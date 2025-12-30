@@ -65,227 +65,129 @@ impl std::error::Error for PmuError {}
 ///
 /// - Must run with sudo/root privileges
 /// - Only works on Apple Silicon (M1/M2/M3)
-#[derive(Debug)]
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
 pub struct PmuTimer {
+    /// The underlying kperf performance counter
+    counter: kperf_rs::PerfCounter,
     /// Estimated cycles per nanosecond (CPU frequency in GHz)
     cycles_per_ns: f64,
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-mod apple_silicon {
-    use super::*;
+impl PmuTimer {
+    /// Initialize PMU counters for cycle counting.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if:
+    /// - Not running on Apple Silicon
+    /// - kperf framework not available
+    /// - Not running with sudo/root privileges
+    pub fn new() -> Result<Self, PmuError> {
+        // Check permissions first
+        kperf_rs::check_kpc_permission().map_err(|e| match e {
+            kperf_rs::error::KperfError::PermissionDenied => PmuError::PermissionDenied,
+            _ => PmuError::ConfigurationFailed(format!("{:?}", e)),
+        })?;
 
-    // kperf constants (reverse-engineered from Apple's private framework)
-    const KPC_CLASS_FIXED: u32 = 0;
-    const KPC_CLASS_CONFIGURABLE: u32 = 1;
-    const KPC_CLASS_FIXED_MASK: u32 = 1 << KPC_CLASS_FIXED;
-    const KPC_CLASS_CONFIGURABLE_MASK: u32 = 1 << KPC_CLASS_CONFIGURABLE;
+        // Build the performance counter for cycles
+        let mut counter = kperf_rs::PerfCounterBuilder::new()
+            .track_event(kperf_rs::event::Event::Cycles)
+            .build_counter()
+            .map_err(|e| PmuError::ConfigurationFailed(format!("{:?}", e)))?;
 
-    // ARM PMU event: CPU cycles
-    #[allow(dead_code)]
-    const ARMV8_PMCR_E: u64 = 1 << 0; // Enable (for reference)
-    const CPMU_CORE_CYCLE: u64 = 0x02; // Core cycles event
+        // Start counting
+        counter
+            .start()
+            .map_err(|e| PmuError::ConfigurationFailed(format!("Failed to start: {:?}", e)))?;
 
-    // Thread counter buffer size
-    const KPC_MAX_COUNTERS: usize = 32;
+        // Calibrate cycles per nanosecond
+        let cycles_per_ns = Self::calibrate(&mut counter);
 
-    // Dynamic linking to kperf framework
-    type KpcForceAllCtrsSet = unsafe extern "C" fn(i32) -> i32;
-    type KpcSetCounting = unsafe extern "C" fn(u32) -> i32;
-    type KpcSetThreadCounting = unsafe extern "C" fn(u32) -> i32;
-    type KpcSetConfig = unsafe extern "C" fn(u32, *const u64) -> i32;
-    type KpcGetThreadCounters = unsafe extern "C" fn(u32, u32, *mut u64) -> i32;
-    type KpcGetCounterCount = unsafe extern "C" fn(u32) -> u32;
-    type KpcGetConfigCount = unsafe extern "C" fn(u32) -> u32;
+        eprintln!(
+            "PMU initialized: {:.2} cycles/ns ({:.2} GHz)",
+            cycles_per_ns, cycles_per_ns
+        );
 
-    struct KperfFunctions {
-        force_all_ctrs_set: KpcForceAllCtrsSet,
-        set_counting: KpcSetCounting,
-        set_thread_counting: KpcSetThreadCounting,
-        set_config: KpcSetConfig,
-        get_thread_counters: KpcGetThreadCounters,
-        get_counter_count: KpcGetCounterCount,
-        get_config_count: KpcGetConfigCount,
+        Ok(Self {
+            counter,
+            cycles_per_ns,
+        })
     }
 
-    use std::sync::OnceLock;
-    static KPERF: OnceLock<Option<KperfFunctions>> = OnceLock::new();
+    fn calibrate(counter: &mut kperf_rs::PerfCounter) -> f64 {
+        use std::time::Instant;
 
-    fn load_kperf() -> Result<&'static KperfFunctions, PmuError> {
-        let kperf = KPERF.get_or_init(|| {
-            unsafe {
-                let lib = libc::dlopen(
-                    b"/System/Library/PrivateFrameworks/kperf.framework/kperf\0".as_ptr() as *const i8,
-                    libc::RTLD_NOW,
-                );
-                if lib.is_null() {
-                    return None;
-                }
+        let mut ratios = Vec::with_capacity(10);
+        for _ in 0..10 {
+            // Reset and read start
+            let _ = counter.reset();
+            let start_time = Instant::now();
 
-                macro_rules! load_fn {
-                    ($name:expr) => {{
-                        let sym = libc::dlsym(lib, concat!($name, "\0").as_ptr() as *const i8);
-                        if sym.is_null() {
-                            return None;
-                        }
-                        std::mem::transmute(sym)
-                    }};
-                }
+            std::thread::sleep(std::time::Duration::from_millis(1));
 
-                Some(KperfFunctions {
-                    force_all_ctrs_set: load_fn!("kpc_force_all_ctrs_set"),
-                    set_counting: load_fn!("kpc_set_counting"),
-                    set_thread_counting: load_fn!("kpc_set_thread_counting"),
-                    set_config: load_fn!("kpc_set_config"),
-                    get_thread_counters: load_fn!("kpc_get_thread_counters"),
-                    get_counter_count: load_fn!("kpc_get_counter_count"),
-                    get_config_count: load_fn!("kpc_get_config_count"),
-                })
+            // Read cycles
+            let cycles = counter.read().unwrap_or(0);
+            let elapsed_nanos = start_time.elapsed().as_nanos() as u64;
+
+            if elapsed_nanos > 0 && cycles > 0 {
+                ratios.push(cycles as f64 / elapsed_nanos as f64);
             }
-        });
+        }
 
-        kperf.as_ref().ok_or(PmuError::FrameworkNotFound)
+        if ratios.is_empty() {
+            eprintln!("Warning: PMU calibration failed, using fallback (3.0 cycles/ns)");
+            return 3.0;
+        }
+
+        ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        ratios[ratios.len() / 2]
     }
 
-    impl PmuTimer {
-        /// Initialize PMU counters for cycle counting.
-        ///
-        /// # Errors
-        ///
-        /// Returns an error if:
-        /// - Not running on Apple Silicon
-        /// - kperf framework not available
-        /// - Not running with sudo/root privileges
-        pub fn new() -> Result<Self, PmuError> {
-            let kperf = load_kperf()?;
-
-            unsafe {
-                // Force all counters to be available (requires root)
-                if (kperf.force_all_ctrs_set)(1) != 0 {
-                    return Err(PmuError::PermissionDenied);
-                }
-
-                let classes = KPC_CLASS_FIXED_MASK | KPC_CLASS_CONFIGURABLE_MASK;
-
-                // Get counter counts
-                let n_configs = (kperf.get_config_count)(classes);
-                if n_configs == 0 {
-                    return Err(PmuError::ConfigurationFailed("No configurable counters".into()));
-                }
-
-                // Configure counters for cycle counting
-                let mut config = vec![0u64; n_configs as usize];
-                // First configurable counter: count cycles
-                if !config.is_empty() {
-                    config[0] = CPMU_CORE_CYCLE | (1 << 16); // Enable counting
-                }
-
-                if (kperf.set_config)(classes, config.as_ptr()) != 0 {
-                    return Err(PmuError::ConfigurationFailed("kpc_set_config failed".into()));
-                }
-
-                // Enable counting
-                if (kperf.set_counting)(classes) != 0 {
-                    return Err(PmuError::ConfigurationFailed("kpc_set_counting failed".into()));
-                }
-
-                // Enable thread counting
-                if (kperf.set_thread_counting)(classes) != 0 {
-                    return Err(PmuError::ConfigurationFailed("kpc_set_thread_counting failed".into()));
-                }
-            }
-
-            // Calibrate cycles per nanosecond
-            let cycles_per_ns = Self::calibrate();
-
-            Ok(Self { cycles_per_ns })
-        }
-
-        /// Read the current cycle count from PMU.
-        #[inline]
-        pub fn read_cycles(&self) -> u64 {
-            let kperf = match load_kperf() {
-                Ok(k) => k,
-                Err(_) => return 0,
-            };
-
-            let mut counters = [0u64; KPC_MAX_COUNTERS];
-            unsafe {
-                let classes = KPC_CLASS_FIXED_MASK | KPC_CLASS_CONFIGURABLE_MASK;
-                let n_counters = (kperf.get_counter_count)(classes);
-                (kperf.get_thread_counters)(0, n_counters, counters.as_mut_ptr());
-            }
-
-            // First counter should be cycles
-            counters[0]
-        }
-
-        fn calibrate() -> f64 {
-            use std::time::Instant;
-
-            let timer = match Self::new_uncalibrated() {
-                Ok(t) => t,
-                Err(_) => return 3.0, // Fallback
-            };
-
-            let mut ratios = Vec::with_capacity(10);
-            for _ in 0..10 {
-                let start_cycles = timer.read_cycles();
-                let start_time = Instant::now();
-
-                std::thread::sleep(std::time::Duration::from_millis(1));
-
-                let end_cycles = timer.read_cycles();
-                let elapsed_nanos = start_time.elapsed().as_nanos() as u64;
-
-                if elapsed_nanos > 0 {
-                    let cycles = end_cycles.saturating_sub(start_cycles);
-                    ratios.push(cycles as f64 / elapsed_nanos as f64);
-                }
-            }
-
-            if ratios.is_empty() {
-                return 3.0;
-            }
-
-            ratios.sort_by(|a, b| a.partial_cmp(b).unwrap());
-            ratios[ratios.len() / 2]
-        }
-
-        fn new_uncalibrated() -> Result<Self, PmuError> {
-            Ok(Self { cycles_per_ns: 1.0 })
-        }
-
-        /// Measure execution time in cycles.
-        #[inline]
-        pub fn measure_cycles<F, T>(&self, f: F) -> u64
-        where
-            F: FnOnce() -> T,
-        {
-            compiler_fence(Ordering::SeqCst);
-            let start = self.read_cycles();
-            std::hint::black_box(f());
-            let end = self.read_cycles();
-            compiler_fence(Ordering::SeqCst);
-            end.saturating_sub(start)
-        }
-
-        /// Convert cycles to nanoseconds.
-        #[inline]
-        pub fn cycles_to_ns(&self, cycles: u64) -> f64 {
-            cycles as f64 / self.cycles_per_ns
-        }
-
-        /// Get the calibrated cycles per nanosecond.
-        pub fn cycles_per_ns(&self) -> f64 {
-            self.cycles_per_ns
-        }
-
-        /// Get the timer resolution in nanoseconds (~0.3ns for 3GHz CPU).
-        pub fn resolution_ns(&self) -> f64 {
-            1.0 / self.cycles_per_ns
-        }
+    /// Measure execution time in cycles.
+    #[inline]
+    pub fn measure_cycles<F, T>(&mut self, f: F) -> u64
+    where
+        F: FnOnce() -> T,
+    {
+        let _ = self.counter.reset();
+        compiler_fence(Ordering::SeqCst);
+        std::hint::black_box(f());
+        compiler_fence(Ordering::SeqCst);
+        self.counter.read().unwrap_or(0)
     }
+
+    /// Convert cycles to nanoseconds.
+    #[inline]
+    pub fn cycles_to_ns(&self, cycles: u64) -> f64 {
+        cycles as f64 / self.cycles_per_ns
+    }
+
+    /// Get the calibrated cycles per nanosecond.
+    pub fn cycles_per_ns(&self) -> f64 {
+        self.cycles_per_ns
+    }
+
+    /// Get the timer resolution in nanoseconds (~0.3ns for 3GHz CPU).
+    pub fn resolution_ns(&self) -> f64 {
+        1.0 / self.cycles_per_ns
+    }
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+impl std::fmt::Debug for PmuTimer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PmuTimer")
+            .field("cycles_per_ns", &self.cycles_per_ns)
+            .finish()
+    }
+}
+
+// Stub implementation for non-Apple Silicon platforms
+#[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
+#[derive(Debug)]
+pub struct PmuTimer {
+    _private: (),
 }
 
 #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
@@ -296,12 +198,7 @@ impl PmuTimer {
     }
 
     #[inline]
-    pub fn read_cycles(&self) -> u64 {
-        0
-    }
-
-    #[inline]
-    pub fn measure_cycles<F, T>(&self, _f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, _f: F) -> u64
     where
         F: FnOnce() -> T,
     {
@@ -329,14 +226,11 @@ mod tests {
     #[test]
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     fn test_pmu_timer_requires_root() {
-        // This test documents the expected behavior
         match PmuTimer::new() {
             Ok(_) => {
-                // Running as root - timer should work
                 eprintln!("PMU timer initialized (running as root)");
             }
             Err(PmuError::PermissionDenied) => {
-                // Expected when not running as root
                 eprintln!("PMU timer requires root (expected)");
             }
             Err(e) => {

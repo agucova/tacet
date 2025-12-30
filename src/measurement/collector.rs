@@ -38,8 +38,8 @@ pub struct Collector {
     timer: Timer,
     /// Number of warmup iterations to run before measuring.
     warmup_iterations: usize,
-    /// Iterations per sample for batched measurement.
-    iterations_per_sample: usize,
+    /// Suggested iterations per sample (may be overridden by adaptive detection).
+    suggested_iterations: usize,
 }
 
 impl Collector {
@@ -48,11 +48,11 @@ impl Collector {
     /// Uses auto-detected iterations per sample based on timer resolution.
     pub fn new(warmup_iterations: usize) -> Self {
         let timer = Timer::new();
-        let iterations_per_sample = timer.suggested_iterations(10.0);
+        let suggested_iterations = timer.suggested_iterations(10.0);
         Self {
             timer,
             warmup_iterations,
-            iterations_per_sample,
+            suggested_iterations,
         }
     }
 
@@ -60,11 +60,11 @@ impl Collector {
     ///
     /// Uses auto-detected iterations per sample based on timer resolution.
     pub fn with_timer(timer: Timer, warmup_iterations: usize) -> Self {
-        let iterations_per_sample = timer.suggested_iterations(10.0);
+        let suggested_iterations = timer.suggested_iterations(10.0);
         Self {
             timer,
             warmup_iterations,
-            iterations_per_sample,
+            suggested_iterations,
         }
     }
 
@@ -76,7 +76,7 @@ impl Collector {
         Self {
             timer,
             warmup_iterations,
-            iterations_per_sample: iterations_per_sample.max(1),
+            suggested_iterations: iterations_per_sample.max(1),
         }
     }
 
@@ -85,35 +85,84 @@ impl Collector {
         &self.timer
     }
 
-    /// Get the number of iterations per sample.
+    /// Get the suggested number of iterations per sample.
+    ///
+    /// Note: Actual iterations may differ if adaptive detection determines
+    /// that operations are slow enough to measure individually.
     pub fn iterations_per_sample(&self) -> usize {
-        self.iterations_per_sample
+        self.suggested_iterations
     }
 
-    /// Run warmup iterations for both functions.
+    /// Run warmup iterations and probe operation duration.
     ///
     /// This helps stabilize CPU frequency, warm caches, and train branch predictors
-    /// before actual measurements begin.
-    fn warmup<F, R, T>(&self, mut fixed: F, mut random: R)
+    /// before actual measurements begin. It also measures a few operations to
+    /// estimate their typical duration for adaptive batching decisions.
+    ///
+    /// # Returns
+    ///
+    /// The median operation duration in cycles (minimum of fixed and random).
+    fn warmup_and_probe<F, R, T>(&self, mut fixed: F, mut random: R) -> u64
     where
         F: FnMut() -> T,
         R: FnMut() -> T,
     {
-        for _ in 0..self.warmup_iterations {
+        // Run most warmup iterations without measuring
+        let probe_count = 20.min(self.warmup_iterations);
+        let warmup_only = self.warmup_iterations.saturating_sub(probe_count);
+
+        for _ in 0..warmup_only {
             black_box(fixed());
             black_box(random());
         }
+
+        // Probe operation duration during final warmup iterations
+        let mut fixed_samples = Vec::with_capacity(probe_count);
+        let mut random_samples = Vec::with_capacity(probe_count);
+
+        for _ in 0..probe_count {
+            let start = rdtsc();
+            black_box(fixed());
+            let end = rdtsc();
+            fixed_samples.push(end.saturating_sub(start));
+
+            let start = rdtsc();
+            black_box(random());
+            let end = rdtsc();
+            random_samples.push(end.saturating_sub(start));
+        }
+
+        // Return 90th percentile of both classes combined
+        // We use high percentile because if EITHER class has occasional slow
+        // operations (tail effects), we want to detect them and avoid batching
+        // to preserve variance information
+        let percentile_90 = |samples: &mut [u64]| -> u64 {
+            if samples.is_empty() {
+                return 0;
+            }
+            samples.sort_unstable();
+            let idx = (samples.len() as f64 * 0.9) as usize;
+            samples[idx.min(samples.len() - 1)]
+        };
+
+        let fixed_p90 = percentile_90(&mut fixed_samples);
+        let random_p90 = percentile_90(&mut random_samples);
+
+        fixed_p90.max(random_p90)
     }
 
     /// Collect timing samples using randomized interleaved design.
     ///
     /// This method:
-    /// 1. Runs warmup iterations
-    /// 2. Creates a randomized schedule alternating Fixed/Random
-    /// 3. Measures each execution and records the timing
+    /// 1. Runs warmup iterations and probes operation duration
+    /// 2. Adaptively decides whether to batch based on operation duration
+    /// 3. Creates a randomized schedule alternating Fixed/Random
+    /// 4. Measures each execution and records the timing
     ///
-    /// When `iterations_per_sample > 1` (auto-detected on Apple Silicon),
-    /// each sample measures multiple iterations and reports per-iteration cycles.
+    /// Adaptive batching logic:
+    /// - If operations are fast (< 5× timer resolution), batch to improve precision
+    /// - If operations are slow enough, measure individually to preserve variance
+    ///   (important for detecting tail effects)
     ///
     /// # Arguments
     ///
@@ -129,8 +178,19 @@ impl Collector {
         F: FnMut() -> T,
         R: FnMut() -> T,
     {
-        // Run warmup
-        self.warmup(&mut fixed, &mut random);
+        // Run warmup and probe operation duration
+        let probed_cycles = self.warmup_and_probe(&mut fixed, &mut random);
+        let probed_ns = self.timer.cycles_to_ns(probed_cycles);
+
+        // Adaptive batching: if operations are slow enough, don't batch
+        // This preserves variance information (important for tail effects)
+        // Threshold: operations > 5× timer resolution can be measured individually
+        let use_batching = probed_ns < self.timer.resolution_ns() * 5.0;
+        let iterations = if use_batching {
+            self.suggested_iterations
+        } else {
+            1
+        };
 
         // Create measurement schedule
         let schedule = self.create_schedule(samples_per_class);
@@ -138,8 +198,8 @@ impl Collector {
         // Collect measurements
         let mut samples = Vec::with_capacity(samples_per_class * 2);
 
-        if self.iterations_per_sample <= 1 {
-            // Single-iteration measurement (x86 or when explicitly set)
+        if iterations <= 1 {
+            // Single-iteration measurement
             for class in schedule {
                 let cycles = match class {
                     Class::Fixed => self.timer.measure_cycles(&mut fixed),
@@ -148,12 +208,11 @@ impl Collector {
                 samples.push(Sample::new(class, cycles));
             }
         } else {
-            // Batched measurement (Apple Silicon auto-detection)
-            let iters = self.iterations_per_sample;
+            // Batched measurement
             for class in schedule {
                 let cycles = match class {
-                    Class::Fixed => self.measure_batched(&mut fixed, iters),
-                    Class::Random => self.measure_batched(&mut random, iters),
+                    Class::Fixed => self.measure_batched(&mut fixed, iterations),
+                    Class::Random => self.measure_batched(&mut random, iterations),
                 };
                 samples.push(Sample::new(class, cycles));
             }
