@@ -7,6 +7,34 @@
 
 use rand::Rng;
 
+/// Counter-based RNG seed generation using SplitMix64.
+///
+/// This is a stateless PRF that generates deterministic, well-distributed
+/// seeds from a base seed and counter. Using this instead of simple addition
+/// provides better statistical properties and avoids sequential correlation.
+///
+/// # Arguments
+///
+/// * `base_seed` - Base random seed
+/// * `counter` - Iteration counter (0, 1, 2, ...)
+///
+/// # Returns
+///
+/// A 64-bit seed suitable for initializing an RNG.
+///
+/// # Performance
+///
+/// ~2-3ns per call (negligible compared to ~100ns for RNG initialization).
+#[inline]
+pub fn counter_rng_seed(base_seed: u64, counter: u64) -> u64 {
+    // SplitMix64: high-quality 64-bit hash function
+    // See: https://xoshiro.di.unimi.it/splitmix64.c
+    let mut z = base_seed.wrapping_add(counter.wrapping_mul(0x9e3779b97f4a7c15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+
 /// Compute the optimal block size for block bootstrap.
 ///
 /// Uses approximately sqrt(n) as the block size, which is a common

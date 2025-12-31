@@ -6,7 +6,7 @@
 
 use crate::types::{Matrix9, Vector9};
 
-use super::bootstrap::{block_bootstrap_resample_into, compute_block_size};
+use super::bootstrap::{block_bootstrap_resample_into, compute_block_size, counter_rng_seed};
 use super::quantile::compute_deciles_inplace;
 
 use rand::SeedableRng;
@@ -203,8 +203,8 @@ pub fn bootstrap_covariance_matrix(
                     WelfordCovariance9::new(),
                 ),
                 |(mut rng, mut buffer, mut acc), i| {
-                    // Seed RNG deterministically for this iteration
-                    rng = Xoshiro256PlusPlus::seed_from_u64(seed.wrapping_add(i as u64));
+                    // Counter-based RNG for deterministic, well-distributed seeding
+                    rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
                     // Resample, compute deciles, and update accumulator
                     block_bootstrap_resample_into(data, block_size, &mut rng, &mut buffer);
@@ -230,9 +230,8 @@ pub fn bootstrap_covariance_matrix(
         let mut buffer = vec![0.0; n];
 
         for i in 0..n_bootstrap {
-            // CRITICAL FIX: Deterministic seeding with iteration counter
-            // This matches the parallel version's seeding scheme
-            let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed.wrapping_add(i as u64));
+            // Counter-based RNG for deterministic, well-distributed seeding
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
             // Resample, compute deciles, and update accumulator
             block_bootstrap_resample_into(data, block_size, &mut rng, &mut buffer);

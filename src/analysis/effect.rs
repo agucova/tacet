@@ -74,7 +74,9 @@ pub fn decompose_effect(
     let pattern = classify_pattern(&posterior_mean, &posterior_cov);
 
     // Compute effect magnitude CI from posterior samples
-    let effect_magnitude_ci = sample_effect_magnitude_ci(&posterior_mean, &posterior_cov, 5000);
+    // Reduced from 5000 to 500: for 2D Gaussian, 500 draws gives ~3-5% relative error
+    // on 95% CI bounds, which is acceptable for this heuristic estimate
+    let effect_magnitude_ci = sample_effect_magnitude_ci(&posterior_mean, &posterior_cov, 500);
 
     EffectDecomposition {
         posterior_mean,

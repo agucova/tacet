@@ -19,10 +19,11 @@ use adapters::dudect_adapter::DudectDetector;
 use adapters::Detector;
 use metrics::{
     generate_roc_curve, measure_detection_rate, measure_false_positive_rate,
-    measure_sample_efficiency,
+    measure_sample_efficiency, measure_sample_efficiency_stats, SampleEfficiencyStats,
 };
 use report::{create_tool_result, BenchmarkResults, TestCaseComparison};
 use test_cases::{all_test_cases, leaky_test_cases, safe_test_cases, TestCase};
+use std::collections::HashMap;
 
 /// Configuration for benchmark run
 pub struct BenchmarkConfig {
@@ -32,8 +33,14 @@ pub struct BenchmarkConfig {
     pub detection_trials: usize,
     /// Number of trials per threshold for ROC curves
     pub roc_trials_per_case: usize,
+    /// Sample sizes to test for efficiency analysis
+    pub efficiency_sample_sizes: Vec<usize>,
+    /// Number of trials per sample size for efficiency analysis
+    pub efficiency_trials_per_size: usize,
     /// Whether to run ROC analysis
     pub run_roc: bool,
+    /// Whether to run sample efficiency analysis
+    pub run_efficiency: bool,
     /// Whether to export JSON results
     pub export_json: bool,
     /// Path to JSON output file
@@ -46,7 +53,10 @@ impl Default for BenchmarkConfig {
             samples: 20_000, // Balanced preset
             detection_trials: 10,
             roc_trials_per_case: 5,
+            efficiency_sample_sizes: vec![1_000, 5_000, 10_000, 20_000, 50_000],
+            efficiency_trials_per_size: 10,
             run_roc: true,
+            run_efficiency: true,
             export_json: false,
             json_path: None,
         }
@@ -202,6 +212,167 @@ pub fn run_comparison_benchmark(config: BenchmarkConfig) {
     }
 
     println!("\n✅ Benchmark complete!");
+}
+
+/// Run detection rate comparison (Section 1)
+pub fn run_detection_comparison(config: &BenchmarkConfig) -> BenchmarkResults {
+    let mut results = BenchmarkResults::new();
+
+    // Initialize detectors
+    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let dudect = DudectDetector::new();
+
+    let detectors: Vec<Box<dyn Detector>> = vec![
+        Box::new(timing_oracle),
+        Box::new(dudect),
+    ];
+
+    // Run tests on all test cases
+    let test_cases = all_test_cases();
+
+    for test_case in &test_cases {
+        eprintln!("\n📝 Testing: {} (expected: {})",
+            test_case.name(),
+            if test_case.expected_leaky() { "LEAKY" } else { "SAFE" }
+        );
+
+        let mut tool_results = Vec::new();
+
+        for detector in &detectors {
+            eprintln!("  Tool: {}", detector.name());
+
+            // Measure detection rate
+            let detection_result = if test_case.expected_leaky() {
+                measure_detection_rate(
+                    detector.as_ref(),
+                    test_case.as_ref(),
+                    config.samples,
+                    config.detection_trials,
+                )
+            } else {
+                measure_false_positive_rate(
+                    detector.as_ref(),
+                    test_case.as_ref(),
+                    config.samples,
+                    config.detection_trials,
+                )
+            };
+
+            eprintln!("    Detection rate: {:.1}%", detection_result.detection_rate * 100.0);
+            eprintln!("    Avg samples: {}", detection_result.avg_samples_used);
+            eprintln!("    Time/sample: {:.1}ns", detection_result.avg_time_per_sample.as_nanos());
+
+            // Measure sample efficiency (only on leaky cases, for min_samples_to_detect field)
+            let efficiency_result = if test_case.expected_leaky() {
+                measure_sample_efficiency(
+                    detector.as_ref(),
+                    test_case.as_ref(),
+                )
+            } else {
+                metrics::SampleEfficiencyResult {
+                    min_samples_to_detect: None,
+                    tested_sample_sizes: vec![],
+                    detection_results: vec![],
+                }
+            };
+
+            tool_results.push(create_tool_result(
+                detector.name(),
+                &detection_result,
+                &efficiency_result,
+            ));
+        }
+
+        results.add_test_case(TestCaseComparison {
+            test_case_name: test_case.name().to_string(),
+            expected_leaky: test_case.expected_leaky(),
+            results: tool_results,
+        });
+    }
+
+    results
+}
+
+/// Run ROC curve analysis (Section 2)
+pub fn run_roc_analysis(config: &BenchmarkConfig) -> Vec<metrics::RocCurveResult> {
+    let mut results = Vec::new();
+
+    // Initialize detectors
+    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let dudect = DudectDetector::new();
+
+    let detectors: Vec<Box<dyn Detector>> = vec![
+        Box::new(timing_oracle),
+        Box::new(dudect),
+    ];
+
+    let leaky_cases = leaky_test_cases();
+    let safe_cases = safe_test_cases();
+
+    let leaky_refs: Vec<&dyn TestCase> = leaky_cases.iter().map(|b| b.as_ref()).collect();
+    let safe_refs: Vec<&dyn TestCase> = safe_cases.iter().map(|b| b.as_ref()).collect();
+
+    for detector in &detectors {
+        eprintln!("\n  Generating ROC curve for: {}", detector.name());
+
+        let thresholds = if detector.name() == "timing-oracle" {
+            vec![0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        } else {
+            vec![2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0]
+        };
+
+        let roc = generate_roc_curve(
+            detector.as_ref(),
+            &leaky_refs,
+            &safe_refs,
+            &thresholds,
+            config.samples,
+            config.roc_trials_per_case,
+        );
+
+        eprintln!("    AUC: {:.3}", roc.auc);
+        results.push(roc);
+    }
+
+    results
+}
+
+/// Run sample efficiency analysis (Section 3)
+pub fn run_efficiency_analysis(config: &BenchmarkConfig) -> HashMap<String, HashMap<String, SampleEfficiencyStats>> {
+    let mut results: HashMap<String, HashMap<String, SampleEfficiencyStats>> = HashMap::new();
+
+    // Initialize detectors
+    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let dudect = DudectDetector::new();
+
+    let detectors: Vec<(&str, Box<dyn Detector>)> = vec![
+        ("timing-oracle", Box::new(timing_oracle)),
+        ("dudect-bencher", Box::new(dudect)),
+    ];
+
+    // Only test on known-leaky cases
+    let test_cases = leaky_test_cases();
+
+    for (detector_name, detector) in &detectors {
+        eprintln!("\n  Analyzing sample efficiency for: {}", detector_name);
+
+        let mut test_case_stats: HashMap<String, SampleEfficiencyStats> = HashMap::new();
+
+        for test_case in &test_cases {
+            let stats = measure_sample_efficiency_stats(
+                detector.as_ref(),
+                test_case.as_ref(),
+                &config.efficiency_sample_sizes,
+                config.efficiency_trials_per_size,
+            );
+
+            test_case_stats.insert(test_case.name().to_string(), stats);
+        }
+
+        results.insert(detector_name.to_string(), test_case_stats);
+    }
+
+    results
 }
 
 #[cfg(test)]

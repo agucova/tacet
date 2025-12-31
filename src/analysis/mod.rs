@@ -15,4 +15,4 @@ mod mde;
 pub use bayes::{compute_bayes_factor, compute_posterior_probability, BayesResult};
 pub use ci_gate::{run_ci_gate, CiGateInput};
 pub use effect::{decompose_effect, EffectDecomposition};
-pub use mde::{estimate_mde, MdeEstimate};
+pub use mde::{analytical_mde, estimate_mde, estimate_mde_monte_carlo, MdeEstimate};

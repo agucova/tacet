@@ -13,7 +13,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::result::CiGate;
 use crate::statistics::{
-    block_bootstrap_resample_into, compute_block_size, compute_deciles_inplace,
+    block_bootstrap_resample_into, compute_block_size, compute_deciles_inplace, counter_rng_seed,
 };
 use crate::types::Vector9;
 
@@ -133,9 +133,9 @@ fn compute_bootstrap_thresholds(
                     )
                 },
                 |(rng, f1, f2, r1, r2), (i, (fixed_out, random_out))| {
-                    // Advance RNG deterministically for this iteration
-                    // This ensures reproducibility regardless of thread scheduling
-                    *rng = Xoshiro256PlusPlus::seed_from_u64(base_seed.wrapping_add(i as u64));
+                    // Use counter-based RNG for deterministic, well-distributed seeding
+                    // SplitMix64 provides better statistical properties than simple addition
+                    *rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(base_seed, i as u64));
 
                     // Reuse scratch buffers (no allocations in hot loop)
                     // Resample into buffers, sort in-place, compute deciles
