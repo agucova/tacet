@@ -25,3 +25,4 @@ target
 
 /target
 .devenv/
+.devenv/nix-eval-cache.db

@@ -2,246 +2,255 @@
 
 **Detect timing side channels in Rust code with statistically rigorous methods.**
 
-`timing-oracle` measures whether your code's execution time depends on secret data. It compares timing between a "fixed" input (e.g., a test vector) and random inputs, then uses Bayesian inference to compute the probability of a timing leak and estimate its magnitude. It can be used to evaluate cryptographic implementations, constant-time algorithms, or any code where timing leaks are a concern, and can be easily integrated into CI pipelines.
+```
+$ cargo test --test aes_timing
 
-Traditional timing leak detection tools often rely on t-tests or other mean-based statistics, which provide hard-to-interpret results and usually require a lot of fiddling to prevent test flakiness. `timing-oracle` improves upon these methods by using quantile-based statistics and a two-layer Bayesian analysis, which simply reports the probability of a leak in the tested code, mediums by which a leak might be exploitable (is it exploitable over the internet? just locally?) and provides bounded guarantees on false positive rates (so it's easy to use in CI).
+timing-oracle · aes_encrypt (16 bytes)
+────────────────────────────────────────
+  Leak probability:  2.3%
+  Effect size:       < 1 ns (Negligible)
+  CI gate:           PASS (α = 1%)
+  
+  ✓ No significant timing leak detected
+```
 
-It's inspired by [DudeCT](https://appsec.guide/docs/crypto/constant_time_tool/dudect/), [DudeCT-bencher](github.com/rozbb/dudect-bencher) and the paper [
-With Great Power Come Great Side Channels: Statistical Timing Side-Channel Analyses with Bounded Type-1 Errors](https://www.usenix.org/conference/usenixsecurity24/presentation/dunsche), though it uses a novel statistical approach that aims to be more accurate and interpretable.
+## Installation
+
+```sh
+cargo add timing-oracle --dev
+```
 
 ## Quick Start
 
-```shell
-$ cargo add timing-oracle
-```
-
 ```rust
-use timing_oracle::{test, helpers::InputPair};
+use timing_oracle::timing_test;
 
-let secret = [0u8; 32];
-
-// Pre-generate inputs BEFORE measurement
-let inputs = InputPair::new(
-    [0u8; 32],                    // Fixed: all zeros
-    || rand::random::<[u8; 32]>() // Random: generated per sample
-);
-
-let result = test(
-    || compare(&secret, inputs.fixed()),
-    || compare(&secret, inputs.random()),
-);
-
-if result.leak_probability > 0.9 {
-    panic!("Timing leak detected: {:.0}%", result.leak_probability * 100.0);
+#[test]
+fn constant_time_compare() {
+    let secret = [0u8; 32];
+    
+    let result = timing_test! {
+        fixed: [0u8; 32],
+        random: || rand::random::<[u8; 32]>(),
+        test: |input| {
+            constant_time_eq(&secret, &input);
+        },
+    };
+    
+    assert!(result.ci_gate.passed, "Timing leak detected!");
 }
 ```
 
-See [examples/](examples/) for more usage patterns.
+The macro handles measurement and statistical analysis, returning a `TestResult` with pass/fail plus detailed diagnostics.
+
+---
+
+## What It Catches
+
+```rust
+// ✗ This looks constant-time but isn't (early-exit on mismatch)
+fn naive_compare(a: &[u8], b: &[u8]) -> bool {
+    a == b  // ← timing-oracle detects this in ~1 second
+}
+
+// ✓ This is actually constant-time
+fn ct_compare(a: &[u8], b: &[u8]) -> bool {
+    subtle::ConstantTimeEq::ct_eq(a, b).into()
+}
+```
+
+## Why Another Tool?
+
+Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
+
+`timing-oracle` gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
+
+| | DudeCT | timing-oracle |
+|---|--------|---------------|
+| **Output** | t-statistic + p-value | Probability of leak (0–100%) |
+| **False positives** | Unbounded (more samples → more FPs) | Controlled at ≤1% |
+| **Effect size** | Not provided | Estimated in nanoseconds |
+| **Exploitability** | Manual interpretation | Automatic classification |
+| **CI-friendly** | Flaky without tuning | Works out of the box |
+
+---
+
+## Macro API
+
+### Configuration
+
+Configure via the `oracle:` field:
+
+```rust
+timing_test! {
+    oracle: TimingOracle::thorough(),  // 100k samples (~5s)
+    fixed: my_fixed_input,
+    random: || generate_random(),
+    test: |input| operation(&input),
+}
+```
+
+Presets: `TimingOracle::quick()` (~0.3s), `::balanced()` (~1s, default), `::thorough()` (~5s).
+
+For fine-grained control:
+
+```rust
+timing_test! {
+    oracle: TimingOracle::balanced()
+        .samples(50_000)
+        .ci_alpha(0.05),  // 5% FPR instead of 1%
+    fixed: [0u8; 32],
+    random: || rand::random(),
+    test: |input| operation(&input),
+}
+```
+
+### Setup Block
+
+Use the `setup:` field for expensive initialization that shouldn't be timed:
+
+```rust
+timing_test! {
+    setup: {
+        let key = Aes128::new(&KEY);
+    },
+    fixed: [0u8; 16],
+    random: || rand::random(),
+    test: |input| {
+        key.encrypt(&input);
+    },
+}
+```
+
+### Multiple Inputs
+
+Use tuple destructuring:
+
+```rust
+timing_test! {
+    fixed: ([0u8; 12], [0u8; 64]),
+    random: || (rand::random(), rand::random()),
+    test: |(nonce, plaintext)| {
+        cipher.encrypt(&nonce, &plaintext);
+    },
+}
+```
+
+### Handling Unmeasurable Operations
+
+`timing_test!` panics if the operation is too fast to measure. For explicit handling, use `timing_test_checked!`:
+
+```rust
+use timing_oracle::{timing_test_checked, Outcome};
+
+let outcome = timing_test_checked! {
+    fixed: [0u8; 32],
+    random: || rand::random(),
+    test: |input| very_fast_operation(&input),
+};
+
+match outcome {
+    Outcome::Completed(result) => assert!(result.ci_gate.passed),
+    Outcome::Unmeasurable { .. } => println!("Skipped: operation too fast"),
+}
+```
+
+## Builder API
+
+For programmatic access without macros:
+
+```rust
+use timing_oracle::{TimingTest, TimingOracle, Outcome};
+
+let outcome = TimingTest::new()
+    .oracle(TimingOracle::thorough())
+    .fixed([0u8; 32])
+    .random(|| rand::random())
+    .test(|data| constant_time_eq(&secret, &data))
+    .run();
+
+if let Outcome::Completed(result) = outcome {
+    println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
+    println!("Exploitability: {:?}", result.exploitability);
+}
+```
+
+See [API documentation](https://docs.rs/timing-oracle) for full details.
+
+---
+
+## Interpreting Results
+
+### TestResult Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `ci_gate.passed` | `bool` | Use this for CI pass/fail decisions |
+| `leak_probability` | `f64` | Bayesian posterior probability (0.0–1.0) |
+| `effect` | `Option<Effect>` | Magnitude in ns, with shift/tail decomposition |
+| `exploitability` | `Exploitability` | How practical is exploitation? |
+| `quality` | `MeasurementQuality` | Confidence in results |
+| `min_detectable_effect` | `MinDetectableEffect` | Smallest effect we could have detected |
+
+### Exploitability Levels
+
+Based on [Crosby et al. (2009)](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf):
+
+| Level | Effect Size | Meaning |
+|-------|-------------|---------|
+| `Negligible` | < 100 ns | Requires ~10k+ queries to exploit over LAN |
+| `PossibleLAN` | 100–500 ns | Exploitable on LAN with statistical methods |
+| `LikelyLAN` | 500 ns – 20 µs | Readily exploitable on local network |
+| `PossibleRemote` | > 20 µs | Potentially exploitable over internet |
+
+### Effect Patterns
+
+When a leak is detected, the effect is decomposed:
+
+| Pattern | Meaning | Typical cause |
+|---------|---------|---------------|
+| `UniformShift` | All quantiles shifted equally | Different code path, branch |
+| `TailEffect` | Upper quantiles shifted more | Cache misses, memory patterns |
+| `Mixed` | Both components significant | Multiple interacting factors |
+
+---
 
 ## How It Works
 
-### Two-Layer Analysis
+Instead of comparing means (which miss distributional differences), we compare nine 
+deciles between fixed and random inputs:
 
 ```
-                    Timing Samples
-                          |
-           +--------------+--------------+
-           v                             v
-   +---------------+           +------------------+
-   |  Layer 1:     |           |  Layer 2:        |
-   |  CI Gate      |           |  Bayesian        |
-   +---------------+           +------------------+
-   | Bootstrap     |           | Conjugate Bayes  |
-   | thresholds    |           | inference        |
-   |               |           |                  |
-   | Bounded FPR   |           | Probability +    |
-   | Pass/Fail     |           | Effect size      |
-   +---------------+           +------------------+
+Fixed:   [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┐
+                                     ├─► Δ ∈ ℝ⁹ ─► Bayesian inference ─► P(leak)
+Random:  [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┘
 ```
 
-**Layer 1 (CI Gate)** answers: "Should this block my build?"
-- Uses RTLF-style bootstrap thresholds for bounded false positive rate
-- Guarantees FPR <= alpha (default 1%)
+**Two-layer analysis:**
 
-**Layer 2 (Bayesian)** answers: "What's the probability and magnitude?"
-- Computes Bayes factor between no-leak and leak hypotheses
-- Decomposes effect into uniform shift and tail components
-- Provides 95% credible intervals
+1. **CI Gate**: Bootstraps the max quantile difference under the null hypothesis (pooled samples) to set a threshold controlling false positive rate at ~α. Designed not to flake in CI.
 
-### Quantile-Based Statistics
+2. **Bayesian Layer**: Computes posterior probability of a leak and decomposes effects into uniform shift (different code paths) vs tail effects (cache misses, memory patterns).
 
-Rather than comparing means (which miss distributional differences), we compare nine deciles:
+For full methodology: [docs/spec.md](docs/spec.md)
 
-```
-Fixed class:   [q10, q20, q30, q40, q50, q60, q70, q80, q90]
-Random class:  [q10, q20, q30, q40, q50, q60, q70, q80, q90]
-Difference:    delta in R^9
-```
+## Platform Support
 
-This captures:
-- **Uniform shifts**: Different code path (affects all quantiles equally)
-- **Tail effects**: Cache misses (affects upper quantiles more)
+| Platform | Timer | Resolution | Notes |
+|----------|-------|------------|-------|
+| x86_64 | rdtsc | ~0.3 ns | Works out of the box |
+| Apple Silicon | kperf | ~1 ns | Auto-enabled with `sudo` |
+| Apple Silicon | cntvct | ~41 ns | Fallback with adaptive batching |
+| Linux ARM | perf_event | ~1 ns | Requires `sudo` or `CAP_PERFMON` |
 
-### Statistical Guarantees
-
-- **Bounded false positive rate**: CI gate guarantees FPR <= alpha
-- **Interpretable probabilities**: Bayesian posterior, not p-values
-- **Effect decomposition**: Separates uniform shift from tail effects
-- **Exploitability assessment**: Based on Crosby et al. (2009) thresholds
-
-For full methodology details, see [docs/guide.md](docs/guide.md).
-
-## Basic Usage
-
-### Builder Pattern
-
-```rust
-use timing_oracle::TimingOracle;
-
-let result = TimingOracle::new()
-    .samples(100_000)           // Samples per class
-    .ci_alpha(0.01)             // CI false positive rate
-    .test(fixed_fn, random_fn);
-
-// Key result fields
-println!("Leak probability: {:.0}%", result.leak_probability * 100.0);
-println!("CI gate: {}", if result.ci_gate.passed { "PASS" } else { "FAIL" });
-println!("Quality: {:?}", result.quality);
-```
-
-### Presets
-
-```rust
-TimingOracle::new()        // Default: 100k samples (~5s)
-TimingOracle::balanced()   // Production CI: 20k samples (~1s)
-TimingOracle::quick()      // Development: 5k samples (~0.3s)
-```
-
-### Exploitability Thresholds
-
-| Effect Size | Assessment | Implications |
-|------------|------------|--------------|
-| < 100 ns | `Negligible` | Requires impractical measurement count |
-| 100-500 ns | `PossibleLAN` | Exploitable on LAN with ~100k queries |
-| 500 ns - 20 us | `LikelyLAN` | Likely exploitable on LAN |
-| > 20 us | `PossibleRemote` | Possibly exploitable over internet |
-
-For complete API documentation, see [docs/api-reference.md](docs/api-reference.md).
-
-## Common Mistakes
-
-### Don't Generate Random Data Inside Closures
-
-The most common mistake is calling RNG functions inside the measured closures:
-
-```rust
-// WRONG - RNG overhead measured in random closure only
-let result = test(
-    || encrypt(&KEY, &[0u8; 32]),
-    || encrypt(&KEY, &rand::random()),  // Measures RNG + encrypt!
-);
-
-// CORRECT - Pre-generate inputs with InputPair
-let inputs = InputPair::new([0u8; 32], || rand::random());
-let result = test(
-    || encrypt(&KEY, inputs.fixed()),
-    || encrypt(&KEY, inputs.random()),
-);
-```
-
-Both closures must execute **identical code paths** - only the data differs.
-
-### Side-Effects to Avoid
-
-Inside measured closures, never:
-- Call `rand::random()` or any RNG functions
-- Allocate with `vec![]`, `Vec::new()`, `String::new()`, etc.
-- Perform I/O (file reads, network calls)
-- Use `println!()` or other logging
-
-For more patterns and advanced examples, see [docs/guide.md](docs/guide.md).
-
-## CI Integration
-
-```rust
-#[test]
-fn test_constant_time_compare() {
-    let inputs = InputPair::new([0u8; 32], || rand::random());
-
-    let result = TimingOracle::balanced()
-        .test(
-            || my_compare(inputs.fixed()),
-            || my_compare(inputs.random()),
-        );
-
-    assert!(result.ci_gate.passed, "Timing leak detected");
-    assert!(result.leak_probability < 0.5, "Elevated leak probability");
-}
-```
-
-### Handling Unreliable Measurements
-
-Some tests may be unreliable on certain platforms (e.g., Apple Silicon with coarse timers):
-
-```rust
-use timing_oracle::{Outcome, skip_if_unreliable};
-
-#[test]
-fn test_cache_timing() {
-    let result = TimingOracle::new().test(fixed, random);
-    let outcome = Outcome::Completed(result);
-
-    // Skip if measurement is unreliable (prints warning, returns early)
-    let result = skip_if_unreliable!(outcome, "test_cache_timing");
-
-    assert!(result.leak_probability > 0.5);
-}
-```
-
-For detailed reliability handling and troubleshooting, see [docs/troubleshooting.md](docs/troubleshooting.md).
-
-## Build & Test
-
-```bash
-cargo build                     # Build with all features
-cargo test                      # Run all tests
-cargo test --test known_leaky   # Leak detection tests
-cargo test --test known_safe    # False-positive tests
-cargo test --test aes_timing    # AES-128 timing tests
-cargo test --test ecc_timing    # Curve25519 timing tests
-cargo bench --bench comparison  # Compare with DudeCT (~10 min)
-```
-
-For test organization details, see [TESTING.md](TESTING.md).
-
-## Documentation
-
-| Document | Description |
-|----------|-------------|
-| [docs/guide.md](docs/guide.md) | Conceptual overview, methodology, advanced examples |
-| [docs/api-reference.md](docs/api-reference.md) | Complete API documentation |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | Debugging, reliability handling, performance tips |
-| [docs/architecture.md](docs/architecture.md) | Internal architecture and implementation details |
-| [examples/README.md](examples/README.md) | Example catalog with suggested reading order |
-| [TESTING.md](TESTING.md) | Test organization and running instructions |
-
-## Feature Flags
-
-- **`parallel`** (default) - Rayon-based parallel bootstrap (4-8x speedup)
-- **`kperf`** (default, macOS ARM64) - PMU-based cycle counting support
-- **`perf`** (default, Linux) - perf_event-based cycle counting support
-
-```toml
-# Minimal build without optional features
-timing-oracle = { version = "0.1", default-features = false }
-```
+---
 
 ## References
 
-1. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE.
-2. Dunsche, M., et al. (2024). "With Great Power Come Great Side Channels." USENIX Security.
-3. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and limits of remote timing attacks." ACM TISSEC.
+- Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
+- Dunsche et al. (2024): [RTLF bounded FPR](https://www.usenix.org/conference/usenixsecurity24/presentation/dunsche)
+- Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf)
 
 ## License
 
-MIT OR Apache-2.0
+MPL-2.0
