@@ -28,6 +28,7 @@ serde_json = "1.0.148"
 # Platform-specific cycle counters
 [target.'cfg(target_os = "macos")'.dependencies]
 kperf-rs = { version = "0.1.1", optional = true }
+libc = { version = "0.2", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 perf_event2 = { package = "perf-event2", version = "0.7", optional = true }
@@ -93,5 +94,5 @@ perf-default = ["perf"]
 macros = ["dep:timing-oracle-macros"]
 
 # Internal features - use default features instead
-kperf = ["dep:kperf-rs"]
+kperf = ["dep:kperf-rs", "dep:libc"]
 perf = []

@@ -41,17 +41,22 @@ fn ci_gate_fpr_calibration() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if !result.ci_gate.passed {
-                rejections += 1;
-            }
+        match outcome {
+            Outcome::Completed(result) => {
+                if !result.ci_gate.passed {
+                    rejections += 1;
+                }
 
-            if (trial + 1) % 25 == 0 {
-                let rate = rejections as f64 / (trial + 1) as f64;
-                eprintln!(
-                    "[ci_gate_fpr] Trial {}/{}: {} rejections (rate={:.1}%)",
-                    trial + 1, TRIALS, rejections, rate * 100.0
-                );
+                if (trial + 1) % 25 == 0 {
+                    let rate = rejections as f64 / (trial + 1) as f64;
+                    eprintln!(
+                        "[ci_gate_fpr] Trial {}/{}: {} rejections (rate={:.1}%)",
+                        trial + 1, TRIALS, rejections, rate * 100.0
+                    );
+                }
+            }
+            Outcome::Unmeasurable { .. } => {
+                panic!("Trial {} returned Unmeasurable", trial + 1);
             }
         }
     }
@@ -88,17 +93,22 @@ fn bayesian_calibration() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if result.leak_probability > 0.9 {
-                high_prob_count += 1;
-            }
+        match outcome {
+            Outcome::Completed(result) => {
+                if result.leak_probability > 0.9 {
+                    high_prob_count += 1;
+                }
 
-            if (trial + 1) % 25 == 0 {
-                let rate = high_prob_count as f64 / (trial + 1) as f64;
-                eprintln!(
-                    "[bayesian] Trial {}/{}: {} high-prob (rate={:.1}%)",
-                    trial + 1, TRIALS, high_prob_count, rate * 100.0
-                );
+                if (trial + 1) % 25 == 0 {
+                    let rate = high_prob_count as f64 / (trial + 1) as f64;
+                    eprintln!(
+                        "[bayesian] Trial {}/{}: {} high-prob (rate={:.1}%)",
+                        trial + 1, TRIALS, high_prob_count, rate * 100.0
+                    );
+                }
+            }
+            Outcome::Unmeasurable { .. } => {
+                panic!("Trial {} returned Unmeasurable", trial + 1);
             }
         }
     }
@@ -155,9 +165,14 @@ fn fpr_alpha_001() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if !result.ci_gate.passed {
-                rejections += 1;
+        match outcome {
+            Outcome::Completed(result) => {
+                if !result.ci_gate.passed {
+                    rejections += 1;
+                }
+            }
+            Outcome::Unmeasurable { .. } => {
+                panic!("Trial {} returned Unmeasurable", trial + 1);
             }
         }
 
@@ -214,9 +229,14 @@ fn fpr_alpha_01() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if !result.ci_gate.passed {
-                rejections += 1;
+        match outcome {
+            Outcome::Completed(result) => {
+                if !result.ci_gate.passed {
+                    rejections += 1;
+                }
+            }
+            Outcome::Unmeasurable { .. } => {
+                panic!("Trial {} returned Unmeasurable", trial + 1);
             }
         }
 
@@ -271,9 +291,14 @@ fn fpr_alpha_005() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if !result.ci_gate.passed {
-                rejections += 1;
+        match outcome {
+            Outcome::Completed(result) => {
+                if !result.ci_gate.passed {
+                    rejections += 1;
+                }
+            }
+            Outcome::Unmeasurable { .. } => {
+                panic!("Trial {} returned Unmeasurable", trial + 1);
             }
         }
 
@@ -333,9 +358,14 @@ fn bayesian_prior_sweep() {
                     std::hint::black_box(data);
                 });
 
-            if let Outcome::Completed(result) = outcome {
-                if result.leak_probability > 0.9 {
-                    high_prob_count += 1;
+            match outcome {
+                Outcome::Completed(result) => {
+                    if result.leak_probability > 0.9 {
+                        high_prob_count += 1;
+                    }
+                }
+                Outcome::Unmeasurable { .. } => {
+                    panic!("Trial {} with prior={} returned Unmeasurable", trial + 1, prior);
                 }
             }
 

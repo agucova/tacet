@@ -62,6 +62,8 @@ pub enum PmuError {
     PermissionDenied,
     /// Counter configuration failed
     ConfigurationFailed(String),
+    /// Another process holds exclusive PMU access (macOS kpc limitation)
+    ConcurrentAccess,
 }
 
 impl std::fmt::Display for PmuError {
@@ -82,6 +84,20 @@ impl std::fmt::Display for PmuError {
                  adaptive batching, which works for most cryptographic operations."
             ),
             PmuError::ConfigurationFailed(msg) => write!(f, "PMU configuration failed: {}", msg),
+            PmuError::ConcurrentAccess => write!(
+                f,
+                "Another process holds exclusive PMU access.\n\
+                 \n\
+                 The macOS kpc API requires system-wide exclusive access to PMU counters.\n\
+                 When running tests in parallel (e.g., via nextest), only one process can\n\
+                 use kperf at a time.\n\
+                 \n\
+                 Solutions:\n\
+                 1. Run with single thread: cargo nextest run --test-threads=1\n\
+                 2. Use the kperf profile: cargo nextest run --profile kperf\n\
+                 \n\
+                 The library will automatically fall back to the standard timer."
+            ),
         }
     }
 }
@@ -103,6 +119,8 @@ pub struct PmuTimer {
     counter: kperf_rs::PerfCounter,
     /// Estimated cycles per nanosecond (CPU frequency in GHz)
     cycles_per_ns: f64,
+    /// Lock guard for exclusive PMU access - released when PmuTimer is dropped
+    _lock_guard: super::kperf_lock::LockGuard,
 }
 
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -115,30 +133,50 @@ impl PmuTimer {
     /// - Not running on Apple Silicon
     /// - kperf framework not available
     /// - Not running with sudo/root privileges
+    /// - Another process holds exclusive PMU access
     pub fn new() -> Result<Self, PmuError> {
-        // Check permissions first
+        use super::kperf_lock::{try_acquire_default, LockResult};
+
+        // Step 1: Acquire exclusive lock for PMU access
+        // This serializes kperf initialization across processes to avoid
+        // conflicts with the macOS kpc API's system-wide exclusive access model.
+        let lock_guard = match try_acquire_default() {
+            LockResult::Acquired(guard) => guard,
+            LockResult::Timeout => {
+                return Err(PmuError::ConcurrentAccess);
+            }
+            LockResult::IoError(e) => {
+                return Err(PmuError::ConfigurationFailed(format!(
+                    "Failed to acquire kperf lock: {}",
+                    e
+                )));
+            }
+        };
+
+        // Step 2: Check permissions
         kperf_rs::check_kpc_permission().map_err(|e| match e {
             kperf_rs::error::KperfError::PermissionDenied => PmuError::PermissionDenied,
             _ => PmuError::ConfigurationFailed(format!("{:?}", e)),
         })?;
 
-        // Build the performance counter for cycles
+        // Step 3: Build the performance counter for cycles
         let mut counter = kperf_rs::PerfCounterBuilder::new()
             .track_event(kperf_rs::event::Event::Cycles)
             .build_counter()
             .map_err(|e| PmuError::ConfigurationFailed(format!("{:?}", e)))?;
 
-        // Start counting
+        // Step 4: Start counting
         counter
             .start()
             .map_err(|e| PmuError::ConfigurationFailed(format!("Failed to start: {:?}", e)))?;
 
-        // Calibrate cycles per nanosecond
+        // Step 5: Calibrate cycles per nanosecond
         let cycles_per_ns = Self::calibrate(&mut counter);
 
         Ok(Self {
             counter,
             cycles_per_ns,
+            _lock_guard: lock_guard,
         })
     }
 

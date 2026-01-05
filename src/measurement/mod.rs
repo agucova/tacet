@@ -56,6 +56,9 @@ mod outlier;
 mod timer;
 
 #[cfg(feature = "kperf")]
+mod kperf_lock;
+
+#[cfg(feature = "kperf")]
 pub mod kperf;
 
 #[cfg(feature = "perf")]

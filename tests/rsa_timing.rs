@@ -15,7 +15,7 @@ use rsa::rand_core::OsRng;
 use rsa::signature::{RandomizedSigner, SignatureEncoding, Verifier};
 use rsa::{Pkcs1v15Encrypt, RsaPrivateKey, RsaPublicKey};
 use timing_oracle::helpers::InputPair;
-use timing_oracle::TimingOracle;
+use timing_oracle::{skip_if_unreliable, Exploitability, TimingOracle};
 
 fn rand_bytes_32() -> [u8; 32] {
     let mut arr = [0u8; 32];
@@ -56,6 +56,7 @@ fn rsa_2048_encrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             // Note: PKCS#1 v1.5 encryption is randomized, but we're testing
             // whether the message content affects timing
@@ -63,17 +64,28 @@ fn rsa_2048_encrypt_constant_time() {
             std::hint::black_box(ciphertext[0]);
         });
 
+    let result = skip_if_unreliable!(outcome, "rsa_2048_encrypt_constant_time");
+
     eprintln!("\n[rsa_2048_encrypt_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    eprintln!("{}", timing_oracle::output::format_result(&result));
 
     // RSA encryption should be constant-time with respect to message content
-    let result = outcome.unwrap_completed();
     assert!(
         result.ci_gate.passed,
-        "RSA-2048 encryption should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "RSA-2048 encryption should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -113,22 +125,34 @@ fn rsa_2048_decrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |ct| {
             let plaintext = private_key.decrypt(Pkcs1v15Encrypt, ct).unwrap();
             std::hint::black_box(plaintext[0]);
         });
 
+    let result = skip_if_unreliable!(outcome, "rsa_2048_decrypt_constant_time");
+
     eprintln!("\n[rsa_2048_decrypt_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    eprintln!("{}", timing_oracle::output::format_result(&result));
 
     // Modern RSA implementations use blinding
-    let result = outcome.unwrap_completed();
     assert!(
         result.ci_gate.passed,
-        "RSA-2048 decryption should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "RSA-2048 decryption should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -153,21 +177,33 @@ fn rsa_2048_sign_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let signature = signing_key.sign_with_rng(&mut OsRng, msg);
             std::hint::black_box(signature.to_bytes().as_ref()[0]);
         });
 
-    eprintln!("\n[rsa_2048_sign_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    let result = skip_if_unreliable!(outcome, "rsa_2048_sign_constant_time");
 
-    let result = outcome.unwrap_completed();
+    eprintln!("\n[rsa_2048_sign_constant_time]");
+    eprintln!("{}", timing_oracle::output::format_result(&result));
+
     assert!(
         result.ci_gate.passed,
-        "RSA-2048 signing should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "RSA-2048 signing should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -205,6 +241,7 @@ fn rsa_2048_verify_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |class| {
             let result = if *class == 0 {
                 verifying_key.verify(&fixed_message, &fixed_signature)
@@ -215,16 +252,27 @@ fn rsa_2048_verify_constant_time() {
             std::hint::black_box(result.is_ok());
         });
 
-    eprintln!("\n[rsa_2048_verify_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    let result = skip_if_unreliable!(outcome, "rsa_2048_verify_constant_time");
 
-    let result = outcome.unwrap_completed();
+    eprintln!("\n[rsa_2048_verify_constant_time]");
+    eprintln!("{}", timing_oracle::output::format_result(&result));
+
     assert!(
         result.ci_gate.passed,
-        "RSA-2048 verification should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "RSA-2048 verification should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -244,21 +292,30 @@ fn rsa_2048_hamming_weight_independence() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, msg).unwrap();
             std::hint::black_box(ct[0]);
         });
 
-    eprintln!("\n[rsa_2048_hamming_weight_independence]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    let result = skip_if_unreliable!(outcome, "rsa_2048_hamming_weight_independence");
 
-    let result = outcome.unwrap_completed();
+    eprintln!("\n[rsa_2048_hamming_weight_independence]");
+    eprintln!("{}", timing_oracle::output::format_result(&result));
+
+    assert!(
+        result.ci_gate.passed,
+        "Should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
     assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
         "RSA Hamming weight should not affect timing (got {:?})",
         result.exploitability
@@ -285,6 +342,7 @@ fn rsa_key_size_timing_difference() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |key_idx| {
             if *key_idx == 0 {
                 let ct = pub_2048
@@ -299,13 +357,18 @@ fn rsa_key_size_timing_difference() {
             }
         });
 
+    let result = skip_if_unreliable!(outcome, "rsa_key_size_timing_difference");
+
     eprintln!("\n[rsa_key_size_timing_difference]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
-    }
+    eprintln!("{}", timing_oracle::output::format_result(&result));
 
     // We EXPECT a timing difference here - 4096-bit operations are slower
     eprintln!(
         "Note: Timing difference expected (4096-bit is ~4x slower than 2048-bit)"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
     );
 }

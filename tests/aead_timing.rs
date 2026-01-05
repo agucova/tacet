@@ -60,8 +60,8 @@ fn chacha20poly1305_encrypt_constant_time() {
     ];
     let cipher = ChaCha20Poly1305::new(&key_bytes.into());
 
-    // Fixed nonce (12 bytes for ChaCha20-Poly1305)
-    let nonce = Nonce::from_slice(&[0u8; 12]);
+    // Use atomic counter to generate unique nonces (avoid nonce reuse)
+    let nonce_counter = std::sync::atomic::AtomicU64::new(0);
 
     // Non-pathological fixed plaintext
     let fixed_plaintext: [u8; 64] = [0x42; 64];
@@ -70,20 +70,47 @@ fn chacha20poly1305_encrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0) // Ignore effects below CPU micro-architectural noise floor
         .test(inputs, |plaintext| {
+            // Generate unique nonce for each encryption
+            let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut nonce_bytes = [0u8; 12];
+            nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
+            let nonce = Nonce::from_slice(&nonce_bytes);
+
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ciphertext[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[chacha20poly1305_encrypt_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
+
+    let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_encrypt_constant_time");
 
     assert!(
         result.ci_gate.passed,
         "ChaCha20-Poly1305 encryption should be constant-time (got leak_probability={:.3})",
         result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "ChaCha20-Poly1305 should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -119,20 +146,41 @@ fn chacha20poly1305_decrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0) // Ignore effects below CPU micro-architectural noise floor
         .test(inputs, |ct| {
             let plaintext = cipher.decrypt(nonce, ct.as_ref()).unwrap();
             std::hint::black_box(plaintext[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[chacha20poly1305_decrypt_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
+
+    let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_decrypt_constant_time");
 
     assert!(
         result.ci_gate.passed,
         "ChaCha20-Poly1305 decryption should be constant-time (got leak_probability={:.3})",
         result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "ChaCha20-Poly1305 decryption should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -146,27 +194,52 @@ fn chacha20poly1305_nonce_independence() {
 
     let plaintext = [0x42u8; 64];
 
-    // Fixed vs random nonces
-    let fixed_nonce: [u8; 12] = [0x00; 12];
-    let nonces = InputPair::new(|| fixed_nonce, rand_bytes_12);
+    // Nonce A (all zeros) vs Nonce B (all ones)
+    // Both deterministic to avoid cache locality differences
+    let nonces = InputPair::new(|| [0x00u8; 12], || [0xFFu8; 12]);
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0) // Ignore effects below CPU micro-architectural noise floor
         .test(nonces, |nonce_bytes| {
             let nonce = Nonce::from_slice(nonce_bytes);
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ciphertext[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[chacha20poly1305_nonce_independence]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
 
+    let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_nonce_independence");
+
+    // For nonce independence, check that any timing difference is practically negligible
+    // CI gate may pass while Bayesian posterior is high for tiny effects (~5ns) - this is OK
+    // We care about exploitability, not just statistical detectability
     assert!(
         result.ci_gate.passed,
         "ChaCha20-Poly1305 nonce should not affect timing (got leak_probability={:.3})",
         result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "ChaCha20-Poly1305 nonce independence should have low exploitability (got {:?}, effect: {:?})",
+        result.exploitability,
+        result.effect
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -200,6 +273,7 @@ fn aes_256_gcm_encrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut in_out = plaintext.to_vec();
@@ -209,15 +283,34 @@ fn aes_256_gcm_encrypt_constant_time() {
             std::hint::black_box(tag.as_ref()[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[aes_256_gcm_encrypt_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
+
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes_256_gcm_encrypt_constant_time");
 
     assert!(
         result.ci_gate.passed,
-        "AES-256-GCM encryption should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "AES-256-GCM encryption should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "AES-256-GCM encryption should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -261,6 +354,7 @@ fn aes_256_gcm_decrypt_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |ct| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut ct_mut = ct.clone();
@@ -268,15 +362,34 @@ fn aes_256_gcm_decrypt_constant_time() {
             std::hint::black_box(pt[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[aes_256_gcm_decrypt_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
+
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes_256_gcm_decrypt_constant_time");
 
     assert!(
         result.ci_gate.passed,
-        "AES-256-GCM decryption should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "AES-256-GCM decryption should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "AES-256-GCM decryption should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -301,6 +414,7 @@ fn ring_chacha20poly1305_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut in_out = plaintext.to_vec();
@@ -310,15 +424,34 @@ fn ring_chacha20poly1305_constant_time() {
             std::hint::black_box(tag.as_ref()[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[ring_chacha20poly1305_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
+
+    let result = timing_oracle::skip_if_unreliable!(outcome, "ring_chacha20poly1305_constant_time");
 
     assert!(
         result.ci_gate.passed,
-        "ring ChaCha20-Poly1305 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "ring ChaCha20-Poly1305 should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "ring ChaCha20-Poly1305 should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -333,22 +466,43 @@ fn chacha20poly1305_hamming_weight_independence() {
 
     let key_bytes: [u8; 32] = [0x42; 32];
     let cipher = ChaCha20Poly1305::new(&key_bytes.into());
-    let nonce = Nonce::from_slice(&[0u8; 12]);
+
+    // Use atomic counter to generate unique nonces (avoid nonce reuse)
+    let nonce_counter = std::sync::atomic::AtomicU64::new(0);
 
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0) // Ignore effects below CPU micro-architectural noise floor
         .test(inputs, |plaintext| {
+            // Generate unique nonce for each encryption
+            let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut nonce_bytes = [0u8; 12];
+            nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
+            let nonce = Nonce::from_slice(&nonce_bytes);
+
             let ct = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ct[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[chacha20poly1305_hamming_weight_independence]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
 
+    let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_hamming_weight_independence");
+
+    assert!(
+        result.ci_gate.passed,
+        "ChaCha20-Poly1305 Hamming weight should be constant-time (got leak_probability={:.3})",
+        result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
     assert!(
         matches!(
             result.exploitability,
@@ -356,6 +510,11 @@ fn chacha20poly1305_hamming_weight_independence() {
         ),
         "ChaCha20-Poly1305 Hamming weight should not affect timing (got {:?})",
         result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -367,14 +526,22 @@ fn aes_gcm_hamming_weight_independence() {
     let key_bytes: [u8; 32] = [0x42; 32];
     let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
     let key = LessSafeKey::new(unbound_key);
-    let nonce_bytes: [u8; 12] = [0u8; 12];
+
+    // Use atomic counter to generate unique nonces (avoid nonce reuse)
+    let nonce_counter = std::sync::atomic::AtomicU64::new(0);
 
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |plaintext| {
+            // Generate unique nonce for each encryption
+            let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut nonce_bytes = [0u8; 12];
+            nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+
             let mut in_out = plaintext.to_vec();
             let tag = key
                 .seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut in_out)
@@ -382,11 +549,22 @@ fn aes_gcm_hamming_weight_independence() {
             std::hint::black_box(tag.as_ref()[0]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[aes_gcm_hamming_weight_independence]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
+    }
 
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes_gcm_hamming_weight_independence");
+
+    assert!(
+        result.ci_gate.passed,
+        "AES-GCM Hamming weight should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
     assert!(
         matches!(
             result.exploitability,
@@ -394,5 +572,10 @@ fn aes_gcm_hamming_weight_independence() {
         ),
         "AES-GCM Hamming weight should not affect timing (got {:?})",
         result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }

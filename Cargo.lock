@@ -1671,6 +1671,7 @@ dependencies = [
  "curve25519-dalek",
  "dudect-bencher",
  "kperf-rs",
+ "libc",
  "nalgebra",
  "num-bigint",
  "num-traits",

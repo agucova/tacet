@@ -84,7 +84,13 @@ fn async_executor_overhead_no_false_positive() {
         result.ci_gate.passed,
         "CI gate should pass for async executor overhead"
     );
-}
+
+    // Baseline test: leak probability should be low
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );}
 
 /// 1.2 Async Block-on Overhead Symmetric
 ///
@@ -114,7 +120,13 @@ fn async_block_on_overhead_symmetric() {
         result.ci_gate.passed,
         "CI gate should pass for identical block_on() overhead"
     );
-}
+
+    // Baseline test: leak probability should be low
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );}
 
 // ============================================================================
 // Category 2: Leak Detection Tests (Should Detect Timing Leaks)
@@ -150,8 +162,8 @@ fn detects_conditional_await_timing() {
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
-        !result.ci_gate.passed || result.leak_probability > 0.7,
-        "Expected to detect conditional await timing leak (got leak_probability={}, ci_gate.passed={})",
+        !result.ci_gate.passed && result.leak_probability > 0.7,
+        "Expected to detect leak: ci_gate should fail AND leak_probability should be high (got leak_probability={}, ci_gate.passed={})",
         result.leak_probability,
         result.ci_gate.passed
     );
@@ -275,6 +287,18 @@ fn concurrent_tasks_no_crosstalk() {
         "CI gate should pass with background tasks (got leak_probability={:.3})",
         result.leak_probability
     );
+
+    // Baseline test: leak probability should be low
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(
+        result.min_detectable_effect.shift_ns > 0.0,
+        "MDE should be positive"
+    );
 }
 
 /// 3.2 Detects Task Spawn Timing Leak (Thorough)
@@ -387,4 +411,9 @@ fn async_workload_flag_effectiveness() {
 
     eprintln!("\n[async_workload_flag_effectiveness]");
     eprintln!("{}", timing_oracle::output::format_result(&result_without_flag));
+
+    // Verify result structure is valid (informational test)
+    assert!(result_without_flag.leak_probability >= 0.0 && result_without_flag.leak_probability <= 1.0);
+    assert!(result_without_flag.min_detectable_effect.shift_ns > 0.0);
+    assert!(result_without_flag.metadata.samples_per_class > 0);
 }

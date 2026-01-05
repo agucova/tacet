@@ -139,6 +139,30 @@ where
         }
     }
 
+    /// Create a new input pair without anomaly detection.
+    ///
+    /// Use this when you intentionally use deterministic inputs (e.g., fixed nonces,
+    /// pre-generated signatures) and want to suppress the "identical values" warning.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// // Testing with fixed nonces - intentionally deterministic
+    /// let nonces = InputPair::new_unchecked(
+    ///     || [0x00u8; 12],  // Fixed nonce A
+    ///     || [0xFFu8; 12],  // Fixed nonce B
+    /// );
+    /// ```
+    pub fn new_unchecked(baseline: F1, sample: F2) -> Self {
+        Self {
+            baseline_fn: RefCell::new(baseline),
+            sample_fn: RefCell::new(sample),
+            samples_seen: Cell::new(usize::MAX), // Disable tracking
+            unique_samples: RefCell::new(HashSet::new()),
+            _phantom: std::marker::PhantomData,
+        }
+    }
+
     /// Generate a baseline value by calling the baseline closure.
     ///
     /// Returns `T` by calling the baseline closure each time.
@@ -234,6 +258,12 @@ where
     /// ```
     pub fn check_anomaly(&self) -> Option<String> {
         let count = self.samples_seen.get();
+
+        // Check if tracking was disabled (new_unchecked)
+        if count == usize::MAX {
+            return None; // Anomaly detection explicitly disabled
+        }
+
         if count < ANOMALY_DETECTION_MIN_SAMPLES {
             return None; // Not enough samples to judge
         }
@@ -243,9 +273,18 @@ where
 
         if unique == 1 {
             Some(format!(
-                "ANOMALY: sample() returned identical values for all {} samples. \
-                 Did you accidentally capture a pre-evaluated value instead of a closure? \
-                 Use `sample: || expr` not `sample: expr`.",
+                "ANOMALY: sample() returned identical values for all {} samples.\n\
+                 \n\
+                 Common causes:\n\
+                 1. CLOSURE CAPTURE BUG: You may have captured a pre-evaluated value.\n\
+                    ❌ Bad:  let val = random(); InputPair::new(|| baseline, || val)\n\
+                    ✓  Good: InputPair::new(|| baseline, || random())\n\
+                 \n\
+                 2. INTENTIONAL (testing with fixed inputs): This is OK if you're testing\n\
+                    deterministic operations (e.g., fixed nonces, pre-generated signatures).\n\
+                    You can safely ignore this warning in that case.\n\
+                 \n\
+                 To suppress this warning, use InputPair::new_unchecked() instead.",
                 count
             ))
         } else if unique_ratio < ANOMALY_DETECTION_THRESHOLD {

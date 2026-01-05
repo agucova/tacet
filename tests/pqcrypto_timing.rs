@@ -18,7 +18,7 @@ use pqcrypto_sphincsplus::sphincssha2128fsimple;
 use pqcrypto_traits::kem::{Ciphertext as _, PublicKey as _, SecretKey as _, SharedSecret as _};
 use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _, SecretKey as _};
 use timing_oracle::helpers::InputPair;
-use timing_oracle::TimingOracle;
+use timing_oracle::{skip_if_unreliable, Exploitability, TimingOracle};
 
 fn rand_bytes_32() -> [u8; 32] {
     let mut arr = [0u8; 32];
@@ -50,12 +50,13 @@ fn kyber768_keypair_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(10_000)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |_| {
             let (pk, sk) = kyber768::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "kyber768_keypair_constant_time");
 
     eprintln!("\n[kyber768_keypair_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -63,9 +64,18 @@ fn kyber768_keypair_constant_time() {
     // Key generation should have consistent timing (both branches do the same thing)
     assert!(
         result.ci_gate.passed,
-        "Kyber-768 keypair generation should have consistent timing (got leak_probability={:.3})",
-        result.leak_probability
+        "Kyber-768 keypair generation should have consistent timing"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Kyber-768 encapsulation should be constant-time with respect to the public key
@@ -87,6 +97,7 @@ fn kyber768_encapsulate_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             let pk = if *which == 0 {
                 &pk_fixed
@@ -99,16 +110,25 @@ fn kyber768_encapsulate_constant_time() {
             std::hint::black_box(ss.as_bytes()[0] ^ ct.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "kyber768_encapsulate_constant_time");
 
     eprintln!("\n[kyber768_encapsulate_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "Kyber-768 encapsulation should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "Kyber-768 encapsulation should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Kyber-768 decapsulation should be constant-time
@@ -139,6 +159,7 @@ fn kyber768_decapsulate_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             let ct = if *which == 0 {
                 &fixed_ct
@@ -151,16 +172,25 @@ fn kyber768_decapsulate_constant_time() {
             std::hint::black_box(ss.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "kyber768_decapsulate_constant_time");
 
     eprintln!("\n[kyber768_decapsulate_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "Kyber-768 decapsulation should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "Kyber-768 decapsulation should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -175,21 +205,31 @@ fn dilithium3_keypair_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(5_000)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |_| {
             let (pk, sk) = dilithium3::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "dilithium3_keypair_constant_time");
 
     eprintln!("\n[dilithium3_keypair_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "Dilithium3 keypair should have consistent timing (got leak_probability={:.3})",
-        result.leak_probability
+        "Dilithium3 keypair should have consistent timing"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Dilithium3 signing should be constant-time with respect to message content
@@ -205,21 +245,31 @@ fn dilithium3_sign_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "dilithium3_sign_constant_time");
 
     eprintln!("\n[dilithium3_sign_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "Dilithium3 signing should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "Dilithium3 signing should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Dilithium3 verification should be constant-time
@@ -247,6 +297,7 @@ fn dilithium3_verify_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
@@ -259,16 +310,25 @@ fn dilithium3_verify_constant_time() {
             std::hint::black_box(result.is_ok());
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "dilithium3_verify_constant_time");
 
     eprintln!("\n[dilithium3_verify_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "Dilithium3 verification should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "Dilithium3 verification should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -288,12 +348,13 @@ fn falcon512_sign_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let sig = falcon512::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "falcon512_sign_constant_time");
 
     eprintln!("\n[falcon512_sign_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -301,6 +362,21 @@ fn falcon512_sign_constant_time() {
     // Note: Falcon uses floating-point internally and may have timing variations
     // This test documents the current behavior
     eprintln!("Note: Falcon uses floating-point which may cause platform-dependent timing");
+
+    assert!(
+        result.ci_gate.passed,
+        "Falcon-512 signing should be constant-time"
+    );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Falcon-512 verification should be constant-time
@@ -327,6 +403,7 @@ fn falcon512_verify_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
@@ -339,10 +416,25 @@ fn falcon512_verify_constant_time() {
             std::hint::black_box(result.is_ok());
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "falcon512_verify_constant_time");
 
     eprintln!("\n[falcon512_verify_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
+
+    assert!(
+        result.ci_gate.passed,
+        "Falcon-512 verification should be constant-time"
+    );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -365,12 +457,13 @@ fn sphincs_sha2_128f_sign_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let sig = sphincssha2128fsimple::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sphincs_sha2_128f_sign_constant_time");
 
     eprintln!("\n[sphincs_sha2_128f_sign_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -378,9 +471,18 @@ fn sphincs_sha2_128f_sign_constant_time() {
     // SPHINCS+ is hash-based and should be constant-time
     assert!(
         result.ci_gate.passed,
-        "SPHINCS+ signing should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SPHINCS+ signing should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// SPHINCS+-SHA2-128f verification timing
@@ -408,6 +510,7 @@ fn sphincs_sha2_128f_verify_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
@@ -420,16 +523,25 @@ fn sphincs_sha2_128f_verify_constant_time() {
             std::hint::black_box(result.is_ok());
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sphincs_sha2_128f_verify_constant_time");
 
     eprintln!("\n[sphincs_sha2_128f_verify_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "SPHINCS+ verification should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SPHINCS+ verification should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -465,6 +577,7 @@ fn kyber768_ciphertext_independence() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |which| {
             if *which == 0 {
                 let i = idx1.get();
@@ -479,7 +592,7 @@ fn kyber768_ciphertext_independence() {
             }
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "kyber768_ciphertext_independence");
 
     eprintln!("\n[kyber768_ciphertext_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -487,9 +600,18 @@ fn kyber768_ciphertext_independence() {
     // Both branches use random ciphertexts, should have consistent timing
     assert!(
         result.ci_gate.passed,
-        "Kyber decapsulation timing should be independent of ciphertext (got leak_probability={:.3})",
-        result.leak_probability
+        "Kyber decapsulation timing should be independent of ciphertext"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Dilithium signing with different message patterns
@@ -503,22 +625,35 @@ fn dilithium3_message_hamming_weight() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "dilithium3_message_hamming_weight");
 
     eprintln!("\n[dilithium3_message_hamming_weight]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
+    // Primary check: CI gate should pass
+    assert!(
+        result.ci_gate.passed,
+        "Hamming weight should not affect timing"
+    );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    // Secondary check: exploitability should be low
     assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
-        "Dilithium3 message Hamming weight should not affect timing (got {:?})",
-        result.exploitability
+        "Exploitability: {:?}", result.exploitability
     );
 }

@@ -1,6 +1,6 @@
 error: missing required field `sample`
 
-       The `sample` field must be a closure that generates random inputs.
+       The `sample` field must be a closure that generates sample inputs.
 
        Example:
        timing_test! {

@@ -140,10 +140,11 @@ pub enum TimerSpec {
     /// compensates for resolution.
     Standard,
 
-    /// Prefer PMU timer, fall back to standard if unavailable.
+    /// Prefer PMU timer, panic if unavailable.
     ///
     /// Explicitly requests PMU timing (kperf on macOS, perf_event on Linux).
-    /// Falls back to standard timer if PMU is unavailable (e.g., not running as root).
+    /// Panics if PMU initialization fails (e.g., not running as root, concurrent access).
+    /// Use this when you need to ensure PMU timing is actually being used.
     PreferPmu,
 }
 
@@ -160,14 +161,23 @@ impl TimerSpec {
         match self {
             TimerSpec::Standard => BoxedTimer::Standard(Timer::new()),
 
-            TimerSpec::Auto | TimerSpec::PreferPmu => {
-                // Try PMU first on supported platforms
+            TimerSpec::Auto => {
+                // Try PMU first on supported platforms, fall back silently
                 #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
                 {
+                    use super::kperf::PmuError;
                     match PmuTimer::new() {
                         Ok(pmu) => return BoxedTimer::Kperf(pmu),
+                        Err(PmuError::ConcurrentAccess) => {
+                            // Another process holds the PMU lock - provide clear guidance
+                            eprintln!(
+                                "[timing-oracle] kperf: another process holds PMU lock. \
+                                 Falling back to standard timer. \
+                                 For exclusive kperf access, use: --test-threads=1"
+                            );
+                        }
                         Err(e) => {
-                            // Always log PMU failures - silent fallback hides bugs
+                            // Log other PMU failures
                             eprintln!("[timing-oracle] kperf init failed: {:?}", e);
                         }
                     }
@@ -186,6 +196,49 @@ impl TimerSpec {
 
                 // Fall back to standard timer
                 BoxedTimer::Standard(Timer::new())
+            }
+
+            TimerSpec::PreferPmu => {
+                // User explicitly requested PMU - fail hard if unavailable
+                #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
+                {
+                    use super::kperf::PmuError;
+                    match PmuTimer::new() {
+                        Ok(pmu) => return BoxedTimer::Kperf(pmu),
+                        Err(PmuError::ConcurrentAccess) => {
+                            panic!(
+                                "PreferPmu: kperf unavailable due to concurrent access. \
+                                 Run with --test-threads=1 for exclusive PMU access, \
+                                 or use TimerSpec::Auto to fall back to standard timer."
+                            );
+                        }
+                        Err(e) => {
+                            panic!("PreferPmu: kperf initialization failed: {:?}", e);
+                        }
+                    }
+                }
+
+                #[cfg(all(target_os = "linux", feature = "perf"))]
+                {
+                    match LinuxPerfTimer::new() {
+                        Ok(perf) => return BoxedTimer::Perf(perf),
+                        Err(e) => {
+                            panic!("PreferPmu: perf_event initialization failed: {:?}", e);
+                        }
+                    }
+                }
+
+                // PMU not available on this platform
+                #[cfg(not(any(
+                    all(target_os = "macos", target_arch = "aarch64", feature = "kperf"),
+                    all(target_os = "linux", feature = "perf")
+                )))]
+                {
+                    panic!(
+                        "PreferPmu: PMU timing not available on this platform. \
+                         Use TimerSpec::Auto or TimerSpec::Standard instead."
+                    );
+                }
             }
         }
     }

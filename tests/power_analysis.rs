@@ -49,8 +49,13 @@ fn mde_calibrated_power_curve() {
                 std::hint::black_box(data);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            mde_estimates.push(result.min_detectable_effect.shift_ns);
+        match outcome {
+            Outcome::Completed(result) => {
+                mde_estimates.push(result.min_detectable_effect.shift_ns);
+            }
+            Outcome::Unmeasurable { recommendation, .. } => {
+                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
+            }
         }
 
         if (trial + 1) % 25 == 0 {
@@ -97,10 +102,15 @@ fn mde_calibrated_power_curve() {
                     std::hint::black_box(should_delay);
                 });
 
-            if let Outcome::Completed(result) = outcome {
-                // Detection = CI gate fails OR leak probability > 50%
-                if !result.ci_gate.passed || result.leak_probability > 0.5 {
-                    detections += 1;
+            match outcome {
+                Outcome::Completed(result) => {
+                    // Detection = CI gate fails OR leak probability > 50%
+                    if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                        detections += 1;
+                    }
+                }
+                Outcome::Unmeasurable { recommendation, .. } => {
+                    panic!("Trial {} at {:.1}×MDE returned Unmeasurable: {}", trial + 1, multiple, recommendation);
                 }
             }
 
@@ -216,8 +226,13 @@ fn mde_scaling_validation() {
                     std::hint::black_box(data);
                 });
 
-            if let Outcome::Completed(result) = outcome {
-                mdes.push(result.min_detectable_effect.shift_ns);
+            match outcome {
+                Outcome::Completed(result) => {
+                    mdes.push(result.min_detectable_effect.shift_ns);
+                }
+                Outcome::Unmeasurable { recommendation, .. } => {
+                    panic!("Trial {} at n={} returned Unmeasurable: {}", trial + 1, samples, recommendation);
+                }
             }
 
             if (trial + 1) % 10 == 0 {
@@ -301,20 +316,25 @@ fn large_effect_detection() {
                 std::hint::black_box(should_delay);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            leak_probs.push(result.leak_probability);
+        match outcome {
+            Outcome::Completed(result) => {
+                leak_probs.push(result.leak_probability);
 
-            if !result.ci_gate.passed || result.leak_probability > 0.5 {
-                detections += 1;
+                if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                    detections += 1;
+                }
+
+                if (trial + 1) % 10 == 0 {
+                    let rate = detections as f64 / (trial + 1) as f64;
+                    eprintln!(
+                        "  Trial {}/{}: {}/{} detected ({:.0}%), avg P(leak)={:.1}%",
+                        trial + 1, TRIALS, detections, trial + 1, rate * 100.0,
+                        leak_probs.iter().sum::<f64>() / leak_probs.len() as f64 * 100.0
+                    );
+                }
             }
-
-            if (trial + 1) % 10 == 0 {
-                let rate = detections as f64 / (trial + 1) as f64;
-                eprintln!(
-                    "  Trial {}/{}: {}/{} detected ({:.0}%), avg P(leak)={:.1}%",
-                    trial + 1, TRIALS, detections, trial + 1, rate * 100.0,
-                    leak_probs.iter().sum::<f64>() / leak_probs.len() as f64 * 100.0
-                );
+            Outcome::Unmeasurable { recommendation, .. } => {
+                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
             }
         }
     }
@@ -377,9 +397,14 @@ fn negligible_effect_fpr() {
                 std::hint::black_box(should_delay);
             });
 
-        if let Outcome::Completed(result) = outcome {
-            if !result.ci_gate.passed || result.leak_probability > 0.5 {
-                detections += 1;
+        match outcome {
+            Outcome::Completed(result) => {
+                if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                    detections += 1;
+                }
+            }
+            Outcome::Unmeasurable { recommendation, .. } => {
+                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
             }
         }
 

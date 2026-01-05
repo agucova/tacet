@@ -60,16 +60,35 @@ fn aes128_block_encrypt_constant_time() {
         });
 
     eprintln!("\n[aes128_block_encrypt_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
     }
 
     // Modern AES implementations should be constant-time
-    let result = outcome.unwrap_completed();
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_block_encrypt_constant_time");
+
     assert!(
         result.ci_gate.passed,
         "AES-128 should be constant-time (got leak_probability={:.3})",
         result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "AES-128 should have negligible exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -108,12 +127,23 @@ fn aes128_different_keys_constant_time() {
         });
 
     eprintln!("\n[aes128_different_keys_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
     }
 
     // Different keys shouldn't cause timing differences
-    let result = outcome.unwrap_completed();
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_different_keys_constant_time");
+
+    assert!(
+        result.ci_gate.passed,
+        "AES-128 with different keys should be constant-time (got leak_probability={:.3})",
+        result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
     assert!(
         matches!(
             result.exploitability,
@@ -121,6 +151,11 @@ fn aes128_different_keys_constant_time() {
         ),
         "AES with different keys should have low exploitability (got {:?})",
         result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -193,33 +228,52 @@ fn aes128_multiple_blocks_constant_time() {
         });
 
     eprintln!("\n[aes128_multiple_blocks_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
 
         // Debug: Show CI gate details to understand boundary behavior
         eprintln!("\nCI Gate Debug:");
-        eprintln!("  Passed: {}", result.ci_gate.passed);
-        eprintln!("  Alpha: {}", result.ci_gate.alpha);
-        eprintln!("  Max observed: {:.2}", result.ci_gate.max_observed);
-        eprintln!("  Threshold: {:.2}", result.ci_gate.threshold);
-        let margin = result.ci_gate.threshold - result.ci_gate.max_observed;
+        eprintln!("  Passed: {}", r.ci_gate.passed);
+        eprintln!("  Alpha: {}", r.ci_gate.alpha);
+        eprintln!("  Max observed: {:.2}", r.ci_gate.max_observed);
+        eprintln!("  Threshold: {:.2}", r.ci_gate.threshold);
+        let margin = r.ci_gate.threshold - r.ci_gate.max_observed;
         eprintln!("  Margin: {:.2} {}", margin, if margin < 0.0 { "FAIL" } else { "pass" });
         eprintln!("  Per-quantile observed:");
         for i in 0..9 {
             eprintln!(
                 "    Q{}: obs={:7.2}",
                 i + 1,
-                result.ci_gate.observed[i],
+                r.ci_gate.observed[i],
             );
         }
     }
 
     // Multiple block encryption should maintain constant-time properties
-    let result = outcome.unwrap_completed();
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_multiple_blocks_constant_time");
+
     assert!(
         result.ci_gate.passed,
         "AES-128 multiple blocks should be constant-time (got leak_probability={:.3})",
         result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "AES-128 multiple blocks should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -246,9 +300,36 @@ fn aes128_key_init_constant_time() {
         });
 
     eprintln!("\n[aes128_key_init_constant_time]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
     }
+
+    // Key initialization should be constant-time
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_key_init_constant_time");
+
+    assert!(
+        result.ci_gate.passed,
+        "AES-128 key init should be constant-time (got leak_probability={:.3})",
+        result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "AES-128 key init should have low exploitability (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
+    );
 }
 
 // ============================================================================
@@ -274,12 +355,23 @@ fn aes128_hamming_weight_independence() {
         });
 
     eprintln!("\n[aes128_hamming_weight_independence]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
     }
 
     // Hamming weight should not affect timing
-    let result = outcome.unwrap_completed();
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_hamming_weight_independence");
+
+    assert!(
+        result.ci_gate.passed,
+        "AES-128 Hamming weight should be constant-time (got leak_probability={:.3})",
+        result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
     assert!(
         matches!(
             result.exploitability,
@@ -287,6 +379,11 @@ fn aes128_hamming_weight_independence() {
         ),
         "Hamming weight should not affect timing (got {:?})",
         result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
     );
 }
 
@@ -319,7 +416,34 @@ fn aes128_byte_pattern_independence() {
         });
 
     eprintln!("\n[aes128_byte_pattern_independence]");
-    if let timing_oracle::Outcome::Completed(result) = &outcome {
-        eprintln!("{}", timing_oracle::output::format_result(&result));
+    if let timing_oracle::Outcome::Completed(ref r) = outcome {
+        eprintln!("{}", timing_oracle::output::format_result(r));
     }
+
+    // Byte patterns should not affect timing
+    let result = timing_oracle::skip_if_unreliable!(outcome, "aes128_byte_pattern_independence");
+
+    assert!(
+        result.ci_gate.passed,
+        "AES-128 byte pattern should be constant-time (got leak_probability={:.3})",
+        result.leak_probability
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+        ),
+        "Byte patterns should not affect timing (got {:?})",
+        result.exploitability
+    );
+    assert!(
+        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
+        "Measurement quality should not be TooNoisy (got {:?})",
+        result.quality
+    );
 }

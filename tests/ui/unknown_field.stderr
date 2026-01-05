@@ -1,6 +1,6 @@
 error: unknown field `sampl`
 
-       Expected one of: `oracle`, `setup`, `baseline`, `sample`, `measure`
+       Expected one of: `type Input`, `oracle`, `baseline`, `sample`, `measure`
  --> tests/ui/unknown_field.rs:7:9
   |
 7 |         sampl: || rand::random::<u8>(),  // Typo: should be `sample`

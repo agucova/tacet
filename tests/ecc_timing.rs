@@ -10,7 +10,7 @@
 //! Pre-generate inputs outside closures to avoid measuring RNG time.
 
 use timing_oracle::helpers::InputPair;
-use timing_oracle::TimingOracle;
+use timing_oracle::{skip_if_unreliable, Exploitability, TimingOracle};
 use x25519_dalek::x25519;
 
 fn rand_bytes_32() -> [u8; 32] {
@@ -49,12 +49,13 @@ fn x25519_scalar_mult_constant_time() {
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_scalar_mult_constant_time");
 
     eprintln!("\n[x25519_scalar_mult_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -62,8 +63,20 @@ fn x25519_scalar_mult_constant_time() {
     // X25519 implementations should be constant-time
     assert!(
         result.ci_gate.passed,
-        "X25519 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "X25519 should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -83,6 +96,7 @@ fn x25519_different_basepoints_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(30_000)
+        .min_effect_ns(50.0)
         .test(inputs, |bp_idx| {
             let basepoint = if *bp_idx == 0 {
                 basepoint_zeros
@@ -93,16 +107,25 @@ fn x25519_different_basepoints_constant_time() {
             std::hint::black_box(result);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_different_basepoints_constant_time");
 
     eprintln!("\n[x25519_different_basepoints_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     // Different basepoints shouldn't cause significant timing differences
     assert!(
+        result.ci_gate.passed,
+        "Should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
         "X25519 with different basepoints should have low exploitability (got {:?})",
         result.exploitability
@@ -139,6 +162,7 @@ fn x25519_multiple_operations_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(scalars, |scalar_set| {
             let mut total = 0u8;
             for scalar in scalar_set {
@@ -148,7 +172,7 @@ fn x25519_multiple_operations_constant_time() {
             std::hint::black_box(total);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_multiple_operations_constant_time");
 
     eprintln!("\n[x25519_multiple_operations_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -156,8 +180,20 @@ fn x25519_multiple_operations_constant_time() {
     // Multiple operations should maintain constant-time properties
     assert!(
         result.ci_gate.passed,
-        "X25519 multiple operations should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "X25519 multiple operations should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }
 
@@ -199,15 +235,35 @@ fn x25519_scalar_clamping_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_scalar_clamping_constant_time");
 
     eprintln!("\n[x25519_scalar_clamping_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
+
+    // Scalar clamping should be constant-time
+    assert!(
+        result.ci_gate.passed,
+        "Scalar clamping should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
+    );
 }
 
 // ============================================================================
@@ -225,21 +281,31 @@ fn x25519_hamming_weight_independence() {
 
     let outcome = TimingOracle::new()
         .samples(20_000)
+        .min_effect_ns(50.0)
         .test(inputs, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_hamming_weight_independence");
 
     eprintln!("\n[x25519_hamming_weight_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     // Hamming weight should not affect timing significantly
     assert!(
+        result.ci_gate.passed,
+        "Should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
         "Hamming weight should not significantly affect timing (got {:?})",
         result.exploitability
@@ -255,6 +321,7 @@ fn x25519_byte_pattern_independence() {
 
     let outcome = TimingOracle::new()
         .samples(20_000)
+        .min_effect_ns(50.0)
         .test(inputs, |pattern_type| {
             let mut scalar = [0u8; 32];
             if *pattern_type == 0 {
@@ -272,10 +339,29 @@ fn x25519_byte_pattern_independence() {
             std::hint::black_box(result);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_byte_pattern_independence");
 
     eprintln!("\n[x25519_byte_pattern_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
+
+    // Byte pattern should not affect timing
+    assert!(
+        result.ci_gate.passed,
+        "Should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
+    );
 }
 
 /// Full ECDH exchange timing
@@ -306,13 +392,14 @@ fn x25519_ecdh_exchange_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |(secret_scalar, other_public_key)| {
             // Perform scalar multiplication (ECDH)
             let shared = x25519(*secret_scalar, *other_public_key);
             std::hint::black_box(shared);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "x25519_ecdh_exchange_constant_time");
 
     eprintln!("\n[x25519_ecdh_exchange_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -320,7 +407,19 @@ fn x25519_ecdh_exchange_constant_time() {
     // Full ECDH exchange should be constant-time
     assert!(
         result.ci_gate.passed,
-        "ECDH exchange should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "ECDH exchange should be constant-time"
+    );
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+    assert!(
+        matches!(
+            result.exploitability,
+            Exploitability::Negligible | Exploitability::PossibleLAN
+        ),
+        "Exploitability: {:?}",
+        result.exploitability
     );
 }

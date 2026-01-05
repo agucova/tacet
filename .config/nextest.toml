@@ -14,6 +14,17 @@ final-status-level = "fail"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
 
+# PMU-based timing (kperf on macOS, perf_event on Linux)
+# Uses single thread to ensure exclusive PMU access
+# Usage: sudo -E cargo nextest run --profile kperf
+[profile.kperf]
+test-threads = 1
+failure-output = "immediate"
+status-level = "fail"
+final-status-level = "fail"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+
 # Statistical power and extended calibration tests (slow)
 # Usage: cargo nextest run --profile power
 [profile.power]

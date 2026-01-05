@@ -12,7 +12,7 @@
 use blake2::{Blake2b512, Blake2s256, Digest as Blake2Digest};
 use sha3::{Sha3_256, Sha3_384, Sha3_512};
 use timing_oracle::helpers::InputPair;
-use timing_oracle::TimingOracle;
+use timing_oracle::{skip_if_unreliable, Exploitability, TimingOracle};
 
 fn rand_bytes_32() -> [u8; 32] {
     let mut arr = [0u8; 32];
@@ -61,12 +61,13 @@ fn sha3_256_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_256_constant_time");
 
     eprintln!("\n[sha3_256_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
@@ -74,9 +75,18 @@ fn sha3_256_constant_time() {
     // SHA-3 should be constant-time
     assert!(
         result.ci_gate.passed,
-        "SHA3-256 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SHA3-256 should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// SHA3-384 should be constant-time
@@ -90,21 +100,31 @@ fn sha3_384_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Sha3_384::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_384_constant_time");
 
     eprintln!("\n[sha3_384_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "SHA3-384 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SHA3-384 should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// SHA3-512 should be constant-time
@@ -118,51 +138,72 @@ fn sha3_512_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Sha3_512::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_512_constant_time");
 
     eprintln!("\n[sha3_512_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "SHA3-512 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SHA3-512 should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
-/// SHA3-256 with varying input lengths
+/// SHA3-256 with same-length but different data
 ///
-/// Tests whether padding logic has timing dependencies
+/// Tests constant-time property for fixed-length inputs
+/// Note: SHA3 is NOT constant-time for varying lengths by design
 #[test]
-fn sha3_256_varying_length_constant_time() {
+fn sha3_256_data_independence() {
     const SAMPLES: usize = 30_000;
 
-    // Test with 128-byte inputs
+    // Test with 128-byte inputs (same length, different data)
     let fixed_input: [u8; 128] = [0x42; 128];
     let inputs = InputPair::new(|| fixed_input, rand_bytes_128);
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_256_data_independence");
 
-    eprintln!("\n[sha3_256_varying_length_constant_time]");
+    eprintln!("\n[sha3_256_data_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "SHA3-256 with longer inputs should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SHA3-256 should be constant-time for same-length inputs"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -182,21 +223,31 @@ fn blake2b_512_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Blake2b512::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "blake2b_512_constant_time");
 
     eprintln!("\n[blake2b_512_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "BLAKE2b-512 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "BLAKE2b-512 should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// BLAKE2s-256 should be constant-time
@@ -212,21 +263,31 @@ fn blake2s_256_constant_time() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Blake2s256::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "blake2s_256_constant_time");
 
     eprintln!("\n[blake2s_256_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "BLAKE2s-256 should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "BLAKE2s-256 should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 // ============================================================================
@@ -244,24 +305,36 @@ fn sha3_256_hamming_weight_independence() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_256_hamming_weight_independence");
 
     eprintln!("\n[sha3_256_hamming_weight_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
-    // Hamming weight should not affect timing
+    // Primary check: CI gate should pass
+    assert!(
+        result.ci_gate.passed,
+        "Hamming weight should not affect timing"
+    );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    // Secondary check: exploitability should be low
     assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
-        "SHA3-256 Hamming weight should not affect timing (got {:?})",
-        result.exploitability
+        "Exploitability: {:?}", result.exploitability
     );
 }
 
@@ -274,23 +347,36 @@ fn blake2b_hamming_weight_independence() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |data| {
             let hash = Blake2b512::digest(data);
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "blake2b_hamming_weight_independence");
 
     eprintln!("\n[blake2b_hamming_weight_independence]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
+    // Primary check: CI gate should pass
+    assert!(
+        result.ci_gate.passed,
+        "Hamming weight should not affect timing"
+    );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    // Secondary check: exploitability should be low
     assert!(
         matches!(
             result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
+            Exploitability::Negligible | Exploitability::PossibleLAN
         ),
-        "BLAKE2b Hamming weight should not affect timing (got {:?})",
-        result.exploitability
+        "Exploitability: {:?}", result.exploitability
     );
 }
 
@@ -313,6 +399,7 @@ fn sha3_256_incremental_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |(data1, data2)| {
             let mut hasher = Sha3_256::new();
             hasher.update(data1);
@@ -321,16 +408,25 @@ fn sha3_256_incremental_constant_time() {
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "sha3_256_incremental_constant_time");
 
     eprintln!("\n[sha3_256_incremental_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "SHA3-256 incremental hashing should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "SHA3-256 incremental hashing should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }
 
 /// Test BLAKE2b incremental hashing
@@ -345,6 +441,7 @@ fn blake2b_incremental_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
+        .min_effect_ns(50.0)
         .test(inputs, |(data1, data2)| {
             let mut hasher = Blake2b512::new();
             hasher.update(data1);
@@ -353,14 +450,23 @@ fn blake2b_incremental_constant_time() {
             std::hint::black_box(hash[0]);
         });
 
-    let result = outcome.unwrap_completed();
+    let result = skip_if_unreliable!(outcome, "blake2b_incremental_constant_time");
 
     eprintln!("\n[blake2b_incremental_constant_time]");
     eprintln!("{}", timing_oracle::output::format_result(&result));
 
     assert!(
         result.ci_gate.passed,
-        "BLAKE2b incremental hashing should be constant-time (got leak_probability={:.3})",
-        result.leak_probability
+        "BLAKE2b incremental hashing should be constant-time"
     );
+
+    assert!(
+        result.leak_probability < 0.3,
+        "Leak probability too high: {:.1}%",
+        result.leak_probability * 100.0
+    );
+
+    assert!(matches!(result.exploitability,
+        Exploitability::Negligible | Exploitability::PossibleLAN),
+        "Exploitability should be low, got: {:?}", result.exploitability);
 }

@@ -1,6 +1,6 @@
 error: missing required field `baseline`
 
-       The `baseline` field must be a closure that returns the fixed input
+       The `baseline` field is a closure that generates the constant input
        used for the baseline class.
 
        Example:
