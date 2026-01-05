@@ -83,8 +83,8 @@ let oracle = TimingOracle::new()
     .warmup(1_000)                       // Warmup iterations (not measured)
 
     // Statistical parameters
-    .ci_alpha(0.01)                      // CI gate false positive rate
-    .effect_prior_ns(10.0)               // Prior scale for effects (σ_μ)
+    .alpha(0.01)                      // CI gate false positive rate
+    .min_effect_ns(10.0)               // Prior scale for effects (σ_μ)
     .effect_threshold_ns(100.0)          // Optional hard threshold
     .prior_no_leak(0.75)                 // Prior probability of no leak
     .outlier_percentile(0.999)           // Percentile for outlier filtering

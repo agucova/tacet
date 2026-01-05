@@ -48,9 +48,7 @@ The timing oracle follows a multi-layer analysis pipeline:
 
 ### Module Structure
 
-- `TimingOracle` (`src/oracle.rs`) - Builder-pattern entry point
-- `TimingTest` (`src/builder.rs`) - Alternative builder API for macro-averse users
-- `CiTestBuilder` (`src/ci.rs`) - CI-focused builder with ergonomic defaults
+- `TimingOracle` (`src/oracle.rs`) - Builder-pattern entry point with presets and configuration
 - `Config` (`src/config.rs`) - All tunable parameters (samples, alpha, thresholds)
 - `TestResult`, `Outcome` (`src/result.rs`) - Output types with leak_probability, effect, ci_gate, exploitability
 - `helpers` (`src/helpers.rs`) - Utilities for generating test inputs (`InputPair`, `byte_arrays_32`, `byte_vecs`)
@@ -85,7 +83,6 @@ The timing oracle follows a multi-layer analysis pipeline:
 - `MeasurementQuality` - Excellent (<5ns MDE), Good (5-20ns), Poor (20-100ns), TooNoisy (>100ns)
 - `MinDetectableEffect` - Minimum detectable shift_ns and tail_ns
 - `Class::Baseline` / `Class::Sample` - Input class identifiers
-- `Matrix9`, `Vector9` - nalgebra types for 9 decile quantile differences
 - `InputPair<T>` - Helper for generating baseline/sample test inputs via closures
 
 ### Adaptive Batching
@@ -187,21 +184,20 @@ See `TESTING.md` for detailed documentation of each test category.
 ## API Usage Pattern
 
 ```rust
-// Recommended: InputPair-based API (generates inputs via closures)
-use timing_oracle::{test, Outcome, helpers::InputPair};
+// Recommended: TimingOracle with InputPair
+use timing_oracle::{TimingOracle, Outcome, helpers::InputPair};
 
 let inputs = InputPair::new(
     || [0u8; 32],                 // Baseline: closure returning all zeros
     || rand::random::<[u8; 32]>() // Sample: closure returning random data
 );
 
-// Access inputs via methods
-inputs.baseline();  // calls baseline closure
-inputs.sample();    // calls sample closure
-
-let outcome = test(inputs, |data| {
-    my_crypto_function(data);
-});
+let outcome = TimingOracle::balanced()  // 20k samples, ~1s per test
+    .alpha(0.01)                        // 1% false positive rate
+    .min_effect_ns(10.0)                // Minimum effect of concern
+    .test(inputs, |data| {
+        my_crypto_function(data);
+    });
 
 // Handle result
 match outcome {
@@ -213,32 +209,10 @@ match outcome {
     }
 }
 
-// Builder API with configuration
-use timing_oracle::TimingTest;
-
-let outcome = TimingTest::new()
-    .baseline(|| [0u8; 32])
-    .sample(|| rand::random::<[u8; 32]>())
-    .measure(|data| my_function(data))
-    .run();
-
-// TimingOracle builder for advanced configuration
-use timing_oracle::TimingOracle;
-
-let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-let outcome = TimingOracle::balanced()  // 20k samples, faster
-    .ci_alpha(0.01)
-    .min_effect_of_concern(10.0)
+// CI integration with environment variable overrides
+let outcome = TimingOracle::balanced()
+    .from_env()  // Override with TO_SAMPLES, TO_ALPHA, TO_MIN_EFFECT_NS env vars
     .test(inputs, |data| my_function(data));
-
-// CI-focused API
-use timing_oracle::CiTestBuilder;
-
-CiTestBuilder::new()
-    .name("aes_encryption")
-    .inputs(InputPair::new(|| [0u8; 16], || rand::random()))
-    .operation(|data| cipher.encrypt(data))
-    .assert_constant_time();  // Panics if leak detected
 ```
 
 ### Macro API (with `macros` feature)

@@ -3,10 +3,13 @@ name = "timing-oracle"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.80"
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
 description = "Detect timing side channels in cryptographic code"
 keywords = ["security", "cryptography", "timing", "side-channel"]
 categories = ["cryptography", "development-tools::testing"]
+repository = "https://github.com/agucova/timing-oracle"
+documentation = "https://docs.rs/timing-oracle"
+homepage = "https://github.com/agucova/timing-oracle"
 
 [workspace]
 members = [".", "timing-oracle-macros"]

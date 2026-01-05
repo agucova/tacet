@@ -61,7 +61,7 @@ fn main() {
 
     // Using timing_test_checked! macro with custom config
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::new().samples(10_000).ci_alpha(0.01),
+        oracle: TimingOracle::new().samples(10_000).alpha(0.01),
         baseline: || [0u8; 32],
         sample: || {
             let mut arr = [0u8; 32];

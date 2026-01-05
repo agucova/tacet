@@ -27,10 +27,10 @@ This document describes the internal architecture of `timing-oracle`, detailing 
 ┌──────────────────────────┐      ┌──────────────────────────────┐
 │   LAYER 1: CI GATE       │      │   LAYER 2: BAYESIAN          │
 ├──────────────────────────┤      ├──────────────────────────────┤
-│ RTLF-style bootstrap     │      │ Sample splitting:            │
-│ Within-class resampling  │      │  - 30% calibration set       │
-│ Conservative max bounds  │      │  - 70% inference set         │
-│ Bonferroni correction    │      │                              │
+│ Max-bootstrap pooled     │      │ Sample splitting:            │
+│ Single unified threshold │      │  - 30% calibration set       │
+│ Max-statistic over Δ     │      │  - 70% inference set         │
+│ No multiple testing adj  │      │                              │
 │                          │      │ Closed-form conjugate        │
 │ Output: passed/failed    │      │ Bayes factor                 │
 │         at α level       │      │                              │
@@ -99,10 +99,10 @@ autocorrelation.rs  ← ACF for detecting periodic interference
 **Purpose:** Two-layer statistical inference
 
 ```
-ci_gate.rs          ← Layer 1: RTLF-style frequentist gate
-│                     - Bootstrap within each class
-│                     - max(threshold_F, threshold_R) per quantile
-│                     - Bonferroni correction: α/9
+ci_gate.rs          ← Layer 1: Max-bootstrap frequentist gate
+│                     - Pools samples from both classes under H₀
+│                     - Single (1-α) quantile threshold on M* distribution
+│                     - Max-statistic: M = max_p |Δ_p| (more powerful than Bonferroni)
 │
 bayes.rs            ← Layer 2: Bayesian interpretation
 │                     - Closed-form Bayes factor
@@ -287,8 +287,8 @@ The architecture separates **decision-making** from **interpretation**:
 - **Purpose:** "Should this block my CI build?"
 - **Method:** RTLF-style bootstrap with bounded FPR
 - **Output:** Binary pass/fail
-- **Null:** H₀ = no difference between within-class quantile pairs
-- **Conservative:** Uses max of per-class thresholds
+- **Null:** H₀ = no difference between classes (pooled samples)
+- **Method:** Max-statistic bootstrap with single unified threshold
 
 ### Layer 2 (Bayesian): Quantitative Assessment
 - **Purpose:** "What's the probability and magnitude of the leak?"

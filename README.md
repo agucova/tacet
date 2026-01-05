@@ -30,9 +30,9 @@ fn constant_time_compare() {
     let secret = [0u8; 32];
     
     let result = timing_test! {
-        fixed: [0u8; 32],
-        random: || rand::random::<[u8; 32]>(),
-        test: |input| {
+        baseline: || [0u8; 32],
+        sample: || rand::random::<[u8; 32]>(),
+        measure: |input| {
             constant_time_eq(&secret, &input);
         },
     };
@@ -83,14 +83,14 @@ Configure via the `oracle:` field:
 
 ```rust
 timing_test! {
-    oracle: TimingOracle::thorough(),  // 100k samples (~5s)
-    fixed: my_fixed_input,
-    random: || generate_random(),
-    test: |input| operation(&input),
+    oracle: TimingOracle::new(),  // 100k samples (~5s)
+    baseline: || my_fixed_input,
+    sample: || generate_random(),
+    measure: |input| operation(&input),
 }
 ```
 
-Presets: `TimingOracle::quick()` (~0.3s), `::balanced()` (~1s, default), `::thorough()` (~5s).
+Presets: `TimingOracle::quick()` (~0.3s), `::balanced()` (~1s, default), `::new()` (~5s).
 
 For fine-grained control:
 
@@ -98,25 +98,26 @@ For fine-grained control:
 timing_test! {
     oracle: TimingOracle::balanced()
         .samples(50_000)
-        .ci_alpha(0.05),  // 5% FPR instead of 1%
-    fixed: [0u8; 32],
-    random: || rand::random(),
-    test: |input| operation(&input),
+        .alpha(0.05),  // 5% FPR instead of 1%
+    baseline: || [0u8; 32],
+    sample: || rand::random(),
+    measure: |input| operation(&input),
 }
 ```
 
-### Setup Block
+### Shared State
 
-Use the `setup:` field for expensive initialization that shouldn't be timed:
+For expensive initialization, define variables before the macro and capture them:
 
 ```rust
+// Expensive setup done before the macro
+let key = Aes128::new(&KEY);
+
 timing_test! {
-    setup: {
-        let key = Aes128::new(&KEY);
-    },
-    fixed: [0u8; 16],
-    random: || rand::random(),
-    test: |input| {
+    baseline: || [0u8; 16],
+    sample: || rand::random(),
+    measure: |input| {
+        // `key` is captured from outer scope
         key.encrypt(&input);
     },
 }
@@ -128,9 +129,9 @@ Use tuple destructuring:
 
 ```rust
 timing_test! {
-    fixed: ([0u8; 12], [0u8; 64]),
-    random: || (rand::random(), rand::random()),
-    test: |(nonce, plaintext)| {
+    baseline: || ([0u8; 12], [0u8; 64]),
+    sample: || (rand::random(), rand::random()),
+    measure: |(nonce, plaintext)| {
         cipher.encrypt(&nonce, &plaintext);
     },
 }
@@ -144,9 +145,9 @@ timing_test! {
 use timing_oracle::{timing_test_checked, Outcome};
 
 let outcome = timing_test_checked! {
-    fixed: [0u8; 32],
-    random: || rand::random(),
-    test: |input| very_fast_operation(&input),
+    baseline: || [0u8; 32],
+    sample: || rand::random(),
+    measure: |input| very_fast_operation(&input),
 };
 
 match outcome {
@@ -160,14 +161,11 @@ match outcome {
 For programmatic access without macros:
 
 ```rust
-use timing_oracle::{TimingTest, TimingOracle, Outcome};
+use timing_oracle::{TimingOracle, Outcome, helpers::InputPair};
 
-let outcome = TimingTest::new()
-    .oracle(TimingOracle::thorough())
-    .fixed([0u8; 32])
-    .random(|| rand::random())
-    .test(|data| constant_time_eq(&secret, &data))
-    .run();
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::balanced()
+    .test(inputs, |data| constant_time_eq(&secret, data));
 
 if let Outcome::Completed(result) = outcome {
     println!("Leak probability: {:.1}%", result.leak_probability * 100.0);

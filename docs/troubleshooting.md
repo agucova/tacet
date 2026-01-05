@@ -82,7 +82,7 @@ For API documentation, see [api-reference.md](api-reference.md). For conceptual 
 
 1. **Tighten CI alpha:**
    ```rust
-   TimingOracle::new().ci_alpha(0.001)  // vs default 0.01
+   TimingOracle::new().alpha(0.001)  // vs default 0.01
    ```
 
 2. **Run sanity check manually:**

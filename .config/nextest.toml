@@ -3,6 +3,8 @@ failure-output = "immediate"
 status-level = "pass"
 final-status-level = "pass"
 retries = 0
+# Exclude slow statistical tests from default runs
+default-filter = "not (binary(power_analysis) | test(/^fpr_alpha/) | test(/^bayesian_prior/))"
 
 [profile.timing]
 test-threads = 1
@@ -11,3 +13,23 @@ status-level = "fail"
 final-status-level = "fail"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
+
+# Statistical power and extended calibration tests (slow)
+# Usage: cargo nextest run --profile power
+[profile.power]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "600s", terminate-after = 2 }
+retries = 0
+default-filter = "binary(power_analysis) | binary(calibration)"
+
+# Calibration suite only
+# Usage: cargo nextest run --profile calibration
+[profile.calibration]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "300s", terminate-after = 2 }
+retries = 0
+default-filter = "binary(calibration)"

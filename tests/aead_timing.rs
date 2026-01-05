@@ -69,7 +69,7 @@ fn chacha20poly1305_encrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |plaintext| {
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ciphertext[0]);
@@ -118,7 +118,7 @@ fn chacha20poly1305_decrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |ct| {
             let plaintext = cipher.decrypt(nonce, ct.as_ref()).unwrap();
             std::hint::black_box(plaintext[0]);
@@ -199,7 +199,7 @@ fn aes_256_gcm_encrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut in_out = plaintext.to_vec();
@@ -260,7 +260,7 @@ fn aes_256_gcm_decrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |ct| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut ct_mut = ct.clone();
@@ -300,7 +300,7 @@ fn ring_chacha20poly1305_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
             let mut in_out = plaintext.to_vec();

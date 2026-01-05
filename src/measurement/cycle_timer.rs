@@ -164,15 +164,23 @@ impl TimerSpec {
                 // Try PMU first on supported platforms
                 #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
                 {
-                    if let Ok(pmu) = PmuTimer::new() {
-                        return BoxedTimer::Kperf(pmu);
+                    match PmuTimer::new() {
+                        Ok(pmu) => return BoxedTimer::Kperf(pmu),
+                        Err(e) => {
+                            // Always log PMU failures - silent fallback hides bugs
+                            eprintln!("[timing-oracle] kperf init failed: {:?}", e);
+                        }
                     }
                 }
 
                 #[cfg(all(target_os = "linux", feature = "perf"))]
                 {
-                    if let Ok(perf) = LinuxPerfTimer::new() {
-                        return BoxedTimer::Perf(perf);
+                    match LinuxPerfTimer::new() {
+                        Ok(perf) => return BoxedTimer::Perf(perf),
+                        Err(e) => {
+                            // Always log PMU failures - silent fallback hides bugs
+                            eprintln!("[timing-oracle] perf init failed: {:?}", e);
+                        }
                     }
                 }
 

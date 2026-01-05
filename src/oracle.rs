@@ -1,5 +1,6 @@
 //! Main `TimingOracle` entry point and builder.
 
+use std::env;
 use std::time::Instant;
 
 #[allow(unused_imports)]
@@ -9,7 +10,6 @@ use rand::seq::SliceRandom;
 use std::hash::Hash;
 
 use crate::analysis::{compute_bayes_factor, compute_diagnostics, decompose_effect, estimate_mde, run_ci_gate, CiGateInput};
-use crate::ci::CiTestBuilder;
 use crate::config::Config;
 use crate::helpers::InputPair;
 use crate::measurement::{filter_outliers, BoxedTimer, TimerSpec};
@@ -40,7 +40,7 @@ use crate::types::{Class, Vector9};
 ///
 /// let result = TimingOracle::new()
 ///     .samples(50_000)
-///     .ci_alpha(0.001)
+///     .alpha(0.001)
 ///     .test(inputs, |data| my_function(data));
 /// ```
 ///
@@ -164,11 +164,6 @@ impl TimingOracle {
         }
     }
 
-    /// Create a CI-focused builder with ergonomic defaults.
-    pub fn ci_test() -> CiTestBuilder {
-        CiTestBuilder::from_oracle(Self::new())
-    }
-
     /// Set the timer specification.
     ///
     /// Controls which timer implementation is used:
@@ -206,7 +201,12 @@ impl TimingOracle {
     }
 
     /// Set samples per class.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is 0.
     pub fn samples(mut self, n: usize) -> Self {
+        assert!(n > 0, "samples must be > 0 (got {})", n);
         self.config.samples = n;
         self
     }
@@ -217,58 +217,126 @@ impl TimingOracle {
         self
     }
 
-    /// Set CI false positive rate.
-    pub fn ci_alpha(mut self, alpha: f64) -> Self {
+    /// Set CI false positive rate (default: 0.01).
+    ///
+    /// Lower values reduce false positives but require more samples to detect real leaks.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `alpha` is not in the range (0, 1).
+    pub fn alpha(mut self, alpha: f64) -> Self {
+        assert!(
+            alpha > 0.0 && alpha < 1.0,
+            "alpha must be in (0, 1), got {}",
+            alpha
+        );
         self.config.ci_alpha = alpha;
         self
     }
 
-    /// Set minimum effect of concern in nanoseconds.
-    pub fn min_effect_of_concern(mut self, ns: f64) -> Self {
-        self.config.min_effect_of_concern_ns = ns;
-        self
-    }
-
-    /// Set minimum effect of concern in nanoseconds.
+    /// Set minimum effect of concern in nanoseconds (default: 10.0).
     ///
-    /// Alias for [`min_effect_of_concern`] to preserve compatibility.
-    pub fn effect_prior_ns(mut self, ns: f64) -> Self {
+    /// Effects smaller than this are considered negligible. Used for:
+    /// - Setting the Bayesian prior scale
+    /// - Determining exploitability classification
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ns` is negative or NaN.
+    pub fn min_effect_ns(mut self, ns: f64) -> Self {
+        assert!(
+            ns >= 0.0 && !ns.is_nan(),
+            "min_effect_ns must be >= 0, got {}",
+            ns
+        );
         self.config.min_effect_of_concern_ns = ns;
         self
     }
 
     /// Optional hard effect threshold in nanoseconds for reporting/panic.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `ns` is not positive or is NaN.
     pub fn effect_threshold_ns(mut self, ns: f64) -> Self {
+        assert!(
+            ns > 0.0 && !ns.is_nan(),
+            "effect_threshold_ns must be > 0, got {}",
+            ns
+        );
         self.config.effect_threshold_ns = Some(ns);
         self
     }
 
     /// Set bootstrap iterations for CI thresholds.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is 0.
     pub fn ci_bootstrap_iterations(mut self, n: usize) -> Self {
+        assert!(n > 0, "ci_bootstrap_iterations must be > 0, got {}", n);
         self.config.ci_bootstrap_iterations = n;
         self
     }
 
     /// Set bootstrap iterations for covariance estimation.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `n` is 0.
     pub fn cov_bootstrap_iterations(mut self, n: usize) -> Self {
+        assert!(n > 0, "cov_bootstrap_iterations must be > 0, got {}", n);
         self.config.cov_bootstrap_iterations = n;
         self
     }
 
     /// Set outlier filtering percentile.
+    ///
+    /// Must be in the range (0, 1]. Set to 1.0 to disable filtering.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `p` is not in the range (0, 1].
     pub fn outlier_percentile(mut self, p: f64) -> Self {
+        assert!(
+            p > 0.0 && p <= 1.0,
+            "outlier_percentile must be in (0, 1], got {}",
+            p
+        );
         self.config.outlier_percentile = p;
         self
     }
 
     /// Set prior probability of no leak.
+    ///
+    /// Must be in the range (0, 1).
+    ///
+    /// # Panics
+    ///
+    /// Panics if `p` is not in the range (0, 1).
     pub fn prior_no_leak(mut self, p: f64) -> Self {
+        assert!(
+            p > 0.0 && p < 1.0,
+            "prior_no_leak must be in (0, 1), got {}",
+            p
+        );
         self.config.prior_no_leak = p;
         self
     }
 
-    /// Set calibration fraction for sample splitting (0.0-1.0).
+    /// Set calibration fraction for sample splitting.
+    ///
+    /// Must be in the range (0, 1). The remaining fraction is used for inference.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `frac` is not in the range (0, 1).
     pub fn calibration_fraction(mut self, frac: f32) -> Self {
+        assert!(
+            frac > 0.0 && frac < 1.0,
+            "calibration_fraction must be in (0, 1), got {}",
+            frac
+        );
         self.config.calibration_fraction = frac;
         self
     }
@@ -288,6 +356,50 @@ impl TimingOracle {
     /// Get the current configuration.
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Merge configuration from environment variables.
+    ///
+    /// Reads the following environment variables to override settings:
+    /// - `TO_SAMPLES`: Number of samples per class
+    /// - `TO_ALPHA`: CI false positive rate (e.g., "0.01")
+    /// - `TO_MIN_EFFECT_NS`: Minimum effect of concern in nanoseconds
+    /// - `TO_EFFECT_THRESHOLD_NS`: Hard effect threshold in nanoseconds
+    /// - `TO_CALIBRATION_FRAC`: Calibration fraction (e.g., "0.3")
+    /// - `TO_MAX_DURATION_MS`: Maximum duration guardrail in milliseconds
+    /// - `TO_SEED`: Deterministic measurement seed
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::TimingOracle;
+    ///
+    /// // In CI, set TO_SAMPLES=50000 to increase samples
+    /// let oracle = TimingOracle::balanced().from_env();
+    /// ```
+    pub fn from_env(mut self) -> Self {
+        if let Some(samples) = parse_usize_env("TO_SAMPLES") {
+            self = self.samples(samples);
+        }
+        if let Some(alpha) = parse_f64_env("TO_ALPHA") {
+            self = self.alpha(alpha);
+        }
+        if let Some(prior) = parse_f64_env("TO_MIN_EFFECT_NS") {
+            self = self.min_effect_ns(prior);
+        }
+        if let Some(threshold) = parse_f64_env("TO_EFFECT_THRESHOLD_NS") {
+            self = self.effect_threshold_ns(threshold);
+        }
+        if let Some(frac) = parse_f32_env("TO_CALIBRATION_FRAC") {
+            self = self.calibration_fraction(frac);
+        }
+        if let Some(ms) = parse_u64_env("TO_MAX_DURATION_MS") {
+            self = self.max_duration_ms(ms);
+        }
+        if let Some(seed) = parse_u64_env("TO_SEED") {
+            self = self.seed(seed);
+        }
+        self
     }
 
     /// Run a timing test with pre-generated inputs.
@@ -391,22 +503,30 @@ impl TimingOracle {
             let threshold_ns = resolution_ns * crate::measurement::MIN_TICKS_SINGLE_CALL;
 
             // Return early for unmeasurable operations
-            let platform = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-                "Apple Silicon (cntvct_el0, ~42ns resolution)"
-            } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-                "ARM64 Linux (cntvct_el0, ~40ns resolution)"
-            } else if cfg!(target_arch = "x86_64") {
-                "x86_64 (rdtsc, ~1ns resolution)"
-            } else {
-                "Unknown platform"
-            };
+            let platform = format!(
+                "{} ({}, {:.1}ns resolution)",
+                std::env::consts::OS,
+                timer.name(),
+                timer.resolution_ns()
+            );
 
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let recommendation = "Run with sudo to enable kperf cycle counting (~1ns resolution), or increase operation complexity";
-            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-            let recommendation = "Run with sudo and --features perf for cycle-accurate timing, or increase operation complexity";
-            #[cfg(not(target_arch = "aarch64"))]
-            let recommendation = "Increase operation complexity (current operation is too fast to measure reliably)";
+            // Recommend PMU if using standard timer on ARM64
+            let recommendation = if timer.name() == "cntvct_el0" {
+                #[cfg(target_os = "macos")]
+                {
+                    "Run with sudo to enable kperf cycle counting (~0.3ns resolution), or increase operation complexity"
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    "Run with sudo to enable perf_event cycle counting (~0.3ns resolution), or increase operation complexity"
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+                {
+                    "Increase operation complexity (current operation is too fast to measure reliably)"
+                }
+            } else {
+                "Increase operation complexity (current operation is too fast to measure reliably)"
+            };
 
             return Outcome::Unmeasurable {
                 operation_ns: median_ns,
@@ -699,29 +819,35 @@ impl TimingOracle {
         // Wrap result in Outcome enum based on measurability
         if let Some(unmeasurable_info) = &batching.unmeasurable {
             // Operation was too fast to measure reliably
-            let platform = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-                "Apple Silicon (cntvct_el0, ~42ns resolution)"
-            } else if cfg!(all(target_os = "linux", target_arch = "aarch64")) {
-                "ARM64 Linux (cntvct_el0, ~40ns resolution)"
-            } else if cfg!(target_arch = "x86_64") {
-                "x86_64 (rdtsc, ~1ns resolution)"
+            let platform = format!(
+                "{} ({}, {:.1}ns resolution)",
+                std::env::consts::OS,
+                timer.name(),
+                timer.resolution_ns()
+            );
+
+            // Recommend PMU if using standard timer on ARM64
+            let recommendation = if timer.name() == "cntvct_el0" {
+                #[cfg(target_os = "macos")]
+                {
+                    "Run with sudo to enable kperf cycle counting (~0.3ns resolution), or increase operation complexity"
+                }
+                #[cfg(target_os = "linux")]
+                {
+                    "Run with sudo to enable perf_event cycle counting (~0.3ns resolution), or increase operation complexity"
+                }
+                #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+                {
+                    "Increase operation complexity (current operation is too fast to measure reliably)"
+                }
             } else {
-                "Unknown platform"
+                "Increase operation complexity (current operation is too fast to measure reliably)"
             };
-
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let recommendation = "Run with sudo to enable kperf cycle counting (~1ns resolution), or increase operation complexity";
-
-            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-            let recommendation = "Run with sudo and --features perf for cycle-accurate timing, or increase operation complexity";
-
-            #[cfg(not(target_arch = "aarch64"))]
-            let recommendation = "Increase operation complexity (current operation is too fast to measure reliably)";
 
             crate::result::Outcome::Unmeasurable {
                 operation_ns: unmeasurable_info.operation_ns,
                 threshold_ns: unmeasurable_info.threshold_ns,
-                platform: platform.to_string(),
+                platform,
                 recommendation: recommendation.to_string(),
             }
         } else {
@@ -1130,6 +1256,23 @@ fn split_calibration_temporal(
     (calib.to_vec(), infer.to_vec())
 }
 
+// Environment variable parsing helpers
+fn parse_usize_env(key: &str) -> Option<usize> {
+    env::var(key).ok()?.parse().ok()
+}
+
+fn parse_u64_env(key: &str) -> Option<u64> {
+    env::var(key).ok()?.parse().ok()
+}
+
+fn parse_f64_env(key: &str) -> Option<f64> {
+    env::var(key).ok()?.parse().ok()
+}
+
+fn parse_f32_env(key: &str) -> Option<f32> {
+    env::var(key).ok()?.parse().ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1147,8 +1290,8 @@ mod tests {
         let oracle = TimingOracle::new()
             .samples(50_000)
             .warmup(500)
-            .ci_alpha(0.05)
-            .min_effect_of_concern(5.0)
+            .alpha(0.05)
+            .min_effect_ns(5.0)
             .prior_no_leak(0.9);
 
         assert_eq!(oracle.config().samples, 50_000);

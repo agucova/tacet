@@ -48,7 +48,7 @@ fn x25519_scalar_mult_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);

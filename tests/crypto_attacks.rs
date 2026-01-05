@@ -156,7 +156,7 @@ fn aes_sbox_timing_thorough() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(indices, |idx| {
             let val = std::hint::black_box(*idx);
             std::hint::black_box(sbox[val as usize]);

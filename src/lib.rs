@@ -11,20 +11,20 @@
 //!
 //! ## Common Pitfall: Side-Effects in Closures
 //!
-//! The closures you provide to `test()` must execute **identical code paths**.
+//! The closures you provide must execute **identical code paths**.
 //! Only the input *data* should differ - not the operations performed.
 //!
 //! ```ignore
 //! // WRONG - Sample closure has extra RNG/allocation overhead
-//! test(
-//!     || my_op(&[0u8; 32]),
-//!     || my_op(&rand::random()),  // RNG called during measurement!
+//! TimingOracle::balanced().test(
+//!     InputPair::new(|| my_op(&[0u8; 32]), || my_op(&rand::random())),
+//!     |_| {},  // RNG called during measurement!
 //! );
 //!
 //! // CORRECT - Pre-generate inputs, both closures identical
-//! use timing_oracle::helpers::InputPair;
+//! use timing_oracle::{TimingOracle, helpers::InputPair};
 //! let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-//! test(inputs, |data| {
+//! TimingOracle::balanced().test(inputs, |data| {
 //!     my_op(data);
 //! });
 //! ```
@@ -34,19 +34,19 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use timing_oracle::{test, helpers::InputPair};
+//! use timing_oracle::{TimingOracle, helpers::InputPair, Outcome};
 //!
-//! // Simple API with InputPair
+//! // Builder API with InputPair
 //! let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-//! let outcome = test(inputs, |data| {
+//! let outcome = TimingOracle::balanced().test(inputs, |data| {
 //!     my_function(data);
 //! });
 //!
 //! match outcome {
-//!     timing_oracle::Outcome::Completed(result) => {
+//!     Outcome::Completed(result) => {
 //!         println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
 //!     }
-//!     timing_oracle::Outcome::Unmeasurable { recommendation, .. } => {
+//!     Outcome::Unmeasurable { recommendation, .. } => {
 //!         println!("Skipping: {}", recommendation);
 //!     }
 //! }
@@ -58,11 +58,9 @@
 // Core modules
 mod config;
 mod constants;
-pub mod ci;
 mod oracle;
 mod result;
 mod types;
-mod builder;
 mod thread_pool;
 
 // Functional modules
@@ -82,57 +80,10 @@ pub use result::{
     BatchingInfo, CiGate, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
     Metadata, MinDetectableEffect, Outcome, TestResult, UnmeasurableInfo, UnreliablePolicy,
 };
-pub use ci::{CiFailure, CiRunOutcome, CiTestBuilder, FailCriterion, Mode};
-pub use types::{Class, Matrix9, Matrix9x2, TimingSample, Vector9};
+pub use types::{Class, TimingSample};
 
 // Re-export helpers for convenience
 pub use helpers::InputPair;
-
-// Re-export builder for the builder API
-pub use builder::TimingTest;
-
-/// Convenience function for simple timing tests with default configuration.
-///
-/// This runs a timing analysis comparing a baseline input operation against
-/// a sample input operation.
-///
-/// # Example
-///
-/// ```ignore
-/// use timing_oracle::{test, helpers::InputPair, Outcome};
-///
-/// let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-/// let outcome = test(inputs, |data| {
-///     my_crypto_function(data);
-/// });
-///
-/// match outcome {
-///     Outcome::Completed(result) => {
-///         assert!(result.leak_probability < 0.5, "Timing leak detected!");
-///     }
-///     Outcome::Unmeasurable { .. } => {
-///         // Test skipped due to noisy environment
-///     }
-/// }
-/// ```
-///
-/// # Arguments
-///
-/// * `inputs` - An `InputPair` containing the baseline and sample closures
-/// * `operation` - Closure that performs the operation to time (receives `&T`)
-///
-/// # Returns
-///
-/// An `Outcome` which is either `Completed(TestResult)` or `Unmeasurable`.
-pub fn test<T, F1, F2, F>(inputs: InputPair<T, F1, F2>, operation: F) -> Outcome
-where
-    T: Clone + std::hash::Hash,
-    F1: FnMut() -> T,
-    F2: FnMut() -> T,
-    F: FnMut(&T),
-{
-    TimingOracle::new().test(inputs, operation)
-}
 
 // ============================================================================
 // Reliability Handling Macros

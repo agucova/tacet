@@ -55,7 +55,7 @@ fn rsa_2048_encrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |msg| {
             // Note: PKCS#1 v1.5 encryption is randomized, but we're testing
             // whether the message content affects timing
@@ -112,7 +112,7 @@ fn rsa_2048_decrypt_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |ct| {
             let plaintext = private_key.decrypt(Pkcs1v15Encrypt, ct).unwrap();
             std::hint::black_box(plaintext[0]);
@@ -152,7 +152,7 @@ fn rsa_2048_sign_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |msg| {
             let signature = signing_key.sign_with_rng(&mut OsRng, msg);
             std::hint::black_box(signature.to_bytes().as_ref()[0]);
@@ -204,7 +204,7 @@ fn rsa_2048_verify_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |class| {
             let result = if *class == 0 {
                 verifying_key.verify(&fixed_message, &fixed_signature)

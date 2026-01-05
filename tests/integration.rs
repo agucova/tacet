@@ -28,8 +28,8 @@ fn builder_api() {
     let oracle = TimingOracle::new()
         .samples(1000)
         .warmup(100)
-        .ci_alpha(0.05)
-        .effect_prior_ns(5.0)
+        .alpha(0.05)
+        .min_effect_ns(5.0)
         .outlier_percentile(0.99);
 
     let config = oracle.config();

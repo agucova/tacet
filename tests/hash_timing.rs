@@ -60,7 +60,7 @@ fn sha3_256_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
             std::hint::black_box(hash[0]);
@@ -89,7 +89,7 @@ fn sha3_384_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             let hash = Sha3_384::digest(data);
             std::hint::black_box(hash[0]);
@@ -117,7 +117,7 @@ fn sha3_512_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             let hash = Sha3_512::digest(data);
             std::hint::black_box(hash[0]);
@@ -181,7 +181,7 @@ fn blake2b_512_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             let hash = Blake2b512::digest(data);
             std::hint::black_box(hash[0]);
@@ -211,7 +211,7 @@ fn blake2s_256_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             let hash = Blake2s256::digest(data);
             std::hint::black_box(hash[0]);

@@ -52,7 +52,7 @@ fn aes128_block_encrypt_constant_time() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |plaintext| {
             let mut block = plaintext.to_owned().into();
             cipher.encrypt_block(&mut block);
@@ -181,7 +181,7 @@ fn aes128_multiple_blocks_constant_time() {
     // Use alpha=0.05 to reproduce original flakiness (default is 0.01)
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
-        .ci_alpha(0.05)
+        .alpha(0.05)
         .test(inputs, |blocks| {
             let mut total = 0u8;
             for b in blocks {

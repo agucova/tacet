@@ -49,7 +49,7 @@ fn kyber768_keypair_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(10_000)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |_| {
             let (pk, sk) = kyber768::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
@@ -86,7 +86,7 @@ fn kyber768_encapsulate_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |which| {
             let pk = if *which == 0 {
                 &pk_fixed
@@ -138,7 +138,7 @@ fn kyber768_decapsulate_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |which| {
             let ct = if *which == 0 {
                 &fixed_ct
@@ -174,7 +174,7 @@ fn dilithium3_keypair_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(5_000)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |_| {
             let (pk, sk) = dilithium3::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
@@ -204,7 +204,7 @@ fn dilithium3_sign_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
@@ -246,7 +246,7 @@ fn dilithium3_verify_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
@@ -287,7 +287,7 @@ fn falcon512_sign_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |msg| {
             let sig = falcon512::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
@@ -326,7 +326,7 @@ fn falcon512_verify_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
@@ -364,7 +364,7 @@ fn sphincs_sha2_128f_sign_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |msg| {
             let sig = sphincssha2128fsimple::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
@@ -407,7 +407,7 @@ fn sphincs_sha2_128f_verify_constant_time() {
 
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)

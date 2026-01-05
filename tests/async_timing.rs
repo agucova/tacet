@@ -69,7 +69,7 @@ fn async_executor_overhead_no_false_positive() {
 
     let outcome = TimingOracle::new()
         .samples(SAMPLES)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |data| {
             rt.block_on(async { std::hint::black_box(data); })
         });
@@ -132,7 +132,7 @@ fn detects_conditional_await_timing() {
 
     let outcome = TimingOracle::new()
         .samples(50_000)
-        .ci_alpha(0.01)
+        .alpha(0.01)
         .test(inputs, |secret| {
             rt.block_on(async {
                 if *secret {
