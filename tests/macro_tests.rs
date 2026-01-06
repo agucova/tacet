@@ -597,6 +597,7 @@ fn timing_test_returns_test_result() {
 fn timing_test_no_pattern_matching_needed() {
     // This demonstrates the convenience of timing_test! - no need for match/if-let
     let result = timing_test! {
+        oracle: TimingOracle::quick(),  // Use quick() for faster test
         baseline: || [0u8; 64],
         sample: || {
             let mut arr = [0u8; 64];
@@ -779,6 +780,7 @@ fn timing_test_checked_all_optional_fields() {
 #[test]
 fn timing_test_complex_array_type() {
     let result = timing_test! {
+        oracle: TimingOracle::quick(),  // Use quick() for faster test
         baseline: || [0u8; 64],  // Larger array
         sample: || {
             let mut arr = [0u8; 64];

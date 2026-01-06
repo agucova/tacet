@@ -44,3 +44,57 @@ final-status-level = "pass"
 slow-timeout = { period = "300s", terminate-after = 2 }
 retries = 0
 default-filter = "binary(calibration)"
+
+# Quick smoke tests - runs in ~5s (333 tests)
+# Includes lib tests + fast integration tests (config, types, helpers, macros, crypto samples)
+# Usage: cargo nextest run --profile quick
+[profile.quick]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "15s", terminate-after = 2 }
+retries = 0
+# Lib tests + fast integration tests
+default-filter = """
+(
+  kind(lib) |
+  binary(config_validation) |
+  binary(types_unit) |
+  binary(reliability) |
+  binary(helpers_test) |
+  binary(integration) |
+  binary(test_perf) |
+  binary(macro_tests) |
+  binary(concurrency_test) |
+  (binary(aead_timing) & test(/aes_gcm_hamming|chacha20poly1305_encrypt/)) |
+  (binary(crypto_attacks) & test(/aes_sbox_timing_fast|cache_line_boundary/))
+) & not test(/kperf_lock/)
+"""
+
+# Quick smoke tests with kperf/perf (requires sudo)
+# Same as quick but includes PMU-based timing tests, single-threaded
+# Usage: sudo -E cargo nextest run --profile quick-kperf
+[profile.quick-kperf]
+test-threads = 1
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "15s", terminate-after = 2 }
+retries = 0
+# Same as quick but includes kperf/perf tests
+default-filter = """
+(
+  kind(lib) |
+  binary(config_validation) |
+  binary(types_unit) |
+  binary(reliability) |
+  binary(helpers_test) |
+  binary(integration) |
+  binary(test_perf) |
+  binary(test_kperf) |
+  binary(macro_tests) |
+  binary(concurrency_test) |
+  (binary(aead_timing) & test(/aes_gcm_hamming|chacha20poly1305_encrypt/)) |
+  (binary(crypto_attacks) & test(/aes_sbox_timing_fast|cache_line_boundary/))
+)
+"""

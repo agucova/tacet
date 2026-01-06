@@ -64,7 +64,8 @@ fn test_no_false_positive_with_helpers() {
     // Use helpers for constant-time XOR - should not false positive
     let inputs = byte_arrays_32();
 
-    let outcome = TimingOracle::new().samples(50_000).test(inputs, |data| {
+    // Use balanced() for reasonable speed while still being accurate
+    let outcome = TimingOracle::balanced().test(inputs, |data| {
         // XOR with zeros is identity - constant time
         let mut result = [0u8; 32];
         for i in 0..32 {

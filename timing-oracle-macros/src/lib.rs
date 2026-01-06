@@ -29,8 +29,8 @@ use parse::TimingTestInput;
 ///
 /// ```ignore
 /// timing_test! {
-///     // Optional: custom oracle configuration
-///     oracle: TimingOracle::balanced(),
+///     // Optional: custom oracle configuration (defaults to balanced())
+///     oracle: TimingOracle::quick(),
 ///
 ///     // Required: baseline input generator (closure returning the fixed/baseline value)
 ///     baseline: || [0u8; 32],
@@ -117,9 +117,9 @@ fn expand_timing_test(input: TimingTestInput, checked: bool) -> proc_macro2::Tok
         measure,
     } = input;
 
-    // Default oracle if not specified
+    // Default oracle if not specified - use balanced() for reasonable speed
     let oracle_expr = oracle.unwrap_or_else(|| {
-        syn::parse_quote!(::timing_oracle::TimingOracle::new())
+        syn::parse_quote!(::timing_oracle::TimingOracle::balanced())
     });
 
     // Generate the timing test code

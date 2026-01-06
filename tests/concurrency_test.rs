@@ -50,6 +50,7 @@ fn library_is_thread_safe() {
 #[test]
 fn library_works_with_many_sequential_calls() {
     // Run 10 oracle tests sequentially - should never overflow
+    // Use calibration() since we're just testing concurrency, not accuracy
     for i in 0..10 {
         let mut fixed = [0u8; 128];
         fixed[0] = i as u8;
@@ -65,7 +66,7 @@ fn library_works_with_many_sequential_calls() {
             },
         );
 
-        let outcome = TimingOracle::quick().test(inputs, |arr| {
+        let outcome = TimingOracle::calibration().test(inputs, |arr| {
             let mut acc = 0u32;
             for byte in arr {
                 acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);

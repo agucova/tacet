@@ -1,4 +1,4 @@
-# timing-oracle Specification (v2)
+# timing-oracle Specification
 
 ## 1. Overview
 
@@ -8,7 +8,7 @@ Timing side-channel attacks exploit the fact that cryptographic implementations 
 
 - **DudeCT** and similar t-test approaches compare means, missing distributional differences (e.g., cache effects that only affect upper quantiles)
 - **P-values are misinterpreted**: A p-value of 0.01 doesn't mean "1% chance of leak"—it means "1% chance of this data given no leak." These are very different.
-- **Practical vs. statistical significance**: With enough samples, even negligible effects become statistically significant—this is power working correctly, but it creates operational problems when you want CI to pass for effects below some threshold of concern
+- **Unbounded false positives**: With enough samples, even negligible effects become "statistically significant"
 - **CI flakiness**: Tests that pass locally fail in CI due to environmental noise, or vice versa
 
 ### Solution
@@ -25,15 +25,11 @@ Timing side-channel attacks exploit the fact that cryptographic implementations 
 
 ### Design Goals
 
-- **Controlled FPR**: The CI gate controls false positive rate at approximately $\alpha$ (default 1%) under ideal conditions; discrete timers and environmental factors typically make it conservative (FPR below $\alpha$)
-- **Interpretable**: Output includes both a probability (0–100%) and the underlying Bayes factor
+- **Controlled FPR**: The CI gate controls false positive rate at approximately $\alpha$ (default 1%)
+- **Interpretable**: Output is a probability (0–100%), not a t-statistic
 - **CI-friendly**: Works reliably across environments without manual tuning
 - **Fast**: Under 5 seconds for 100k samples on typical hardware
 - **Portable**: Handles different timer resolutions via adaptive batching
-
-### Limitations
-
-**Quantile ceiling**: The highest quantile tested is P90. Effects that manifest only in the top 1–5% of samples (e.g., very rare cache misses) may not be detected. For applications where such rare events are critical, consider using a higher sample count or specialized tail-focused analysis.
 
 ---
 
@@ -44,13 +40,13 @@ This section describes the mathematical foundation of timing-oracle: why we use 
 ### 2.1 Test Statistic: Quantile Differences
 
 We collect timing samples from two classes:
-- **Baseline class**: A specific input (e.g., all zeros, matching plaintext)—the "control" condition
-- **Sample class**: Randomly sampled inputs—the "varying" condition
+- **Fixed class**: A specific input (e.g., all zeros, matching plaintext)
+- **Random class**: Randomly sampled inputs
 
 Rather than comparing means, we compare the distributions via their deciles. For each class, compute the 10th, 20th, ..., 90th percentiles, yielding two vectors in $\mathbb{R}^9$. The test statistic is their difference:
 
 $$
-\Delta = \hat{q}(\text{Baseline}) - \hat{q}(\text{Sample}) \in \mathbb{R}^9
+\Delta = \hat{q}(\text{Fixed}) - \hat{q}(\text{Random}) \in \mathbb{R}^9
 $$
 
 where $\hat{q}_p$ denotes the empirical $p$-th quantile.
@@ -70,8 +66,6 @@ This is a bias-variance tradeoff:
 - More quantiles (e.g., percentiles) would require estimating a $99 \times 99$ covariance matrix from limited data, introducing severe estimation noise
 
 Nine deciles capture enough structure to distinguish shift from tail patterns while keeping the covariance matrix ($9 \times 9 = 81$ parameters) tractable with typical sample sizes (10k–100k).
-
-**Note on coverage**: Using deciles means effects confined to the top 10% of samples (above P90) may be underdetected. The CI gate's max-statistic will still respond to P90 shifts, but very rare slow-path effects (affecting <10% of samples) require higher sample counts for reliable detection.
 
 **Quantile computation**: We use R-7 linear interpolation (the default in R and NumPy).² For sorted sample $x$ of size $n$:
 
@@ -93,22 +87,24 @@ A key design decision is using two separate statistical tests rather than one:
 
 | Layer | Question | Method | Output |
 |-------|----------|--------|--------|
-| CI Gate | Should this block my build? | Block permutation threshold | Pass/Fail |
-| Bayesian | What's the probability and magnitude? | Bayes factor | $P(\text{leak})$, BF, effect size |
+| CI Gate | Is there a leak above my threshold? | SILENT relevant-hypothesis bootstrap | Pass/Fail |
+| Bayesian | What's the probability and magnitude? | Posterior integration | $P(\text{leak} > \theta)$, effect size |
 
-**Why not just use one?**
+Both layers use the same practical significance threshold: `min_effect_of_concern` (θ, default 10ns). This ensures they agree on what counts as a "leak worth caring about."
 
-Each approach has strengths the other lacks:
+**Why two layers?**
 
-*Block permutation thresholds* (Layer 1) provide controlled false positive rate. If you set $\alpha = 0.01$, the test will incorrectly reject approximately 1% of the time under the null hypothesis (no leak). This is crucial for CI: you don't want your build randomly failing on safe code. However, permutation gives you only pass/fail—no probability, no effect size.
+Each provides something the other can't:
 
-*Bayesian inference* (Layer 2) gives you a posterior probability ("72% chance of a leak") and an effect estimate ("~50ns uniform shift"). This is far more informative than pass/fail. However, the posterior depends on your prior and model assumptions. It doesn't provide the same FPR control.
+*Bootstrap CI gate* (Layer 1) provides controlled false positive rate using the SILENT framework [2]. If you set α = 0.01, the test will incorrectly reject at most 1% of the time when the true effect is ≤ θ—crucially, this holds even at the boundary (effect = θ), not just when effect = 0. This is what makes the CI gate reliable: you won't get spurious failures on code that just barely meets your threshold.
 
-By combining both, you get:
-- A reliable CI gate that won't flake
+*Bayesian inference* (Layer 2) gives you a posterior probability ("72% chance of a leak exceeding θ") and an effect estimate ("~50ns uniform shift"). This is far more informative than pass/fail, and the probability is calibrated: when we report 80%, approximately 80% of the posterior mass lies above θ.
+
+By combining both:
+- A reliable CI gate that won't flake on negligible effects
 - Rich diagnostic information when you need to understand what's happening
 
-They're computed from the same data but answer different questions. In most cases they agree; when they diverge, the gate is authoritative for CI decisions while the Bayesian layer explains magnitude.
+They're computed from the same data and use the same threshold. In normal operation they agree; divergence indicates edge cases worth investigating.
 
 ### 2.3 Sample Splitting
 
@@ -123,121 +119,307 @@ Why temporal rather than random split? Timing measurements exhibit autocorrelati
 
 The 30/70 ratio balances two needs: enough calibration data for stable covariance estimation, enough inference data for statistical power. With 100k samples, the inference set still has 70k samples—plenty for precise quantile estimation.
 
-**Stationarity assumption**: This split assumes the noise environment is approximately stationary across the measurement period. A non-stationarity diagnostic (§2.8) checks this assumption and warns when it's violated.
-
 **Minimum sample requirements:**
 
 | Samples per class | Behavior |
 |-------------------|----------|
-| $\geq 200$ | Normal 30/70 split |
-| 100–199 | Warning; results may have reduced reliability |
-| 50–99 | Warning; use 50/50 split for more calibration data |
-| $< 50$ | Return Unmeasurable |
+| $\geq 50$ | Normal 30/70 split |
+| 20–49 | Warning; use all data for both phases (accept double-dipping bias) |
+| $< 20$ | Return Unmeasurable |
 
-Below 200 samples, quantile estimation becomes unreliable, especially for extreme deciles (P10, P90). The P90 estimate with n=70 (after 30/70 split of 100 samples) is based on roughly the 7th largest value—highly variable.
+Below 50 samples, the split leaves too few calibration samples for reliable covariance estimation. We fall back to using all data for both phases, accepting that this makes the posterior slightly overconfident. Below 20, even this isn't meaningful.
 
 ### 2.4 Layer 1: CI Gate
 
-The CI gate's job is to answer "is there a statistically significant timing difference?" with controlled false positive rate. We use a block permutation approach that respects the temporal structure of measurements.
+The CI gate answers "is there a timing leak exceeding my concern threshold?" with controlled false positive rate. We use a relevant-hypothesis bootstrap test following SILENT [2], which properly controls FPR when the true effect is at or below the threshold.
 
-**Core idea:**
+#### The Relevant Hypotheses
 
-If there's no timing leak, the Fixed and Random samples come from the same distribution. The class labels are arbitrary—any observed difference $\Delta$ is just sampling noise plus environmental correlation. By permuting the labels while preserving temporal structure, we can estimate the distribution of $\Delta$ under the null—and set thresholds that control false positives.
-
-**Test statistic:**
-
-We use the maximum absolute quantile difference as our test statistic:
+Classical tests frame the hypotheses as "effect = 0" vs "effect ≠ 0". But we care about practical significance: does the effect exceed `min_effect_of_concern` (θ)? The relevant hypotheses are:
 
 $$
-M = \max_{p \in \{0.1, 0.2, \ldots, 0.9\}} |\Delta_p|
+H_0: d \leq \theta \quad \text{vs} \quad H_1: d > \theta
 $$
 
-This is natural: we're asking "is the largest discrepancy unusually large?" rather than testing each quantile separately and correcting for multiple comparisons.
+where $d = \max_k |q_F(k) - q_R(k)|$ is the maximum absolute quantile difference.
 
-**Algorithm:**
+**Why not just test "effect = 0" and add θ as a post-filter?**
 
-Measurements are stored as an interleaved time series with class labels: $(t_1, c_1), (t_2, c_2), \ldots$ where $c_i \in \{\text{Fixed}, \text{Random}\}$.
+SILENT explicitly warns against this common mistake: running a classical test (H₀: effect = 0), rejecting when significant, and *then* checking if the observed statistic exceeds θ. This two-step procedure does **not** control type-1 error at α.
 
-1. **Compute observed statistic**: From the actual labels, compute $\Delta$ and $M = \max_p |\Delta_p|$
+The problem: at the boundary (true effect = θ), your estimator $\hat{d}$ is centered at θ. Half the time it lands above θ, half below. So you reject ~50% of the time at the boundary—regardless of what α you set for the classical test.
 
-2. **Block permutation** ($B = 10{,}000$ iterations):
-   - Divide the measurement indices into contiguous blocks of length $b$ (same block length as §2.6)
-   - For each block, with probability 0.5, flip all labels in that block (Fixed ↔ Random)
-   - Recompute quantiles for each pseudo-class from the permuted labels
-   - Compute $\Delta^*$ and record $M^* = \max_p |\Delta^*_p|$
+The fix: build θ into the hypothesis itself, and use a bootstrap that's calibrated to the relevant null (d ≤ θ), not the classical null (d = 0).
 
-3. **Compute threshold** from the max-statistic distribution:
+#### Test Statistic
+
+For each quantile $k \in K = \{0.1, 0.2, \ldots, 0.9\}$, define:
 
 $$
-\tau = \text{Quantile}_{1-\alpha}\left( \{M^{*(1)}, \ldots, M^{*(B)}\} \right)
+A_k = |\hat{q}_F(k) - \hat{q}_R(k)|
 $$
 
-4. **Test**: Reject $H_0$ (declare leak) if $M > \tau$
-
-**Why block permutation instead of i.i.d. bootstrap?**
-
-Timing measurements are autocorrelated—nearby samples share cache state, frequency scaling effects, and environmental noise. Standard i.i.d. bootstrap destroys this correlation structure, leading to underestimated variance and inflated false positive rates.
-
-Block permutation preserves the temporal structure: within each block, the relative timing of samples is unchanged. Only the class labels are (potentially) swapped. This maintains the autocorrelation while still testing the null hypothesis that labels are exchangeable.
-
-**Why max-statistic instead of per-component corrections?**
-
-The 9 quantile differences are positively correlated—they come from the same samples. Traditional multiple-testing corrections (Bonferroni, Šidák) don't account for this correlation and are unnecessarily conservative, reducing power.
-
-The permutation approach directly estimates the null distribution of the statistic we actually use. The correlation structure is automatically captured. This gives tighter thresholds and better power while still controlling FPR at the target level.
-
-**Threshold flooring:**
-
-The raw permutation threshold $\tau_\alpha$ may be too small in two scenarios:
-
-1. **Discrete timers**: If $\tau_\alpha < 1$ tick, random quantization noise triggers false positives
-2. **High-resolution timers with large n**: With rdtsc (~0.3ns) and 100k samples, you can detect sub-nanosecond effects that are practically irrelevant
-
-We apply a two-part floor:
+The raw distance is $d = \max_k A_k$. Following SILENT (Section 5, equation before Algorithm 1), the test statistic is **studentized**:
 
 $$
-\tau = \max(\tau_\alpha, \text{1 tick}, \text{min\_effect\_of\_concern})
+\hat{Q}_{max} = \max_{k \in K_{\text{sub}}^{\text{max}}} \frac{A_k - \theta}{\hat{\sigma}_k}
 $$
 
-The `min_effect_of_concern` (default 10ns) ensures the CI gate only fails for effects you actually care about. This aligns the gate with practical relevance rather than pure statistical detectability.
+where:
+- $K_{\text{sub}}^{\text{max}} \subseteq K$ is a filtered subset of quantiles (see below)
+- $\hat{\sigma}_k$ is the bootstrap-estimated standard deviation of $A_k$
+- Division by $\hat{\sigma}_k$ normalizes each quantile's contribution by its variability
 
-**FPR control:**
+**Why studentize?** Without studentization, high-variance quantiles (often the tails) dominate the max, making the test insensitive to leaks in low-variance quantiles. Studentization gives each quantile equal "voting power" relative to its noise level.
 
-By construction, the probability that $M > \tau$ is approximately $\alpha$ under $H_0$. Two factors make this conservative in practice:
+#### Quantile Filtering (SILENT-style)
 
-1. **Monte Carlo error** from finite $B$: with $B = 10{,}000$, the SE on the threshold quantile is ~0.1%
-2. **Class-size imbalance** from block-flipping: permuted datasets have $O(\sqrt{n})$ deviation from $(n, n)$, which slightly inflates variance estimates
+SILENT uses $\hat{\sigma}_k$ for both **filtering** (to construct $K_{\text{sub}}$) and **studentization** (inside the max). We filter quantiles in two steps:
 
-For $n \geq 10{,}000$, actual FPR is typically $0.5\text{–}1\times\alpha$. On discrete timers with threshold flooring (§2.4), the effect is more pronounced—FPR may be substantially below $\alpha$. This conservatism is acceptable for security applications.
+**Step 1: Remove high-variance quantiles**
+
+Quantiles with unusually high bootstrap variance (e.g., p90 on noisy data) can still dominate even after studentization. Define:
+
+$$
+K_{\text{sub}} = \left\{ k \in K : \hat{\sigma}_k^2 < c_{\text{var}} \cdot \text{median}_{j \in K}(\hat{\sigma}_j^2) \right\}
+$$
+
+where $c_{\text{var}} = 4$ (quantiles with variance > 4× median are excluded). Also exclude quantiles with near-zero variance (< $10^{-10}$) to avoid division blow-ups.
+
+**Step 2 (optional): Power-boost filter**
+
+For additional power, SILENT suggests keeping only quantiles likely to contribute to detection:
+
+$$
+K_{\text{sub}}^{\text{max}} = \left\{ k \in K_{\text{sub}} : A_k > \theta - c_{\text{margin}} \cdot \hat{\sigma}_k \right\}
+$$
+
+where $c_{\text{margin}} \approx 2$. This focuses on quantiles that are "close to or above threshold." We make this optional (off by default) since it can make the test less conservative.
+
+**Note:** The spec's filtering criteria differ in specifics from SILENT's equation 6. They are empirically validated rather than inheriting SILENT's formal properties directly.
+
+**Transparency:** Filtered quantiles are reported in `Diagnostics.filtered_quantiles` with reasons.
+
+#### Algorithm (Continuous Timer Mode)
+
+**Setup:**
+
+1. Compute observed quantile differences $A_k = |\hat{q}_F(k) - \hat{q}_R(k)|$ for each $k \in K$
+2. Compute raw distance $d = \max_k A_k$
+
+**Bootstrap ($B = 2{,}000$ iterations for CI, $B = 10{,}000$ for thorough mode):**
+
+SILENT's theory requires **paired resampling**: the same index set is used for both classes, preserving cross-covariance structure.
+
+For each bootstrap iteration $b = 1, \ldots, B$:
+
+1. Sample a set of block starting indices $I \subset \{1, \ldots, n - \ell + 1\}$
+2. **Resample both classes using the same indices**: $F^{*(b)} = F[I]$, $R^{*(b)} = R[I]$
+3. Compute bootstrap quantiles: $\hat{q}^{*(b)}_F(k)$, $\hat{q}^{*(b)}_R(k)$
+4. Compute bootstrap differences: $A^{*(b)}_k = |\hat{q}^{*(b)}_F(k) - \hat{q}^{*(b)}_R(k)|$
+
+**Critical:** Both classes use **block** bootstrap with **the same index set** (not separately sampled). This preserves:
+- Autocorrelation structure within each class
+- Cross-covariance between classes (common-mode drift)
+
+SILENT's Theorem 2 guarantees bounded FPR under this scheme.
+
+**Variance estimation (for filtering and studentization):**
+
+From the bootstrap samples, compute per-quantile standard deviation:
+
+$$
+\hat{\sigma}_k = \sqrt{\frac{1}{B-1} \sum_{b=1}^{B} \left( A^{*(b)}_k - \bar{A}_k \right)^2}, \quad \bar{A}_k = \frac{1}{B} \sum_{b=1}^{B} A^{*(b)}_k
+$$
+
+Use these to determine $K_{\text{sub}}^{\text{max}}$ (filtering) and for studentization in the test statistic.
+
+**Centered, studentized bootstrap statistics:**
+
+For each iteration $b$, compute:
+
+$$
+\hat{Q}^{*(b)}_{max} = \max_{k \in K_{\text{sub}}^{\text{max}}} \frac{A^{*(b)}_k - A_k}{\hat{\sigma}_k}
+$$
+
+Note: we subtract the *observed* $A_k$ (not θ) to center the bootstrap distribution around 0.
+
+**Decision:**
+
+1. Compute critical value: $c^*_{1-\alpha} = \text{Quantile}_{1-\alpha}(\{\hat{Q}^{*(1)}_{max}, \ldots, \hat{Q}^{*(B)}_{max}\})$
+2. Compute test statistic: $\hat{Q}_{max} = \max_{k \in K_{\text{sub}}^{\text{max}}} \frac{A_k - \theta}{\hat{\sigma}_k}$
+3. **Reject** (declare leak) if $\hat{Q}_{max} > c^*_{1-\alpha}$
+
+#### Bootstrap Mode: Paired vs Separate-Class
+
+**Paired mode (default, matches SILENT):**
+
+Uses the same block indices for both classes. This preserves the joint bivariate structure that SILENT's theory depends on. The FPR guarantee $P(\text{reject} \mid d \leq \theta) \leq \alpha$ holds by Theorem 2.
+
+**Separate-class mode (optional):**
+
+Resamples Fixed and Random independently, destroying cross-covariance. This is a **variant** that does not carry SILENT's formal guarantee.
+
+```rust
+TimingOracle::new()
+    .bootstrap_mode(BootstrapMode::SeparateClass)  // NOT recommended for CI
+```
+
+Separate-class mode **tends to be conservative** under common-mode drift conditions (when $\text{Cov}(\hat{q}_F, \hat{q}_R) > 0$), but this is not guaranteed:
+- If cross-covariance is positive (typical): overestimates variance → conservative
+- If cross-covariance is negative (rare): underestimates variance → inflated FPR
+
+Use separate-class mode only for exploratory analysis where formal guarantees aren't required.
+
+#### Why This Works at the Boundary
+
+The key insight is the **centered, studentized bootstrap**: $\hat{Q}^*_{max} = \max_k (A^*_k - A_k) / \hat{\sigma}_k$.
+
+- The centering $(A^*_k - A_k)$ makes $\hat{Q}^*_{max}$ distributed around 0, regardless of the true effect size
+- $\hat{Q}_{max}$ measures studentized excess over θ: $(A_k - \theta) / \hat{\sigma}_k$
+- At the boundary (true effect = θ): observed $A_k \approx \theta$, so $\hat{Q}_{max} \approx 0$
+- Since $\hat{Q}^*_{max}$ is centered at 0, we have $P(\hat{Q}_{max} > c^*_{1-\alpha}) \approx \alpha$ ✓
+
+Away from the boundary:
+- True effect < θ: $\hat{Q}_{max} < 0$ typically, so rejection rate < α (conservative)
+- True effect > θ: $\hat{Q}_{max} > 0$, so power → 1 as n → ∞
+
+#### Discrete Timer Mode
+
+When the timer has low resolution, the continuous bootstrap CLT doesn't hold—quantile estimators behave differently with atoms (tied values). We switch to a discrete-aware mode that follows SILENT's Algorithm 4.
+
+**Key difference from continuous mode:** Discrete mode uses **non-studentized** statistics with $\sqrt{m}$ scaling, unlike continuous mode's studentized form. This matches SILENT's separate treatment of discrete distributions.
+
+**Trigger conditions (any of):**
+
+1. **duplicate_fraction ≥ 0.30**: More than 30% of samples share values with other samples
+2. **tick_size ≥ 5ns**: Estimated timer resolution is coarse
+3. **unique_values / n < 0.02**: Severe quantization (very few distinct values)
+
+When triggered, set `Diagnostics.discrete_mode = true` and use the procedures below.
+
+**Mid-distribution quantiles:**
+
+Instead of the standard quantile estimator (R-7 interpolation), use mid-distribution quantiles which handle ties correctly:
+
+$$
+F_{\text{mid}}(x) = F(x) - \frac{1}{2}p(x), \quad \hat{q}^{\text{mid}}_k = F^{-1}_{\text{mid}}(k)
+$$
+
+where $p(x)$ is the probability mass at $x$. With integer ticks, compute quantiles from a histogram—this is efficient and numerically stable.
+
+**m-out-of-n paired block bootstrap:**
+
+Instead of resampling $n$ values, resample $m_1 = \lfloor n^{2/3} \rfloor$ values. Still use **paired** block resampling (same indices for both classes) to preserve cross-covariance.
+
+**Asymmetric scaling (non-studentized):**
+
+Standard m-out-of-n bootstrap theory (Bickel et al. 1997) states that $\sqrt{m}(\hat{\theta}^*_m - \hat{\theta}_n)$ approximates the distribution of $\sqrt{n}(\hat{\theta}_n - \theta)$. This means:
+
+- **Bootstrap statistic** (scaled by $\sqrt{m_1}$, non-studentized):
+$$
+\hat{Q}^{*(b)} = \sqrt{m_1} \cdot \max_{k \in K_{\text{sub}}} \left( A^{*(b)}_k - A_k \right)
+$$
+
+- **Test statistic** (scaled by $\sqrt{n}$, non-studentized):
+$$
+\hat{Q} = \sqrt{n} \cdot \max_{k \in K_{\text{sub}}} (A_k - \theta)
+$$
+
+The asymmetry is intentional: the $\sqrt{m_1}$-scaled bootstrap distribution approximates the $\sqrt{n}$-scaled test statistic's distribution.
+
+**Practical constraints on m:**
+
+- **Minimum:** $m_1 \geq 400$ per class (enough to estimate deciles reliably)
+- If $n < 2{,}000$: set $m_1 = \max(200, \lfloor 0.5n \rfloor)$ and add `QualityIssue::SmallSampleDiscrete`
+- **Block length cap:** $\ell \leq m_1 / 5$ to avoid resamples being "one giant block"
+
+**Work in ticks internally:**
+
+In discrete mode, perform all computations in **ticks** (the timer's native unit), not nanoseconds:
+- $A_k$, θ, effect sizes all in ticks
+- Convert to nanoseconds only for display: "Δ ≈ 1.2 ticks ≈ 49ns"
+
+This avoids introducing rounding errors from the tick-to-ns conversion factor.
+
+**Threshold clamping:**
+
+If the user's θ (in ns) would be < 1 tick after conversion, clamp to 1 tick and add `QualityIssue::ThresholdClamped`:
+
+```rust
+QualityIssue {
+    code: IssueCode::ThresholdClamped,
+    message: "θ=2ns clamped to 1 tick (41ns). Timer cannot resolve smaller effects.",
+    guidance: "Use a cycle counter (perf/kperf) or accept reduced sensitivity.",
+}
+```
+
+**Quantile filtering in discrete mode:**
+
+High-variance filtering still applies, but with an adjustment for pinned quantiles. If a quantile has near-zero variance because both classes are pinned to the *same* tick, this is actually strong evidence of similarity—not noise to discard. In the Bayesian layer, consider treating such quantiles as having high precision centered at zero difference, rather than excluding them entirely.
+
+**Bayesian layer in discrete mode:**
+
+The Gaussian model is a rougher approximation with discrete data. We:
+1. Estimate covariance using the same m-out-of-n bootstrap
+2. Rescale: $\Sigma_n = \Sigma_m \cdot (m_1 / n)$
+3. Report `QualityIssue::DiscreteTimer` on all Bayesian outputs
+4. Frame leak_probability as "approximate posterior under Gaussianized model"
+
+The CI gate (with m-out-of-n) remains the primary reliability guarantee.
+
+**Validation requirements:**
+
+Discrete mode is outside most practitioners' intuition. The implementation should include empirical validation:
+- **Null at boundary:** true $d = \theta$ in ticks → gate fails ≈ α
+- **Below threshold:** $d = 0.5\theta$ → fail rate ≤ α
+- **Power curves:** $d = 1.5\theta$, $d = 2\theta$ → adequate power
+- **Robustness:** AR(1) dependence, blocky drift, periodic noise
+- **Tick size variation:** different timer resolutions
+
+#### Batching Consistency
+
+When using adaptive batching (§3.4), measurements are in batch-total scale. The threshold θ must be scaled to match:
+
+$$
+\theta_{\text{batch}} = K \cdot \theta
+$$
+
+where $K$ is the batch size. Use $\theta_{\text{batch}}$ in the CI gate computation.
+
+**Caveat:** This scaling maintains consistent **threshold semantics**, but batching changes the microarchitectural regime. K operations executed together accumulate correlated state (branch predictor training, cache warming), so the distribution of batch totals is not simply K × the single-operation distribution. Do not assume decision invariance across batching strategies; treat large K as a regime change. The K ≤ 20 limit (§3.4) bounds but does not eliminate this effect.
+
+The reported `max_distance_ns` in `CiGate` is always converted back to per-operation scale for interpretability.
+
+#### FPR Guarantee
+
+By construction, when the true effect $d \leq \theta$:
+
+$$
+\limsup_{n \to \infty} P(\hat{Q} > c^*_{1-\alpha}) \leq \alpha
+$$
+
+with equality when $d = \theta$ (the least favorable point in the null). This is the SILENT guarantee [2, Theorem 2].
+
+**Monte Carlo error in critical value estimation:**
+
+The bootstrap critical value $c^*_{1-\alpha}$ is estimated from B samples. For α = 0.01 (1% FPR), only ~B×α samples land beyond the $(1-\alpha)$ quantile. With B = 2,000, that's only ~20 samples in the tail, giving:
+
+$$
+\text{SE}(\hat{\alpha}) = \sqrt{\frac{\alpha(1-\alpha)}{B}} \approx 0.0022
+$$
+
+Relative to α = 0.01, this is **~22% relative error**—not negligible. This is a primary source of CI gate flakiness at strict α levels.
+
+**Recommendation:** For stable 1% gates, use $B \geq 10{,}000$ (thorough mode). With B = 10,000, the relative error drops to ~10%, which is acceptable for most applications. The heuristic $B \gtrsim 50/\alpha$ ensures adequate tail resolution.
 
 ### 2.5 Layer 2: Bayesian Inference
 
-The Bayesian layer provides what the CI gate cannot: a probability that there's a leak, and an estimate of how big it is. We use a conjugate Gaussian model that admits closed-form solutions—no MCMC required.
-
-**The model:**
-
-We frame leak detection as model comparison:
-
-- $H_0$ (no leak): $\Delta \sim \mathcal{N}(0, \Sigma_0)$ — the observed quantile differences are pure noise
-- $H_1$ (leak): $\Delta \sim \mathcal{N}(X\beta, \Sigma_0)$ — the differences have a systematic component $X\beta$ plus noise
-
-Under $H_1$, $X$ is a design matrix that decomposes effects into interpretable components, and $\beta = (\mu, \tau)^\top$ are the effect magnitudes.
-
-**Covariance estimation:**
-
-$\Sigma_0$ is the covariance of the difference vector $\Delta$ under the null hypothesis. It is estimated directly via paired block bootstrap on the calibration set (see §2.6)—**not** as the sum of marginal covariances $\Sigma_F + \Sigma_R$.
-
-This distinction matters: with interleaved measurements, common-mode noise creates positive covariance between $\hat{q}_F$ and $\hat{q}_R$. The true variance of $\Delta$ is:
-
-$$
-\text{Var}(\Delta) = \Sigma_F + \Sigma_R - 2\,\text{Cov}(\hat{q}_F, \hat{q}_R)
-$$
-
-Summing marginal covariances would overestimate variance, making the Bayesian layer overly conservative. Bootstrapping $\Delta$ directly captures the correct (smaller) variance.
+The Bayesian layer provides what the CI gate cannot: a probability that there's a leak worth caring about, and an estimate of how big it is. We use a conjugate Gaussian model that admits closed-form posteriors—no MCMC required.
 
 #### Design Matrix
 
-We want to distinguish two types of timing leaks:
+We decompose the observed quantile differences into interpretable components:
 
 - **Uniform shift** ($\mu$): All quantiles move by the same amount (e.g., a branch that adds constant overhead)
 - **Tail effect** ($\tau$): Upper quantiles shift more than lower ones (e.g., cache misses that occur probabilistically)
@@ -250,101 +432,51 @@ $$
 
 where:
 - $\mathbf{1} = (1, 1, 1, 1, 1, 1, 1, 1, 1)^\top$ — a uniform shift moves all 9 quantiles equally
-- $\mathbf{b}_{\text{tail}}$ — a tail effect basis (see orthogonalization below)
+- $\mathbf{b}_{\text{tail}} = (-0.5, -0.375, -0.25, -0.125, 0, 0.125, 0.25, 0.375, 0.5)^\top$ — a tail effect moves upper quantiles up and lower quantiles down, centered at zero
 
-An effect of $\mu = 10, \tau = 0$ means a pure 10ns uniform shift; $\mu = 0, \tau = 20$ means upper quantiles are slower while lower quantiles are faster than the mean.
+The tail basis is centered (sums to zero) so that $\mu$ and $\tau$ are orthogonal. An effect of $\mu = 10, \tau = 0$ means a pure 10ns uniform shift; $\mu = 0, \tau = 20$ means upper quantiles are 10ns slower while lower quantiles are 10ns faster than the mean.
 
-**Orthogonalization:**
+**Design limitation:** The antisymmetric tail basis assumes symmetric "lower-faster, upper-slower" patterns. Real cache-timing leaks often show:
+- Lower quantiles unchanged (~100 cycles baseline)
+- Upper quantiles elevated (~1000 cycles from cache misses)
 
-The raw tail basis $\mathbf{b}_{\text{tail}}^{(0)} = (-0.5, -0.375, \ldots, 0.375, 0.5)^\top$ is centered (sums to zero), making it orthogonal to $\mathbf{1}$ under the standard inner product. However, GLS inference uses the $\Sigma_0^{-1}$-weighted inner product, so for $\mu$ and $\tau$ to be uncorrelated, we need:
+The model *can* fit this pattern (μ absorbs the mean shift, τ captures the spread), but the interpretation of τ becomes less intuitive. A future version could add a third basis capturing asymmetric upper-tail effects, though this increases model complexity (9×3 GLS is still cheap).
+
+#### Model
+
+We model the observed quantile differences as:
 
 $$
-\mathbf{1}^\top \Sigma_0^{-1} \mathbf{b}_{\text{tail}} = 0
+\Delta = X\beta + \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, \Sigma_0)
 $$
 
-After estimating $\Sigma_0$ from the calibration set, we orthogonalize via one Gram-Schmidt step:
-
-$$
-\mathbf{b}_{\text{tail}} = \mathbf{b}_{\text{tail}}^{(0)} - \frac{\mathbf{1}^\top \Sigma_0^{-1} \mathbf{b}_{\text{tail}}^{(0)}}{\mathbf{1}^\top \Sigma_0^{-1} \mathbf{1}} \cdot \mathbf{1}
-$$
-
-This ensures the effect estimates $(\mu, \tau)$ are uncorrelated, making pattern classification ("is this shift or tail?") cleaner and single-effect MDE calculations accurate.
-
-**Model limitations**: The linear tail basis assumes effects vary smoothly across quantiles. Real cache-timing attacks sometimes exhibit "hockey stick" patterns—flat through P80, then a sharp spike at P90. Such patterns will still be detected by the CI gate (which uses $\max|\Delta_p|$), but the Bayesian decomposition may attribute them to a mix of shift and tail rather than a pure tail effect. A model fit diagnostic (§2.8) flags when the observed $\Delta$ is poorly explained by the shift+tail model.
+where $\beta = (\mu, \tau)^\top$ are the effect magnitudes and $\Sigma_0$ is the null covariance estimated via bootstrap (§2.6).
 
 #### Prior Specification
 
-We need a prior on $\beta$ under $H_1$. We use a zero-centered Gaussian:
+We place a zero-centered Gaussian prior on $\beta$:
 
 $$
 \beta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \text{diag}(\sigma_\mu^2, \sigma_\tau^2)
 $$
 
-The prior scale determines what we consider a "reasonably sized" effect. We set it adaptively based on what's detectable:
+The prior scale determines regularization strength. We set it adaptively:
 
 $$
-\sigma_\mu = \max(2 \cdot \text{MDE}_\mu, \text{min\_effect\_of\_concern})
+\sigma_\mu = \sigma_\tau = \max(2 \cdot \text{MDE}, \text{min\_effect\_of\_concern})
 $$
 
-$$
-\sigma_\tau = \max(2 \cdot \text{MDE}_\tau, \text{min\_effect\_of\_concern})
-$$
+where MDE is the minimum detectable effect (§2.7). This provides mild shrinkage toward zero without strongly biasing the estimates.
 
-where MDE (minimum detectable effect) is computed from the calibration set's noise level. The factor of 2 ensures effects near the detection threshold get reasonable prior mass, while truly tiny effects (below min_effect_of_concern, default 10ns) are downweighted.
+#### Posterior Distribution
 
-**Prior on hypotheses:** We default to $P(H_0) = 0.75$ (3:1 odds favoring no leak). This reflects that most well-written cryptographic code is constant-time. You can adjust this if you have different prior beliefs.
-
-**Prior sensitivity**: The posterior probability depends on the prior. Users with different beliefs can use the reported Bayes factor to compute their own posteriors:
+With Gaussian likelihood and Gaussian prior, the posterior on $\beta$ is also Gaussian (standard conjugate result⁴):
 
 $$
-\text{posterior odds} = \text{BF}_{10} \times \text{prior odds}
-$$
-
-#### Bayes Factor
-
-The Bayes factor quantifies how much the data favor $H_1$ over $H_0$:
-
-$$
-\text{BF}_{10} = \frac{p(\Delta \mid H_1)}{p(\Delta \mid H_0)}
-$$
-
-A BF of 10 means the data are 10× more likely under "leak" than "no leak." A BF of 0.1 means the opposite.
-
-Because both hypotheses are Gaussian, the marginal likelihoods have closed forms:
-
-$$
-\log \text{BF}_{10} = \log p(\Delta; 0, \Sigma_1) - \log p(\Delta; 0, \Sigma_0)
+\beta \mid \Delta \sim \mathcal{N}(\beta_{\text{post}}, \Lambda_{\text{post}})
 $$
 
 where:
-- $\Sigma_0$ is the null covariance (estimated via paired block bootstrap—see §2.6)
-- $\Sigma_1 = \Sigma_0 + X \Lambda_0 X^\top$ is the alternative covariance, inflated by the prior on effects
-
-The multivariate Gaussian log-PDF is:
-
-$$
-\log p(\mathbf{x}; \boldsymbol{\mu}, \Sigma) = -\frac{1}{2} \left[ d \log(2\pi) + \log|\Sigma| + (\mathbf{x} - \boldsymbol{\mu})^\top \Sigma^{-1} (\mathbf{x} - \boldsymbol{\mu}) \right]
-$$
-
-This requires computing the log-determinant and a matrix solve, both done via Cholesky decomposition.
-
-#### Posterior Probability
-
-The posterior probability of a leak combines the Bayes factor with the prior:
-
-$$
-P(\text{leak} \mid \Delta) = \frac{\text{BF}_{10} \cdot \text{prior\_odds}}{1 + \text{BF}_{10} \cdot \text{prior\_odds}}
-$$
-
-where $\text{prior\_odds} = P(H_1) / P(H_0) = 0.25 / 0.75 = 1/3$ by default.
-
-This is just Bayes' rule. If the BF is 1 (equal evidence), the posterior equals the prior. Strong evidence shifts the posterior toward 0 or 1.
-
-We clamp the result to $[0.0001, 0.9999]$ to prevent floating-point overflow when $|\log \text{BF}| > 700$.
-
-#### Effect Estimation
-
-When $P(\text{leak}) > 0.5$, we report an effect estimate. Under the $H_1$ model, the posterior on $\beta$ given $\Delta$ is also Gaussian (standard conjugate prior result⁴):
 
 $$
 \Lambda_{\text{post}} = \left( X^\top \Sigma_0^{-1} X + \Lambda_0^{-1} \right)^{-1}
@@ -356,11 +488,78 @@ $$
 
 The posterior mean $\beta_{\text{post}} = (\mu, \tau)^\top$ gives the estimated shift and tail effects in nanoseconds.
 
-⁴ Bishop, C. M. (2006). Pattern Recognition and Machine Learning, §3.3. Springer. These are the standard posterior mean and covariance for Bayesian linear regression with known observation noise.
+⁴ Bishop, C. M. (2006). Pattern Recognition and Machine Learning, §3.3. Springer.
+
+#### Leak Probability via Posterior Integration
+
+The key question is: "what's the probability of a leak worth caring about?" The user specifies this threshold via `min_effect_of_concern` (θ). We compute:
+
+$$
+P(\text{significant leak} \mid \Delta) = P\bigl(\max_k |(X\beta)_k| > \theta \;\big|\; \Delta\bigr)
+$$
+
+Since the posterior is Gaussian, we compute this by Monte Carlo integration:
+
+```
+Draw N = 1000 samples β ~ N(β_post, Λ_post)
+For each sample:
+  pred = X @ β                    # predicted Δ vector (9 quantile differences)
+  max_effect = max_k |pred[k]|    # same metric structure as CI gate
+  if max_effect > θ: count++
+leak_probability = count / N
+```
+
+**Calibration caveat:** This probability is **internally consistent under the Gaussian model**—if we report 80%, then 80% of the posterior predictive mass exceeds θ. However, it is not automatically **frequentist-calibrated** in the "long-run 80% of the time" sense unless:
+- The Gaussian likelihood is well-specified (quantile estimators can be non-Gaussian with dependence or discrete timers)
+- The linear basis $X\beta$ adequately captures the true effect structure
+
+We validate calibration empirically on null and near-null benchmarks. The CI gate (not this layer) provides the bounded-FPR guarantee.
+
+**Relationship to CI gate (approximate, not exact):**
+
+The CI gate uses **absolute** quantile differences: $d = \max_k |A_k|$ where $A_k = |\hat{q}_F(k) - \hat{q}_R(k)|$.
+
+The Bayesian layer uses **signed** differences $\Delta_k = \hat{q}_F(k) - \hat{q}_R(k)$ with a 2D linear model. The leak probability $P(\max_k |(X\beta)_k| > \theta)$ is a **model-based approximation** to the gate's statistic, not literally the same quantity.
+
+In practice they usually agree because:
+- When there's a real effect, both detect it
+- The linear model $X\beta$ captures the dominant patterns (shift and tail)
+
+But divergence is possible in edge cases (complex non-linear patterns, high uncertainty straddling θ).
+
+**Interpreting the tail basis:**
+
+With the tail basis $b_{\text{tail}} \in [-0.5, +0.5]$, the predicted difference at quantile $k$ is:
+
+$$
+(X\beta)_k = \mu + \tau \cdot b_{\text{tail}}(k)
+$$
+
+When $\mu = 0$, the maximum absolute effect from $\tau$ alone is $0.5 \cdot |\tau|$ (at the extreme quantiles). So a "10ns tail effect" produces at most ~5ns difference at any single quantile.
+
+**Example with default `min_effect_of_concern = 10ns`:**
+
+| Posterior mean (μ, τ) | Max predicted |Δ| | Approx. leak probability |
+|-----------------------|------------------|--------------------------|
+| (2ns, 1ns) | ~2.5ns | ~2% |
+| (8ns, 4ns) | ~10ns | ~50% |
+| (12ns, 5ns) | ~14.5ns | ~85% |
+
+**Additional diagnostics (reported but not used for leak_probability):**
+
+We also report marginal probabilities for interpretability:
+- $P(|\mu| > \theta \mid \Delta)$: probability shift component exceeds threshold
+- $P(|\tau| > \theta \mid \Delta)$: probability tail component exceeds threshold
+
+These help diagnose *what kind* of leak exists but aren't used for the headline `leak_probability`.
+
+#### Effect Estimation
+
+We always report effect estimates (not just when leak_probability > 0.5). The posterior mean $\beta_{\text{post}}$ gives the point estimate; the posterior covariance $\Lambda_{\text{post}}$ quantifies uncertainty.
 
 **Effect pattern classification:**
 
-Classification uses statistical significance rather than raw magnitudes. An effect component is "significant" if its magnitude exceeds twice its posterior standard error:
+An effect component is "significant" if its magnitude exceeds twice its posterior standard error:
 
 $$
 \text{significant}(\mu) \iff |\mu| > 2 \cdot \sqrt{\Lambda_{\text{post}}[0,0]}
@@ -371,15 +570,13 @@ $$
 | Yes | No | UniformShift |
 | No | Yes | TailEffect |
 | Yes | Yes | Mixed |
-| No | No | Indeterminate |
+| No | No | Classify by relative magnitude: if $|\mu| > |\tau|$ then UniformShift, else TailEffect |
 
-When neither component is statistically significant, the pattern is reported as `Indeterminate` rather than guessing based on relative magnitudes. This indicates the effect is too small or noisy to characterize reliably.
-
-**Credible interval:** To quantify uncertainty, we draw 500 samples from $\mathcal{N}(\beta_{\text{post}}, \Lambda_{\text{post}})$, compute the total effect magnitude $\lVert\beta\rVert_2$ for each, and report the 2.5th and 97.5th percentiles as a 95% credible interval.
+**Credible interval:** We draw 1000 samples from the posterior (reusing the leak probability samples), compute the total effect magnitude $\lVert\beta\rVert_2$ for each, and report the 2.5th and 97.5th percentiles as a 95% credible interval.
 
 ### 2.6 Covariance Estimation
 
-Both the CI gate and Bayesian layer need to know how much natural variability to expect in $\Delta$. This is captured by the null covariance $\Sigma_0$, estimated via paired block bootstrap on the calibration set.
+Both the CI gate and Bayesian layer need to know how much natural variability to expect in $\Delta$. This is captured by the null covariance $\Sigma_0$, estimated via block bootstrap on the calibration set.
 
 **Why bootstrap instead of analytical formulas?**
 
@@ -387,7 +584,7 @@ Quantile estimators have complex covariance structures that depend on the unknow
 
 **Why block bootstrap instead of standard bootstrap?**
 
-Timing measurements are autocorrelated—nearby samples are more similar than distant ones due to cache state, branch predictor warmup, and frequency scaling. Standard bootstrap assumes i.i.d. samples; violating this leads to underestimated variance.
+Timing measurements are autocorrelated: nearby samples are more similar than distant ones due to cache state, branch predictor warmup, and frequency scaling. Standard bootstrap assumes i.i.d. samples; violating this leads to underestimated variance.
 
 Block bootstrap preserves local correlation structure by resampling contiguous blocks rather than individual points. Block length scales as $n^{1/3}$ (Politis-Romano), with a constant that depends on the autocorrelation structure. We use:
 
@@ -399,49 +596,48 @@ For $n = 30{,}000$ calibration samples, this gives blocks of ~40 samples. The co
 
 ³ Politis, D. N. & Romano, J. P. (1994). "The Stationary Bootstrap." JASA 89(428):1303–1313. The $n^{1/3}$ scaling is well-established; the multiplicative constant requires spectral density estimation for optimality.
 
-The block length constant $c$ is configurable for environments with unusual autocorrelation structure. If the pre-flight ACF check (§3.2) shows high autocorrelation persisting beyond the default block length, consider increasing $c$ to 2.0 or higher.
+**Procedure:**
 
-**Why joint resampling?**
+For each of $B = 2{,}000$ bootstrap iterations:
+1. Resample blocks with replacement from Fixed class → compute quantile vector $\hat{q}_F^*$
+2. Resample blocks with replacement from Random class → compute quantile vector $\hat{q}_R^*$
+3. Record $\Delta^* = \hat{q}_F^* - \hat{q}_R^*$
 
-With interleaved measurements, Fixed and Random samples measured near each other in time share environmental noise (cache state, CPU frequency, thermal conditions). This creates positive cross-covariance $\text{Cov}(\hat{q}_F, \hat{q}_R) > 0$, which *reduces* the variance of the difference:
+Compute sample covariance of the $\Delta^*$ vectors directly using Welford's online algorithm⁵ (numerically stable for large $B$).
+
+⁵ Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420. See also Chan, T. F., Golub, G. H., & LeVeque, R. J. (1983). "Algorithms for Computing the Sample Variance." The American Statistician 37(3):242–247 for the parallel/incremental generalization.
+
+**Critical: Rescaling for inference set (30/70 split)**
+
+The bootstrap covariance $\hat{\Sigma}_{\text{cal}}$ is estimated at calibration sample size $n_{\text{cal}}$. Under standard asymptotics for sample quantiles, covariance scales as $1/n$. Since the Bayesian layer operates on the inference set with $n_{\text{inf}} \neq n_{\text{cal}}$, we must rescale:
+
+$$
+\Sigma_0 = \hat{\Sigma}_{\text{cal}} \cdot \frac{n_{\text{cal}}}{n_{\text{inf}}}
+$$
+
+With the default 30/70 split: $n_{\text{cal}} / n_{\text{inf}} = 0.3 / 0.7 \approx 0.43$. This **shrinks** the covariance for the larger inference set, which is correct—more samples means lower variance.
+
+**Without this rescaling**, the Bayesian posterior would be too wide (overstating uncertainty), leading to:
+- Underconfident leak probabilities
+- Inflated MDE estimates
+- Conservative but miscalibrated results
+
+**Note on cross-covariance and bootstrap mode:**
+
+An alternative approach estimates $\Sigma_F$ and $\Sigma_R$ separately, then computes $\Sigma_0 = \Sigma_F + \Sigma_R$. This ignores the cross-covariance term:
 
 $$
 \text{Var}(\Delta) = \Sigma_F + \Sigma_R - 2\,\text{Cov}(\hat{q}_F, \hat{q}_R)
 $$
 
-To capture this benefit, we must resample the *joint interleaved sequence*, not the classes independently.
+With interleaved measurements, common-mode noise (frequency drift, thermal effects) typically makes $\text{Cov}(\hat{q}_F, \hat{q}_R) > 0$, so ignoring cross-covariance **overestimates** variance—a conservative error for security applications.
 
-**Procedure:**
+Whether bootstrapping $\Delta^*$ captures cross-covariance depends on the resampling scheme:
 
-The calibration set is stored as an interleaved sequence of $(t_i, c_i)$ pairs, where $t_i$ is the timing and $c_i \in \{\text{Fixed}, \text{Random}\}$ is the class label.
+- **Paired resampling** (default `BootstrapMode::Paired`): Uses same indices for both classes, preserving cross-covariance. Matches SILENT's theoretical requirements for the FPR guarantee.
+- **Separate-class resampling** (`BootstrapMode::SeparateClass`): Resamples Fixed and Random independently, destroying cross-covariance. Tends to be conservative when cross-covariance is positive, but does not carry SILENT's formal guarantee.
 
-For each of $B = 2{,}000$ bootstrap iterations:
-1. Block-resample the **joint interleaved sequence** (preserving temporal structure)
-2. **After resampling**, split by class label to obtain bootstrap samples for Fixed and Random
-3. Compute quantile vectors $\hat{q}_F^*$ and $\hat{q}_R^*$ from the split samples
-4. Compute $\Delta^* = \hat{q}_F^* - \hat{q}_R^*$
-
-Compute sample covariance of the $\Delta^*$ vectors using Welford's online algorithm⁵ (numerically stable for large $B$).
-
-⁵ Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420. See also Chan, T. F., Golub, G. H., & LeVeque, R. J. (1983). "Algorithms for Computing the Sample Variance." The American Statistician 37(3):242–247 for the parallel/incremental generalization.
-
-**Why this works:**
-
-When we resample blocks from the joint sequence, samples that were measured together stay together. A block like:
-
-$$
-[(t_{100}, \text{Fixed}), (t_{101}, \text{Random}), (t_{102}, \text{Random}), (t_{103}, \text{Fixed}), \ldots]
-$$
-
-remains intact. The Fixed and Random samples within that block still share their environmental noise. After splitting, the bootstrap distribution of $\Delta^*$ correctly reflects the reduced variance from common-mode noise cancellation.
-
-**Class-size fluctuation:**
-
-After joint resampling, class sizes may fluctuate slightly (e.g., 10,050 Fixed / 9,950 Random instead of exactly 10,000 each). This $O(\sqrt{n})$ variation is negligible for quantile estimation and does not affect validity—both classes remain large enough for reliable estimates.
-
-**Contrast with independent resampling:**
-
-If we resampled Fixed and Random classes independently (block-resample each class separately), the bootstrap samples would lose their temporal pairing. Bootstrap iteration $k$'s Fixed samples would come from different original time indices than its Random samples, destroying the cross-covariance. This would yield $\text{Cov}(\hat{q}_F^*, \hat{q}_R^*) \approx 0$, overestimating variance by a factor that can approach 2× in high-common-mode-noise environments.
+For consistency, `bootstrap_mode` affects both the CI gate and covariance estimation.
 
 **Numerical stability:**
 
@@ -455,27 +651,12 @@ $$
 
 The trace-scaled term adapts to the matrix's magnitude.
 
-2. If Cholesky still fails after jitter, return $\log \text{BF} = 0$ (neutral evidence). The posterior falls back to the prior, which is safe if uninformative.
+2. If Cholesky still fails after jitter:
+   - Set `MeasurementQuality::TooNoisy` with issue explaining the failure
+   - Set `leak_probability = 0.5` (maximally uncertain)
+   - The CI gate still runs (it doesn't require $\Sigma_0$), so you get at least that result
 
-**Variance floor:**
-
-In idealized environments (simulators, deterministic operations), variance can approach zero, causing numerical instability. We apply a minimum variance floor based on timer quantization:
-
-$$
-\Sigma_0 \leftarrow \Sigma_0 + \frac{(\text{tick\_resolution})^2}{12} \cdot I
-$$
-
-The factor of $1/12$ is the variance of a uniform distribution over one tick—the irreducible quantization noise from discrete timers.
-
-**Sample size scaling:**
-
-The covariance $\Sigma_0$ is estimated from the calibration set ($n_{\text{cal}}$ samples per class), but applied to the inference set ($n_{\text{inf}}$ samples per class). Since quantile variance scales as $1/n$, we must scale the covariance to match the inference sample size:
-
-$$
-\Sigma_0 \leftarrow \Sigma_0 \cdot \frac{n_{\text{cal}}}{n_{\text{inf}}}
-$$
-
-With the default 30/70 split, this scales variance down by ~0.43 (= 30/70). Without this correction, the Bayesian layer would be systematically conservative—still valid, but with reduced statistical power and inflated MDE estimates.
+**Implementation note:** Diagonal jitter is a simple fix. More principled approaches like Ledoit-Wolf shrinkage could improve stability and estimation accuracy, particularly with limited bootstrap iterations. This is an implementation choice; the specification is agnostic to the regularization method as long as the result is positive definite.
 
 **Edge case handling:**
 
@@ -504,24 +685,24 @@ $$
 \text{Var}(\hat{\tau}) = \left( \mathbf{b}_{\text{tail}}^\top \Sigma_0^{-1} \mathbf{b}_{\text{tail}} \right)^{-1}
 $$
 
-The MDE is the effect size detectable at significance level $\alpha$ with 80% power:
+The MDE is the effect size detectable at significance level $\alpha$ with 50% power:
 
 $$
-\text{MDE}_\mu = (z_{1-\alpha/2} + z_{0.8}) \cdot \sqrt{\left( \mathbf{1}^\top \Sigma_0^{-1} \mathbf{1} \right)^{-1}}
+\text{MDE}_\mu = z_{1-\alpha/2} \cdot \sqrt{\left( \mathbf{1}^\top \Sigma_0^{-1} \mathbf{1} \right)^{-1}}
 $$
 
 $$
-\text{MDE}_\tau = (z_{1-\alpha/2} + z_{0.8}) \cdot \sqrt{\left( \mathbf{b}_{\text{tail}}^\top \Sigma_0^{-1} \mathbf{b}_{\text{tail}} \right)^{-1}}
+\text{MDE}_\tau = z_{1-\alpha/2} \cdot \sqrt{\left( \mathbf{b}_{\text{tail}}^\top \Sigma_0^{-1} \mathbf{b}_{\text{tail}} \right)^{-1}}
 $$
 
-where $z_{0.975} \approx 1.96$ for $\alpha = 0.05$ and $z_{0.8} \approx 0.84$, giving a combined factor of approximately 2.8.
+where $z_{0.975} \approx 1.96$ for $\alpha = 0.05$.
 
 **Intuition:**
 
 The term $\mathbf{1}^\top \Sigma_0^{-1} \mathbf{1}$ is the *precision* of the uniform-shift estimator. Larger precision (smaller variance) means smaller MDE. In the simple case of i.i.d. quantiles with $\Sigma_0 = \sigma^2 I$:
 
 $$
-\text{MDE}_\mu \approx 2.8 \cdot \frac{\sigma}{\sqrt{9}} \approx 0.93\sigma
+\text{MDE}_\mu = z_{1-\alpha/2} \cdot \frac{\sigma}{\sqrt{9}} = z_{1-\alpha/2} \cdot \frac{\sigma}{3}
 $$
 
 Averaging 9 quantiles reduces the standard error by $\sqrt{9} = 3$, as expected.
@@ -531,67 +712,6 @@ Averaging 9 quantiles reduces the standard error by $\sqrt{9} = 3$, as expected.
 - MDE decreases with $\sqrt{n}$: 4× more samples → 2× better sensitivity
 - MDE increases with timer noise: coarse timers mean larger MDE
 - If MDE > min_effect_of_concern, consider more samples before trusting a "pass"
-
-### 2.8 Diagnostics
-
-Several diagnostics help assess result reliability and flag potential issues.
-
-#### Non-Stationarity Check
-
-The 30/70 temporal split assumes noise characteristics are stable across the measurement period. If a background process activates mid-measurement, the calibration covariance won't match inference conditions.
-
-**Check:** Compare the empirical variance of the inference set (ignoring class labels) to the calibration set:
-
-$$
-R = \frac{\text{tr}(\hat{\Sigma}_{\text{inference}})}{\text{tr}(\hat{\Sigma}_{\text{calibration}})}
-$$
-
-| Ratio $R$ | Status |
-|-----------|--------|
-| 0.5–2.0 | Normal |
-| 2.0–5.0 | Warning: environment may have changed |
-| > 5.0 | Flag as non-stationary; results unreliable |
-
-This is a rough heuristic. A variance increase of 2× might just be noise, but 5× strongly suggests something changed.
-
-#### Model Fit Check
-
-The Bayesian layer assumes $\Delta$ lies in the 2D subspace spanned by shift and tail effects. Real leaks may not fit this model (e.g., "hockey stick" patterns affecting only P90).
-
-**Check:** After estimating $\hat{\beta}$, compute the residual:
-
-$$
-r = \Delta - X\hat{\beta}
-$$
-
-Under $H_1$ with correct model, $r \sim \mathcal{N}(0, \Sigma_0 - X\Lambda_{\text{post}}X^\top)$. Compute:
-
-$$
-\chi^2 = r^\top \Sigma_0^{-1} r
-$$
-
-This should be approximately $\chi^2_7$ (9 dimensions minus 2 parameters). If $\chi^2 > 18.5$ (p < 0.01), flag that the shift+tail model may not capture the leak pattern. The CI gate result remains valid; only the effect decomposition is suspect.
-
-#### Outlier Asymmetry Check
-
-Outlier filtering (§3.3) removes extreme values symmetrically. However, if one class has substantially more outliers than the other, that asymmetry may itself indicate a timing leak (one class has a heavy tail).
-
-**Check:** After filtering, compare outlier rates:
-
-$$
-\text{rate}_F = \frac{\text{outliers trimmed from Fixed}}{\text{total Fixed samples}}
-$$
-$$
-\text{rate}_R = \frac{\text{outliers trimmed from Random}}{\text{total Random samples}}
-$$
-
-| Condition | Action |
-|-----------|--------|
-| Both rates < 1% | Normal |
-| One rate > 3× the other | Warning: asymmetric outliers may indicate tail leak |
-| Absolute difference > 2% | Flag for investigation |
-
-If outlier asymmetry is detected and the CI gate passes, consider re-running with a higher outlier threshold (99.99th percentile) or investigating the outlier distribution directly.
 
 ---
 
@@ -626,9 +746,68 @@ Before measurement begins, several sanity checks detect common problems that wou
 
 **Harness sanity (fixed-vs-fixed)**: Split the fixed samples in half and run the full analysis pipeline. If a "leak" is detected between two halves of identical inputs, something is wrong with the test harness—perhaps the closure captures mutable state, or the timer has systematic bias. This catches bugs that would otherwise produce false positives.
 
-**Generator overhead**: Measure the baseline and sample generators in isolation. If they differ in cost by more than 10%, **abort with an error**. With the macro API, this check verifies that the harness is correctly pre-generating inputs (see §3.3)—if generation were accidentally happening inside the timed region, the measured difference would reflect generator cost rather than the operation under test. This check should always pass with correct harness implementation.
+**Generator overhead**: Measure the random input generator in isolation. If the fixed and random generators differ in cost by more than 10%, **abort with an error** (not just a warning). The measured difference would reflect generator cost rather than the operation under test. This check catches API misuse where inputs are generated inside the timed region (see §3.3). A well-designed API should make this check always pass.
 
-**Autocorrelation check**: Compute the autocorrelation function (ACF) on the full interleaved measurement sequence. If lag-1 or lag-2 autocorrelation exceeds 0.3, warn about periodic interference—likely from background processes, frequency scaling, or interrupt handlers. High autocorrelation inflates variance estimates and can cause both false positives and false negatives.
+### 3.2.1 Stationarity Check
+
+SILENT explicitly lists non-stationarity as a known failure mode: if the measurement distribution drifts during the test (e.g., thermal throttling, background load changes, GC pauses), the bootstrap assumptions break down.
+
+We implement a cheap rolling-variance check:
+
+1. Divide samples into $W$ windows (default: 10 windows)
+2. Compute median and IQR within each window
+3. Flag `stationarity_suspect = true` if:
+   - Max window median differs from min window median by > $\max(2 \times \text{IQR}, \text{drift\_floor})$
+   - Or window variance increases/decreases monotonically by > 50%
+
+The `drift_floor` prevents false positives in very quiet environments where IQR → 0. Default: $\text{drift\_floor} = 0.05 \times \text{global\_median}$ (5% of the overall median timing).
+
+This doesn't prove non-stationarity (that would require more sophisticated tests), but it catches obvious drift patterns that explain "why did CI flake?"
+
+**When stationarity is suspect:**
+
+```rust
+QualityIssue {
+    code: IssueCode::StationaritySuspect,
+    message: "Timing distribution appears to drift during measurement (median shift: 15ns)",
+    guidance: "Try: longer warmup, CPU frequency pinning (disable turbo/C-states), or run during stable system load",
+}
+```
+
+The test still produces results (we don't abort), but the quality is downgraded and the issue is surfaced prominently.
+
+### 3.2.2 Dependence Estimation
+
+SILENT emphasizes that timing measurements are often dependent due to caches, TLB, frequency scaling, etc. We estimate the dependence length $m$ using an autocorrelation-based heuristic.
+
+**Critical:** Compute ACF **per class** (Fixed and Random separately), not on the interleaved sequence. The interleaved sequence has artificial structure from the measurement schedule (alternating F/R) that would contaminate the dependence estimate.
+
+**Algorithm:**
+
+1. Extract the Fixed-class subsequence $F_1, F_2, \ldots, F_{n/2}$ and Random-class subsequence $R_1, R_2, \ldots, R_{n/2}$
+2. Demean each class: $\tilde{F}_i = F_i - \bar{F}$, $\tilde{R}_i = R_i - \bar{R}$
+3. Compute sample autocorrelation $\rho_F(h)$ and $\rho_R(h)$ for lags $h = 1, 2, \ldots, h_{\max}$
+4. Use the **maximum** of the two: $\hat{m} = \max(\hat{m}_F, \hat{m}_R)$ where $\hat{m}_c$ is the smallest $h$ where $|\rho_c(h)| < 2/\sqrt{n/2}$
+
+The block length for bootstrap is then $\ell = \max(\hat{m}, c \cdot n^{1/3})$ where $c \approx 1.3$.
+
+**Effective sample size:**
+
+$$
+\text{ESS} \approx \frac{n}{1 + 2\sum_{h=1}^{\hat{m}} \rho(h)} \approx \frac{n}{\hat{m}}
+$$
+
+This is surfaced in `Diagnostics.effective_sample_size`. When ESS << n, the nominal sample count is misleading:
+
+```rust
+QualityIssue {
+    code: IssueCode::HighDependence,
+    message: "Estimated dependence length: 47 samples (ESS: 2,100 of 100,000)",
+    guidance: "High autocorrelation reduces effective sample size. Try: isolate to dedicated core, disable hyperthreading, or increase sample count to compensate",
+}
+```
+
+**Periodic interference check**: If lag-1 or lag-2 autocorrelation (in either class) exceeds 0.3, warn about periodic interference—likely from background processes, frequency scaling, or interrupt handlers. High autocorrelation inflates variance estimates and can cause both false positives and false negatives.
 
 **CPU frequency governor (Linux)**: Check `/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`. If not set to "performance", warn that frequency scaling may introduce noise. The "powersave" or "ondemand" governors cause the CPU to change frequency mid-measurement, adding variance unrelated to the code under test.
 
@@ -667,7 +846,7 @@ for i in 0..n {
 }
 ```
 
-The "Generator overhead" pre-flight check (§3.2) verifies this requirement is met. With the macro API (§4.3), pre-generation is guaranteed by the harness—users cannot accidentally generate inputs inside the timed region.
+The "Generator overhead" pre-flight check (§3.2) detects violations of this requirement, but proper API design should make violations impossible.
 
 **Interleaved randomized sampling:**
 
@@ -679,18 +858,42 @@ Rather than measuring all Fixed samples then all Random samples, we interleave t
 
 This prevents systematic drift (thermal throttling, frequency scaling) from biasing one class.
 
-**Outlier filtering:**
+**Outlier handling (winsorization, not dropping):**
 
-Extreme outliers (context switches, interrupts) can skew quantile estimates. Apply symmetric filtering:
+Extreme outliers (context switches, interrupts) can skew quantile estimates. However, **dropping outliers can delete real signal**—a tail-heavy leak might have its informative samples removed, causing false negatives.
 
-1. Pool all samples from both classes
-2. Compute the 99.9th percentile of the pooled distribution
-3. Remove samples exceeding this threshold from both classes equally
-4. **Track per-class outlier rates** (see §2.8 Outlier Asymmetry Check)
+We use **winsorization** (capping) instead of dropping:
 
-Report the fraction filtered (typically < 0.1%). High outlier rates indicate environmental noise.
+1. Compute the 99.99th percentile from **pooled data** (Fixed ∪ Random combined) as $t_{\text{cap}}$
+2. Cap (not drop) samples exceeding this threshold:
+   - For each sample $t > t_{\text{cap}}$: set $t = t_{\text{cap}}$
+3. Record the fraction capped for reporting
 
-**Caution:** Aggressive filtering can remove genuine signal. If outlier rates differ substantially between classes, the asymmetry diagnostic (§2.8) will flag this. Consider using a looser threshold (99.99th percentile) for operations with legitimately heavy tails.
+**Why pooled threshold, not null-derived:**
+
+Using the Fixed-vs-Fixed harness threshold is **dangerous** when Fixed corresponds to a fast code path:
+- If Fixed is fast (~100 cycles) and Random includes slow paths (~1000 cycles from cache misses)
+- The null harness cap might be ~150 cycles
+- All slow-path samples in Random get capped to 150
+- Result: A real 900-cycle leak is reduced to ~50 cycles, potentially passing the test
+
+The pooled threshold captures the full range of timing behavior from both classes, avoiding this failure mode.
+
+**Why winsorize instead of drop:**
+- Capping preserves sample count (important for bootstrap)
+- Capped extreme values still contribute to upper quantiles (shifting them toward the cap)
+- Dropping would silently remove potentially informative data
+
+**Critical timing:** Winsorization must happen:
+- **Before** computing observed quantiles $\hat{q}_F(k)$, $\hat{q}_R(k)$
+- **Before** all bootstrap resampling (bootstrap operates on the winsorized dataset)
+
+This ensures consistency: observed statistics and bootstrap statistics are computed on identically processed data.
+
+**Quality signals:**
+- If > 0.1% of samples are capped: `QualityIssue` warning (environmental noise)
+- If > 1% capped: `MeasurementQuality::Acceptable` downgrade
+- If > 5% capped: `MeasurementQuality::TooNoisy` (something is wrong)
 
 ### 3.4 Adaptive Batching
 
@@ -710,15 +913,17 @@ $$
 
 The maximum of 20 prevents microarchitectural artifacts (branch predictor, cache state) from accumulating across too many iterations.
 
-**Input symmetry within batches:**
+**Interpretation caution for large K:**
 
-When batching $K$ operations, each *measurement* (batch) must use the same input repeated $K$ times—for both classes. For the Random class, generate one random input per measurement, then repeat that input $K$ times within the batch. Do not use $K$ different random inputs within a single batch.
-
-This ensures symmetric microarchitectural behavior: both classes see $K$ identical operations with identical cache/predictor training. Using $K$ different inputs for Random but one repeated input for Fixed would create artificial timing differences from branch predictor divergence, not from the operation under test.
+When K > 10, interpret results more cautiously:
+- The batch measures K *correlated* operations (predictor trained, caches warm)
+- The distribution of batch totals may not relate simply to single-operation behavior
+- Effects that appear in batched measurements may not manifest in single calls (and vice versa)
+- Consider flagging results with K > 10 as requiring additional verification
 
 **Effect scaling:**
 
-When batching is enabled, inference is performed on the **sum** of $K$ operation timings. Only the **display** values (reported effect sizes) are divided by $K$. Do not divide by $K$ before quantile estimation—this would introduce floating-point smoothing that masks the discrete nature of timer ticks.
+When batching is enabled, the measured time is for $K$ operations. The reported effect size must be divided by $K$ to give per-operation estimates.
 
 **Reporting:**
 
@@ -748,20 +953,20 @@ Outcome::Unmeasurable {
 
 ### 3.6 Anomaly Detection
 
-Users sometimes make mistakes that produce valid code but meaningless results—most commonly, capturing a pre-evaluated value instead of regenerating it:
+Users sometimes make mistakes that produce valid code but meaningless results—most commonly, capturing a pre-evaluated random value instead of regenerating it:
 
 ```rust
 let value = rand::random();  // Evaluated once!
 timing_test! {
-    baseline: || [0u8; 32],
-    sample: || value,  // Always returns the same thing!
-    measure: |input| compare(&input),
+    fixed: [0u8; 32],
+    random: || value,  // Always returns the same thing
+    test: |input| compare(&input),
 }
 ```
 
 **Detection mechanism:**
 
-During measurement, track the uniqueness of sample inputs by hashing the first 1,000 values generated. After measurement:
+During measurement, track the uniqueness of random inputs by hashing the first 1,000 values generated. After measurement:
 
 | Condition | Action |
 |-----------|--------|
@@ -831,7 +1036,7 @@ covariance = M2 / (n - 1)
 
 This is numerically stable regardless of the mean's magnitude. For covariance matrices, extend to track cross-products.
 
-**Statistical implication**: Numerical instability in covariance estimation propagates to the Bayes factor calculation. A poorly estimated $\Sigma_0$ can cause the Cholesky decomposition to fail or produce incorrect posteriors. Welford's algorithm avoids this failure mode.
+**Statistical implication**: Numerical instability in covariance estimation propagates to the posterior calculation. A poorly estimated $\Sigma_0$ can cause the Cholesky decomposition to fail or produce incorrect posteriors. Welford's algorithm avoids this failure mode.
 
 #### Batching and Microarchitectural Artifacts
 
@@ -865,19 +1070,16 @@ The primary result type, returned directly by `timing_test!`:
 
 ```rust
 pub struct TestResult {
-    /// Posterior probability of timing leak (0.0 to 1.0)
+    /// P(effect exceeds min_effect_of_concern), from 0.0 to 1.0
     pub leak_probability: f64,
     
-    /// Bayes factor (H1 vs H0) for users who want to apply different priors
-    pub bayes_factor: f64,
-    
-    /// Effect size estimate (when leak_probability > 0.5)
-    pub effect: Option<Effect>,
+    /// Effect size estimate with shift/tail decomposition
+    pub effect: Effect,
     
     /// Exploitability assessment
     pub exploitability: Exploitability,
     
-    /// Minimum detectable effect given noise level (at 80% power)
+    /// Minimum detectable effect given noise level
     pub min_detectable_effect: MinDetectableEffect,
     
     /// CI gate result
@@ -886,11 +1088,14 @@ pub struct TestResult {
     /// Measurement quality assessment
     pub quality: MeasurementQuality,
     
-    /// Fraction of samples trimmed as outliers
-    pub outlier_fraction: f64,
-    
-    /// Diagnostics (non-stationarity, model fit, outlier asymmetry)
+    /// Detailed diagnostics (dependence, stationarity, filtered quantiles)
     pub diagnostics: Diagnostics,
+    
+    /// Fraction of samples capped (winsorized) as outliers
+    pub winsorized_fraction: f64,
+    
+    /// The attacker model / threshold used
+    pub attacker_model: AttackerModel,
 }
 ```
 
@@ -921,10 +1126,10 @@ When a leak is detected, the effect is decomposed:
 
 ```rust
 pub struct Effect {
-    /// Uniform shift in nanoseconds (positive = baseline class slower)
+    /// Uniform shift in nanoseconds (positive = fixed class slower)
     pub shift_ns: f64,
     
-    /// Tail effect in nanoseconds (positive = baseline has heavier upper tail)
+    /// Tail effect in nanoseconds (positive = fixed has heavier upper tail)
     pub tail_ns: f64,
     
     /// 95% credible interval for total effect magnitude
@@ -932,13 +1137,20 @@ pub struct Effect {
     
     /// Dominant pattern
     pub pattern: EffectPattern,
+    
+    /// Marginal probability: P(|μ| > θ | Δ)
+    /// Diagnostic only—not used for headline leak_probability
+    pub prob_shift_exceeds_threshold: f64,
+    
+    /// Marginal probability: P(|τ| > θ | Δ)  
+    /// Diagnostic only—not used for headline leak_probability
+    pub prob_tail_exceeds_threshold: f64,
 }
 
 pub enum EffectPattern {
-    UniformShift,   // Branch, different code path
-    TailEffect,     // Cache misses, memory access patterns
-    Mixed,          // Both components significant (check model_fit diagnostic for non-linear patterns)
-    Indeterminate,  // Neither component statistically significant
+    UniformShift,  // Branch, different code path
+    TailEffect,    // Cache misses, memory access patterns
+    Mixed,         // Both components significant
 }
 ```
 
@@ -948,52 +1160,82 @@ The pass/fail decision with controlled FPR:
 
 ```rust
 pub struct CiGate {
-    pub alpha: f64,             // Target FPR
-    pub passed: bool,           // True if no leak detected
-    pub threshold: f64,         // Effective threshold (after flooring at 1 tick and min_effect_of_concern)
-    pub max_observed: f64,      // Observed max|Δ_p|
-    pub observed: [f64; 9],     // Per-quantile differences (for diagnostics)
+    /// True if Q_hat_max ≤ critical_value (no significant leak above threshold)
+    pub passed: bool,
+    
+    /// Target FPR (default 0.01)
+    pub alpha: f64,
+    
+    /// Practical significance threshold θ (min_effect_of_concern)
+    pub threshold_theta_ns: f64,
+    
+    /// Observed test statistic
+    /// - Continuous mode: max_k((A_k - θ) / σ_k) — studentized
+    /// - Discrete mode: √n × max_k(A_k - θ) — not studentized
+    pub q_hat_max: f64,
+    
+    /// Bootstrap critical value c*_{1-α}
+    pub critical_value: f64,
+    
+    /// Raw max distance d = max_k |q_F(k) - q_R(k)| in nanoseconds
+    pub max_distance_ns: f64,
+    
+    /// Margin: critical_value - q_hat_max (positive = passed with room to spare)
+    pub margin: f64,
+    
+    /// Whether discrete timer mode was used (m-out-of-n bootstrap)
+    pub discrete_mode: bool,
+    
+    /// Quantiles that were filtered out (transparency)
+    pub filtered_quantile_count: usize,
 }
 ```
 
-#### Diagnostics
-
-Flags from §2.8 diagnostic checks:
-
-```rust
-pub struct Diagnostics {
-    /// Non-stationarity: ratio of inference to calibration variance
-    pub stationarity_ratio: f64,
-    pub stationarity_ok: bool,
-    
-    /// Model fit: chi-squared statistic for residuals
-    pub model_fit_chi2: f64,
-    pub model_fit_ok: bool,
-    
-    /// Outlier asymmetry: per-class outlier rates
-    pub outlier_rate_fixed: f64,
-    pub outlier_rate_random: f64,
-    pub outlier_asymmetry_ok: bool,
-    
-    /// Human-readable warnings (empty if all OK)
-    pub warnings: Vec<String>,
-}
-```
+The gate passes when `q_hat ≤ critical_value`. The `margin` field tells you how close you are to the boundary: positive means passed with room to spare, negative means failed. The `max_distance_ns` field gives the raw observed distance in nanoseconds for interpretability.
 
 #### Exploitability
 
-Heuristic assessment based on Crosby et al. (2009):
+Heuristic assessment based on Crosby et al. (2009) and local attack research:
 
 ```rust
 pub enum Exploitability {
-    Negligible,      // < 100 ns: at LAN resolution limit; requires ~10k+ queries
-    PossibleLAN,     // 100–500 ns: exploitable on LAN with ~1k–10k queries
-    LikelyLAN,       // 500 ns – 20 μs: readily exploitable on LAN
-    PossibleRemote,  // > 20 μs: potentially exploitable over internet
+    /// < 1 cycle: Essentially undetectable even locally
+    Undetectable,
+    
+    /// 1–100 cycles: Exploitable by local attacker with direct access
+    /// (SGX, shared hosting, local privilege escalation)
+    ExploitableLocal,
+    
+    /// 100 ns – 500 ns: Exploitable on LAN with ~1k–10k queries
+    ExploitableLAN,
+    
+    /// 500 ns – 20 μs: Readily exploitable on LAN, possibly remote
+    LikelyExploitable,
+    
+    /// > 20 μs: Exploitable over internet
+    ExploitableRemote,
 }
 ```
 
-**Note:** These thresholds are based on 2009 measurements and are approximate. Modern networks and attack techniques may achieve better resolution. Treat these as rough guidance rather than definitive boundaries.
+**Caveat: 2009-era baseline**
+
+The Crosby thresholds are from 2009. Modern stacks (better clocks, improved filtering, protocol-specific optimizations) can shift these boundaries in either direction. Treat this enum as a rough heuristic for prioritization, not a security guarantee.
+
+**Connection to AttackerModel:**
+
+The `Exploitability` assessment tells you who *could* exploit a detected leak. The `AttackerModel` configuration tells the library who you're *trying to defend against*. They work together:
+
+| AttackerModel | θ (threshold) | CI gate fails if | Exploitability to watch |
+|---------------|---------------|------------------|------------------------|
+| `LocalCycles` | 2 cycles | effect > 2 cycles | ExploitableLocal+ |
+| `LocalCoarseTimer` | 1 tick | effect > 1 tick | ExploitableLocal+ |
+| `LANStrict` | 2 cycles | effect > 2 cycles | ExploitableLocal+ |
+| `LANConservative` | 100 ns | effect > 100 ns | ExploitableLAN+ |
+| `WANOptimistic` | 15 μs | effect > 15 μs | LikelyExploitable+ |
+| `WANConservative` | 50 μs | effect > 50 μs | ExploitableRemote |
+| `KyberSlashSentinel` | 10 cycles | effect > 10 cycles | ExploitableLocal+ |
+
+A common pattern: configure for your threat model, but also check `exploitability` to understand worst-case risk. For example, with `LANConservative`, you might pass CI but still see `ExploitableLocal`—meaning a co-resident attacker could still exploit it.
 
 #### MeasurementQuality
 
@@ -1004,13 +1246,269 @@ pub enum MeasurementQuality {
     /// Confident in results
     Good,
     /// Results valid but noisier than ideal
-    Acceptable { issues: Vec<String> },
+    Acceptable { issues: Vec<QualityIssue> },
     /// Results may be unreliable
-    TooNoisy { issues: Vec<String> },
+    TooNoisy { issues: Vec<QualityIssue> },
+}
+
+pub struct QualityIssue {
+    pub code: IssueCode,
+    pub message: String,
+    pub guidance: String,  // Actionable next step
+}
+
+pub enum IssueCode {
+    HighDependence,       // Autocorrelation reducing effective samples
+    LowEffectiveSamples,  // ESS << nominal samples
+    StationaritySuspect,  // Variance drift detected
+    DiscreteTimer,        // Low resolution, using m-out-of-n mode
+    SmallSampleDiscrete,  // n < 2000 in discrete mode, weak asymptotics
+    HighGeneratorCost,    // Generator overhead > 10% of measurement
+    LowUniqueInputs,      // Input generation may not be random
+    QuantilesFiltered,    // Some quantiles excluded due to noise
+    ThresholdClamped,     // θ collapsed to < 1 tick, clamped up
+    HighWinsorRate,       // > 1% of samples capped (environmental noise)
 }
 ```
 
+**Example issue with guidance:**
+
+```rust
+QualityIssue {
+    code: IssueCode::HighDependence,
+    message: "Estimated dependence length: 47 samples (ESS: 2,100 of 100,000)",
+    guidance: "Try: pin process to isolated core, disable turbo boost, increase warmup, or separate input generation to another thread",
+}
+```
+
+#### Diagnostics
+
+Detailed measurement diagnostics for debugging and transparency:
+
+```rust
+pub struct Diagnostics {
+    /// Estimated dependence length (block size used for bootstrap)
+    pub dependence_length: usize,
+    
+    /// Effective sample size (accounts for autocorrelation)
+    /// ESS ≈ n / dependence_length
+    pub effective_sample_size: usize,
+    
+    /// True if rolling variance test detected drift
+    pub stationarity_suspect: bool,
+    
+    /// Quantiles excluded from CI gate (and why)
+    pub filtered_quantiles: Vec<FilteredQuantile>,
+    
+    /// Whether discrete timer mode was triggered
+    pub discrete_mode: bool,
+    
+    /// Timer resolution estimate (ns per tick)
+    pub timer_resolution_ns: f64,
+    
+    /// Fraction of duplicate timing values (high = discrete timer)
+    pub duplicate_fraction: f64,
+}
+
+pub struct FilteredQuantile {
+    pub quantile: f64,           // e.g., 0.9
+    pub reason: FilterReason,
+    pub bootstrap_std: f64,      // σ_k estimate
+}
+
+pub enum FilterReason {
+    /// Bootstrap variance too high relative to others
+    HighVariance { relative_to_median: f64 },
+    /// Bootstrap variance near zero (would cause numerical issues)
+    NearZeroVariance,
+}
+```
+
+These diagnostics are always computed and available in `TestResult`. They explain *why* results might be unreliable, not just *that* they are.
+
 ### 4.2 Configuration
+
+#### Attacker Model Presets
+
+The most important configuration choice is your **attacker model**, which determines what size leak you consider "negligible." SILENT's key insight [2] is that the right question isn't "is there any timing difference?" but "is the difference > θ under my threat model?"
+
+**There is no single correct θ.** SILENT explicitly demonstrates this using KyberSlash: under Crosby-style thresholds (~100ns), the ~20-cycle leak isn't flagged as practically significant; under Kario-style thresholds (~1 cycle), it is. Your choice of preset is a statement about your threat model.
+
+```rust
+pub enum AttackerModel {
+    // ═══════════════════════════════════════════════════════════════════
+    // LOCAL ATTACKER PRESETS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /// Local attacker with cycle-level timing (rdtsc, perf, kperf)
+    /// θ = 2 cycles
+    /// Use for: SGX enclaves, shared hosting, local privilege escalation
+    /// Source: Kario argues even 1 cycle is detectable over LAN—so for
+    /// same-host attackers, 1–2 cycles is the conservative stance.
+    LocalCycles,
+    
+    /// Local attacker but only coarse timers available
+    /// θ = 1 tick (whatever the timer resolution is)
+    /// Use for: Sandboxed environments, tick-only measurement, noisy scheduling
+    /// Rationale: This isn't "attacker is weaker"—it's "measurement primitive
+    /// is weaker." Picks the smallest meaningful θ for your timer.
+    LocalCoarseTimer,
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // LAN ATTACKER PRESETS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /// Strict LAN attacker ("Kario-style")
+    /// θ = 2 cycles
+    /// Use for: High-security internal services where LAN attackers are capable
+    /// Source: Kario argues even ~1 clock cycle can be detectable over LAN.
+    /// SILENT explicitly contrasts this with Crosby's more relaxed view.
+    /// Warning: May produce "TooNoisy" on coarse timers.
+    LANStrict,
+    
+    /// Conservative LAN attacker ("Crosby-style")
+    /// θ = 100 ns
+    /// Use for: Internal services, database servers, microservices
+    /// Source: Crosby et al. (2009) report attackers can measure with
+    /// "accuracy as good as 100ns over a local network."
+    LANConservative,
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // WAN ATTACKER PRESETS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /// Optimistic WAN attacker (low-jitter environments)
+    /// θ = 15 μs
+    /// Use for: Same-region cloud, datacenter-to-datacenter, low-jitter paths
+    /// Source: Best-case end of Crosby's 15–100μs internet range.
+    /// Note: Less anchored than Conservative; use when you have reason to
+    /// believe network conditions are favorable.
+    WANOptimistic,
+    
+    /// Conservative WAN attacker (general internet)
+    /// θ = 50 μs
+    /// Use for: Public APIs, web services, general internet exposure
+    /// Source: Crosby et al. (2009) report 15–100μs accuracy across internet;
+    /// 50μs is a reasonable midpoint.
+    WANConservative,
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // SPECIAL-PURPOSE PRESETS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /// Calibrated to catch KyberSlash-class vulnerabilities
+    /// θ = 10 cycles
+    /// Use for: Post-quantum crypto, division-based leaks, "don't ignore
+    /// 20-cycle class vulnerabilities"
+    /// Source: SILENT characterizes KyberSlash as ~20 cycles on Raspberry Pi
+    /// 2B (900MHz Cortex-A7). θ=10 ensures such leaks are non-negligible.
+    KyberSlashSentinel,
+    
+    /// Research mode: detect any statistical difference (θ → 0)
+    /// Warning: Will flag tiny, unexploitable differences. Not for CI.
+    /// Use for: Profiling, debugging, academic analysis, finding any leak
+    Research,
+    
+    // ═══════════════════════════════════════════════════════════════════
+    // CUSTOM THRESHOLDS
+    // ═══════════════════════════════════════════════════════════════════
+    
+    /// Custom threshold in nanoseconds
+    CustomNs { threshold_ns: f64 },
+    
+    /// Custom threshold in cycles (more portable across CPUs)
+    CustomCycles { threshold_cycles: u32 },
+    
+    /// Custom threshold in timer ticks (for tick-based timers)
+    CustomTicks { threshold_ticks: u32 },
+}
+```
+
+**Preset summary:**
+
+| Preset | θ | Native unit | Threat model |
+|--------|---|-------------|--------------|
+| `LocalCycles` | 2 cycles | cycles | Co-resident attacker, strong timer |
+| `LocalCoarseTimer` | 1 tick | ticks | Co-resident attacker, weak timer |
+| `LANStrict` | 2 cycles | cycles | LAN attacker, Kario-style (capable) |
+| `LANConservative` | 100 ns | ns | LAN attacker, Crosby-style |
+| `WANOptimistic` | 15 μs | ns | Internet, low-jitter path |
+| `WANConservative` | 50 μs | ns | Internet, general |
+| `KyberSlashSentinel` | 10 cycles | cycles | Catch ~20-cycle leaks |
+| `Research` | 0 | — | Detect any difference |
+
+**The LAN dispute:** SILENT goes out of its way to show that "what counts as negligible on LAN?" is genuinely disputed. `LANStrict` vs `LANConservative` represents this fork explicitly—pick based on your threat model, not based on what's convenient.
+
+**Sources:**
+
+- **Crosby et al. (2009)**: "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC. Reports ~100ns LAN accuracy, 15–100μs internet accuracy.
+- **Kario**: Argues timing differences as small as one clock cycle can be detectable over local networks. SILENT cites this as the "strict" alternative to Crosby.
+- **SILENT [2]**: Uses KyberSlash (~20 cycles on Raspberry Pi 2B @ 900MHz Cortex-A7) to demonstrate how conclusions flip based on θ choice.
+
+**Recommended usage:**
+
+```rust
+// Public web API (internet attackers)
+let result = timing_test! {
+    oracle: TimingOracle::for_attacker(AttackerModel::WANConservative),
+    fixed: || verify_signature(&secret_key, &msg),
+    random: || verify_signature(&random_key, &msg),
+};
+
+// Internal microservice (conservative LAN model)
+let result = timing_test! {
+    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
+    // ...
+};
+
+// High-security internal service (strict LAN model)
+let result = timing_test! {
+    oracle: TimingOracle::for_attacker(AttackerModel::LANStrict),
+    // ...
+};
+
+// SGX enclave or shared hosting
+let result = timing_test! {
+    oracle: TimingOracle::for_attacker(AttackerModel::LocalCycles),
+    // ...
+};
+
+// Post-quantum crypto (catch KyberSlash-class leaks)
+let result = timing_test! {
+    oracle: TimingOracle::for_attacker(AttackerModel::KyberSlashSentinel),
+    // ...
+};
+```
+
+**Output always shows θ in context:**
+
+```
+CI gate: FAIL (α=1%) for leaks > θ=100ns [LANConservative]
+Observed distance: d=247ns (≈741 cycles @ 3.0GHz)
+Margin: d−θ = 147ns
+```
+
+#### Native Units for θ
+
+**Critical:** θ should be applied in the timer's native units for robustness:
+
+| Timer type | θ applied as | Rationale |
+|------------|--------------|-----------|
+| Cycle counter (rdtsc, perf, kperf) | cycles | "10 cycles" is portable across CPUs |
+| Tick timer (cntvct_el0) | ticks | Avoids sub-tick thresholds |
+| Nanosecond timer | ns | Direct comparison |
+
+When a cycle-based preset (like `LocalCycles` or `LANStrict`) would collapse to < 1 tick on a coarse timer, the library warns and suggests alternatives:
+
+```
+Warning: LANStrict requires θ=2 cycles, but timer resolution is 41ns (~123 cycles).
+Effective θ clamped to 1 tick. Options:
+  - Use a cycle counter (perf/kperf) for this attacker model
+  - Switch to LANConservative (θ=100ns) which is measurable on this timer
+  - Accept reduced sensitivity with LocalCoarseTimer (θ=1 tick)
+```
+
+This prevents strict presets from being silently meaningless on coarse timers.
 
 #### TimingOracle
 
@@ -1018,15 +1516,55 @@ The main configuration type with builder pattern:
 
 ```rust
 impl TimingOracle {
+    // Attacker-model presets (recommended)
+    pub fn for_attacker(model: AttackerModel) -> Self;
+    
+    // Sample-count presets
     pub fn new() -> Self;       // 100k samples, thorough
     pub fn balanced() -> Self;  // 20k samples, good for CI
     pub fn quick() -> Self;     // 5k samples, development
     
+    // Fine-grained configuration
     pub fn samples(self, n: usize) -> Self;
     pub fn warmup(self, n: usize) -> Self;
     pub fn ci_alpha(self, alpha: f64) -> Self;
-    pub fn min_effect_of_concern(self, ns: f64) -> Self;
+    pub fn min_effect_of_concern_ns(self, ns: f64) -> Self;
+    pub fn min_effect_of_concern_cycles(self, cycles: u32) -> Self;
+    pub fn attacker_model(self, model: AttackerModel) -> Self;
+    pub fn bootstrap_mode(self, mode: BootstrapMode) -> Self;
+    pub fn bootstrap_iterations(self, b: usize) -> Self;
 }
+
+pub enum BootstrapMode {
+    /// Resample Fixed and Random separately (default)
+    /// Conservative: destroys positive cross-covariance, tighter FPR, lower power
+    SeparateClass,
+    
+    /// Resample paired blocks from interleaved sequence
+    /// Higher power when common-mode drift dominates
+    /// Use for local investigation, not CI
+    Paired,
+}
+```
+
+**Combining presets:**
+
+```rust
+// LANConservative threat model, but fewer samples for faster CI
+TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)
+
+// Maximum sensitivity for local investigation
+TimingOracle::new()
+    .bootstrap_mode(BootstrapMode::Paired)
+    .bootstrap_iterations(10_000)
+```
+
+Output always shows both cycles and nanoseconds when a cycle counter is available:
+
+```
+Threshold: θ = 100ns (≈300 cycles @ 3.0GHz)
+Threshold: θ = 10 cycles ≈ 3.3ns @ 3.0GHz
 ```
 
 #### Key Configuration Options
@@ -1035,9 +1573,11 @@ impl TimingOracle {
 |--------|---------|-------------|
 | samples | 100,000 | Samples per class |
 | warmup | 1,000 | Warmup iterations |
-| ci_alpha | 0.01 | CI gate false positive rate ($\alpha$) |
-| min_effect_of_concern | 10.0 ns | Effects below this are considered negligible |
-| prior_no_leak | 0.75 | Prior probability of no leak ($P(H_0)$) |
+| ci_alpha | 0.01 | CI gate false positive rate (α) |
+| min_effect_of_concern | 10.0 ns | Threshold θ for practical significance; effects below this are considered negligible |
+| attacker_model | LANConservative | Determines default θ; can be overridden by explicit min_effect_of_concern |
+| bootstrap_mode | SeparateClass | How to resample; `Paired` for maximum power in local investigation |
+| bootstrap_iterations | 2,000 | B for CI gate; use 10,000 for thorough mode |
 
 ### 4.3 Macro API
 
@@ -1046,24 +1586,23 @@ The `timing_test!` macro is the recommended API for most users. It returns `Test
 #### Syntax
 
 ```rust
-// Setup: define any variables needed for the test
-let key = Aes128::new(&KEY);
-
 let result = timing_test! {
     // Optional: custom configuration
     oracle: TimingOracle::balanced(),
     
-    // Optional: explicit input type (improves error messages)
-    type Input = [u8; 32],
+    // Optional: setup block
+    setup: {
+        let key = Aes128::new(&KEY);
+    },
     
-    // Required: baseline input (closure called once per measurement)
-    baseline: || [0u8; 32],
+    // Required: fixed input (evaluated once)
+    fixed: [0u8; 32],
     
-    // Required: sample generator (closure called once per measurement)
-    sample: || rand::random::<[u8; 32]>(),
+    // Required: random generator (closure, called per sample)
+    random: || rand::random::<[u8; 32]>(),
     
-    // Required: operation to measure
-    measure: |input| {
+    // Required: test body (duplicated into both closures)
+    test: |input| {
         key.encrypt(&input);
     },
 };
@@ -1072,19 +1611,7 @@ let result = timing_test! {
 assert!(result.ci_gate.passed);
 ```
 
-Variables defined before the macro are captured by the closures using normal Rust closure semantics—no magic scoping rules.
-
-**Pre-generation contract:**
-
-The `baseline` and `sample` closures are used to **pre-generate** all inputs before any timing measurements begin. They are:
-
-- Called in batch to fill input buffers (not interleaved with timing)
-- Never invoked inside the timed region
-- Completely finished before the first `measure` call
-
-This separation prevents input generation from contaminating timing via cache pollution, branch predictor warmup, allocator noise, or thermal effects. The `measure` closure receives pre-generated inputs and is the *only* code inside the timed region.
-
-**Both `baseline` and `sample` are closures.** This symmetry makes the API consistent. The difference is semantic: `baseline` typically returns a fixed value (the "control"), while `sample` generates varied inputs.
+**The `random` field requires an explicit closure** (`|| expr`). This is intentional: the syntax mirrors the semantics. A bare expression looks like it would be evaluated once, which is exactly the mistake we're preventing.
 
 #### Checked Variant
 
@@ -1092,9 +1619,9 @@ For explicit unmeasurable handling, use `timing_test_checked!`:
 
 ```rust
 let outcome = timing_test_checked! {
-    baseline: || [0u8; 32],
-    sample: || rand::random::<[u8; 32]>(),
-    measure: |input| operation(&input),
+    fixed: [0u8; 32],
+    random: || rand::random::<[u8; 32]>(),
+    test: |input| operation(&input),
 };
 
 match outcome {
@@ -1115,14 +1642,10 @@ Use `timing_test_checked!` when:
 Use tuple destructuring:
 
 ```rust
-let cipher = ChaCha20Poly1305::new(&key);
-
 timing_test! {
-    type Input = ([u8; 12], [u8; 64]),
-    
-    baseline: || ([0u8; 12], [0u8; 64]),
-    sample: || (rand::random(), rand::random()),
-    measure: |(nonce, plaintext)| {
+    fixed: ([0u8; 12], [0u8; 64]),
+    random: || (rand::random(), rand::random()),
+    test: |(nonce, plaintext)| {
         cipher.encrypt(&nonce, &plaintext);
     },
 }
@@ -1134,10 +1657,10 @@ The macro catches common mistakes with clear messages:
 
 | Mistake | Error |
 |---------|-------|
-| Missing `sample:` field | "missing `sample` field" |
-| Typo in field name | "unknown field `sampel`, expected one of: baseline, sample, measure, ..." |
-| Type mismatch baseline/sample | Standard Rust type error pointing at user's code |
-| Missing type annotation when needed | Suggest adding `type Input = ...` |
+| Missing `random:` field | "missing `random` field" with syntax suggestion |
+| Typo in field name | "unknown field `rando`, expected one of: ..." |
+| Missing closure on random | "`random` must be a closure" with fix suggestion |
+| Type mismatch fixed/random | Standard Rust type error pointing at user's code |
 
 ### 4.4 Builder API
 
@@ -1146,9 +1669,9 @@ For users who prefer explicit code over macros:
 ```rust
 let result = TimingTest::new()
     .oracle(TimingOracle::balanced())
-    .baseline(|| [0u8; 32])
-    .sample(|| rand::random::<[u8; 32]>())
-    .measure(|input| secret.ct_eq(&input))
+    .fixed([0u8; 32])
+    .random(|| rand::random::<[u8; 32]>())
+    .test(|input| secret.ct_eq(&input))
     .run();
 ```
 
@@ -1157,10 +1680,10 @@ let result = TimingTest::new()
 ```rust
 impl TimingTest {
     pub fn new() -> Self;
-    pub fn oracle(self, oracle: TimingOracle) -> Self;      // Optional
-    pub fn baseline<F: FnMut() -> V>(self, f: F) -> Self;   // Required
-    pub fn sample<F: FnMut() -> V>(self, gen: F) -> Self;   // Required
-    pub fn measure<E: FnMut(V)>(self, body: E) -> Self;     // Required
+    pub fn oracle(self, oracle: TimingOracle) -> Self;  // Optional
+    pub fn fixed<V: Clone>(self, value: V) -> Self;     // Required
+    pub fn random<F: FnMut() -> V>(self, gen: F) -> Self;  // Required
+    pub fn test<E: FnMut(V)>(self, body: E) -> Self;    // Required
     pub fn run(self) -> Outcome;
 }
 ```
@@ -1178,13 +1701,13 @@ impl TimingTest {
 For complex cases requiring full control:
 
 ```rust
-use timing_oracle::{measure, helpers::InputPair};
+use timing_oracle::{test, helpers::InputPair};
 
-let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let inputs = InputPair::new([0u8; 32], || rand::random());
 
-let result = measure(
-    || encrypt(&inputs.baseline()),
-    || encrypt(&inputs.sample()),
+let result = test(
+    || encrypt(&inputs.fixed()),
+    || encrypt(&inputs.random()),
 );
 ```
 
@@ -1193,12 +1716,14 @@ let result = measure(
 Separates input generation from measurement:
 
 ```rust
-impl<F1: FnMut() -> T, F2: FnMut() -> T> InputPair<T, F1, F2> {
-    pub fn new(baseline: F1, sample: F2) -> Self;
-    pub fn baseline(&mut self) -> T;  // Calls baseline closure
-    pub fn sample(&mut self) -> T;    // Calls sample closure
+impl<T: Clone, F: FnMut() -> T> InputPair<T, F> {
+    pub fn new(fixed: T, generator: F) -> Self;
+    pub fn fixed(&self) -> T;   // Clones fixed value
+    pub fn random(&self) -> T;  // Calls generator
 }
 ```
+
+Both methods return owned `T` for symmetric usage.
 
 **Anomaly detection**: If the type is hashable, tracks value uniqueness and warns about suspicious patterns. For non-hashable types, tracking is skipped automatically with zero overhead.
 
@@ -1209,73 +1734,77 @@ impl<F1: FnMut() -> T, F2: FnMut() -> T> InputPair<T, F1, F2> {
 | `timing_test!` | `TestResult` | Most users; panics if unmeasurable |
 | `timing_test_checked!` | `Outcome` | Platform-adaptive tests; explicit unmeasurable handling |
 | `TimingTest` builder | `Outcome` | Macro-averse; programmatic result access |
-| `InputPair` + `measure()` | `Outcome` | Multiple independent varying inputs; full control |
+| `InputPair` + `test()` | `Outcome` | Multiple independent varying inputs; full control |
 
 ---
 
 ## 5. Interpreting Results
 
-### 5.1 Leak Probability and Bayes Factor
+### 5.1 Leak Probability
 
-The `leak_probability` is a Bayesian posterior: the probability that there is a timing leak given the data and model assumptions.
+The `leak_probability` answers: "what's the probability that this code has a timing leak exceeding `min_effect_of_concern`?"
+
+This is computed by integrating the posterior distribution over effect sizes (§2.5). It's **calibrated**: when we report 80% probability, approximately 80% of the posterior mass lies above your concern threshold.
 
 **Decision thresholds:**
 
 | Probability | Interpretation | Action |
 |-------------|----------------|--------|
 | $< 10\%$ | Probably safe | Pass |
-| $10\%$–$50\%$ | Inconclusive | Consider more samples |
+| $10\%$–$50\%$ | Inconclusive | Consider more samples or lower threshold |
 | $50\%$–$90\%$ | Probably leaking | Investigate |
 | $> 90\%$ | Almost certainly leaking | Fix required |
 
 These are guidelines, not rules. Your risk tolerance may vary.
 
-**Using the Bayes factor:**
+**What it depends on:**
 
-The `bayes_factor` field gives the raw evidence ratio, independent of the prior. Users with different prior beliefs can compute their own posteriors:
-
-$$
-\text{posterior odds} = \text{BF}_{10} \times \frac{P(H_1)}{P(H_0)}
-$$
-
-$$
-P(\text{leak}) = \frac{\text{posterior odds}}{1 + \text{posterior odds}}
-$$
-
-For example, if BF₁₀ = 5 and you believe $P(H_0) = 0.9$ (9:1 odds favoring no leak):
-- Prior odds = 1/9 ≈ 0.11
-- Posterior odds = 5 × 0.11 ≈ 0.56
-- P(leak) ≈ 36%
+- `min_effect_of_concern`: Effects below this threshold don't count as "leaks." Default 10ns.
+- Measurement noise: Higher noise → wider posterior → more uncertainty.
+- Sample size: More samples → narrower posterior → more decisive probabilities.
 
 **What it is not:**
 
-- Not a confidence level
-- Not a p-value
-- Not the probability of being hacked
-
-It's the probability that timing depends on input, given reasonable priors about effect sizes.
+- Not a frequentist p-value
+- Not the probability of being exploited (see `exploitability` for that)
+- Not sensitive to "any nonzero effect"—only effects you've said you care about
 
 ### 5.2 CI Gate
 
-The CI gate provides a binary pass/fail with controlled false positive rate.
+The CI gate provides a binary pass/fail with controlled false positive rate, testing whether the effect exceeds `min_effect_of_concern` (θ) using the SILENT relevant-hypothesis framework.
 
 **Semantics:**
 
-- `passed: true` means the maximum quantile difference did not exceed the permutation threshold at the $\alpha$ level
-- `passed: false` means the maximum quantile difference exceeded the threshold
+- `passed: true` means $\hat{Q}_{max} \leq c^*_{1-\alpha}$ (the studentized excess-over-threshold doesn't exceed the bootstrap critical value)
+- `passed: false` means the test statistic exceeded the critical value, indicating a likely leak above θ
+
+**FPR guarantee:** When the true effect is ≤ θ, the gate fails at most α of the time. Crucially, this holds *at the boundary* (true effect = θ), not just when effect = 0. This is what distinguishes the SILENT approach from naive "test + filter" methods.
+
+- Code with no timing leak: fails ≤ α ✓
+- Code with a 5ns leak when θ = 10ns: fails ≤ α ✓ (below threshold)
+- Code with a 10ns leak when θ = 10ns: fails ≈ α ✓ (at boundary—properly calibrated)
+- Code with a 15ns leak when θ = 10ns: usually fails ✓ (above threshold, good power)
+
+**Key fields:**
+
+- `max_distance_ns`: The raw observed distance $d = \max_k |q_F(k) - q_R(k)|$ in nanoseconds—the most interpretable measure
+- `q_hat_max`: The test statistic. In continuous mode: $\hat{Q}_{max} = \max_k (A_k - \theta) / \hat{\sigma}_k$ (studentized). In discrete mode: $\sqrt{n} \cdot \max_k(A_k - \theta)$ (not studentized)
+- `margin`: $c^* - \hat{Q}_{max}$. Positive = passed with room to spare; negative = failed
+- `discrete_mode`: Whether the m-out-of-n bootstrap with mid-quantiles was used (for low-resolution timers)
+- `filtered_quantile_count`: How many quantiles were excluded due to high variance (transparency)
 
 **Relationship to Bayesian layer:**
 
-The gate and posterior usually agree, but can diverge:
+Both layers use the same threshold θ, so they typically agree:
 
 | CI Gate | Posterior | Interpretation |
 |---------|-----------|----------------|
-| Pass | Low | Clean bill of health |
-| Pass | Medium | Small effect below detection threshold |
-| Fail | High | Clear leak |
-| Fail | Medium | Detected but effect is small |
+| Pass | Low | Clean: effect is below threshold |
+| Pass | High | Rare: posterior sees mass above θ that CI didn't flag (edge case) |
+| Fail | High | Clear leak above threshold |
+| Fail | Low | Rare: CI flagged something posterior doesn't (edge case) |
 
-When they diverge, trust the gate for CI decisions (it controls FPR) and use the posterior for understanding magnitude.
+Divergence is uncommon because both use the same θ. When it happens, it's usually due to posterior uncertainty (wide credible interval straddling θ) vs the CI gate's hard cutoff.
 
 ### 5.3 Effect Size
 
@@ -1293,21 +1822,6 @@ The effect is in nanoseconds. A 50ns shift means the fixed input takes about 50n
 
 The 95% credible interval gives uncertainty bounds. If it's [20ns, 80ns], you're 95% confident the true effect is in that range.
 
-**Indeterminate pattern:**
-
-When neither shift nor tail is statistically significant (both within 2 standard errors of zero), the pattern is `Indeterminate`. This typically means:
-- The effect is very small (near the noise floor)
-- The effect has an unusual shape not captured by shift+tail
-- Check the model fit diagnostic for the latter case
-
-**Mixed pattern:**
-
-When both shift and tail are significant, the pattern is `Mixed`. This can indicate either:
-- A genuine combination of both effects (e.g., a code path that's both slower overall and has more variable cache behavior)
-- A non-linear pattern (e.g., "hockey stick" affecting only P90) that the linear model approximates as shift+tail
-
-If `diagnostics.model_fit_ok` is false alongside a `Mixed` pattern, inspect `ci_gate.observed` for the raw quantile differences—the true pattern may not decompose cleanly into shift and tail components.
-
 ### 5.4 Exploitability
 
 The `Exploitability` enum provides a rough assessment of practical risk, based on Crosby et al. (2009)⁶ which measured timing attack resolution across network conditions:
@@ -1323,13 +1837,10 @@ The `Exploitability` enum provides a rough assessment of practical risk, based o
 
 **Caveats:**
 
-- These are heuristics based on 2009 measurements, not guarantees
-- Modern networks and attacks may achieve better resolution
+- These are heuristics, not guarantees
 - Actual exploitability depends on many factors (network jitter, attacker capabilities, protocol specifics)
+- Modern attacks may achieve better resolution than the 2009 study
 - Even "Negligible" leaks should be fixed if practical
-- **Amplification attacks**: These thresholds assume single-query attacks. Amplification attacks (e.g., Lucky13⁷) can exploit smaller timing differences if the attacker can trigger them repeatedly within a protocol. A 100ns leak in a byte-by-byte comparison loop, queried millions of times, becomes exploitable even at "Negligible" magnitude.
-
-⁷ AlFardan, N. J. & Paterson, K. G. (2013). "Lucky Thirteen: Breaking the TLS and DTLS Record Protocols." IEEE S&P. Exploited timing differences around 1μs using ~2²³ queries.
 
 ### 5.5 Quality Assessment
 
@@ -1365,17 +1876,7 @@ When quality is `TooNoisy`, consider:
 - Running on dedicated hardware or in single-user mode
 - Using a platform with better timer resolution (x86_64 with rdtsc, or ARM with perf_event)
 
-### 5.6 Diagnostics
-
-Check the `diagnostics` field for potential issues:
-
-**Non-stationarity** (`stationarity_ok: false`): The noise level changed between calibration and inference. Results may be unreliable. Consider re-running when the system is more stable.
-
-**Model fit** (`model_fit_ok: false`): The observed quantile differences don't fit the shift+tail model well. The CI gate result is still valid, but the effect decomposition may be misleading. Inspect `ci_gate.observed` for the raw quantile differences.
-
-**Outlier asymmetry** (`outlier_asymmetry_ok: false`): One class had substantially more outliers than the other. This asymmetry may itself indicate a timing leak (heavy tail in one class). Consider re-running with a higher outlier threshold.
-
-### 5.7 Reliability Handling
+### 5.6 Reliability Handling
 
 Some tests may be unreliable on certain platforms due to timer limitations or environmental factors.
 
@@ -1391,7 +1892,6 @@ impl Outcome {
 A result is reliable if:
 - Measurement completed (not `Unmeasurable`)
 - Quality is not `TooNoisy`, OR posterior is conclusive ($< 0.1$ or $> 0.9$)
-- No critical diagnostic failures
 
 The rationale: conclusive posteriors overcame the noise, so the signal was strong enough.
 
@@ -1415,36 +1915,52 @@ Environment variable `TIMING_ORACLE_UNRELIABLE_POLICY` can override: set to `fai
 
 | Symbol | Meaning |
 |--------|---------|
-| $\Delta$ | 9-dimensional vector of signed quantile differences |
-| $\Delta_p$ | Quantile difference at percentile $p$ |
-| $\Sigma_0$ | Null covariance matrix of $\Delta$ (estimated via paired bootstrap) |
-| $\Sigma_1$ | Alternative covariance (leak hypothesis) |
+| $\Delta$ | 9-dimensional vector of signed quantile differences (Bayesian layer) |
+| $\Delta_p$ | Quantile difference at percentile $p$: $\hat{q}_F(p) - \hat{q}_R(p)$ |
+| $A_k$ | Absolute quantile difference at level $k$: $|\hat{q}_F(k) - \hat{q}_R(k)|$ |
+| $d$ | Max distance: $\max_k A_k$ |
+| $\hat{Q}_{max}$ | CI gate test statistic (continuous): $\max_{k \in K_{\text{sub}}^{\text{max}}} (A_k - \theta) / \hat{\sigma}_k$ — studentized |
+| $\hat{Q}$ | CI gate test statistic (discrete): $\sqrt{n} \cdot \max_{k \in K_{\text{sub}}} (A_k - \theta)$ — not studentized |
+| $\hat{Q}^*_{max}$ | Bootstrap statistic (continuous): $\max_k (A^*_k - A_k) / \hat{\sigma}_k$ |
+| $\hat{Q}^*$ | Bootstrap statistic (discrete): $\sqrt{m_1} \cdot \max_k (A^*_k - A_k)$ |
+| $c^*_{1-\alpha}$ | Bootstrap critical value for CI gate |
+| $K_{\text{sub}}$, $K_{\text{sub}}^{\text{max}}$ | Filtered subset of quantiles (high-variance excluded) |
+| $\hat{\sigma}_k$ | Bootstrap-estimated standard deviation of $A_k$ (for filtering AND studentization) |
+| $\Sigma_0$ | Null covariance matrix for Bayesian layer (estimated via bootstrap) |
 | $X$ | $9 \times 2$ design matrix $[\mathbf{1} \mid \mathbf{b}_{\text{tail}}]$ |
-| $\beta = (\mu, \tau)^\top$ | Effect parameters: shift and tail |
+| $\beta = (\mu, \tau)^\top$ | Effect parameters: uniform shift and tail effect |
 | $\Lambda_0$ | Prior covariance for $\beta$ |
-| $\text{BF}_{10}$ | Bayes factor for $H_1$ vs $H_0$ |
-| $\alpha$ | CI gate false positive rate |
-| MDE | Minimum detectable effect (at 80% power) |
+| $\Lambda_{\text{post}}$ | Posterior covariance for $\beta$ |
+| $\theta$ | Practical significance threshold (`min_effect_of_concern`) |
+| $\alpha$ | CI gate target false positive rate |
+| MDE | Minimum detectable effect |
 | $K$ | Batch size for adaptive batching |
 | $n$ | Samples per class |
-| $B$ | Bootstrap/permutation iterations |
+| $m_1$ | Resample size for discrete mode: $\lfloor n^{2/3} \rfloor$ |
+| $B$ | Bootstrap iterations |
+
+**Note on continuous vs discrete mode:**
+- Continuous mode uses **studentized** statistics (dividing by $\hat{\sigma}_k$), matching SILENT's Algorithm 1
+- Discrete mode uses **non-studentized** $\sqrt{n}$-scaled statistics with m-out-of-n bootstrap, matching SILENT's Algorithm 4
+- In discrete mode, bootstrap uses $\sqrt{m_1}$ while test statistic uses $\sqrt{n}$ (asymmetry per Bickel et al. 1997)
 
 ## Appendix B: Constants
 
 | Constant | Value | Rationale |
 |----------|-------|-----------|
 | Deciles | $\{0.1, 0.2, \ldots, 0.9\}$ | Nine quantile positions |
-| CI permutation iterations | $10{,}000$ | Sufficient for stable threshold estimation |
-| Covariance bootstrap iterations | $2{,}000$ | Balance between accuracy and speed |
-| Min samples per class | $200$ | Below this, extreme quantile estimation is unreliable |
+| CI bootstrap iterations (default) | $2{,}000$ | Balance between accuracy and CI speed |
+| CI bootstrap iterations (thorough) | $10{,}000$ | For local investigation / nightly |
+| Covariance bootstrap iterations | $2{,}000$ | Same as CI gate default |
+| Posterior samples | $1{,}000$ | For leak probability Monte Carlo integration |
+| Variance filter cutoff | $4 \times$ median | Exclude quantiles with $\hat{\sigma}_k^2 > 4 \cdot \text{median}$ |
 | Min ticks per call | $5$ | Below this, quantization noise dominates |
 | Target ticks per batch | $50$ | Target for adaptive batching |
 | Max batch size | $20$ | Limit microarchitectural artifacts |
 | Anomaly detection window | $1{,}000$ | Samples to track for uniqueness |
 | Anomaly detection threshold | $0.5$ | Warn if $< 50\%$ unique values |
-| Default prior $P(H_0)$ | $0.75$ | Conservative prior favoring no leak |
 | Default $\alpha$ | $0.01$ | 1% false positive rate |
-| Default min effect | $10$ ns | Effects below this are negligible |
+| Default min effect | $10$ ns | Threshold for significant leak |
 
 ## Appendix C: References
 
@@ -1452,27 +1968,33 @@ Environment variable `TIMING_ORACLE_UNRELIABLE_POLICY` can override: set to `fai
 
 1. Dunsche, M., Lamp, M., & Pöpper, C. (2024). "With Great Power Come Great Side Channels: Statistical Timing Side-Channel Analyses with Bounded Type-1 Errors." USENIX Security. — RTLF bootstrap methodology
 
-2. Künsch, H. R. (1989). "The Jackknife and the Bootstrap for General Stationary Observations." Annals of Statistics. — Block bootstrap for autocorrelated data
+2. Dunsche, M., Lamp, M., & Pöpper, C. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. — Extension supporting negligible leak thresholds
 
-3. Politis, D. N. & Romano, J. P. (1994). "The Stationary Bootstrap." JASA 89(428):1303–1313. — Block length heuristics
+3. Künsch, H. R. (1989). "The Jackknife and the Bootstrap for General Stationary Observations." Annals of Statistics. — Block bootstrap for autocorrelated data
 
-4. Hyndman, R. J. & Fan, Y. (1996). "Sample quantiles in statistical packages." The American Statistician 50(4):361–365. — R-7 quantile interpolation
+4. Politis, D. N. & Romano, J. P. (1994). "The Stationary Bootstrap." JASA 89(428):1303–1313. — Block length heuristics
 
-5. Bishop, C. M. (2006). Pattern Recognition and Machine Learning, Ch. 3. Springer. — Bayesian linear regression
+5. Bickel, P. J., Götze, F., & van Zwet, W. R. (1997). "Resampling Fewer Than n Observations: Gains, Losses, and Remedies for Losses." Statistica Sinica 7:1–31. — m-out-of-n bootstrap theory; establishes that $\sqrt{m}(\hat{\theta}^*_m - \hat{\theta}_n)$ approximates the distribution of $\sqrt{n}(\hat{\theta}_n - \theta)$
 
-6. Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420. — Online variance algorithm
+6. Hyndman, R. J. & Fan, Y. (1996). "Sample quantiles in statistical packages." The American Statistician 50(4):361–365. — R-7 quantile interpolation
 
-7. Chan, T. F., Golub, G. H., & LeVeque, R. J. (1983). "Algorithms for Computing the Sample Variance." The American Statistician 37(3):242–247. — Parallel Welford extension
+7. Bishop, C. M. (2006). Pattern Recognition and Machine Learning, Ch. 3. Springer. — Bayesian linear regression
+
+8. Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420. — Online variance algorithm
+
+9. Chan, T. F., Golub, G. H., & LeVeque, R. J. (1983). "Algorithms for Computing the Sample Variance." The American Statistician 37(3):242–247. — Parallel Welford extension
 
 **Timing attacks:**
 
-8. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — DudeCT methodology
+10. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — DudeCT methodology
 
-9. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. — Exploitability thresholds. Key findings: LAN resolution ~100ns with thousands of measurements; internet ~15–100µs.
+11. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. — Exploitability thresholds. Key findings: LAN resolution ~100ns with thousands of measurements; internet ~15–100µs.
 
-10. AlFardan, N. J. & Paterson, K. G. (2013). "Lucky Thirteen: Breaking the TLS and DTLS Record Protocols." IEEE S&P. — Amplification attacks exploiting ~1μs timing differences.
+12. Kario, H. — tlsfuzzer timing analysis. Argues that timing differences as small as one clock cycle can be detectable over local networks. Cited by SILENT as the "strict" alternative to Crosby's thresholds.
+
+13. Bernstein, D. J. et al. (2024). "KyberSlash." — Timing vulnerability in Kyber reference implementation due to secret-dependent division. ~20-cycle leak on ARM Cortex-A7. Used by SILENT to demonstrate threshold-dependent conclusions.
 
 **Existing tools:**
 
-11. dudect (C): https://github.com/oreparaz/dudect
-12. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
+14. dudect (C): https://github.com/oreparaz/dudect
+15. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
