@@ -180,6 +180,7 @@ fn diagnostics_all_ok_constructor() {
     assert!(diag.stationarity_ok);
     assert!(diag.model_fit_ok);
     assert!(diag.outlier_asymmetry_ok);
+    assert!(diag.preflight_ok);
     assert!(diag.warnings.is_empty());
     assert!(diag.all_checks_passed());
 }
@@ -187,6 +188,8 @@ fn diagnostics_all_ok_constructor() {
 #[test]
 fn diagnostics_all_checks_passed_all_true() {
     let diag = Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
         model_fit_chi2: 5.0,
@@ -194,6 +197,11 @@ fn diagnostics_all_checks_passed_all_true() {
         outlier_rate_fixed: 0.001,
         outlier_rate_random: 0.001,
         outlier_asymmetry_ok: true,
+        filtered_quantiles: vec![],
+        discrete_mode: false,
+        timer_resolution_ns: 1.0,
+        duplicate_fraction: 0.0,
+        preflight_ok: true,
         warnings: vec![],
     };
     assert!(diag.all_checks_passed());
@@ -203,6 +211,8 @@ fn diagnostics_all_checks_passed_all_true() {
 fn diagnostics_all_checks_passed_one_false() {
     // stationarity_ok = false
     let diag1 = Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
         model_fit_chi2: 5.0,
@@ -210,12 +220,19 @@ fn diagnostics_all_checks_passed_one_false() {
         outlier_rate_fixed: 0.001,
         outlier_rate_random: 0.001,
         outlier_asymmetry_ok: true,
+        filtered_quantiles: vec![],
+        discrete_mode: false,
+        timer_resolution_ns: 1.0,
+        duplicate_fraction: 0.0,
+        preflight_ok: true,
         warnings: vec![],
     };
     assert!(!diag1.all_checks_passed());
 
     // model_fit_ok = false
     let diag2 = Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
         model_fit_chi2: 50.0,
@@ -223,12 +240,19 @@ fn diagnostics_all_checks_passed_one_false() {
         outlier_rate_fixed: 0.001,
         outlier_rate_random: 0.001,
         outlier_asymmetry_ok: true,
+        filtered_quantiles: vec![],
+        discrete_mode: false,
+        timer_resolution_ns: 1.0,
+        duplicate_fraction: 0.0,
+        preflight_ok: true,
         warnings: vec![],
     };
     assert!(!diag2.all_checks_passed());
 
     // outlier_asymmetry_ok = false
     let diag3 = Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
         model_fit_chi2: 5.0,
@@ -236,6 +260,11 @@ fn diagnostics_all_checks_passed_one_false() {
         outlier_rate_fixed: 0.1,
         outlier_rate_random: 0.001,
         outlier_asymmetry_ok: false,
+        filtered_quantiles: vec![],
+        discrete_mode: false,
+        timer_resolution_ns: 1.0,
+        duplicate_fraction: 0.0,
+        preflight_ok: true,
         warnings: vec![],
     };
     assert!(!diag3.all_checks_passed());
@@ -244,6 +273,8 @@ fn diagnostics_all_checks_passed_one_false() {
 #[test]
 fn diagnostics_all_checks_passed_all_false() {
     let diag = Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
         model_fit_chi2: 50.0,
@@ -251,6 +282,11 @@ fn diagnostics_all_checks_passed_all_false() {
         outlier_rate_fixed: 0.1,
         outlier_rate_random: 0.001,
         outlier_asymmetry_ok: false,
+        filtered_quantiles: vec![],
+        discrete_mode: false,
+        timer_resolution_ns: 1.0,
+        duplicate_fraction: 0.0,
+        preflight_ok: false,
         warnings: vec!["warning".to_string()],
     };
     assert!(!diag.all_checks_passed());
@@ -645,4 +681,137 @@ fn outcome_unmeasurable_json_roundtrip() {
         }
         _ => panic!("Expected Unmeasurable variant"),
     }
+}
+
+// ============================================================================
+// AttackerModel tests
+// ============================================================================
+
+use timing_oracle::AttackerModel;
+
+#[test]
+fn attacker_model_default_is_lan_conservative() {
+    assert_eq!(AttackerModel::default(), AttackerModel::LANConservative);
+}
+
+#[test]
+fn attacker_model_to_threshold_ns_nanosecond_presets() {
+    // These presets don't need CPU freq or timer resolution
+    assert_eq!(
+        AttackerModel::LANConservative.to_threshold_ns(None, None),
+        Some(100.0)
+    );
+    assert_eq!(
+        AttackerModel::WANOptimistic.to_threshold_ns(None, None),
+        Some(15_000.0)
+    );
+    assert_eq!(
+        AttackerModel::WANConservative.to_threshold_ns(None, None),
+        Some(50_000.0)
+    );
+    assert_eq!(
+        AttackerModel::Research.to_threshold_ns(None, None),
+        Some(0.0)
+    );
+}
+
+#[test]
+fn attacker_model_to_threshold_ns_cycle_presets() {
+    // 3 GHz CPU: 1 cycle = 1/3 ns
+    let cpu_freq = Some(3.0);
+
+    // LocalCycles and LANStrict: 2 cycles = 2/3 ns ≈ 0.667 ns
+    let threshold = AttackerModel::LocalCycles.to_threshold_ns(cpu_freq, None);
+    assert!(threshold.is_some());
+    assert!((threshold.unwrap() - 2.0 / 3.0).abs() < 0.001);
+
+    let threshold = AttackerModel::LANStrict.to_threshold_ns(cpu_freq, None);
+    assert!(threshold.is_some());
+    assert!((threshold.unwrap() - 2.0 / 3.0).abs() < 0.001);
+
+    // KyberSlashSentinel: 10 cycles = 10/3 ns ≈ 3.333 ns
+    let threshold = AttackerModel::KyberSlashSentinel.to_threshold_ns(cpu_freq, None);
+    assert!(threshold.is_some());
+    assert!((threshold.unwrap() - 10.0 / 3.0).abs() < 0.001);
+
+    // Without CPU freq, returns None
+    assert_eq!(AttackerModel::LocalCycles.to_threshold_ns(None, None), None);
+    assert_eq!(AttackerModel::LANStrict.to_threshold_ns(None, None), None);
+}
+
+#[test]
+fn attacker_model_to_threshold_ns_tick_preset() {
+    // LocalCoarseTimer uses timer resolution
+    let timer_res = Some(41.0); // 41 ns per tick
+
+    let threshold = AttackerModel::LocalCoarseTimer.to_threshold_ns(None, timer_res);
+    assert_eq!(threshold, Some(41.0));
+
+    // Without timer resolution, returns None
+    assert_eq!(
+        AttackerModel::LocalCoarseTimer.to_threshold_ns(None, None),
+        None
+    );
+}
+
+#[test]
+fn attacker_model_custom_ns() {
+    let model = AttackerModel::CustomNs { threshold_ns: 250.0 };
+    assert_eq!(model.to_threshold_ns(None, None), Some(250.0));
+}
+
+#[test]
+fn attacker_model_custom_cycles() {
+    let model = AttackerModel::CustomCycles { threshold_cycles: 50 };
+    // 3 GHz: 50 cycles = 50/3 ns ≈ 16.67 ns
+    let threshold = model.to_threshold_ns(Some(3.0), None);
+    assert!(threshold.is_some());
+    assert!((threshold.unwrap() - 50.0 / 3.0).abs() < 0.001);
+
+    // Without CPU freq, returns None
+    assert_eq!(model.to_threshold_ns(None, None), None);
+}
+
+#[test]
+fn attacker_model_custom_ticks() {
+    let model = AttackerModel::CustomTicks { threshold_ticks: 5 };
+    // 41 ns per tick: 5 ticks = 205 ns
+    let threshold = model.to_threshold_ns(None, Some(41.0));
+    assert_eq!(threshold, Some(205.0));
+
+    // Without timer resolution, returns None
+    assert_eq!(model.to_threshold_ns(None, None), None);
+}
+
+#[test]
+fn attacker_model_is_cycle_based() {
+    assert!(AttackerModel::LocalCycles.is_cycle_based());
+    assert!(AttackerModel::LANStrict.is_cycle_based());
+    assert!(AttackerModel::KyberSlashSentinel.is_cycle_based());
+    assert!(AttackerModel::CustomCycles { threshold_cycles: 10 }.is_cycle_based());
+
+    assert!(!AttackerModel::LANConservative.is_cycle_based());
+    assert!(!AttackerModel::WANOptimistic.is_cycle_based());
+    assert!(!AttackerModel::LocalCoarseTimer.is_cycle_based());
+    assert!(!AttackerModel::CustomNs { threshold_ns: 100.0 }.is_cycle_based());
+}
+
+#[test]
+fn attacker_model_is_tick_based() {
+    assert!(AttackerModel::LocalCoarseTimer.is_tick_based());
+    assert!(AttackerModel::CustomTicks { threshold_ticks: 5 }.is_tick_based());
+
+    assert!(!AttackerModel::LocalCycles.is_tick_based());
+    assert!(!AttackerModel::LANConservative.is_tick_based());
+    assert!(!AttackerModel::WANOptimistic.is_tick_based());
+    assert!(!AttackerModel::CustomCycles { threshold_cycles: 10 }.is_tick_based());
+}
+
+#[test]
+fn attacker_model_description() {
+    // Just verify descriptions are non-empty and descriptive
+    assert!(AttackerModel::LocalCycles.description().contains("2 cycles"));
+    assert!(AttackerModel::LANConservative.description().contains("100ns"));
+    assert!(AttackerModel::WANOptimistic.description().contains("15μs"));
+    assert!(AttackerModel::Research.description().contains("θ→0"));
 }

@@ -65,12 +65,29 @@ cargo run --example <name>
 
 ## Key Patterns
 
+### Choosing an Attacker Model
+
+Select a threat model that matches your deployment scenario:
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+// Internet-facing API
+let oracle = TimingOracle::for_attacker(AttackerModel::WANConservative);
+
+// Internal LAN service
+let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative);
+
+// SGX or shared hosting (strictest)
+let oracle = TimingOracle::for_attacker(AttackerModel::LocalCycles);
+```
+
 ### Correct Input Generation
 
 All examples use InputPair to pre-generate inputs:
 
 ```rust
-use timing_oracle::helpers::InputPair;
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
 
 // Pre-generate BEFORE measurement
 let inputs = InputPair::new(
@@ -78,11 +95,9 @@ let inputs = InputPair::new(
     || rand::random(),      // Random generator
 );
 
-// Both closures execute identical code paths
-let result = test(
-    || operation(inputs.fixed()),
-    || operation(inputs.random()),
-);
+// Use attacker model + InputPair
+let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .test(inputs, |data| operation(data));
 ```
 
 ### Common Mistakes to Avoid

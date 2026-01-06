@@ -82,8 +82,30 @@ The timing oracle follows a multi-layer analysis pipeline:
 - `Exploitability` - Negligible (<100ns), PossibleLAN (100-500ns), LikelyLAN (500ns-20μs), PossibleRemote (>20μs)
 - `MeasurementQuality` - Excellent (<5ns MDE), Good (5-20ns), Poor (20-100ns), TooNoisy (>100ns)
 - `MinDetectableEffect` - Minimum detectable shift_ns and tail_ns
+- `AttackerModel` - Threat model presets for minimum effect thresholds (see below)
 - `Class::Baseline` / `Class::Sample` - Input class identifiers
 - `InputPair<T>` - Helper for generating baseline/sample test inputs via closures
+
+### Attacker Model Presets
+
+**There is no single correct threshold (θ).** Your choice of attacker model is a statement about your threat model. The library provides presets based on academic research:
+
+| Preset | θ | Use case |
+|--------|---|----------|
+| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting, local privilege escalation |
+| `LocalCoarseTimer` | 1 tick | Sandboxed environments with coarse timers |
+| `LANStrict` | 2 cycles | High-security LAN (Kario-style, most strict) |
+| `LANConservative` | 100 ns | Internal services, microservices (Crosby-style) |
+| `WANOptimistic` | 15 μs | Same-region cloud, low-jitter internet paths |
+| `WANConservative` | 50 μs | Public APIs, general internet exposure |
+| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto, catch ~20-cycle leaks |
+| `Research` | 0 | Academic analysis, detect any difference (not for CI) |
+
+**The LAN dispute:** `LANStrict` vs `LANConservative` represents a genuine dispute in the literature:
+- **Kario** argues timing differences as small as one clock cycle can be detectable over LAN
+- **Crosby et al. (2009)** reports ~100ns accuracy over local networks
+
+Pick based on your threat model, not convenience. For cycle-based presets on coarse timers, the library warns when the threshold would be smaller than the timer resolution.
 
 ### Adaptive Batching
 
@@ -184,17 +206,22 @@ See `TESTING.md` for detailed documentation of each test category.
 ## API Usage Pattern
 
 ```rust
-// Recommended: TimingOracle with InputPair
-use timing_oracle::{TimingOracle, Outcome, helpers::InputPair};
+// Recommended: Use attacker model presets to define your threat model
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 let inputs = InputPair::new(
     || [0u8; 32],                 // Baseline: closure returning all zeros
     || rand::random::<[u8; 32]>() // Sample: closure returning random data
 );
 
-let outcome = TimingOracle::balanced()  // 20k samples, ~1s per test
-    .alpha(0.01)                        // 1% false positive rate
-    .min_effect_ns(10.0)                // Minimum effect of concern
+// Choose attacker model based on your threat scenario:
+// - Public API? Use WANConservative (50μs threshold)
+// - Internal LAN service? Use LANConservative (100ns threshold)
+// - SGX/shared hosting? Use LocalCycles (2 cycles threshold)
+// - Post-quantum crypto? Use KyberSlashSentinel (10 cycles threshold)
+
+let outcome = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)              // Optional: adjust sample count
     .test(inputs, |data| {
         my_crypto_function(data);
     });
@@ -208,21 +235,70 @@ match outcome {
         eprintln!("Skipping: {}", recommendation);
     }
 }
+```
+
+### Choosing an Attacker Model
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+// Internet-facing API: attacker measures over general internet
+TimingOracle::for_attacker(AttackerModel::WANConservative)  // θ = 50μs
+
+// Internal microservice: attacker on local network
+TimingOracle::for_attacker(AttackerModel::LANConservative)  // θ = 100ns
+
+// High-security LAN (strict interpretation)
+TimingOracle::for_attacker(AttackerModel::LANStrict)        // θ = 2 cycles
+
+// SGX enclave or shared hosting: co-resident attacker
+TimingOracle::for_attacker(AttackerModel::LocalCycles)      // θ = 2 cycles
+
+// Post-quantum crypto (catch KyberSlash-class bugs)
+TimingOracle::for_attacker(AttackerModel::KyberSlashSentinel) // θ = 10 cycles
+
+// Research/debugging: detect any statistical difference
+TimingOracle::for_attacker(AttackerModel::Research)         // θ → 0
+
+// Custom threshold
+TimingOracle::for_attacker(AttackerModel::CustomNs { threshold_ns: 500.0 })
+```
+
+### Combining Presets
+
+```rust
+// Attacker model + sample count preset
+TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)  // Faster than default 100k
+
+// Or start with sample preset, add attacker model
+TimingOracle::balanced()
+    .attacker_model(AttackerModel::WANConservative)
 
 // CI integration with environment variable overrides
-let outcome = TimingOracle::balanced()
-    .from_env()  // Override with TO_SAMPLES, TO_ALPHA, TO_MIN_EFFECT_NS env vars
+TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .from_env()  // Override with TO_SAMPLES, TO_ALPHA env vars
     .test(inputs, |data| my_function(data));
+```
+
+### Legacy: Manual Threshold (not recommended)
+
+For backwards compatibility, you can still set thresholds manually:
+
+```rust
+// Not recommended - use attacker models instead
+TimingOracle::balanced()
+    .min_effect_ns(100.0)  // Manual threshold in nanoseconds
 ```
 
 ### Macro API (with `macros` feature)
 
 ```rust
-use timing_oracle::{timing_test, timing_test_checked};
+use timing_oracle::{timing_test, timing_test_checked, TimingOracle, AttackerModel};
 
 // timing_test! returns TestResult directly (panics if unmeasurable)
 let result = timing_test! {
-    oracle: TimingOracle::balanced(),
+    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
     baseline: || [0u8; 32],
     sample: || rand::random::<[u8; 32]>(),
     measure: |input| my_function(&input),
@@ -231,6 +307,7 @@ assert!(result.ci_gate.passed);
 
 // timing_test_checked! returns Outcome for explicit unmeasurable handling
 let outcome = timing_test_checked! {
+    oracle: TimingOracle::for_attacker(AttackerModel::WANConservative),
     baseline: || [0u8; 32],
     sample: || rand::random::<[u8; 32]>(),
     measure: |input| my_function(&input),
@@ -241,24 +318,29 @@ let outcome = timing_test_checked! {
 
 ### Configuration Presets
 
-Choose the right preset for your use case to balance speed and accuracy:
+**Sample count presets** control speed vs accuracy. Combine with attacker models:
 
 ```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
 // Default - Most accurate, slowest (~5-10 seconds per test)
 // 100k samples, 10,000 CI bootstrap, 2,000 covariance bootstrap
-TimingOracle::new()
+TimingOracle::for_attacker(AttackerModel::LANConservative)
 
 // Balanced - Recommended for production (~1-2 seconds per test)
 // 20k samples, 100 CI bootstrap, 50 covariance bootstrap
-TimingOracle::balanced()
+TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)
 
 // Quick - Fast iteration during development (~0.2-0.5 seconds per test)
 // 5k samples, 50 CI bootstrap, 50 covariance bootstrap
 TimingOracle::quick()
+    .attacker_model(AttackerModel::LANConservative)
 
 // Calibration - For running many trials (100+) (~0.1-0.2 seconds per test)
 // 2k samples, 30 CI bootstrap, 20 covariance bootstrap
 TimingOracle::calibration()
+    .attacker_model(AttackerModel::Research)
 ```
 
 ### Parallel Processing
@@ -310,10 +392,11 @@ cargo build --no-default-features
 Results may be unreliable on noisy systems or with coarse timers. Use the reliability macros:
 
 ```rust
-use timing_oracle::{skip_if_unreliable, require_reliable, Outcome};
+use timing_oracle::{skip_if_unreliable, require_reliable, TimingOracle, AttackerModel, Outcome};
 
 // Fail-open: Skip test if unreliable (returns early)
-let outcome = TimingOracle::new().test(inputs, |d| op(d));
+let outcome = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .test(inputs, |d| op(d));
 let result = skip_if_unreliable!(outcome, "test_name");
 
 // Fail-closed: Panic if unreliable

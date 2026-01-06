@@ -131,6 +131,7 @@ fn test_anomaly_detection_low_entropy() {
     assert!(anomaly.unwrap().contains("WARNING"));
 }
 
+#[allow(dead_code)]
 fn xor_bytes(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
     let mut result = [0u8; 32];
     for i in 0..32 {

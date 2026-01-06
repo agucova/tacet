@@ -1,5 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use timing_oracle::{FailCriterion, TimingOracle};
+use timing_oracle::{helpers::InputPair, TimingOracle};
 
 fn bench_oracle_simple(c: &mut Criterion) {
     let mut group = c.benchmark_group("timing_oracle");
@@ -7,19 +7,31 @@ fn bench_oracle_simple(c: &mut Criterion) {
     group.bench_function("baseline_addition", |b| {
         b.iter(|| {
             // Empty timing oracle run on trivial closures; keeps samples small to avoid long benches.
+            let inputs = InputPair::new(|| 1u64, || 2u64);
             let result = TimingOracle::new()
                 .samples(500)
-                .test(|| black_box(1u64 + 1), || black_box(2u64 + 2));
-            black_box(result.leak_probability)
+                .test(inputs, |x| {
+                    black_box(x + 1);
+                });
+            match result {
+                timing_oracle::Outcome::Completed(r) => black_box(r.leak_probability),
+                timing_oracle::Outcome::Unmeasurable { .. } => 0.0,
+            }
         });
     });
 
-    group.bench_function("ci_builder_probability_fail", |b| {
+    group.bench_function("balanced_preset", |b| {
         b.iter(|| {
-            let _ = TimingOracle::ci_test()
+            let inputs = InputPair::new(|| 3u64, || 4u64);
+            let result = TimingOracle::balanced()
                 .samples(500)
-                .fail_on(FailCriterion::Probability(0.0))
-                .run(|| black_box(3u64 + 3), || black_box(4u64 + 4));
+                .test(inputs, |x| {
+                    black_box(x + 1);
+                });
+            match result {
+                timing_oracle::Outcome::Completed(r) => black_box(r.ci_gate.passed),
+                timing_oracle::Outcome::Unmeasurable { .. } => true,
+            }
         });
     });
     group.finish();

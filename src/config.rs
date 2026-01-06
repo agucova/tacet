@@ -1,5 +1,7 @@
 //! Configuration for timing analysis.
 
+use crate::types::AttackerModel;
+
 /// Configuration options for `TimingOracle`.
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -16,7 +18,19 @@ pub struct Config {
     ///
     /// Effects smaller than this won't trigger high posterior probabilities
     /// even if statistically detectable. This encodes practical relevance.
+    ///
+    /// Note: When `attacker_model` is set, this value may be overridden
+    /// at runtime based on the attacker model's threshold.
     pub min_effect_of_concern_ns: f64,
+
+    /// Attacker model preset (default: None, uses min_effect_of_concern_ns).
+    ///
+    /// When set, the attacker model's threshold is used instead of
+    /// `min_effect_of_concern_ns`. The threshold is computed at runtime
+    /// based on the timer's resolution and CPU frequency.
+    ///
+    /// See [`AttackerModel`] for available presets.
+    pub attacker_model: Option<AttackerModel>,
 
     /// Optional hard effect threshold in nanoseconds for reporting/panic.
     pub effect_threshold_ns: Option<f64>,
@@ -49,16 +63,28 @@ pub struct Config {
     /// automatically batches iterations when needed for coarse timers.
     /// Set to a specific value to override auto-detection.
     pub iterations_per_sample: IterationsPerSample,
+
+    /// Force discrete mode for testing (default: false).
+    ///
+    /// When true, discrete mode (m-out-of-n bootstrap with mid-quantiles)
+    /// is used regardless of timer resolution. This is primarily for
+    /// testing the discrete mode code path on machines with high-resolution timers.
+    ///
+    /// In production, discrete mode is triggered automatically when the
+    /// minimum uniqueness ratio < 10% (per spec §2.4).
+    pub force_discrete_mode: bool,
 }
 
 /// Configuration for iterations per timing sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default)]
 pub enum IterationsPerSample {
     /// Automatically detect based on timer resolution.
     ///
     /// On ARM64 with coarse timers (~40ns on Apple Silicon, Ampere Altra),
     /// this will batch multiple iterations per sample for reliable timing.
     /// On x86 or ARMv8.6+ (~1ns resolution), this typically uses 1 iteration.
+    #[default]
     Auto,
 
     /// Use exactly N iterations per sample.
@@ -74,6 +100,7 @@ impl Default for Config {
             warmup: 1_000,
             ci_alpha: 0.01,
             min_effect_of_concern_ns: 10.0,
+            attacker_model: None,
             effect_threshold_ns: None,
             ci_bootstrap_iterations: 10_000,  // Distribution-free FPR guarantee requires sufficient iterations
             cov_bootstrap_iterations: 2_000,  // Accurate covariance estimation for MVN test
@@ -83,15 +110,42 @@ impl Default for Config {
             max_duration_ms: None,
             measurement_seed: None,
             iterations_per_sample: IterationsPerSample::Auto,
+            force_discrete_mode: false,
         }
     }
 }
 
-impl Default for IterationsPerSample {
-    fn default() -> Self {
-        Self::Auto
+impl Config {
+    /// Resolve the minimum effect of concern in nanoseconds.
+    ///
+    /// If an attacker model is set, converts it to nanoseconds using the
+    /// provided CPU frequency and timer resolution. Otherwise, returns
+    /// the manually configured `min_effect_of_concern_ns`.
+    ///
+    /// # Arguments
+    ///
+    /// * `cpu_freq_ghz` - CPU frequency in GHz (for cycle-based models)
+    /// * `timer_resolution_ns` - Timer resolution in nanoseconds (for tick-based models)
+    ///
+    /// # Returns
+    ///
+    /// The resolved threshold in nanoseconds, or falls back to `min_effect_of_concern_ns`
+    /// if the attacker model cannot be converted (e.g., missing CPU frequency).
+    pub fn resolve_min_effect_ns(
+        &self,
+        cpu_freq_ghz: Option<f64>,
+        timer_resolution_ns: Option<f64>,
+    ) -> f64 {
+        if let Some(model) = &self.attacker_model {
+            model
+                .to_threshold_ns(cpu_freq_ghz, timer_resolution_ns)
+                .unwrap_or(self.min_effect_of_concern_ns)
+        } else {
+            self.min_effect_of_concern_ns
+        }
     }
 }
+
 
 impl IterationsPerSample {
     /// Resolve the iterations count for a given timer.

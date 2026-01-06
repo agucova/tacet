@@ -204,9 +204,34 @@ pub struct Metadata {
     pub runtime_secs: f64,
 }
 
-/// Diagnostic checks for result reliability (spec §2.8).
+/// Reason why a quantile was filtered from the CI gate test.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FilterReason {
+    /// Variance exceeds 5× mean variance threshold.
+    HighVariance,
+    /// Near-zero variance (< 1e-10) would cause division issues.
+    NearZeroVariance,
+    /// Failed power-boost filter (unlikely to contribute to detection).
+    PowerBoostFilter,
+}
+
+/// Information about a filtered quantile.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilteredQuantile {
+    /// Quantile index (0-8, corresponding to 10th-90th percentile).
+    pub index: usize,
+    /// Reason for filtering.
+    pub reason: FilterReason,
+}
+
+/// Diagnostic checks for result reliability (spec §2.8, §4.1).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostics {
+    /// Block size used for bootstrap (Politis-White automatic selection).
+    pub dependence_length: usize,
+    /// Effective sample size accounting for autocorrelation (ESS ≈ n / dependence_length).
+    pub effective_sample_size: usize,
+
     /// Non-stationarity: ratio of inference to calibration variance.
     /// Values 0.5-2.0 are normal; >5.0 indicates non-stationarity.
     pub stationarity_ratio: f64,
@@ -226,14 +251,32 @@ pub struct Diagnostics {
     /// True if outlier rates are symmetric (both <1%, ratio <3×, diff <2%).
     pub outlier_asymmetry_ok: bool,
 
+    /// Quantiles filtered from CI gate analysis with reasons.
+    pub filtered_quantiles: Vec<FilteredQuantile>,
+    /// Whether discrete timer mode was used (low timer resolution).
+    pub discrete_mode: bool,
+    /// Timer resolution in nanoseconds.
+    pub timer_resolution_ns: f64,
+    /// Fraction of samples with duplicate timing values (0.0-1.0).
+    pub duplicate_fraction: f64,
+
+    /// True if preflight checks passed (sanity, generator, system).
+    /// False indicates measurement harness issues or environmental interference.
+    pub preflight_ok: bool,
+
     /// Human-readable warnings (empty if all checks pass).
     pub warnings: Vec<String>,
 }
 
 impl Diagnostics {
     /// Create diagnostics indicating all checks passed.
+    ///
+    /// Uses placeholder values for numeric fields; prefer constructing
+    /// explicitly with actual measured values.
     pub fn all_ok() -> Self {
         Self {
+            dependence_length: 1,
+            effective_sample_size: 0, // Should be set to actual sample count
             stationarity_ratio: 1.0,
             stationarity_ok: true,
             model_fit_chi2: 0.0,
@@ -241,13 +284,18 @@ impl Diagnostics {
             outlier_rate_fixed: 0.0,
             outlier_rate_random: 0.0,
             outlier_asymmetry_ok: true,
+            filtered_quantiles: Vec::new(),
+            discrete_mode: false,
+            timer_resolution_ns: 1.0,
+            duplicate_fraction: 0.0,
+            preflight_ok: true,
             warnings: Vec::new(),
         }
     }
 
     /// Check if all diagnostics are OK.
     pub fn all_checks_passed(&self) -> bool {
-        self.stationarity_ok && self.model_fit_ok && self.outlier_asymmetry_ok
+        self.stationarity_ok && self.model_fit_ok && self.outlier_asymmetry_ok && self.preflight_ok
     }
 }
 
@@ -259,6 +307,7 @@ impl Diagnostics {
 ///
 /// Distinguishes between successful analysis and unmeasurable operations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)] // Completed path is hot; avoid Box indirection
 pub enum Outcome {
     /// Analysis completed successfully.
     Completed(TestResult),

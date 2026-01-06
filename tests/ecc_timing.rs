@@ -326,13 +326,13 @@ fn x25519_byte_pattern_independence() {
             let mut scalar = [0u8; 32];
             if *pattern_type == 0 {
                 // Sequential pattern
-                for i in 0..32 {
-                    scalar[i] = i as u8;
+                for (i, byte) in scalar.iter_mut().enumerate() {
+                    *byte = i as u8;
                 }
             } else {
                 // Scattered pattern (reverse)
-                for i in 0..32 {
-                    scalar[i] = (31 - i) as u8;
+                for (i, byte) in scalar.iter_mut().enumerate() {
+                    *byte = (31 - i) as u8;
                 }
             }
             let result = x25519(scalar, basepoint);

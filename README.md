@@ -79,26 +79,42 @@ Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are har
 
 ### Configuration
 
-Configure via the `oracle:` field:
+Configure via the `oracle:` field with an **attacker model** that defines your threat scenario:
 
 ```rust
+use timing_oracle::{timing_test, TimingOracle, AttackerModel};
+
 timing_test! {
-    oracle: TimingOracle::new(),  // 100k samples (~5s)
+    // Choose your threat model:
+    // - WANConservative (50μs): Public APIs, internet-facing
+    // - LANConservative (100ns): Internal services
+    // - LocalCycles (2 cycles): SGX, shared hosting
+    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
     baseline: || my_fixed_input,
     sample: || generate_random(),
     measure: |input| operation(&input),
 }
 ```
 
-Presets: `TimingOracle::quick()` (~0.3s), `::balanced()` (~1s, default), `::new()` (~5s).
+**Attacker Model Presets:**
 
-For fine-grained control:
+| Preset | Threshold | Use case |
+|--------|-----------|----------|
+| `WANConservative` | 50 μs | Public APIs, general internet |
+| `WANOptimistic` | 15 μs | Low-jitter cloud paths |
+| `LANConservative` | 100 ns | Internal services (Crosby-style) |
+| `LANStrict` | 2 cycles | High-security LAN (Kario-style) |
+| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
+| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto |
+| `Research` | 0 | Detect any difference (not for CI) |
+
+For sample count tuning, combine presets:
 
 ```rust
 timing_test! {
-    oracle: TimingOracle::balanced()
-        .samples(50_000)
-        .alpha(0.05),  // 5% FPR instead of 1%
+    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative)
+        .samples(50_000)   // More samples for higher power
+        .alpha(0.05),      // 5% FPR instead of 1%
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| operation(&input),
@@ -142,9 +158,10 @@ timing_test! {
 `timing_test!` panics if the operation is too fast to measure. For explicit handling, use `timing_test_checked!`:
 
 ```rust
-use timing_oracle::{timing_test_checked, Outcome};
+use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
 
 let outcome = timing_test_checked! {
+    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| very_fast_operation(&input),
@@ -161,10 +178,13 @@ match outcome {
 For programmatic access without macros:
 
 ```rust
-use timing_oracle::{TimingOracle, Outcome, helpers::InputPair};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-let outcome = TimingOracle::balanced()
+
+// Use attacker model to define threat scenario
+let outcome = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)  // Optional: tune sample count
     .test(inputs, |data| constant_time_eq(&secret, data));
 
 if let Outcome::Completed(result) = outcome {
@@ -215,20 +235,45 @@ When a leak is detected, the effect is decomposed:
 
 ## How It Works
 
-Instead of comparing means (which miss distributional differences), we compare nine 
+### Quantile-Based Statistics
+
+Instead of comparing means (which miss distributional differences), we compare nine
 deciles between fixed and random inputs:
 
 ```
 Fixed:   [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┐
-                                     ├─► Δ ∈ ℝ⁹ ─► Bayesian inference ─► P(leak)
+                                     ├─► Δ ∈ ℝ⁹
 Random:  [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┘
 ```
 
-**Two-layer analysis:**
+This captures both uniform shifts (branch timing) and tail effects (cache misses that only affect upper quantiles).
 
-1. **CI Gate**: Bootstraps the max quantile difference under the null hypothesis (pooled samples) to set a threshold controlling false positive rate at ~α. Designed not to flake in CI.
+### Practical Significance Testing
 
-2. **Bayesian Layer**: Computes posterior probability of a leak and decomposes effects into uniform shift (different code paths) vs tail effects (cache misses, memory patterns).
+The key question isn't "is there any timing difference?" but "is the difference exploitable under my threat model?" The attacker model (θ) defines your threshold:
+
+```
+H₀: max|Δ| ≤ θ  (effect within acceptable bounds)
+H₁: max|Δ| > θ  (exploitable timing leak)
+```
+
+This follows the [SILENT methodology](https://arxiv.org/abs/2504.19821), which properly controls false positives at the boundary—you won't get spurious failures on code that just barely meets your threshold.
+
+### Two-Layer Analysis
+
+1. **CI Gate** (SILENT bootstrap): Studentized max-statistic test with bounded FPR ≤ α. Uses paired block bootstrap to handle autocorrelation. Rejects only when the effect significantly exceeds θ.
+
+2. **Bayesian Layer**: Computes posterior probability P(leak > θ) and decomposes effects into uniform shift (different code paths) vs tail effects (cache misses).
+
+Both layers use the same θ threshold and typically agree; divergence indicates edge cases worth investigating.
+
+### Sample Splitting
+
+To avoid double-dipping (using data to both set priors and test), samples are split temporally:
+- **First 30%**: Calibration (covariance estimation, prior setting)
+- **Last 70%**: Inference (actual hypothesis test)
+
+Temporal split preserves autocorrelation structure and prevents overfitting.
 
 For full methodology: [docs/spec.md](docs/spec.md)
 
@@ -245,8 +290,9 @@ For full methodology: [docs/spec.md](docs/spec.md)
 
 ## References
 
-- Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
+- Dunsche et al. (2025): [SILENT](https://arxiv.org/abs/2504.19821) — Practical significance testing for timing side channels
 - Dunsche et al. (2024): [RTLF bounded FPR](https://www.usenix.org/conference/usenixsecurity24/presentation/dunsche)
+- Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
 - Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf)
 
 ## License

@@ -75,12 +75,12 @@ pub mod helpers;
 pub use config::{Config, IterationsPerSample};
 pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};
 pub use measurement::{BoxedTimer, Timer, TimerSpec};
-pub use oracle::TimingOracle;
+pub use oracle::{compute_min_uniqueness_ratio, TimingOracle};
 pub use result::{
     BatchingInfo, CiGate, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
     Metadata, MinDetectableEffect, Outcome, TestResult, UnmeasurableInfo, UnreliablePolicy,
 };
-pub use types::{Class, TimingSample};
+pub use types::{AttackerModel, Class, TimingSample};
 
 // Re-export helpers for convenience
 pub use helpers::InputPair;

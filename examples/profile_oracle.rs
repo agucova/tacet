@@ -12,8 +12,8 @@ fn early_exit_compare(a: &[u8], b: &[u8]) -> bool {
 
 fn rand_bytes_512() -> [u8; 512] {
     let mut input = [0u8; 512];
-    for i in 0..512 {
-        input[i] = rand::random();
+    for byte in &mut input {
+        *byte = rand::random();
     }
     input
 }

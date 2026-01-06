@@ -21,6 +21,7 @@ use super::perf::LinuxPerfTimer;
 ///
 /// This enum-based approach avoids trait object limitations while providing
 /// a unified interface for all timer types.
+#[allow(clippy::large_enum_variant)] // PMU timer size is unavoidable; avoid Box for hot path
 pub enum BoxedTimer {
     /// Standard platform timer (rdtsc/cntvct_el0)
     Standard(Timer),
@@ -204,7 +205,7 @@ impl TimerSpec {
                 {
                     use super::kperf::PmuError;
                     match PmuTimer::new() {
-                        Ok(pmu) => return BoxedTimer::Kperf(pmu),
+                        Ok(pmu) => BoxedTimer::Kperf(pmu),
                         Err(PmuError::ConcurrentAccess) => {
                             panic!(
                                 "PreferPmu: kperf unavailable due to concurrent access. \

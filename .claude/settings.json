@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(/Users/agucova/.config/claude-code/plugins/**/*.sh:*)"
+    ]
+  }
+}

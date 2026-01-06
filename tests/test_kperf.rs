@@ -29,7 +29,7 @@ fn test_pmu_calibration_accuracy() {
             // - Power state (idle vs active)
             // - Thermal conditions
             assert!(
-                cycles_per_ns >= 1.5 && cycles_per_ns <= 5.0,
+                (1.5..=5.0).contains(&cycles_per_ns),
                 "cycles_per_ns {} should be between 1.5 and 5.0 for Apple Silicon",
                 cycles_per_ns
             );
@@ -210,7 +210,7 @@ fn test_aaa_warmup_investigation() {
         match PmuTimer::new() {
             Ok(timer) => {
                 let cpns = timer.cycles_per_ns();
-                let status = if cpns >= 1.5 && cpns <= 5.0 { "OK" } else { "BAD" };
+                let status = if (1.5..=5.0).contains(&cpns) { "OK" } else { "BAD" };
                 eprintln!("  Timer {}: {:.2} cycles/ns [{}]", i, cpns, status);
             }
             Err(e) => {

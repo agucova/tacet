@@ -110,7 +110,6 @@ pub fn timing_test_checked(input: TokenStream) -> TokenStream {
 
 fn expand_timing_test(input: TimingTestInput, checked: bool) -> proc_macro2::TokenStream {
     let TimingTestInput {
-        input_type: _,
         oracle,
         baseline,
         sample,

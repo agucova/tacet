@@ -255,6 +255,6 @@ mod tests {
         // Threshold should be computed from pooled data
         // Pooled sorted: [100, 150, 200, 250, 300, 350]
         // 50th percentile of 6 elements is around index 2.5
-        assert!(threshold >= 200 && threshold <= 250);
+        assert!((200..=250).contains(&threshold));
     }
 }

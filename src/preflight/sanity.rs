@@ -147,10 +147,12 @@ fn compute_full_leak_check(first: &[f64], second: &[f64], timer_resolution_ns: f
         seed: Some(999),
         timer_resolution_ns,
         min_effect_of_concern: 0.0, // Sanity checks should detect any harness issues
+        discrete_mode: false, // Sanity checks use continuous mode
     };
     let ci_gate = run_ci_gate(&ci_gate_input);
 
-    let bayes = compute_bayes_factor(&delta, &sigma0, prior_sigmas, 0.5);
+    // For sanity checks, use min_effect threshold of 10ns
+    let bayes = compute_bayes_factor(&delta, &sigma0, prior_sigmas, min_effect, Some(999));
     if !ci_gate.passed {
         bayes.posterior_probability.max(LEAK_THRESHOLD)
     } else {

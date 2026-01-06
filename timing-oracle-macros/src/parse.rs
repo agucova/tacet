@@ -1,12 +1,10 @@
 //! Parsing logic for timing_test! macro input.
 
 use syn::parse::{Parse, ParseStream};
-use syn::{Expr, ExprClosure, Ident, Result, Token, Type};
+use syn::{Expr, ExprClosure, Ident, Result, Token};
 
 /// Parsed input to the timing_test! macro.
 pub struct TimingTestInput {
-    /// Optional explicit input type annotation
-    pub input_type: Option<Type>,
     /// Optional oracle configuration
     pub oracle: Option<Expr>,
     /// Required: baseline input generator (closure)
@@ -19,7 +17,6 @@ pub struct TimingTestInput {
 
 impl Parse for TimingTestInput {
     fn parse(input: ParseStream) -> Result<Self> {
-        let mut input_type = None;
         let mut oracle = None;
         let mut baseline: Option<ExprClosure> = None;
         let mut sample: Option<ExprClosure> = None;
@@ -27,32 +24,6 @@ impl Parse for TimingTestInput {
 
         // Parse field: value pairs
         while !input.is_empty() {
-            // Check for `type Input = ...` syntax
-            if input.peek(Token![type]) {
-                input.parse::<Token![type]>()?;
-                let type_name: Ident = input.parse()?;
-                if type_name != "Input" {
-                    return Err(syn::Error::new(
-                        type_name.span(),
-                        "expected `type Input = ...`",
-                    ));
-                }
-                input.parse::<Token![=]>()?;
-                if input_type.is_some() {
-                    return Err(syn::Error::new(
-                        type_name.span(),
-                        "duplicate `type Input` declaration",
-                    ));
-                }
-                input_type = Some(input.parse()?);
-
-                // Parse trailing comma (optional for last field)
-                if input.peek(Token![,]) {
-                    input.parse::<Token![,]>()?;
-                }
-                continue;
-            }
-
             let field_name: Ident = input.parse()?;
             input.parse::<Token![:]>()?;
 
@@ -162,7 +133,7 @@ impl Parse for TimingTestInput {
                         field_name.span(),
                         format!(
                             "unknown field `{}`\n\n\
-                             Expected one of: `type Input`, `oracle`, `baseline`, `sample`, `measure`",
+                             Expected one of: `oracle`, `baseline`, `sample`, `measure`",
                             unknown
                         ),
                     ));
@@ -221,7 +192,6 @@ impl Parse for TimingTestInput {
         })?;
 
         Ok(TimingTestInput {
-            input_type,
             oracle,
             baseline,
             sample,

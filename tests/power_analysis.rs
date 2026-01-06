@@ -270,7 +270,7 @@ fn mde_scaling_validation() {
 
     // Allow 25% tolerance: expect 2.0, accept [1.5, 2.5]
     assert!(
-        observed_ratio >= 1.5 && observed_ratio <= 2.5,
+        (1.5..=2.5).contains(&observed_ratio),
         "MDE ratio {:.2} outside acceptable range [1.5, 2.5] (expected ~{:.1})",
         observed_ratio, expected_ratio
     );

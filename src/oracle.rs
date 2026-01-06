@@ -9,7 +9,7 @@ use rand::seq::SliceRandom;
 
 use std::hash::Hash;
 
-use crate::analysis::{compute_bayes_factor, compute_diagnostics, decompose_effect, estimate_mde, run_ci_gate, CiGateInput};
+use crate::analysis::{compute_bayes_factor, compute_diagnostics, decompose_effect, estimate_mde, run_ci_gate, CiGateInput, DiagnosticsExtra};
 use crate::config::Config;
 use crate::helpers::InputPair;
 use crate::measurement::{filter_outliers, BoxedTimer, TimerSpec};
@@ -19,10 +19,10 @@ use crate::result::{
     Outcome, TestResult,
 };
 use crate::statistics::{
-    apply_variance_floor, bootstrap_difference_covariance, compute_deciles_fast,
-    scale_covariance_for_inference,
+    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
+    compute_deciles_fast, compute_midquantile_deciles, scale_covariance_for_inference,
 };
-use crate::types::{Class, Vector9};
+use crate::types::{AttackerModel, Class, Vector9};
 
 /// Main entry point for timing analysis.
 ///
@@ -162,6 +162,68 @@ impl TimingOracle {
             },
             timer_spec: TimerSpec::Auto,
         }
+    }
+
+    /// Create with an attacker model preset.
+    ///
+    /// The attacker model determines the minimum effect threshold (θ) that
+    /// is considered practically significant. Different attacker models
+    /// represent different threat scenarios with varying capabilities.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel};
+    ///
+    /// // For public APIs exposed to the internet
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::WANConservative);
+    ///
+    /// // For internal LAN services
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative);
+    ///
+    /// // For SGX enclaves or shared hosting (most strict)
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::LocalCycles);
+    /// ```
+    ///
+    /// # Presets
+    ///
+    /// | Preset | θ | Use case |
+    /// |--------|---|----------|
+    /// | `LocalCycles` | 2 cycles | SGX, shared hosting |
+    /// | `LocalCoarseTimer` | 1 tick | Sandboxed environments |
+    /// | `LANStrict` | 2 cycles | High-security LAN (Kario-style) |
+    /// | `LANConservative` | 100ns | Internal services (Crosby-style) |
+    /// | `WANOptimistic` | 15μs | Low-jitter internet paths |
+    /// | `WANConservative` | 50μs | Public APIs, general internet |
+    /// | `KyberSlashSentinel` | 10 cycles | Post-quantum crypto |
+    /// | `Research` | 0 | Academic analysis (not for CI) |
+    pub fn for_attacker(model: AttackerModel) -> Self {
+        Self {
+            config: Config {
+                attacker_model: Some(model),
+                ..Config::default()
+            },
+            timer_spec: TimerSpec::Auto,
+        }
+    }
+
+    /// Set the attacker model for threshold determination.
+    ///
+    /// Overrides any previously set `min_effect_ns` value. The actual
+    /// threshold is computed at runtime based on the timer and CPU.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel};
+    ///
+    /// // Start with balanced settings, then set attacker model
+    /// let oracle = TimingOracle::balanced()
+    ///     .attacker_model(AttackerModel::LANConservative);
+    /// ```
+    pub fn attacker_model(mut self, model: AttackerModel) -> Self {
+        self.config.attacker_model = Some(model);
+        self
     }
 
     /// Set the timer specification.
@@ -353,6 +415,27 @@ impl TimingOracle {
         self
     }
 
+    /// Force discrete mode for testing.
+    ///
+    /// When set to `true`, the oracle uses discrete mode (m-out-of-n bootstrap
+    /// with mid-quantiles) regardless of actual timer resolution. This is
+    /// primarily useful for testing the discrete mode code path on machines
+    /// with high-resolution timers.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::TimingOracle;
+    ///
+    /// let oracle = TimingOracle::quick()
+    ///     .force_discrete_mode(true)  // Force discrete mode for testing
+    ///     .test(inputs, |data| operation(data));
+    /// ```
+    pub fn force_discrete_mode(mut self, force: bool) -> Self {
+        self.config.force_discrete_mode = force;
+        self
+    }
+
     /// Get the current configuration.
     pub fn config(&self) -> &Config {
         &self.config
@@ -472,8 +555,10 @@ impl TimingOracle {
 
         // Step 4: Warmup
         for i in 0..self.config.warmup.min(self.config.samples) {
-            std::hint::black_box(operation(&baseline_inputs[i % baseline_inputs.len()]));
-            std::hint::black_box(operation(&sample_inputs[i % sample_inputs.len()]));
+            operation(&baseline_inputs[i % baseline_inputs.len()]);
+            std::hint::black_box(());
+            operation(&sample_inputs[i % sample_inputs.len()]);
+            std::hint::black_box(());
         }
 
         // Step 5: Pilot phase to check measurability
@@ -482,12 +567,14 @@ impl TimingOracle {
 
         for i in 0..PILOT_SAMPLES.min(self.config.samples) {
             let cycles = timer.measure_cycles(|| {
-                std::hint::black_box(operation(&baseline_inputs[i]));
+                operation(&baseline_inputs[i]);
+                std::hint::black_box(());
             });
             pilot_cycles.push(cycles);
 
             let cycles = timer.measure_cycles(|| {
-                std::hint::black_box(operation(&sample_inputs[i]));
+                operation(&sample_inputs[i]);
+                std::hint::black_box(());
             });
             pilot_cycles.push(cycles);
         }
@@ -562,7 +649,8 @@ impl TimingOracle {
             match class {
                 Class::Baseline => {
                     let cycles = timer.measure_cycles(|| {
-                        std::hint::black_box(operation(&baseline_inputs[idx]));
+                        operation(&baseline_inputs[idx]);
+                        std::hint::black_box(());
                     });
                     baseline_cycles.push(cycles);
                     interleaved_cycles.push(cycles);
@@ -570,7 +658,8 @@ impl TimingOracle {
                 }
                 Class::Sample => {
                     let cycles = timer.measure_cycles(|| {
-                        std::hint::black_box(operation(&sample_inputs[idx]));
+                        operation(&sample_inputs[idx]);
+                        std::hint::black_box(());
                     });
                     sample_cycles.push(cycles);
                     interleaved_cycles.push(cycles);
@@ -910,6 +999,25 @@ impl TimingOracle {
 
         // Get timer name for metadata
         let timer_name = timer.name();
+        let debug_pipeline = env::var("TO_DEBUG_PIPELINE").map(|v| v != "0").unwrap_or(false);
+        if debug_pipeline {
+            eprintln!("[DEBUG_PIPELINE] enabled");
+        }
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG_PIPELINE] timer={} resolution_ns={:.2} cycles_per_ns={:.3}",
+                timer_name,
+                timer.resolution_ns(),
+                timer.cycles_per_ns()
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] batching enabled={} k={} ticks_per_batch={:.2} rationale={}",
+                batching.enabled,
+                batching.k,
+                batching.ticks_per_batch,
+                batching.rationale
+            );
+        }
 
         // Step 3a: Filter out zero measurements (kperf read failures)
         // kperf returns 0 on counter reset/read failure, which pollutes lower quantiles
@@ -947,6 +1055,15 @@ impl TimingOracle {
             filtered_sample.len(),
             sample_nonzero.len() - filtered_sample.len(),
             filtered_interleaved.len());
+        if debug_pipeline {
+            let threshold_ns = timer.cycles_to_ns(outlier_threshold);
+            eprintln!(
+                "[DEBUG_PIPELINE] outlier_threshold_cycles={} outlier_threshold_ns={:.2} outlier_fraction={:.4}",
+                outlier_threshold,
+                threshold_ns,
+                outlier_stats.outlier_fraction
+            );
+        }
 
         // Convert cycles to nanoseconds
         let baseline_ns: Vec<f64> = filtered_baseline
@@ -957,6 +1074,45 @@ impl TimingOracle {
             .iter()
             .map(|&c| timer.cycles_to_ns(c))
             .collect();
+        let baseline_ticks: Vec<f64> = filtered_baseline.iter().map(|&c| c as f64).collect();
+        let sample_ticks: Vec<f64> = filtered_sample.iter().map(|&c| c as f64).collect();
+        let interleaved_ticks: Vec<(f64, Class)> = filtered_interleaved
+            .iter()
+            .map(|&(c, class)| (c as f64, class))
+            .collect();
+        if debug_pipeline {
+            let baseline_nonzero_ns: Vec<f64> = baseline_nonzero
+                .iter()
+                .map(|&c| timer.cycles_to_ns(c))
+                .collect();
+            let sample_nonzero_ns: Vec<f64> = sample_nonzero
+                .iter()
+                .map(|&c| timer.cycles_to_ns(c))
+                .collect();
+            let q_base_pre = compute_deciles_fast(&baseline_nonzero_ns);
+            let q_samp_pre = compute_deciles_fast(&sample_nonzero_ns);
+            let q_base_post = compute_deciles_fast(&baseline_ns);
+            let q_samp_post = compute_deciles_fast(&sample_ns);
+            eprintln!(
+                "[DEBUG_PIPELINE] pre_filter p80/p90 baseline={:.2}/{:.2} sample={:.2}/{:.2}",
+                q_base_pre[7], q_base_pre[8], q_samp_pre[7], q_samp_pre[8]
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] post_filter p80/p90 baseline={:.2}/{:.2} sample={:.2}/{:.2}",
+                q_base_post[7], q_base_post[8], q_samp_post[7], q_samp_post[8]
+            );
+        }
+
+        // Compute discrete mode using tick-level uniqueness (spec §2.4)
+        let min_uniqueness_ratio = compute_min_uniqueness_ratio(&baseline_ticks, &sample_ticks);
+        let discrete_mode = self.config.force_discrete_mode || min_uniqueness_ratio < 0.10;
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG_PIPELINE] discrete_mode={} min_uniqueness_ratio={:.3}",
+                discrete_mode,
+                min_uniqueness_ratio
+            );
+        }
 
         // Convert interleaved to TimingSample (nanoseconds with class labels)
         let interleaved_samples: Vec<TimingSample> = filtered_interleaved
@@ -966,11 +1122,6 @@ impl TimingOracle {
                 class,
             })
             .collect();
-
-        // Step 4: Compute full-sample quantile differences for CI gate
-        let q_baseline_full = compute_deciles_fast(&baseline_ns);
-        let q_sample_full = compute_deciles_fast(&sample_ns);
-        let delta_full: Vector9 = q_baseline_full - q_sample_full;
 
         // Step 5: Sample splitting (calibration/inference)
         let n = baseline_ns.len().min(sample_ns.len());
@@ -1055,12 +1206,120 @@ impl TimingOracle {
             let (calib, infer) = interleaved_samples.split_at(n_calib_interleaved);
             (calib.to_vec(), infer.to_vec())
         };
+        let (calib_interleaved_ticks, infer_interleaved_ticks) = {
+            let (calib, infer) = interleaved_ticks.split_at(n_calib_interleaved);
+            (calib.to_vec(), infer.to_vec())
+        };
 
-        // Also split baseline/sample for other computations
-        let n_calib = ((n as f64) * calib_fraction).round() as usize;
-        let (_, i_b) = split_calibration_temporal(&baseline_ns, n_calib);
-        let (_, i_s) = split_calibration_temporal(&sample_ns, n_calib);
-        let (infer_baseline, infer_sample) = (i_b, i_s);
+        // Split baseline/sample for inference using the interleaved inference window
+        // so both classes share the same temporal slice (prevents drift artifacts).
+        let mut infer_baseline = Vec::new();
+        let mut infer_sample = Vec::new();
+        for sample in &infer_interleaved {
+            match sample.class {
+                Class::Baseline => infer_baseline.push(sample.time_ns),
+                Class::Sample => infer_sample.push(sample.time_ns),
+            }
+        }
+        let mut calib_baseline_ticks = Vec::new();
+        let mut calib_sample_ticks = Vec::new();
+        for (time_ticks, class) in &calib_interleaved_ticks {
+            match class {
+                Class::Baseline => calib_baseline_ticks.push(*time_ticks),
+                Class::Sample => calib_sample_ticks.push(*time_ticks),
+            }
+        }
+        let mut infer_baseline_ticks = Vec::new();
+        let mut infer_sample_ticks = Vec::new();
+        for (time_ticks, class) in &infer_interleaved_ticks {
+            match class {
+                Class::Baseline => infer_baseline_ticks.push(*time_ticks),
+                Class::Sample => infer_sample_ticks.push(*time_ticks),
+            }
+        }
+        if debug_pipeline {
+            let (q_base_calib, q_samp_calib) = if discrete_mode {
+                (
+                    compute_midquantile_deciles(&calib_baseline_ticks),
+                    compute_midquantile_deciles(&calib_sample_ticks),
+                )
+            } else {
+                let mut calib_baseline = Vec::new();
+                let mut calib_sample = Vec::new();
+                for sample in &calib_interleaved {
+                    match sample.class {
+                        Class::Baseline => calib_baseline.push(sample.time_ns),
+                        Class::Sample => calib_sample.push(sample.time_ns),
+                    }
+                }
+                (
+                    compute_deciles_fast(&calib_baseline),
+                    compute_deciles_fast(&calib_sample),
+                )
+            };
+            if !q_base_calib.as_slice().is_empty() && !q_samp_calib.as_slice().is_empty() {
+                let q_base_slice = q_base_calib.as_slice();
+                let q_samp_slice = q_samp_calib.as_slice();
+                eprintln!(
+                    "[DEBUG_PIPELINE] q_baseline_calib={:?}",
+                    [
+                        q_base_slice[0], q_base_slice[1], q_base_slice[2], q_base_slice[3],
+                        q_base_slice[4], q_base_slice[5], q_base_slice[6], q_base_slice[7],
+                        q_base_slice[8]
+                    ]
+                );
+                eprintln!(
+                    "[DEBUG_PIPELINE] q_sample_calib={:?}",
+                    [
+                        q_samp_slice[0], q_samp_slice[1], q_samp_slice[2], q_samp_slice[3],
+                        q_samp_slice[4], q_samp_slice[5], q_samp_slice[6], q_samp_slice[7],
+                        q_samp_slice[8]
+                    ]
+                );
+            }
+
+            let (calib_times, infer_times) = if discrete_mode {
+                (
+                    calib_interleaved_ticks.iter().map(|(t, _)| *t).collect::<Vec<f64>>(),
+                    infer_interleaved_ticks.iter().map(|(t, _)| *t).collect::<Vec<f64>>(),
+                )
+            } else {
+                (
+                    calib_interleaved.iter().map(|s| s.time_ns).collect::<Vec<f64>>(),
+                    infer_interleaved.iter().map(|s| s.time_ns).collect::<Vec<f64>>(),
+                )
+            };
+            if !calib_times.is_empty() {
+                let q_calib = if discrete_mode {
+                    compute_midquantile_deciles(&calib_times)
+                } else {
+                    compute_deciles_fast(&calib_times)
+                };
+                let q_slice = q_calib.as_slice();
+                eprintln!(
+                    "[DEBUG_PIPELINE] interleaved_calib_deciles={:?}",
+                    [
+                        q_slice[0], q_slice[1], q_slice[2], q_slice[3], q_slice[4],
+                        q_slice[5], q_slice[6], q_slice[7], q_slice[8]
+                    ]
+                );
+            }
+            if !infer_times.is_empty() {
+                let q_infer = if discrete_mode {
+                    compute_midquantile_deciles(&infer_times)
+                } else {
+                    compute_deciles_fast(&infer_times)
+                };
+                let q_slice = q_infer.as_slice();
+                eprintln!(
+                    "[DEBUG_PIPELINE] interleaved_infer_deciles={:?}",
+                    [
+                        q_slice[0], q_slice[1], q_slice[2], q_slice[3], q_slice[4],
+                        q_slice[5], q_slice[6], q_slice[7], q_slice[8]
+                    ]
+                );
+            }
+        }
 
         eprintln!("[DEBUG] After calibration split ({:.0}% calib, {:.0}% infer): calib_interleaved={}, infer_baseline={}, infer_sample={}",
             calib_fraction * 100.0,
@@ -1068,13 +1327,29 @@ impl TimingOracle {
             calib_interleaved.len(),
             infer_baseline.len(),
             infer_sample.len());
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG_PIPELINE] calib_fraction={:.2} calib_interleaved={} infer_interleaved={} infer_baseline={} infer_sample={}",
+                calib_fraction,
+                calib_interleaved.len(),
+                infer_interleaved.len(),
+                infer_baseline.len(),
+                infer_sample.len()
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] infer_interleaved_range=[{}, {}] (n_interleaved={})",
+                n_calib_interleaved,
+                n_interleaved.saturating_sub(1),
+                n_interleaved
+            );
+        }
 
         // Run preflight checks
         let interleaved_ns: Vec<f64> = interleaved_samples
             .iter()
             .map(|s| s.time_ns)
             .collect();
-        let _preflight = run_all_checks(
+        let preflight = run_all_checks(
             &baseline_ns,
             &sample_ns,
             &interleaved_ns,
@@ -1084,69 +1359,215 @@ impl TimingOracle {
         );
 
         // CALIBRATION PHASE
-        // Step 6: Estimate covariance of Δ* = q_F* - q_R* via joint bootstrap
-        // Joint resampling preserves temporal pairing for correct Var(Δ) estimation
-        let calib_cov_estimate = bootstrap_difference_covariance(
-            &calib_interleaved,
-            self.config.cov_bootstrap_iterations,
-            42,
-        );
-        // Save calibration covariance for diagnostics (before scaling)
+        // Step 6: Estimate covariance of Δ* = q_F* - q_R* via bootstrap
+        let (calib_cov_estimate, infer_cov_estimate, n_calib, n_infer) = if discrete_mode {
+            let calib_cov_estimate = bootstrap_difference_covariance_discrete(
+                &calib_baseline_ticks,
+                &calib_sample_ticks,
+                self.config.cov_bootstrap_iterations,
+                42,
+            );
+            let infer_cov_estimate = bootstrap_difference_covariance_discrete(
+                &infer_baseline_ticks,
+                &infer_sample_ticks,
+                self.config.cov_bootstrap_iterations,
+                42,
+            );
+            let n_calib = calib_baseline_ticks.len().min(calib_sample_ticks.len());
+            let n_infer = infer_baseline_ticks.len().min(infer_sample_ticks.len());
+            (calib_cov_estimate, infer_cov_estimate, n_calib, n_infer)
+        } else {
+            let calib_cov_estimate = bootstrap_difference_covariance(
+                &calib_interleaved,
+                self.config.cov_bootstrap_iterations,
+                42,
+            );
+            let infer_cov_estimate = bootstrap_difference_covariance(
+                &infer_interleaved,
+                self.config.cov_bootstrap_iterations,
+                42,
+            );
+            let n_calib = calib_interleaved.len();
+            let n_infer = infer_baseline.len() + infer_sample.len();
+            (calib_cov_estimate, infer_cov_estimate, n_calib, n_infer)
+        };
         let calib_cov = calib_cov_estimate.matrix;
-
-        // Compute inference covariance for diagnostics stationarity check
-        let infer_cov_estimate = bootstrap_difference_covariance(
-            &infer_interleaved,
-            self.config.cov_bootstrap_iterations,
-            42,
-        );
         let infer_cov = infer_cov_estimate.matrix;
+        if debug_pipeline {
+            let trace_calib: f64 = (0..9).map(|i| calib_cov[(i, i)]).sum();
+            let trace_infer: f64 = (0..9).map(|i| infer_cov[(i, i)]).sum();
+            let min_diag_calib = (0..9).map(|i| calib_cov[(i, i)]).fold(f64::INFINITY, f64::min);
+            let max_diag_calib = (0..9).map(|i| calib_cov[(i, i)]).fold(0.0_f64, f64::max);
+            let min_diag_infer = (0..9).map(|i| infer_cov[(i, i)]).fold(f64::INFINITY, f64::min);
+            let max_diag_infer = (0..9).map(|i| infer_cov[(i, i)]).fold(0.0_f64, f64::max);
+            eprintln!(
+                "[DEBUG_PIPELINE] calib_cov trace={:.4} min_diag={:.4} max_diag={:.4} block_size={} jitter={:.3e}",
+                trace_calib,
+                min_diag_calib,
+                max_diag_calib,
+                calib_cov_estimate.block_size,
+                calib_cov_estimate.jitter_added
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] infer_cov trace={:.4} min_diag={:.4} max_diag={:.4} block_size={} jitter={:.3e}",
+                trace_infer,
+                min_diag_infer,
+                max_diag_infer,
+                infer_cov_estimate.block_size,
+                infer_cov_estimate.jitter_added
+            );
+        }
 
         // Step 6b: Scale covariance from calibration to inference sample sizes
         // Quantile variance scales as 1/n
-        let n_calib = calib_interleaved.len();
-        let n_infer = infer_baseline.len() + infer_sample.len();
-        let scaled_cov = scale_covariance_for_inference(calib_cov, n_calib, n_infer);
-
-        // Step 6c: Apply variance floor for numerical stability
-        let pooled_cov = apply_variance_floor(scaled_cov, timer.resolution_ns());
+        let pooled_cov = scale_covariance_for_inference(calib_cov, n_calib, n_infer);
+        if debug_pipeline {
+            let trace_pooled: f64 = (0..9).map(|i| pooled_cov[(i, i)]).sum();
+            let min_diag = (0..9).map(|i| pooled_cov[(i, i)]).fold(f64::INFINITY, f64::min);
+            let max_diag = (0..9).map(|i| pooled_cov[(i, i)]).fold(0.0_f64, f64::max);
+            eprintln!(
+                "[DEBUG_PIPELINE] pooled_cov trace={:.4} min_diag={:.4} max_diag={:.4} n_calib={} n_infer={}",
+                trace_pooled,
+                min_diag,
+                max_diag,
+                n_calib,
+                n_infer
+            );
+        }
+        // Note: Jitter for numerical stability is already added in bootstrap_difference_covariance
+        // via add_diagonal_jitter (spec §2.6). No additional variance floor needed.
 
         // Step 7: Estimate MDE from covariance (spec §2.7)
         let mde_estimate = estimate_mde(&pooled_cov, self.config.ci_alpha);
-
-        // Prior scales from calibration (spec: max(2*MDE, min_effect_of_concern))
-        let min_effect = self.config.min_effect_of_concern_ns;
+        let min_effect = if discrete_mode {
+            (self.config.min_effect_of_concern_ns / timer.resolution_ns()).max(1.0)
+        } else {
+            self.config.min_effect_of_concern_ns
+        };
         let prior_sigmas = (
             (2.0 * mde_estimate.shift_ns).max(min_effect),
             (2.0 * mde_estimate.tail_ns).max(min_effect),
         );
-
-        // INFERENCE PHASE
-        // Step 8: Compute quantile difference vector from inference data
-        let q_baseline = compute_deciles_fast(&infer_baseline);
-        let q_sample = compute_deciles_fast(&infer_sample);
-        let delta_infer: Vector9 = q_baseline - q_sample;
+        if debug_pipeline {
+            if discrete_mode {
+                eprintln!(
+                    "[DEBUG_PIPELINE] mde shift={:.2}ticks tail={:.2}ticks ci_alpha={:.3}",
+                    mde_estimate.shift_ns,
+                    mde_estimate.tail_ns,
+                    self.config.ci_alpha
+                );
+                eprintln!(
+                    "[DEBUG_PIPELINE] prior_sigmas shift={:.2}ticks tail={:.2}ticks min_effect={:.2}ticks",
+                    prior_sigmas.0,
+                    prior_sigmas.1,
+                    min_effect
+                );
+            } else {
+                eprintln!(
+                    "[DEBUG_PIPELINE] mde shift={:.2}ns tail={:.2}ns ci_alpha={:.3}",
+                    mde_estimate.shift_ns,
+                    mde_estimate.tail_ns,
+                    self.config.ci_alpha
+                );
+                eprintln!(
+                    "[DEBUG_PIPELINE] prior_sigmas shift={:.2}ns tail={:.2}ns min_effect={:.2}ns",
+                    prior_sigmas.0,
+                    prior_sigmas.1,
+                    min_effect
+                );
+            }
+        }
 
         // Use scaled covariance for inference
         let cov_estimate = pooled_cov;
 
+        // INFERENCE PHASE
+        // Step 8: Compute quantile difference vector from inference data
+        let (q_baseline, q_sample) = if discrete_mode {
+            (
+                compute_midquantile_deciles(&infer_baseline_ticks),
+                compute_midquantile_deciles(&infer_sample_ticks),
+            )
+        } else {
+            (
+                compute_deciles_fast(&infer_baseline),
+                compute_deciles_fast(&infer_sample),
+            )
+        };
+        let delta_infer: Vector9 = q_baseline - q_sample;
+        if debug_pipeline {
+            let delta_slice = delta_infer.as_slice();
+            eprintln!(
+                "[DEBUG_PIPELINE] delta_infer={:?}",
+                [
+                    delta_slice[0], delta_slice[1], delta_slice[2], delta_slice[3], delta_slice[4],
+                    delta_slice[5], delta_slice[6], delta_slice[7], delta_slice[8]
+                ]
+            );
+            let q_base_slice = q_baseline.as_slice();
+            let q_samp_slice = q_sample.as_slice();
+            eprintln!(
+                "[DEBUG_PIPELINE] q_baseline_infer={:?}",
+                [
+                    q_base_slice[0], q_base_slice[1], q_base_slice[2], q_base_slice[3], q_base_slice[4],
+                    q_base_slice[5], q_base_slice[6], q_base_slice[7], q_base_slice[8]
+                ]
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] q_sample_infer={:?}",
+                [
+                    q_samp_slice[0], q_samp_slice[1], q_samp_slice[2], q_samp_slice[3], q_samp_slice[4],
+                    q_samp_slice[5], q_samp_slice[6], q_samp_slice[7], q_samp_slice[8]
+                ]
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] discrete_mode={} min_uniqueness_ratio={:.3}",
+                discrete_mode,
+                min_uniqueness_ratio
+            );
+        }
+
         // Step 9: Run CI Gate (Layer 1)
+        // CI gate operates on batch-total scale; scale theta accordingly (spec §2.4).
+        let theta_batch = min_effect * batching.k as f64;
         let ci_gate_input = CiGateInput {
-            observed_diff: delta_full,
-            baseline_samples: &baseline_ns,
-            sample_samples: &sample_ns,
+            observed_diff: delta_infer,
+            baseline_samples: if discrete_mode { &infer_baseline_ticks } else { &infer_baseline },
+            sample_samples: if discrete_mode { &infer_sample_ticks } else { &infer_sample },
             alpha: self.config.ci_alpha,
             bootstrap_iterations: self.config.ci_bootstrap_iterations,
             seed: self.config.measurement_seed,
-            timer_resolution_ns: timer.resolution_ns(),
-            min_effect_of_concern: self.config.min_effect_of_concern_ns,
+            timer_resolution_ns: if discrete_mode { 1.0 } else { timer.resolution_ns() },
+            min_effect_of_concern: theta_batch,
+            discrete_mode,
         };
-        let ci_gate = run_ci_gate(&ci_gate_input);
+        let mut ci_gate = run_ci_gate(&ci_gate_input);
+        if debug_pipeline {
+            let unit = if discrete_mode { "ticks" } else { "ns" };
+            eprintln!(
+                "[DEBUG_PIPELINE] ci_gate passed={} threshold={:.2} max_observed={:.2} {}",
+                ci_gate.passed,
+                ci_gate.threshold,
+                ci_gate.max_observed,
+                unit
+            );
+        }
 
         // Step 10: Compute Bayes factor and posterior probability (Layer 2)
+        // theta = min_effect_of_concern, scaled by batch size
+        let theta = min_effect * batching.k as f64;
         let bayes_result =
-            compute_bayes_factor(&delta_infer, &cov_estimate, prior_sigmas, self.config.prior_no_leak);
+            compute_bayes_factor(&delta_infer, &cov_estimate, prior_sigmas, theta, self.config.measurement_seed);
         let leak_probability = bayes_result.posterior_probability;
+        if debug_pipeline {
+            let unit = if discrete_mode { "ticks" } else { "ns" };
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes leak_probability={:.3} theta_batch={:.2}{}",
+                leak_probability,
+                theta,
+                unit
+            );
+        }
 
         // Step 11: Effect decomposition (if leak detected)
         // Also compute for diagnostics even if not returning effect
@@ -1161,18 +1582,37 @@ impl TimingOracle {
         let effect = if leak_probability > 0.5 || !ci_gate.passed {
             // Scale batch-total effects to per-call effects by dividing by K
             let k_scale = batching.k as f64;
+            let unit_scale = if discrete_mode { timer.resolution_ns() } else { 1.0 };
             Some(Effect {
-                shift_ns: decomp.posterior_mean[0] / k_scale,
-                tail_ns: decomp.posterior_mean[1] / k_scale,
+                shift_ns: (decomp.posterior_mean[0] / k_scale) * unit_scale,
+                tail_ns: (decomp.posterior_mean[1] / k_scale) * unit_scale,
                 credible_interval_ns: (
-                    decomp.effect_magnitude_ci.0 / k_scale,
-                    decomp.effect_magnitude_ci.1 / k_scale,
+                    (decomp.effect_magnitude_ci.0 / k_scale) * unit_scale,
+                    (decomp.effect_magnitude_ci.1 / k_scale) * unit_scale,
                 ),
                 pattern: decomp.pattern,
             })
         } else {
             None
         };
+
+        // Scale CI gate reporting back to per-call units when batching is enabled.
+        let k_scale = batching.k as f64;
+        if k_scale > 1.0 {
+            ci_gate.threshold /= k_scale;
+            ci_gate.max_observed /= k_scale;
+            for observed in &mut ci_gate.observed {
+                *observed /= k_scale;
+            }
+        }
+        if discrete_mode {
+            let unit_scale = timer.resolution_ns();
+            ci_gate.threshold *= unit_scale;
+            ci_gate.max_observed *= unit_scale;
+            for observed in &mut ci_gate.observed {
+                *observed *= unit_scale;
+            }
+        }
 
         // Step 12: Exploitability assessment
         let effect_magnitude = effect
@@ -1183,10 +1623,10 @@ impl TimingOracle {
 
         // Step 13: Measurement quality assessment
         // MDE also needs to be scaled to per-call
-        let k_scale = batching.k as f64;
+        let unit_scale = if discrete_mode { timer.resolution_ns() } else { 1.0 };
         let scaled_mde = MinDetectableEffect {
-            shift_ns: mde_estimate.shift_ns / k_scale,
-            tail_ns: mde_estimate.tail_ns / k_scale,
+            shift_ns: (mde_estimate.shift_ns / k_scale) * unit_scale,
+            tail_ns: (mde_estimate.tail_ns / k_scale) * unit_scale,
         };
         let quality = MeasurementQuality::from_mde_ns(scaled_mde.shift_ns);
 
@@ -1195,13 +1635,34 @@ impl TimingOracle {
         // Step 14: Compute Bayes factor from log BF (clamped for numerical stability)
         let bayes_factor = bayes_result.log_bayes_factor.exp().clamp(1e-100, 1e100);
 
-        // Step 15: Compute diagnostics (stationarity, model fit, outlier asymmetry)
+        // Step 15: Compute diagnostics (stationarity, model fit, outlier asymmetry, preflight)
+        // Compute duplicate fraction: how many samples have duplicate timing values
+        let samples_per_class = infer_baseline.len().min(infer_sample.len());
+        let duplicate_fraction = if discrete_mode {
+            compute_duplicate_fraction(&infer_baseline_ticks, &infer_sample_ticks)
+        } else {
+            compute_duplicate_fraction(&infer_baseline, &infer_sample)
+        };
+        let timer_resolution_ns = timer.resolution_ns();
+        // discrete_mode was computed earlier (before CI gate)
+
+        let diagnostics_extra = DiagnosticsExtra {
+            dependence_length: calib_cov_estimate.block_size,
+            samples_per_class,
+            filtered_quantiles: Vec::new(), // TODO: get from CI gate
+            discrete_mode,
+            timer_resolution_ns,
+            duplicate_fraction,
+        };
+
         let diagnostics = compute_diagnostics(
             &calib_cov,
             &infer_cov,
             &delta_infer,
             &posterior_mean,
             &outlier_stats,
+            &preflight,
+            &diagnostics_extra,
         );
 
         // Step 16: Assemble and return TestResult
@@ -1233,29 +1694,6 @@ impl TimingOracle {
     }
 }
 
-/// Split samples temporally for calibration/inference.
-///
-/// CRITICAL: This must preserve temporal order for block bootstrap to work correctly.
-/// Shuffling before block bootstrap destroys autocorrelation structure and causes
-/// Σ₀ underestimation, leading to overconfident results.
-///
-/// Returns: (calibration_samples, inference_samples)
-/// - calibration: first n_calib samples (in temporal order)
-/// - inference: remaining samples (in temporal order)
-fn split_calibration_temporal(
-    data: &[f64],
-    n_calib: usize,
-) -> (Vec<f64>, Vec<f64>) {
-    if n_calib == 0 || data.is_empty() {
-        return (Vec::new(), data.to_vec());
-    }
-
-    let n_calib = n_calib.min(data.len());
-    let (calib, infer) = data.split_at(n_calib);
-
-    (calib.to_vec(), infer.to_vec())
-}
-
 // Environment variable parsing helpers
 fn parse_usize_env(key: &str) -> Option<usize> {
     env::var(key).ok()?.parse().ok()
@@ -1271,6 +1709,51 @@ fn parse_f64_env(key: &str) -> Option<f64> {
 
 fn parse_f32_env(key: &str) -> Option<f32> {
     env::var(key).ok()?.parse().ok()
+}
+
+/// Compute the fraction of samples with duplicate timing values.
+///
+/// High duplicate fractions indicate timer resolution issues.
+/// Used for diagnostics reporting.
+fn compute_duplicate_fraction(baseline: &[f64], sample: &[f64]) -> f64 {
+    use std::collections::HashSet;
+
+    let mut all_values = Vec::with_capacity(baseline.len() + sample.len());
+    all_values.extend(baseline.iter().map(|&v| v.to_bits()));
+    all_values.extend(sample.iter().map(|&v| v.to_bits()));
+
+    if all_values.is_empty() {
+        return 0.0;
+    }
+
+    let unique: HashSet<_> = all_values.iter().collect();
+    let total = all_values.len();
+    let duplicates = total - unique.len();
+
+    duplicates as f64 / total as f64
+}
+
+/// Compute the minimum uniqueness ratio across both classes (spec §2.4).
+///
+/// Returns min(|unique(F)|/n_F, |unique(R)|/n_R).
+/// This is used to trigger discrete mode when uniqueness < 10%.
+///
+/// This function is primarily exposed for testing discrete mode logic.
+pub fn compute_min_uniqueness_ratio(baseline: &[f64], sample: &[f64]) -> f64 {
+    use std::collections::HashSet;
+
+    let uniqueness_ratio = |data: &[f64]| -> f64 {
+        if data.is_empty() {
+            return 1.0; // Empty data is considered fully unique
+        }
+        let unique: HashSet<u64> = data.iter().map(|&v| v.to_bits()).collect();
+        unique.len() as f64 / data.len() as f64
+    };
+
+    let baseline_ratio = uniqueness_ratio(baseline);
+    let sample_ratio = uniqueness_ratio(sample);
+
+    baseline_ratio.min(sample_ratio)
 }
 
 #[cfg(test)]

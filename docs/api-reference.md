@@ -33,16 +33,20 @@ Complete API documentation for timing-oracle. For conceptual overview, see [guid
 ## Quick Reference
 
 ```rust
-// Simple API
-let result = timing_oracle::test(fixed_closure, random_closure);
+use timing_oracle::{TimingOracle, AttackerModel};
 
-// Builder API
-let result = TimingOracle::new()
-    .samples(100_000)
+// Recommended: Use attacker model to define threat scenario
+let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .test(fixed_closure, random_closure);
+
+// Builder API with sample count tuning
+let result = TimingOracle::for_attacker(AttackerModel::WANConservative)
+    .samples(20_000)
     .test(fixed_closure, random_closure);
 
 // CI-focused API
 TimingOracle::ci_test()
+    .attacker_model(AttackerModel::LANConservative)
     .fail_on(FailCriterion::CiGate)
     .run(fixed_closure, random_closure)
     .unwrap_or_report();
@@ -52,39 +56,75 @@ TimingOracle::ci_test()
 
 ## TimingOracle Builder
 
-### Presets
+### Attacker Model Presets (Recommended)
+
+Choose your threat model to define what effect size is considered significant:
 
 ```rust
-use timing_oracle::TimingOracle;
+use timing_oracle::{TimingOracle, AttackerModel};
+
+// Internet-facing API: attacker measures over general internet
+TimingOracle::for_attacker(AttackerModel::WANConservative)  // θ = 50μs
+
+// Internal microservice: attacker on local network (Crosby-style)
+TimingOracle::for_attacker(AttackerModel::LANConservative)  // θ = 100ns
+
+// High-security LAN: strict interpretation (Kario-style)
+TimingOracle::for_attacker(AttackerModel::LANStrict)        // θ = 2 cycles
+
+// SGX enclave or shared hosting: co-resident attacker
+TimingOracle::for_attacker(AttackerModel::LocalCycles)      // θ = 2 cycles
+
+// Post-quantum crypto (catch KyberSlash-class bugs)
+TimingOracle::for_attacker(AttackerModel::KyberSlashSentinel) // θ = 10 cycles
+
+// Research/debugging: detect any statistical difference
+TimingOracle::for_attacker(AttackerModel::Research)         // θ → 0
+
+// Custom threshold in nanoseconds
+TimingOracle::for_attacker(AttackerModel::CustomNs { threshold_ns: 500.0 })
+```
+
+### Sample Count Presets
+
+Combine with attacker models to tune speed vs accuracy:
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
 
 // Default - Most accurate (~5-10 seconds per test)
 // 100k samples, 100 CI bootstrap, 50 covariance bootstrap
-TimingOracle::new()
+TimingOracle::for_attacker(AttackerModel::LANConservative)
 
 // Balanced - Recommended for production (~1-2 seconds per test)
-// 20k samples, 100 CI bootstrap, 50 covariance bootstrap
-TimingOracle::balanced()
+TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .samples(20_000)
 
 // Quick - Fast iteration during development (~0.2-0.5 seconds per test)
-// 5k samples, 50 CI bootstrap, 50 covariance bootstrap
 TimingOracle::quick()
+    .attacker_model(AttackerModel::LANConservative)
 
 // Calibration - For running many trials (100+) (~0.1-0.2 seconds per test)
-// 2k samples, 30 CI bootstrap, 20 covariance bootstrap
 TimingOracle::calibration()
+    .attacker_model(AttackerModel::Research)
 ```
 
 ### Configuration Methods
 
 ```rust
-let oracle = TimingOracle::new()
+use timing_oracle::{TimingOracle, AttackerModel};
+
+let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative)
     // Sample configuration
     .samples(100_000)                    // Samples per class
     .warmup(1_000)                       // Warmup iterations (not measured)
 
+    // Attacker model (recommended over min_effect_ns)
+    .attacker_model(AttackerModel::LANConservative)  // Set/override threat model
+
     // Statistical parameters
-    .alpha(0.01)                      // CI gate false positive rate
-    .min_effect_ns(10.0)               // Prior scale for effects (σ_μ)
+    .alpha(0.01)                         // CI gate false positive rate
+    .min_effect_ns(10.0)                 // Legacy: manual threshold (prefer attacker_model)
     .effect_threshold_ns(100.0)          // Optional hard threshold
     .prior_no_leak(0.75)                 // Prior probability of no leak
     .outlier_percentile(0.999)           // Percentile for outlier filtering
@@ -266,6 +306,50 @@ pub struct CiGate {
 ---
 
 ## Enums
+
+### AttackerModel
+
+Threat model presets for defining what timing difference is considered significant:
+
+```rust
+pub enum AttackerModel {
+    // Local attacker presets
+    LocalCycles,        // θ = 2 cycles (SGX, shared hosting)
+    LocalCoarseTimer,   // θ = 1 tick (sandboxed environments)
+
+    // LAN attacker presets
+    LANStrict,          // θ = 2 cycles (Kario-style, strict)
+    LANConservative,    // θ = 100 ns (Crosby-style)
+
+    // WAN attacker presets
+    WANOptimistic,      // θ = 15 μs (low-jitter paths)
+    WANConservative,    // θ = 50 μs (general internet)
+
+    // Special-purpose
+    KyberSlashSentinel, // θ = 10 cycles (post-quantum crypto)
+    Research,           // θ → 0 (detect any difference)
+
+    // Custom thresholds
+    CustomNs { threshold_ns: f64 },
+    CustomCycles { threshold_cycles: u32 },
+    CustomTicks { threshold_ticks: u32 },
+}
+```
+
+| Preset | Threshold | Use case |
+|--------|-----------|----------|
+| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
+| `LocalCoarseTimer` | 1 tick | Sandboxed with coarse timers |
+| `LANStrict` | 2 cycles | High-security LAN (Kario-style) |
+| `LANConservative` | 100 ns | Internal services (Crosby-style) |
+| `WANOptimistic` | 15 μs | Low-jitter cloud paths |
+| `WANConservative` | 50 μs | Public APIs, general internet |
+| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto |
+| `Research` | 0 | Academic analysis (not for CI) |
+
+**Sources:**
+- Crosby et al. (2009): ~100ns LAN accuracy, 15–100μs internet
+- Kario: argues even ~1 cycle is detectable over LAN
 
 ### Exploitability
 

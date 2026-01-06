@@ -6,10 +6,12 @@
 
 use crate::types::{Matrix9, Vector9};
 
-use super::bootstrap::{block_bootstrap_resample_into, compute_block_size, counter_rng_seed};
-use super::quantile::compute_deciles_inplace;
+use super::block_length::{optimal_block_length, paired_optimal_block_length};
+use super::bootstrap::{block_bootstrap_resample_into, counter_rng_seed};
+use super::quantile::{compute_deciles_inplace, compute_midquantile_deciles};
 
 use rand::SeedableRng;
+use rand::Rng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 #[cfg(feature = "parallel")]
@@ -90,13 +92,13 @@ impl WelfordCovariance9 {
         let n = self.n as f64;
 
         // δ = x - μₙ₋₁
-        let delta = x - &self.mean;
+        let delta = x - self.mean;
 
         // μₙ = μₙ₋₁ + δ/n
-        self.mean += &delta / n;
+        self.mean += delta / n;
 
         // δ' = x - μₙ
-        let delta2 = x - &self.mean;
+        let delta2 = x - self.mean;
 
         // M2ₙ = M2ₙ₋₁ + δ·δ'^T
         // The outer product δ·δ'^T is symmetric
@@ -144,14 +146,14 @@ impl WelfordCovariance9 {
         let n_ab = n_a + n_b;
 
         // δ = μ_B - μ_A
-        let delta = &other.mean - &self.mean;
+        let delta = other.mean - self.mean;
 
         // μ_AB = (n_A·μ_A + n_B·μ_B) / n_AB
-        self.mean = (&self.mean * n_a + &other.mean * n_b) / n_ab;
+        self.mean = (self.mean * n_a + other.mean * n_b) / n_ab;
 
         // M2_AB = M2_A + M2_B + (n_A·n_B/n_AB)·δ·δ^T
         let correction = delta * delta.transpose() * (n_a * n_b / n_ab);
-        self.m2 = &self.m2 + &other.m2 + correction;
+        self.m2 = self.m2 + other.m2 + correction;
 
         self.n += other.n;
     }
@@ -193,7 +195,13 @@ pub fn bootstrap_covariance_matrix(
     seed: u64,
 ) -> CovarianceEstimate {
     let n = data.len();
-    let block_size = compute_block_size(n);
+    // Use Politis-White algorithm for optimal block length selection (spec §2.6)
+    let block_size = if n >= 10 {
+        optimal_block_length(data).circular.ceil() as usize
+    } else {
+        // Fall back to simple formula for very small samples
+        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
+    }.max(1);
 
     // Generate bootstrap replicates using online Welford covariance accumulation
     // This avoids allocating Vec<Vector9> (saves 72 KB for 1000 iterations)
@@ -222,7 +230,7 @@ pub fn bootstrap_covariance_matrix(
             )
             .map(|(_, _, acc)| acc)
             .reduce(
-                || WelfordCovariance9::new(),
+                WelfordCovariance9::new,
                 |mut a, b| {
                     a.merge(&b);
                     a
@@ -266,6 +274,22 @@ pub fn bootstrap_covariance_matrix(
     }
 }
 
+fn resample_with_indices(data: &[f64], indices: &[usize], block_size: usize, buffer: &mut [f64]) {
+    let n = buffer.len();
+    let mut pos = 0;
+
+    for &start in indices {
+        for offset in 0..block_size {
+            if pos >= n {
+                break;
+            }
+            let idx = (start + offset) % data.len();
+            buffer[pos] = data[idx];
+            pos += 1;
+        }
+    }
+}
+
 /// Estimate covariance matrix of quantile differences Δ* = q_F* - q_R* via joint block bootstrap.
 ///
 /// Uses joint resampling to preserve temporal pairing between fixed and random samples.
@@ -301,7 +325,15 @@ pub fn bootstrap_difference_covariance(
     use crate::types::Class;
 
     let n = interleaved.len();
-    let block_size = compute_block_size(n);
+    // Use Politis-White algorithm for optimal block length selection (spec §2.6)
+    // We need to compute on timing values, not the full TimingSample struct
+    let timing_values: Vec<f64> = interleaved.iter().map(|s| s.time_ns).collect();
+    let block_size = if n >= 10 {
+        optimal_block_length(&timing_values).circular.ceil() as usize
+    } else {
+        // Fall back to simple formula for very small samples
+        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
+    }.max(1);
 
     // Generate bootstrap replicates of Δ* = q_F* - q_R* using joint resampling
     #[cfg(feature = "parallel")]
@@ -345,7 +377,7 @@ pub fn bootstrap_difference_covariance(
             )
             .map(|(_, _, acc)| acc)
             .reduce(
-                || WelfordCovariance9::new(),
+                WelfordCovariance9::new,
                 |mut a, b| {
                     a.merge(&b);
                     a
@@ -395,6 +427,124 @@ pub fn bootstrap_difference_covariance(
     let (stabilized_matrix, jitter) = add_diagonal_jitter(cov_matrix);
 
     // Compute minimum eigenvalue for stability check
+    let min_eigenvalue = estimate_min_eigenvalue(&stabilized_matrix);
+
+    CovarianceEstimate {
+        matrix: stabilized_matrix,
+        n_bootstrap,
+        block_size,
+        min_eigenvalue,
+        jitter_added: jitter,
+    }
+}
+
+/// Estimate covariance matrix of quantile differences Δ* = q_F* - q_R* in discrete mode.
+///
+/// Uses m-out-of-n paired block bootstrap on per-class sequences with mid-distribution
+/// quantiles, then rescales by m/n (spec §2.4).
+pub fn bootstrap_difference_covariance_discrete(
+    baseline: &[f64],
+    sample: &[f64],
+    n_bootstrap: usize,
+    seed: u64,
+) -> CovarianceEstimate {
+    let n = baseline.len().min(sample.len());
+    let baseline = &baseline[..n];
+    let sample = &sample[..n];
+
+    let m = if n < 2000 {
+        let half = (0.5 * n as f64).floor() as usize;
+        half.max(200).min(n)
+    } else {
+        let m = (n as f64).powf(2.0 / 3.0).floor() as usize;
+        m.max(400).min(n)
+    };
+    let mut block_size = if n >= 10 {
+        paired_optimal_block_length(baseline, sample)
+    } else {
+        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil().max(1.0) as usize
+    };
+    let max_block = (m / 5).max(1);
+    block_size = block_size.min(max_block).max(1);
+
+    #[cfg(feature = "parallel")]
+    let cov_accumulator: WelfordCovariance9 = crate::thread_pool::install(|| {
+        (0..n_bootstrap)
+            .into_par_iter()
+            .fold_with(
+                (
+                    Xoshiro256PlusPlus::seed_from_u64(seed),
+                    vec![0.0; m],
+                    vec![0.0; m],
+                    Vec::<usize>::with_capacity((m + block_size - 1) / block_size),
+                    WelfordCovariance9::new(),
+                ),
+                |(_, mut baseline_buf, mut sample_buf, mut indices, mut acc), i| {
+                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+
+                    indices.clear();
+                    let n_blocks = (m + block_size - 1) / block_size;
+                    let max_start = n.saturating_sub(block_size);
+                    for _ in 0..n_blocks {
+                        indices.push(rng.random_range(0..=max_start));
+                    }
+
+                    resample_with_indices(baseline, &indices, block_size, &mut baseline_buf);
+                    resample_with_indices(sample, &indices, block_size, &mut sample_buf);
+
+                    let q_baseline = compute_midquantile_deciles(&baseline_buf);
+                    let q_sample = compute_midquantile_deciles(&sample_buf);
+                    let delta = q_baseline - q_sample;
+                    acc.update(&delta);
+
+                    (rng, baseline_buf, sample_buf, indices, acc)
+                },
+            )
+            .map(|(_, _, _, _, acc)| acc)
+            .reduce(
+                WelfordCovariance9::new,
+                |mut a, b| {
+                    a.merge(&b);
+                    a
+                },
+            )
+    });
+
+    #[cfg(not(feature = "parallel"))]
+    let cov_accumulator: WelfordCovariance9 = {
+        let mut accumulator = WelfordCovariance9::new();
+        let mut baseline_buf = vec![0.0; m];
+        let mut sample_buf = vec![0.0; m];
+        let mut indices = Vec::with_capacity((m + block_size - 1) / block_size);
+
+        for i in 0..n_bootstrap {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+
+            indices.clear();
+            let n_blocks = (m + block_size - 1) / block_size;
+            let max_start = n.saturating_sub(block_size);
+            for _ in 0..n_blocks {
+                indices.push(rng.gen_range(0..=max_start));
+            }
+
+            resample_with_indices(baseline, &indices, block_size, &mut baseline_buf);
+            resample_with_indices(sample, &indices, block_size, &mut sample_buf);
+
+            let q_baseline = compute_midquantile_deciles(&baseline_buf);
+            let q_sample = compute_midquantile_deciles(&sample_buf);
+            let delta = q_baseline - q_sample;
+            accumulator.update(&delta);
+        }
+        accumulator
+    };
+
+    // Finalize the Welford accumulator and rescale from m to n.
+    let mut cov_matrix = cov_accumulator.finalize();
+    if n > 0 {
+        cov_matrix *= (m as f64) / (n as f64);
+    }
+
+    let (stabilized_matrix, jitter) = add_diagonal_jitter(cov_matrix);
     let min_eigenvalue = estimate_min_eigenvalue(&stabilized_matrix);
 
     CovarianceEstimate {

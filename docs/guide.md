@@ -72,9 +72,10 @@ This library follows **DudeCT's two-class testing pattern** for detecting data-d
 This pattern tests whether operations have **data-dependent timing** rather than comparing specific fixed values:
 
 ```rust
-use timing_oracle::TimingOracle;
+use timing_oracle::{TimingOracle, AttackerModel};
 
-let result = TimingOracle::new()
+// Choose your threat model - this determines what effect size is considered "significant"
+let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
     .samples(50_000)
     .test(
         || {
@@ -94,6 +95,17 @@ if !result.ci_gate.passed {
     assert!(matches!(result.exploitability, Exploitability::Negligible));
 }
 ```
+
+**Attacker Model Presets:**
+
+| Preset | Threshold | When to use |
+|--------|-----------|-------------|
+| `WANConservative` | 50 μs | Public APIs, internet-facing services |
+| `LANConservative` | 100 ns | Internal microservices (Crosby-style) |
+| `LANStrict` | 2 cycles | High-security internal services (Kario-style) |
+| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
+| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto libraries |
+| `Research` | 0 | Academic analysis, detect any difference |
 
 **Why this pattern works:**
 - Simpler than fixed-vs-variable input patterns
@@ -256,10 +268,11 @@ fn test_db_query_timing() {
 For faster iteration during development:
 
 ```rust
-use timing_oracle::TimingOracle;
+use timing_oracle::{TimingOracle, AttackerModel};
 
 // Fast test with reduced samples (completes in ~0.5s)
-let result = TimingOracle::quick()  // 5k samples, reduced bootstrap
+let result = TimingOracle::quick()
+    .attacker_model(AttackerModel::LANConservative)
     .test(|| my_function(&FIXED), || my_function(&random_input()));
 
 println!("Quick smoke test: {:.0}% probability",
@@ -269,7 +282,10 @@ println!("Quick smoke test: {:.0}% probability",
 ### Interpreting Results
 
 ```rust
-let result = TimingOracle::new().test(fixed_fn, random_fn);
+use timing_oracle::{TimingOracle, AttackerModel, Exploitability};
+
+let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
+    .test(fixed_fn, random_fn);
 
 // 1. Check CI gate for pass/fail decision
 if !result.ci_gate.passed {
@@ -318,7 +334,7 @@ println!("Min detectable effect: {:.1} ns (shift), {:.1} ns (tail)",
 For async functions, use `Runtime::block_on()` to bridge async → sync for measurement:
 
 ```rust
-use timing_oracle::TimingOracle;
+use timing_oracle::{TimingOracle, AttackerModel};
 use tokio::runtime::Runtime;
 use tokio::time::{sleep, Duration};
 
@@ -328,7 +344,7 @@ let rt = tokio::runtime::Builder::new_current_thread()
     .build()
     .unwrap();
 
-let result = TimingOracle::new()
+let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
     .samples(10_000)
     .test(
         || {
