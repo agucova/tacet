@@ -10,7 +10,7 @@
 //! - Serialization round-trips
 
 use timing_oracle::{
-    CiGate, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
+    CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
     MinDetectableEffect, Outcome, TestResult, UnreliablePolicy,
 };
 
@@ -299,7 +299,6 @@ fn diagnostics_all_checks_passed_all_false() {
 fn make_test_result(leak_prob: f64, mde_shift: f64, quality: MeasurementQuality) -> TestResult {
     TestResult {
         leak_probability: leak_prob,
-        bayes_factor: 1.0,
         effect: None,
         exploitability: Exploitability::Negligible,
         min_detectable_effect: MinDetectableEffect {
@@ -308,10 +307,11 @@ fn make_test_result(leak_prob: f64, mde_shift: f64, quality: MeasurementQuality)
         },
         ci_gate: CiGate {
             alpha: 0.01,
-            passed: true,
+            result: CiGateResult::Pass,
             threshold: 10.0,
             max_observed: 5.0,
             observed: [0.0; 9],
+            p_value: 0.5,
         },
         quality,
         outlier_fraction: 0.001,
@@ -569,7 +569,7 @@ fn test_result_json_roundtrip() {
 
     assert_eq!(result.leak_probability, deserialized.leak_probability);
     assert_eq!(result.quality, deserialized.quality);
-    assert_eq!(result.ci_gate.passed, deserialized.ci_gate.passed);
+    assert_eq!(result.ci_gate.passed(), deserialized.ci_gate.passed());
 }
 
 #[test]
@@ -577,6 +577,8 @@ fn effect_json_roundtrip() {
     let effect = Effect {
         shift_ns: 15.5,
         tail_ns: 3.2,
+        shift_ci_ns: (10.0, 20.0),
+        tail_ci_ns: (0.0, 6.5),
         credible_interval_ns: (10.0, 20.0),
         pattern: EffectPattern::UniformShift,
     };
@@ -592,16 +594,17 @@ fn effect_json_roundtrip() {
 fn ci_gate_json_roundtrip() {
     let gate = CiGate {
         alpha: 0.01,
-        passed: true,
+        result: CiGateResult::Pass,
         threshold: 12.5,
         max_observed: 8.3,
         observed: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 8.3],
+        p_value: 0.15,
     };
     let json = serde_json::to_string(&gate).unwrap();
     let deserialized: CiGate = serde_json::from_str(&json).unwrap();
 
     assert_eq!(gate.alpha, deserialized.alpha);
-    assert_eq!(gate.passed, deserialized.passed);
+    assert_eq!(gate.passed(), deserialized.passed());
     assert_eq!(gate.threshold, deserialized.threshold);
     assert_eq!(gate.observed, deserialized.observed);
 }

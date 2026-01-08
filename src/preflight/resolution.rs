@@ -35,12 +35,24 @@ pub enum ResolutionWarning {
         /// Total number of samples.
         total_samples: usize,
     },
+
+    /// Timer is not monotonic (returned negative duration).
+    NonMonotonic {
+        /// Number of non-monotonic steps detected.
+        violations: usize,
+        /// Largest negative jump in cycles.
+        max_jump_cycles: u64,
+    },
 }
 
 impl ResolutionWarning {
     /// Check if this warning indicates a critical issue.
     pub fn is_critical(&self) -> bool {
-        matches!(self, ResolutionWarning::InsufficientResolution { .. })
+        match self {
+            ResolutionWarning::InsufficientResolution { .. } => true,
+            ResolutionWarning::NonMonotonic { .. } => true,
+            ResolutionWarning::HighQuantization { .. } => false,
+        }
     }
 
     /// Get a human-readable description of the warning.
@@ -75,6 +87,14 @@ impl ResolutionWarning {
                     unique_values, total_samples
                 )
             }
+            ResolutionWarning::NonMonotonic { violations, max_jump_cycles } => {
+                format!(
+                    "CRITICAL: Timer is not monotonic! Detected {} violations (max jump: {} cycles). \
+                     Results are completely invalid. This usually indicates a kernel/BIOS bug \
+                     or CPU frequency scaling artifacts with rdtsc.",
+                    violations, max_jump_cycles
+                )
+            }
         }
     }
 }
@@ -84,6 +104,33 @@ const MIN_UNIQUE_PER_1000: usize = 20;
 
 /// Fraction of zero values that triggers critical warning.
 const CRITICAL_ZERO_FRACTION: f64 = 0.5;
+
+/// Perform basic timer sanity check (spec §3.2).
+///
+/// Verifies monotonicity by taking 1000 consecutive timestamps.
+pub fn timer_sanity_check(_timer: &crate::measurement::BoxedTimer) -> Option<ResolutionWarning> {
+    let mut violations = 0;
+    let mut max_jump = 0;
+    
+    let mut last = crate::measurement::rdtsc();
+    for _ in 0..1000 {
+        let current = crate::measurement::rdtsc();
+        if current < last {
+            violations += 1;
+            max_jump = max_jump.max(last - current);
+        }
+        last = current;
+    }
+
+    if violations > 0 {
+        return Some(ResolutionWarning::NonMonotonic {
+            violations,
+            max_jump_cycles: max_jump,
+        });
+    }
+
+    None
+}
 
 /// Perform resolution check on timing samples.
 ///

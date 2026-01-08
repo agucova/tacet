@@ -1,15 +1,16 @@
 //! Fixed-vs-Fixed sanity check.
 //!
-//! This check splits the fixed samples in half and runs the analysis
-//! between the two halves. If a "leak" is detected between identical
-//! input classes, it indicates a broken measurement harness or
-//! environmental interference.
+//! This check splits the fixed samples in half and compares quantiles
+//! between the two halves. If a large difference is detected between
+//! identical input classes, it indicates a broken measurement harness
+//! or environmental interference.
+//!
+//! The check uses a simple threshold approach: if max|Δ| > 5× median noise,
+//! the harness is likely broken.
 
 use serde::{Deserialize, Serialize};
 
-use crate::analysis::{compute_bayes_factor, estimate_mde, run_ci_gate, CiGateInput};
-use crate::statistics::{bootstrap_difference_covariance, compute_deciles};
-use crate::types::{Class, TimingSample, Vector9};
+use crate::statistics::compute_deciles;
 
 /// Warning from the sanity check.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,19 +64,18 @@ impl SanityWarning {
 /// Minimum samples required to perform sanity check.
 const MIN_SAMPLES_FOR_SANITY: usize = 1000;
 
-/// Threshold for leak probability to trigger warning.
-const LEAK_THRESHOLD: f64 = 0.5;
-
-/// Default alpha for sanity check.
-const SANITY_ALPHA: f64 = 0.01;
-
-/// Default bootstrap iterations for sanity check.
-const SANITY_BOOTSTRAP: usize = 1000;
+/// Multiplier for noise threshold: if max|Δ| > NOISE_MULTIPLIER × median_noise, harness is broken.
+const NOISE_MULTIPLIER: f64 = 5.0;
 
 /// Perform Fixed-vs-Fixed sanity check.
 ///
-/// Splits the fixed samples in half and runs analysis between the halves.
-/// If a leak is detected, returns a warning indicating a broken harness.
+/// Splits the fixed samples in half and compares quantiles between the halves.
+/// If the max quantile difference exceeds 5× the median noise level, returns
+/// a warning indicating a broken harness.
+///
+/// This is a simplified check that doesn't require CI gate or Bayesian inference.
+/// The idea: identical inputs should produce similar timing distributions. If they
+/// don't, the harness is broken.
 ///
 /// # Arguments
 ///
@@ -84,6 +84,7 @@ const SANITY_BOOTSTRAP: usize = 1000;
 /// # Returns
 ///
 /// `Some(SanityWarning)` if an issue is detected, `None` otherwise.
+#[allow(unused_variables)] // timer_resolution_ns kept for API compatibility
 pub fn sanity_check(fixed_samples: &[f64], timer_resolution_ns: f64) -> Option<SanityWarning> {
     // Check if we have enough samples
     if fixed_samples.len() < MIN_SAMPLES_FOR_SANITY {
@@ -98,65 +99,37 @@ pub fn sanity_check(fixed_samples: &[f64], timer_resolution_ns: f64) -> Option<S
     let first_half = &fixed_samples[..mid];
     let second_half = &fixed_samples[mid..];
 
-    let leak_probability = compute_full_leak_check(first_half, second_half, timer_resolution_ns);
+    // Compute quantile differences
+    let q_first = compute_deciles(first_half);
+    let q_second = compute_deciles(second_half);
 
-    if leak_probability > LEAK_THRESHOLD {
+    // Max absolute quantile difference
+    let max_diff = (0..9)
+        .map(|i| (q_first[i] - q_second[i]).abs())
+        .fold(0.0_f64, f64::max);
+
+    // Estimate noise level from IQR of the combined samples
+    // IQR is robust to outliers and gives a sense of typical variation
+    let mut all_samples: Vec<f64> = fixed_samples.to_vec();
+    all_samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    let q25_idx = all_samples.len() / 4;
+    let q75_idx = 3 * all_samples.len() / 4;
+    let iqr = all_samples[q75_idx] - all_samples[q25_idx];
+
+    // Noise threshold: expect quantile differences to be small relative to IQR
+    // For identical distributions split in half, quantile differences should be
+    // roughly O(IQR / sqrt(n)), so 5× that is a conservative threshold
+    let n = fixed_samples.len() as f64;
+    let expected_noise = iqr / n.sqrt();
+    let threshold = NOISE_MULTIPLIER * expected_noise;
+
+    if max_diff > threshold && threshold > 0.0 {
+        // Convert to a "leak probability" for the warning message
+        // This is a rough approximation based on how much we exceeded the threshold
+        let leak_probability = (max_diff / threshold).min(1.0);
         Some(SanityWarning::BrokenHarness { leak_probability })
     } else {
         None
-    }
-}
-
-/// Full leak check using the core quantile-based analysis pipeline.
-fn compute_full_leak_check(first: &[f64], second: &[f64], timer_resolution_ns: f64) -> f64 {
-    if first.is_empty() || second.is_empty() {
-        return 0.0;
-    }
-
-    let q_first = compute_deciles(first);
-    let q_second = compute_deciles(second);
-    let delta: Vector9 = q_first - q_second;
-
-    // Create interleaved sequence for joint resampling
-    // Treat first half as "Fixed", second half as "Random" for the comparison
-    let min_len = first.len().min(second.len());
-    let mut interleaved = Vec::with_capacity(min_len * 2);
-    for i in 0..min_len {
-        interleaved.push(TimingSample { time_ns: first[i], class: Class::Baseline });
-        interleaved.push(TimingSample { time_ns: second[i], class: Class::Sample });
-    }
-
-    // Bootstrap Δ* = q_F* - q_R* via joint resampling
-    let cov_estimate = bootstrap_difference_covariance(&interleaved, SANITY_BOOTSTRAP, 123);
-    let sigma0 = cov_estimate.matrix;
-
-    // Default α=0.01 for MDE in sanity check
-    let mde = estimate_mde(&sigma0, 0.01);
-    let min_effect = 10.0;
-    let prior_sigmas = (
-        (2.0 * mde.shift_ns).max(min_effect),
-        (2.0 * mde.tail_ns).max(min_effect),
-    );
-
-    let ci_gate_input = CiGateInput {
-        observed_diff: delta,
-        baseline_samples: first,
-        sample_samples: second,
-        alpha: SANITY_ALPHA,
-        bootstrap_iterations: SANITY_BOOTSTRAP,
-        seed: Some(999),
-        timer_resolution_ns,
-        min_effect_of_concern: 0.0, // Sanity checks should detect any harness issues
-        discrete_mode: false, // Sanity checks use continuous mode
-    };
-    let ci_gate = run_ci_gate(&ci_gate_input);
-
-    // For sanity checks, use min_effect threshold of 10ns
-    let bayes = compute_bayes_factor(&delta, &sigma0, prior_sigmas, min_effect, Some(999));
-    if !ci_gate.passed {
-        bayes.posterior_probability.max(LEAK_THRESHOLD)
-    } else {
-        bayes.posterior_probability
     }
 }
 
@@ -176,19 +149,15 @@ mod tests {
 
     #[test]
     fn test_identical_samples_pass() {
+        // Create samples with small deterministic variation
         let samples: Vec<f64> = (0..2000).map(|i| 100.0 + (i % 10) as f64).collect();
         let result = sanity_check(&samples, 1.0);
 
-        match result {
-            None => {}
-            Some(SanityWarning::InsufficientSamples { .. }) => {}
-            Some(SanityWarning::BrokenHarness { leak_probability }) => {
-                assert!(
-                    leak_probability < LEAK_THRESHOLD,
-                    "Identical samples should not trigger broken harness warning"
-                );
-            }
-        }
+        // Identical pattern in both halves should pass
+        assert!(
+            !matches!(result, Some(SanityWarning::BrokenHarness { .. })),
+            "Identical samples should not trigger broken harness warning"
+        );
     }
 
     #[test]

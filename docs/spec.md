@@ -1,4 +1,4 @@
-# timing-oracle Specification
+# timing-oracle Specification (v2)
 
 ## 1. Overview
 
@@ -234,18 +234,6 @@ $$
 
 Use these to determine $K_{\text{sub}}^{\text{max}}$ (filtering) and for studentization in the test statistic.
 
-**Finite-sample correction (SILENT's beta correction):**
-
-SILENT applies a finite-sample correction to the quantile estimates using the beta distribution. For quantile level $q$ with sample size $n$:
-
-$$
-\text{correction}_k = \sqrt{\max(\text{sd}(F), \text{sd}(R))} \cdot \frac{1 - F_{\text{Beta}}(q_k; \, q_k \cdot n, \, (1-q_k) \cdot n)}{\sqrt{q_k (1 - q_k)}}
-$$
-
-where $F_{\text{Beta}}$ is the beta CDF. This correction accounts for the finite-sample bias in quantile estimation and is added to $A_k$ before computing the test statistic. The correction is larger for extreme quantiles (near 0 or 1) and smaller samples.
-
-**Implementation note:** This requires a beta CDF implementation. The `statrs` crate provides this in Rust.
-
 **Centered, studentized bootstrap statistics:**
 
 For each iteration $b$, compute:
@@ -259,8 +247,10 @@ Note: we subtract the *observed* $A_k$ (not θ) to center the bootstrap distribu
 **Decision:**
 
 1. Compute critical value: $c^*_{1-\alpha} = \text{Quantile}_{1-\alpha}(\{\hat{Q}^{*(1)}_{max}, \ldots, \hat{Q}^{*(B)}_{max}\})$
-2. Compute corrected test statistic: $\hat{Q}_{max} = \max_{k \in K_{\text{sub}}^{\text{max}}} \frac{(A_k + \text{correction}_k) - \theta}{\hat{\sigma}_k}$
+2. Compute test statistic: $\hat{Q}_{max} = \max_{k \in K_{\text{sub}}^{\text{max}}} \frac{A_k - \theta}{\hat{\sigma}_k}$
 3. **Reject** (declare leak) if $\hat{Q}_{max} > c^*_{1-\alpha}$
+
+**Note on SILENT's R implementation:** SILENT's R code includes an additional finite-sample bias correction using the Beta distribution, scaling with raw timing variance. We omit this correction because (1) Theorem 2's FPR guarantee holds for the uncorrected statistic, and (2) the correction's scaling with raw variance (rather than quantile-difference variance) causes false rejections when testing constant-time code with high measurement variance but identical class distributions.
 
 #### Why This Works at the Boundary
 
@@ -649,7 +639,17 @@ This preserves cross-covariance from common-mode noise (thermal drift, frequency
 
 **Numerical stability:**
 
-If $\Sigma_0$ is ill-conditioned (Cholesky fails), add diagonal jitter: $\varepsilon = 10^{-10} + \text{tr}(\Sigma)/9 \cdot 10^{-8}$. If still fails, set `MeasurementQuality::TooNoisy` and `leak_probability = 0.5` (maximally uncertain). The CI gate still runs.
+In discrete mode with many ties, some quantiles may have zero variance, making $\Sigma_0$ ill-conditioned. Even if Cholesky succeeds, the inverse has huge values for near-zero variance elements, causing them to dominate the Bayesian regression incorrectly.
+
+We regularize by ensuring a minimum diagonal value of 1% of mean variance, bounding the condition number to ~100:
+
+$$
+\sigma^2_i \leftarrow \max(\sigma^2_i, 0.01 \cdot \bar{\sigma}^2) + \varepsilon
+$$
+
+where $\bar{\sigma}^2 = \text{tr}(\Sigma)/9$ and $\varepsilon = 10^{-10} + \bar{\sigma}^2 \cdot 10^{-8}$.
+
+If Cholesky still fails after regularization, set `MeasurementQuality::TooNoisy` and `leak_probability = 0.5` (maximally uncertain). The CI gate still runs.
 
 ### 2.7 Minimum Detectable Effect
 

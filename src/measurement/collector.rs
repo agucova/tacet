@@ -147,74 +147,79 @@ impl Collector {
 
         // Calculate ticks per call (how many timer ticks per single operation)
         let ticks_per_call = median_ns / resolution_ns;
-        let threshold_ns = resolution_ns * MIN_TICKS_SINGLE_CALL;
-
-        // Check measurability floor
-        if ticks_per_call < MIN_TICKS_SINGLE_CALL {
-            // Operation is too fast to measure reliably
-            // Provide platform-specific suggestions
-            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-            let suggestion = ". On macOS, run with sudo to enable kperf cycle counting (~1ns resolution)";
-            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-            let suggestion = ". Run with sudo and --features perf for cycle-accurate timing";
-            #[cfg(not(target_arch = "aarch64"))]
-            let suggestion = "";
-
-            return BatchingInfo {
-                enabled: false,
-                k: 1,
-                ticks_per_batch: ticks_per_call,
-                rationale: format!(
-                    "UNMEASURABLE: {:.1} ticks/call < {:.0} minimum (op ~{:.0}ns, threshold ~{:.0}ns){}",
-                    ticks_per_call, MIN_TICKS_SINGLE_CALL, median_ns, threshold_ns, suggestion
-                ),
-                unmeasurable: Some(UnmeasurableInfo {
-                    operation_ns: median_ns,
-                    threshold_ns,
-                    ticks_per_call,
-                }),
-            };
-        }
+        let threshold_ns = resolution_ns * TARGET_TICKS_PER_BATCH / MAX_BATCH_SIZE as f64;
 
         // Select K to achieve target tick density
-        if ticks_per_call >= self.target_ticks_per_batch {
+        let (k, enabled, unmeasurable, rationale) = if ticks_per_call >= self.target_ticks_per_batch {
             // No batching needed - individual measurements have enough resolution
-            BatchingInfo {
-                enabled: false,
-                k: 1,
-                ticks_per_batch: ticks_per_call,
-                rationale: format!(
+            (
+                1,
+                false,
+                None,
+                format!(
                     "no batching needed ({:.1} ticks/call >= {:.0} target)",
                     ticks_per_call, self.target_ticks_per_batch
                 ),
-                unmeasurable: None,
-            }
+            )
         } else {
             // Need batching to achieve target tick density
             let k_raw = (self.target_ticks_per_batch / ticks_per_call).ceil() as u32;
-            let k = k_raw.clamp(1, self.max_batch_size);
-            let actual_ticks = ticks_per_call * k as f64;
+            let k_attempt = k_raw.clamp(1, self.max_batch_size);
+            let actual_ticks = ticks_per_call * k_attempt as f64;
 
-            // Check if we hit the cap and couldn't reach target
-            let partial = actual_ticks < self.target_ticks_per_batch;
+            // Check if even with max batching we're still below measurability threshold
+            // Spec §8.2.4: If K*Top < 50*Tres even at K=20, it's Unmeasurable.
+            if actual_ticks < self.target_ticks_per_batch {
+                #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                let suggestion = ". On macOS, run with sudo to enable kperf cycle counting (~1ns resolution)";
+                #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                let suggestion = ". Run with sudo and --features perf for cycle-accurate timing";
+                #[cfg(not(target_arch = "aarch64"))]
+                let suggestion = "";
 
-            BatchingInfo {
-                enabled: k > 1,
-                k,
-                ticks_per_batch: actual_ticks,
-                rationale: if partial {
+                let rationale = format!(
+                    "UNMEASURABLE: {:.1} ticks/batch < {:.0} minimum even at K={} (op ~{:.2}ns, threshold ~{:.2}ns){}",
+                    actual_ticks,
+                    self.target_ticks_per_batch,
+                    k_attempt,
+                    median_ns,
+                    resolution_ns * self.target_ticks_per_batch / k_attempt as f64,
+                    suggestion
+                );
+
+                (
+                    1, // Revert to k=1 for reporting unmeasurable
+                    false,
+                    Some(UnmeasurableInfo {
+                        operation_ns: median_ns,
+                        threshold_ns: resolution_ns * self.target_ticks_per_batch / k_attempt as f64,
+                        ticks_per_call,
+                    }),
+                    rationale,
+                )
+            } else {
+                let partial = actual_ticks < self.target_ticks_per_batch;
+                let rationale = if partial {
                     format!(
                         "K={} ({:.1} ticks/batch < {:.0} target, capped at MAX_BATCH_SIZE={})",
-                        k, actual_ticks, self.target_ticks_per_batch, self.max_batch_size
+                        k_attempt, actual_ticks, self.target_ticks_per_batch, self.max_batch_size
                     )
                 } else {
                     format!(
                         "K={} ({:.1} ticks/batch, {:.2} ticks/call, timer res {:.1}ns)",
-                        k, actual_ticks, ticks_per_call, resolution_ns
+                        k_attempt, actual_ticks, ticks_per_call, resolution_ns
                     )
-                },
-                unmeasurable: None,
+                };
+                (k_attempt, k_attempt > 1, None, rationale)
             }
+        };
+
+        BatchingInfo {
+            enabled,
+            k,
+            ticks_per_batch: ticks_per_call * k as f64,
+            rationale,
+            unmeasurable,
         }
     }
 

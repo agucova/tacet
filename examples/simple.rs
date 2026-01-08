@@ -41,7 +41,7 @@ fn main() {
     };
 
     println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-    println!("CI gate passed: {}", result.ci_gate.passed);
+    println!("CI gate passed: {}", result.ci_gate.passed());
     println!("Quality: {:?}", result.quality);
     println!(
         "Timer: {} ({:.1}ns resolution)",

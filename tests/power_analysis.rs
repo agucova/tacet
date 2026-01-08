@@ -105,7 +105,7 @@ fn mde_calibrated_power_curve() {
             match outcome {
                 Outcome::Completed(result) => {
                     // Detection = CI gate fails OR leak probability > 50%
-                    if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                    if !result.ci_gate.passed() || result.leak_probability > 0.5 {
                         detections += 1;
                     }
                 }
@@ -320,7 +320,7 @@ fn large_effect_detection() {
             Outcome::Completed(result) => {
                 leak_probs.push(result.leak_probability);
 
-                if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                if !result.ci_gate.passed() || result.leak_probability > 0.5 {
                     detections += 1;
                 }
 
@@ -399,7 +399,7 @@ fn negligible_effect_fpr() {
 
         match outcome {
             Outcome::Completed(result) => {
-                if !result.ci_gate.passed || result.leak_probability > 0.5 {
+                if !result.ci_gate.passed() || result.leak_probability > 0.5 {
                     detections += 1;
                 }
             }

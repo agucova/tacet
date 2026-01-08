@@ -58,7 +58,7 @@ pub fn lag2_autocorrelation(data: &[f64]) -> f64 {
 /// # Returns
 ///
 /// The autocorrelation coefficient at the specified lag.
-fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
+pub fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
     let n = data.len();
 
     // Need at least lag + 1 observations
@@ -84,6 +84,33 @@ fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
 
     // Return autocorrelation coefficient
     lagged_cov / variance
+}
+
+/// Estimate the dependence length m using the spec's ACF heuristic (§3.2.2).
+///
+/// Find the smallest h where |ρ(h)| < 2/sqrt(n).
+///
+/// # Arguments
+///
+/// * `data` - Subsequence for one class (already extracted and demeaned)
+/// * `max_lag` - Maximum lag to search
+///
+/// # Returns
+///
+/// The estimated dependence length m_c.
+pub fn estimate_dependence_length(data: &[f64], max_lag: usize) -> usize {
+    let n = data.len();
+    if n == 0 { return 1; }
+    let threshold = 2.0 / (n as f64).sqrt();
+
+    for h in 1..=max_lag.min(n - 1) {
+        let rho = compute_lag_autocorrelation(data, h);
+        if rho.abs() < threshold {
+            return h;
+        }
+    }
+
+    max_lag
 }
 
 /// Compute autocorrelation on the full interleaved sequence.
@@ -125,7 +152,6 @@ pub fn interleaved_autocorrelation(fixed: &[f64], random: &[f64], lag: usize) ->
 /// # Returns
 ///
 /// A vector of autocorrelation coefficients for lags 1 through max_lag.
-#[cfg(test)]
 pub fn autocorrelation_function(data: &[f64], max_lag: usize) -> Vec<f64> {
     (1..=max_lag)
         .map(|lag| compute_lag_autocorrelation(data, lag))

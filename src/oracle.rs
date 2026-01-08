@@ -5,24 +5,27 @@ use std::time::Instant;
 
 #[allow(unused_imports)]
 use rand::Rng;
+use rand::SeedableRng;
 use rand::seq::SliceRandom;
 
 use std::hash::Hash;
 
 use crate::analysis::{compute_bayes_factor, compute_diagnostics, decompose_effect, estimate_mde, run_ci_gate, CiGateInput, DiagnosticsExtra};
 use crate::config::Config;
+use crate::constants::B_TAIL;
 use crate::helpers::InputPair;
 use crate::measurement::{filter_outliers, BoxedTimer, TimerSpec};
 use crate::preflight::run_all_checks;
 use crate::result::{
-    BatchingInfo, CiGate, Diagnostics, Effect, Exploitability, MeasurementQuality, Metadata, MinDetectableEffect,
+    BatchingInfo, CiGate, Effect, Exploitability, MeasurementQuality, Metadata, MinDetectableEffect,
     Outcome, TestResult,
 };
 use crate::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
     compute_deciles_fast, compute_midquantile_deciles, scale_covariance_for_inference,
 };
-use crate::types::{AttackerModel, Class, Vector9};
+use crate::types::{AttackerModel, Class, Matrix9, Vector2, Vector9};
+use nalgebra::Cholesky;
 
 /// Main entry point for timing analysis.
 ///
@@ -95,23 +98,23 @@ impl TimingOracle {
         }
     }
 
-    /// Create with fast configuration for testing/calibration.
+    /// Create with fast configuration for development iteration.
     ///
-    /// Uses reduced sample counts, warmup, and bootstrap iterations
-    /// for faster execution while maintaining statistical validity.
+    /// Uses reduced sample counts and bootstrap iterations for faster
+    /// execution. FPR control is less precise (supports α ≥ 0.1).
     ///
     /// Settings:
     /// - 5,000 samples (vs 100,000 default)
     /// - 50 warmup iterations (vs 1,000 default)
-    /// - 50 covariance bootstrap iterations (vs 50 default)
-    /// - 50 CI bootstrap iterations (vs 100 default)
+    /// - 50 covariance bootstrap iterations (vs 2,000 default)
+    /// - 500 CI bootstrap iterations (vs 2,000 default, supports α ≥ 0.1)
     pub fn quick() -> Self {
         Self {
             config: Config {
                 samples: 5_000,
                 warmup: 50,
                 cov_bootstrap_iterations: 50,
-                ci_bootstrap_iterations: 50,
+                ci_bootstrap_iterations: 500,
                 ..Config::default()
             },
             timer_spec: TimerSpec::Auto,
@@ -126,38 +129,38 @@ impl TimingOracle {
     /// Settings:
     /// - 20,000 samples (vs 100,000 default, 5x faster)
     /// - 200 warmup iterations (vs 1,000 default)
-    /// - 50 covariance bootstrap iterations (same as updated default)
-    /// - 100 CI bootstrap iterations (same as updated default)
+    /// - 500 covariance bootstrap iterations (vs 2,000 default)
+    /// - 2,000 CI bootstrap iterations (spec default)
     pub fn balanced() -> Self {
         Self {
             config: Config {
                 samples: 20_000,
                 warmup: 200,
-                cov_bootstrap_iterations: 50,
-                ci_bootstrap_iterations: 100,
+                cov_bootstrap_iterations: 500,
+                ci_bootstrap_iterations: 2_000,
                 ..Config::default()
             },
             timer_spec: TimerSpec::Auto,
         }
     }
 
-    /// Create with minimal configuration for calibration tests.
+    /// Create with minimal sample count for FPR calibration tests.
     ///
-    /// Optimized for running many trials (100+) in calibration suites.
-    /// Uses minimum sample sizes that maintain statistical validity.
+    /// Optimized for running many trials (100+) to validate FPR bounds.
+    /// Uses minimum sample sizes with spec-default bootstrap iterations.
     ///
     /// Settings:
     /// - 2,000 samples (minimal for valid statistics)
     /// - 20 warmup iterations
-    /// - 20 covariance bootstrap iterations
-    /// - 30 CI bootstrap iterations
+    /// - 500 covariance bootstrap iterations
+    /// - 2,000 CI bootstrap iterations (spec default)
     pub fn calibration() -> Self {
         Self {
             config: Config {
                 samples: 2_000,
                 warmup: 20,
-                cov_bootstrap_iterations: 20,
-                ci_bootstrap_iterations: 30,
+                cov_bootstrap_iterations: 500,
+                ci_bootstrap_iterations: 2_000,
                 ..Config::default()
             },
             timer_spec: TimerSpec::Auto,
@@ -562,7 +565,7 @@ impl TimingOracle {
         }
 
         // Step 5: Pilot phase to check measurability
-        const PILOT_SAMPLES: usize = 50;
+        const PILOT_SAMPLES: usize = 100;
         let mut pilot_cycles = Vec::with_capacity(PILOT_SAMPLES * 2);
 
         for i in 0..PILOT_SAMPLES.min(self.config.samples) {
@@ -579,17 +582,91 @@ impl TimingOracle {
             pilot_cycles.push(cycles);
         }
 
-        // Check if operation is measurable
+        // Check if operation is measurable and select batching
         pilot_cycles.sort_unstable();
         let median_cycles = pilot_cycles[pilot_cycles.len() / 2];
         let median_ns = timer.cycles_to_ns(median_cycles);
         let resolution_ns = timer.resolution_ns();
         let ticks_per_call = median_ns / resolution_ns;
 
-        if ticks_per_call < crate::measurement::MIN_TICKS_SINGLE_CALL {
+        if ticks_per_call <= 0.0 || !ticks_per_call.is_finite() {
             let threshold_ns = resolution_ns * crate::measurement::MIN_TICKS_SINGLE_CALL;
+            let platform = format!(
+                "{} ({}, {:.1}ns resolution)",
+                std::env::consts::OS,
+                timer.name(),
+                timer.resolution_ns()
+            );
+            return Outcome::Unmeasurable {
+                operation_ns: median_ns,
+                threshold_ns,
+                platform,
+                recommendation: "Timer returned non-finite measurements; retry on a more stable system.".to_string(),
+            };
+        }
 
-            // Return early for unmeasurable operations
+        let (k, rationale, unmeasurable_info): (u32, String, Option<crate::result::UnmeasurableInfo>) = match self.config.iterations_per_sample {
+            crate::config::IterationsPerSample::Fixed(k) => {
+                let k = k.max(1) as u32;
+                (k, format!("fixed batching K={}", k), None)
+            }
+            crate::config::IterationsPerSample::Auto => {
+                if ticks_per_call >= crate::measurement::TARGET_TICKS_PER_BATCH {
+                    (1, format!("no batching needed ({:.1} ticks/call)", ticks_per_call), None)
+                } else {
+                    let k_raw =
+                        (crate::measurement::TARGET_TICKS_PER_BATCH / ticks_per_call).ceil() as u32;
+                    let k = k_raw.clamp(1, crate::measurement::MAX_BATCH_SIZE);
+                    let ticks_per_batch = ticks_per_call * k as f64;
+                    let partial = ticks_per_batch < crate::measurement::TARGET_TICKS_PER_BATCH;
+
+                    if partial {
+                        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+                        let suggestion = ". On macOS, run with sudo to enable kperf cycle counting (~1ns resolution)";
+                        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+                        let suggestion = ". Run with sudo and --features perf for cycle-accurate timing";
+                        #[cfg(not(target_arch = "aarch64"))]
+                        let suggestion = "";
+
+                        let rationale = format!(
+                            "UNMEASURABLE: {:.1} ticks/batch < {:.0} minimum even at K={} (op ~{:.2}ns, threshold ~{:.2}ns){}",
+                            ticks_per_batch,
+                            crate::measurement::TARGET_TICKS_PER_BATCH,
+                            k,
+                            median_ns,
+                            resolution_ns * crate::measurement::TARGET_TICKS_PER_BATCH / k as f64,
+                            suggestion
+                        );
+                        (
+                            k,
+                            rationale,
+                            Some(crate::result::UnmeasurableInfo {
+                                operation_ns: median_ns,
+                                threshold_ns: resolution_ns * crate::measurement::TARGET_TICKS_PER_BATCH
+                                    / k as f64,
+                                ticks_per_call,
+                            }),
+                        )
+                    } else {
+                        let rationale = format!(
+                            "K={} ({:.1} ticks/batch, {:.2} ticks/call, timer res {:.1}ns)",
+                            k, ticks_per_batch, ticks_per_call, resolution_ns
+                        );
+                        (k, rationale, None)
+                    }
+                }
+            }
+        };
+
+        let batching = crate::result::BatchingInfo {
+            enabled: k > 1,
+            k,
+            ticks_per_batch: ticks_per_call * k as f64,
+            rationale,
+            unmeasurable: unmeasurable_info.clone(),
+        };
+
+        if let Some(info) = unmeasurable_info {
             let platform = format!(
                 "{} ({}, {:.1}ns resolution)",
                 std::env::consts::OS,
@@ -597,7 +674,6 @@ impl TimingOracle {
                 timer.resolution_ns()
             );
 
-            // Recommend PMU if using standard timer on ARM64
             let recommendation = if timer.name() == "cntvct_el0" {
                 #[cfg(target_os = "macos")]
                 {
@@ -616,20 +692,12 @@ impl TimingOracle {
             };
 
             return Outcome::Unmeasurable {
-                operation_ns: median_ns,
-                threshold_ns,
-                platform: platform.to_string(),
+                operation_ns: info.operation_ns,
+                threshold_ns: info.threshold_ns,
+                platform,
                 recommendation: recommendation.to_string(),
             };
         }
-
-        let batching = crate::result::BatchingInfo {
-            enabled: false,
-            k: 1,
-            ticks_per_batch: ticks_per_call,
-            rationale: format!("Pre-generated inputs ({:.1} ticks/call)", ticks_per_call),
-            unmeasurable: None,
-        };
 
         // Step 6: Create randomized schedule (interleaves baseline and sample measurements)
         let mut schedule: Vec<(Class, usize)> = Vec::with_capacity(self.config.samples * 2);
@@ -649,8 +717,10 @@ impl TimingOracle {
             match class {
                 Class::Baseline => {
                     let cycles = timer.measure_cycles(|| {
-                        operation(&baseline_inputs[idx]);
-                        std::hint::black_box(());
+                        for _ in 0..k {
+                            operation(&baseline_inputs[idx]);
+                            std::hint::black_box(());
+                        }
                     });
                     baseline_cycles.push(cycles);
                     interleaved_cycles.push(cycles);
@@ -658,8 +728,10 @@ impl TimingOracle {
                 }
                 Class::Sample => {
                     let cycles = timer.measure_cycles(|| {
-                        operation(&sample_inputs[idx]);
-                        std::hint::black_box(());
+                        for _ in 0..k {
+                            operation(&sample_inputs[idx]);
+                            std::hint::black_box(());
+                        }
                     });
                     sample_cycles.push(cycles);
                     interleaved_cycles.push(cycles);
@@ -674,7 +746,7 @@ impl TimingOracle {
         }
 
         // Step 9: Run analysis pipeline
-        let result = self.run_pipeline(
+        let outcome = self.run_pipeline(
             PipelineInputs {
                 baseline_cycles,
                 sample_cycles,
@@ -688,7 +760,7 @@ impl TimingOracle {
             start_time,
         );
 
-        Outcome::Completed(result)
+        outcome
     }
 
     /// Run test with setup and state.
@@ -891,7 +963,7 @@ impl TimingOracle {
         }
 
         // Run the analysis pipeline
-        let result = self.run_pipeline(
+        let outcome = self.run_pipeline(
             PipelineInputs {
                 baseline_cycles,
                 sample_cycles,
@@ -905,9 +977,28 @@ impl TimingOracle {
             start_time,
         );
 
-        // Wrap result in Outcome enum based on measurability
+        outcome
+    }
+
+    /// Run the full analysis pipeline on collected samples.
+    fn run_pipeline(
+        &self,
+        inputs: PipelineInputs,
+        timer: &BoxedTimer,
+        start_time: Instant,
+    ) -> Outcome {
+        use crate::types::TimingSample;
+
+        let PipelineInputs {
+            baseline_cycles,
+            sample_cycles,
+            interleaved_cycles,
+            interleaved_classes,
+            baseline_gen_time_ns,
+            sample_gen_time_ns,
+            batching,
+        } = inputs;
         if let Some(unmeasurable_info) = &batching.unmeasurable {
-            // Operation was too fast to measure reliably
             let platform = format!(
                 "{} ({}, {:.1}ns resolution)",
                 std::env::consts::OS,
@@ -915,7 +1006,6 @@ impl TimingOracle {
                 timer.resolution_ns()
             );
 
-            // Recommend PMU if using standard timer on ARM64
             let recommendation = if timer.name() == "cntvct_el0" {
                 #[cfg(target_os = "macos")]
                 {
@@ -933,75 +1023,27 @@ impl TimingOracle {
                 "Increase operation complexity (current operation is too fast to measure reliably)"
             };
 
-            crate::result::Outcome::Unmeasurable {
+            return Outcome::Unmeasurable {
                 operation_ns: unmeasurable_info.operation_ns,
                 threshold_ns: unmeasurable_info.threshold_ns,
                 platform,
                 recommendation: recommendation.to_string(),
-            }
-        } else {
-            // Measurement was successful
-            crate::result::Outcome::Completed(result)
-        }
-    }
-
-    /// Run the full analysis pipeline on collected samples.
-    fn run_pipeline(
-        &self,
-        inputs: PipelineInputs,
-        timer: &BoxedTimer,
-        start_time: Instant,
-    ) -> TestResult {
-        use crate::types::TimingSample;
-
-        let PipelineInputs {
-            baseline_cycles,
-            sample_cycles,
-            interleaved_cycles,
-            interleaved_classes,
-            baseline_gen_time_ns,
-            sample_gen_time_ns,
-            batching,
-        } = inputs;
-        if batching.unmeasurable.is_some() {
-            let runtime_secs = start_time.elapsed().as_secs_f64();
-            let timer_name = timer.name();
-
-            return TestResult {
-                leak_probability: 0.0,
-                bayes_factor: 1.0, // Neutral evidence
-                effect: None,
-                exploitability: Exploitability::Negligible,
-                min_detectable_effect: MinDetectableEffect {
-                    shift_ns: 0.0,
-                    tail_ns: 0.0,
-                },
-                ci_gate: CiGate {
-                    alpha: self.config.ci_alpha,
-                    passed: true,
-                    threshold: 0.0,
-                    max_observed: 0.0,
-                    observed: [0.0; 9],
-                },
-                quality: MeasurementQuality::TooNoisy,
-                outlier_fraction: 0.0,
-                diagnostics: Diagnostics::all_ok(),
-                metadata: Metadata {
-                    samples_per_class: baseline_cycles.len().min(sample_cycles.len()),
-                    cycles_per_ns: timer.cycles_per_ns(),
-                    timer: timer_name.to_string(),
-                    timer_resolution_ns: timer.resolution_ns(),
-                    batching,
-                    runtime_secs,
-                },
             };
         }
 
         // Get timer name for metadata
         let timer_name = timer.name();
+
+        // Resolve attacker model's min_effect_of_concern using timer info
+        // This converts cycle-based or tick-based models to nanoseconds
+        let resolved_min_effect_ns = self.config.resolve_min_effect_ns(
+            Some(timer.cycles_per_ns()),
+            Some(timer.resolution_ns()),
+        );
+
         let debug_pipeline = env::var("TO_DEBUG_PIPELINE").map(|v| v != "0").unwrap_or(false);
         if debug_pipeline {
-            eprintln!("[DEBUG_PIPELINE] enabled");
+            eprintln!("[DEBUG_PIPELINE] enabled, resolved_min_effect_ns={:.4}", resolved_min_effect_ns);
         }
         if debug_pipeline {
             eprintln!(
@@ -1035,25 +1077,28 @@ impl TimingOracle {
             );
         }
 
-        // Step 3b: Outlier filtering (pooled symmetric)
+        // Step 3b: Outlier winsorization (pooled symmetric)
         let (filtered_baseline, filtered_sample, outlier_stats) =
             filter_outliers(&baseline_nonzero, &sample_nonzero, self.config.outlier_percentile);
 
-        // Also filter interleaved samples using the same threshold
+        // Also winsorize interleaved samples using the same threshold
         let outlier_threshold = outlier_stats.threshold;
         let filtered_interleaved: Vec<(u64, Class)> = interleaved_cycles
             .iter()
             .zip(interleaved_classes.iter())
-            .filter(|(&c, _)| c > 0 && c <= outlier_threshold)
-            .map(|(&c, &class)| (c, class))
+            .filter(|(&c, _)| c > 0)
+            .map(|(&c, &class)| {
+                let capped = if c > outlier_threshold { outlier_threshold } else { c };
+                (capped, class)
+            })
             .collect();
 
-        eprintln!("[DEBUG] After outlier filtering ({}): baseline={} (removed {}), sample={} (removed {}), interleaved={}",
+        eprintln!("[DEBUG] After outlier winsorization ({}): baseline={} (capped {}), sample={} (capped {}), interleaved={}",
             self.config.outlier_percentile,
             filtered_baseline.len(),
-            baseline_nonzero.len() - filtered_baseline.len(),
+            outlier_stats.trimmed_fixed,
             filtered_sample.len(),
-            sample_nonzero.len() - filtered_sample.len(),
+            outlier_stats.trimmed_random,
             filtered_interleaved.len());
         if debug_pipeline {
             let threshold_ns = timer.cycles_to_ns(outlier_threshold);
@@ -1127,88 +1172,63 @@ impl TimingOracle {
         let n = baseline_ns.len().min(sample_ns.len());
 
         // Check minimum sample requirements (spec §2.3):
-        // - ≥ 200: Normal 30/70 split
-        // - 100–199: Warning; normal split with reduced reliability
-        // - 50–99: Warning; use 50/50 split
-        // - < 50: Return Unmeasurable (statistics meaningless)
-        const MIN_SAMPLES_UNMEASURABLE: usize = 50;
-        const MIN_SAMPLES_WARNING: usize = 100;
-        const MIN_SAMPLES_NORMAL: usize = 200;
+        // - ≥ 50: Normal 30/70 split
+        // - 20–49: Warning; use all data for both phases (double-dip)
+        // - < 20: Return Unmeasurable
+        const MIN_SAMPLES_UNMEASURABLE: usize = 20;
+        const MIN_SAMPLES_DOUBLE_DIP: usize = 50;
 
         if n < MIN_SAMPLES_UNMEASURABLE {
-            // Too few samples for any meaningful statistics - return minimal result
-            let runtime_secs = start_time.elapsed().as_secs_f64();
-            let timer_name = if cfg!(target_arch = "x86_64") {
-                "rdtsc"
-            } else if cfg!(target_arch = "aarch64") {
-                "cntvct_el0"
-            } else {
-                "Instant"
-            };
-
+            let platform = format!(
+                "{} ({}, {:.1}ns resolution)",
+                std::env::consts::OS,
+                timer.name(),
+                timer.resolution_ns()
+            );
             eprintln!(
                 "[ERROR] Only {} samples after filtering (minimum: {}). \
                  Statistics are meaningless with so few samples.",
                 n, MIN_SAMPLES_UNMEASURABLE
             );
-
-            return TestResult {
-                leak_probability: 0.5, // Maximum uncertainty
-                bayes_factor: 1.0, // Neutral evidence
-                effect: None,
-                exploitability: Exploitability::Negligible,
-                min_detectable_effect: MinDetectableEffect {
-                    shift_ns: f64::INFINITY,
-                    tail_ns: f64::INFINITY,
-                },
-                ci_gate: CiGate {
-                    alpha: self.config.ci_alpha,
-                    passed: true, // Don't fail CI on unmeasurable
-                    threshold: f64::INFINITY,
-                    max_observed: 0.0,
-                    observed: [0.0; 9],
-                },
-                quality: MeasurementQuality::TooNoisy,
-                outlier_fraction: outlier_stats.outlier_fraction,
-                diagnostics: Diagnostics::all_ok(),
-                metadata: Metadata {
-                    samples_per_class: n,
-                    cycles_per_ns: timer.cycles_per_ns(),
-                    timer: timer_name.to_string(),
-                    timer_resolution_ns: timer.resolution_ns(),
-                    batching,
-                    runtime_secs,
-                },
+            return Outcome::Unmeasurable {
+                operation_ns: 0.0,
+                threshold_ns: 0.0,
+                platform,
+                recommendation: "Increase sample count or reduce filtering to reach at least 20 samples per class.".to_string(),
             };
         }
 
-        // Determine split strategy based on sample count
-        let use_half_split = n < MIN_SAMPLES_WARNING;
-        let calib_fraction = if use_half_split { 0.5 } else { self.config.calibration_fraction as f64 };
-
-        if n < MIN_SAMPLES_WARNING {
+        let use_all_for_both = n < MIN_SAMPLES_DOUBLE_DIP;
+        if use_all_for_both {
             eprintln!(
-                "[WARNING] Only {} samples (recommended: ≥{}). Using 50/50 split.",
-                n, MIN_SAMPLES_NORMAL
-            );
-        } else if n < MIN_SAMPLES_NORMAL {
-            eprintln!(
-                "[WARNING] Only {} samples (recommended: ≥{}). Reduced reliability.",
-                n, MIN_SAMPLES_NORMAL
+                "[WARNING] Only {} samples after filtering (recommended: ≥{}). Using all data for both phases.",
+                n, MIN_SAMPLES_DOUBLE_DIP
             );
         }
 
         // Split interleaved samples for calibration (preserves temporal order for joint resampling)
-        let n_interleaved = interleaved_samples.len();
-        let n_calib_interleaved = ((n_interleaved as f64) * calib_fraction).round() as usize;
-
-        let (calib_interleaved, infer_interleaved) = {
+        let calib_fraction = self.config.calibration_fraction as f64;
+        let (calib_interleaved, infer_interleaved) = if use_all_for_both {
+            (interleaved_samples.clone(), interleaved_samples.clone())
+        } else {
+            let n_interleaved = interleaved_samples.len();
+            let n_calib_interleaved = ((n_interleaved as f64) * calib_fraction).round() as usize;
             let (calib, infer) = interleaved_samples.split_at(n_calib_interleaved);
             (calib.to_vec(), infer.to_vec())
         };
-        let (calib_interleaved_ticks, infer_interleaved_ticks) = {
+        let (calib_interleaved_ticks, infer_interleaved_ticks) = if use_all_for_both {
+            (interleaved_ticks.clone(), interleaved_ticks.clone())
+        } else {
+            let n_interleaved = interleaved_ticks.len();
+            let n_calib_interleaved = ((n_interleaved as f64) * calib_fraction).round() as usize;
             let (calib, infer) = interleaved_ticks.split_at(n_calib_interleaved);
             (calib.to_vec(), infer.to_vec())
+        };
+        let n_interleaved = interleaved_samples.len();
+        let n_calib_interleaved = if use_all_for_both {
+            n_interleaved
+        } else {
+            ((n_interleaved as f64) * calib_fraction).round() as usize
         };
 
         // Split baseline/sample for inference using the interleaved inference window
@@ -1237,6 +1257,16 @@ impl TimingOracle {
                 Class::Sample => infer_sample_ticks.push(*time_ticks),
             }
         }
+        // Extract per-class sequences for pre-flight checks and calibration diagnostics
+        let mut calib_baseline = Vec::new();
+        let mut calib_sample = Vec::new();
+        for sample in &calib_interleaved {
+            match sample.class {
+                Class::Baseline => calib_baseline.push(sample.time_ns),
+                Class::Sample => calib_sample.push(sample.time_ns),
+            }
+        }
+
         if debug_pipeline {
             let (q_base_calib, q_samp_calib) = if discrete_mode {
                 (
@@ -1244,14 +1274,6 @@ impl TimingOracle {
                     compute_midquantile_deciles(&calib_sample_ticks),
                 )
             } else {
-                let mut calib_baseline = Vec::new();
-                let mut calib_sample = Vec::new();
-                for sample in &calib_interleaved {
-                    match sample.class {
-                        Class::Baseline => calib_baseline.push(sample.time_ns),
-                        Class::Sample => calib_sample.push(sample.time_ns),
-                    }
-                }
                 (
                     compute_deciles_fast(&calib_baseline),
                     compute_deciles_fast(&calib_sample),
@@ -1321,24 +1343,27 @@ impl TimingOracle {
             }
         }
 
+        let log_calib_fraction = if use_all_for_both { 1.0 } else { calib_fraction };
+        let log_infer_fraction = if use_all_for_both { 1.0 } else { 1.0 - calib_fraction };
         eprintln!("[DEBUG] After calibration split ({:.0}% calib, {:.0}% infer): calib_interleaved={}, infer_baseline={}, infer_sample={}",
-            calib_fraction * 100.0,
-            (1.0 - calib_fraction) * 100.0,
+            log_calib_fraction * 100.0,
+            log_infer_fraction * 100.0,
             calib_interleaved.len(),
             infer_baseline.len(),
             infer_sample.len());
         if debug_pipeline {
             eprintln!(
                 "[DEBUG_PIPELINE] calib_fraction={:.2} calib_interleaved={} infer_interleaved={} infer_baseline={} infer_sample={}",
-                calib_fraction,
+                log_calib_fraction,
                 calib_interleaved.len(),
                 infer_interleaved.len(),
                 infer_baseline.len(),
                 infer_sample.len()
             );
+            let infer_start = if use_all_for_both { 0 } else { n_calib_interleaved };
             eprintln!(
                 "[DEBUG_PIPELINE] infer_interleaved_range=[{}, {}] (n_interleaved={})",
-                n_calib_interleaved,
+                infer_start,
                 n_interleaved.saturating_sub(1),
                 n_interleaved
             );
@@ -1350,12 +1375,12 @@ impl TimingOracle {
             .map(|s| s.time_ns)
             .collect();
         let preflight = run_all_checks(
-            &baseline_ns,
-            &sample_ns,
+            &calib_baseline,
+            &calib_sample,
             &interleaved_ns,
             baseline_gen_time_ns,
             sample_gen_time_ns,
-            timer.resolution_ns(),
+            timer,
         );
 
         // CALIBRATION PHASE
@@ -1439,15 +1464,36 @@ impl TimingOracle {
 
         // Step 7: Estimate MDE from covariance (spec §2.7)
         let mde_estimate = estimate_mde(&pooled_cov, self.config.ci_alpha);
-        let min_effect = if discrete_mode {
-            (self.config.min_effect_of_concern_ns / timer.resolution_ns()).max(1.0)
+        
+        let k_scale = batching.k as f64;
+        let unit_scale = if discrete_mode { timer.resolution_ns() } else { 1.0 };
+        
+        // MDE and prior sigmas should be in the same units as delta_infer for compute_bayes_factor
+        // If discrete_mode, delta_infer is in ticks.
+        // If not, delta_infer is in ns.
+        
+        let min_effect_units = if resolved_min_effect_ns == 0.0 {
+            // Research mode: theta=0 means detect any statistical difference
+            0.0
+        } else if discrete_mode {
+            (resolved_min_effect_ns / unit_scale).max(1.0)
         } else {
-            self.config.min_effect_of_concern_ns
+            resolved_min_effect_ns
         };
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG_PIPELINE] theta_setup resolved_min_effect_ns={:.4} discrete={} min_effect_units={:.4}",
+                resolved_min_effect_ns, discrete_mode, min_effect_units
+            );
+        }
+
         let prior_sigmas = (
-            (2.0 * mde_estimate.shift_ns).max(min_effect),
-            (2.0 * mde_estimate.tail_ns).max(min_effect),
+            (2.0 * mde_estimate.shift_ns).max(min_effect_units),
+            (2.0 * mde_estimate.tail_ns).max(min_effect_units),
         );
+
+        let min_effect = min_effect_units;
+
         if debug_pipeline {
             if discrete_mode {
                 eprintln!(
@@ -1504,6 +1550,14 @@ impl TimingOracle {
                     delta_slice[5], delta_slice[6], delta_slice[7], delta_slice[8]
                 ]
             );
+            let mut a_max = 0.0_f64;
+            for k in 0..9 {
+                let a_k = delta_infer[k].abs();
+                if a_k > a_max {
+                    a_max = a_k;
+                }
+            }
+            eprintln!("[DEBUG_PIPELINE] a_max_abs_delta={:.3}", a_max);
             let q_base_slice = q_baseline.as_slice();
             let q_samp_slice = q_sample.as_slice();
             eprintln!(
@@ -1526,10 +1580,113 @@ impl TimingOracle {
                 min_uniqueness_ratio
             );
         }
+        if debug_pipeline {
+            let compute_mahalanobis = |cov: &Matrix9, diff: &Vector9| -> Option<f64> {
+                let mut cov_reg = *cov;
+                let trace: f64 = (0..9).map(|i| cov_reg[(i, i)]).sum();
+                let jitter = 1e-10 + (trace / 9.0) * 1e-8;
+                for i in 0..9 {
+                    cov_reg[(i, i)] += jitter;
+                }
+                let chol = Cholesky::new(cov_reg)?;
+                let z = chol.l().solve_lower_triangular(diff).unwrap_or(*diff);
+                Some(z.dot(&z))
+            };
+            let compute_quad_stats = |cov: &Matrix9, diff: &Vector9| -> Option<(f64, f64, f64, f64, f64)> {
+                let mut cov_reg = *cov;
+                let trace: f64 = (0..9).map(|i| cov_reg[(i, i)]).sum();
+                let jitter = 1e-10 + (trace / 9.0) * 1e-8;
+                for i in 0..9 {
+                    cov_reg[(i, i)] += jitter;
+                }
+                let chol = Cholesky::new(cov_reg)?;
+                let l = chol.l();
+                let min_l = l.diagonal().iter().cloned().fold(f64::INFINITY, f64::min);
+                let max_l = l.diagonal().iter().cloned().fold(0.0_f64, f64::max);
+                let cond_est = if min_l > 0.0 {
+                    (max_l / min_l).powi(2)
+                } else {
+                    f64::INFINITY
+                };
+                let z = l.solve_lower_triangular(diff).unwrap_or(*diff);
+                let q = z.dot(&z);
+                let logdet = 2.0 * l.diagonal().iter().map(|d| d.ln()).sum::<f64>();
+                Some((q, logdet, min_l, max_l, cond_est))
+            };
+            let m2_pooled = compute_mahalanobis(&pooled_cov, &delta_infer);
+            let m2_infer = compute_mahalanobis(&infer_cov, &delta_infer);
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes_mahalanobis pooled={:?} infer={:?}",
+                m2_pooled, m2_infer
+            );
+            if let Some((q, logdet, min_l, max_l, cond_est)) =
+                compute_quad_stats(&pooled_cov, &delta_infer)
+            {
+                eprintln!(
+                    "[DEBUG_PIPELINE] pooled_quad q={:.3} logdet={:.3} l_min={:.3} l_max={:.3} cond_est={:.2e}",
+                    q, logdet, min_l, max_l, cond_est
+                );
+            }
+            if let Some((q, logdet, min_l, max_l, cond_est)) =
+                compute_quad_stats(&infer_cov, &delta_infer)
+            {
+                eprintln!(
+                    "[DEBUG_PIPELINE] infer_quad q={:.3} logdet={:.3} l_min={:.3} l_max={:.3} cond_est={:.2e}",
+                    q, logdet, min_l, max_l, cond_est
+                );
+            }
+
+            let mut ratios: Vec<f64> = (0..9)
+                .map(|i| infer_cov[(i, i)] / pooled_cov[(i, i)].max(1e-12))
+                .collect();
+            ratios.sort_by(|a, b| a.total_cmp(b));
+            let min_ratio = ratios.first().cloned().unwrap_or(0.0);
+            let median_ratio = ratios.get(4).cloned().unwrap_or(0.0);
+            let max_ratio = ratios.last().cloned().unwrap_or(0.0);
+            eprintln!(
+                "[DEBUG_PIPELINE] cov_diag_ratio infer/pooled min={:.3} median={:.3} max={:.3}",
+                min_ratio, median_ratio, max_ratio
+            );
+
+            let mut z_pooled = [0.0_f64; 9];
+            let mut z_infer = [0.0_f64; 9];
+            for i in 0..9 {
+                let denom_pooled = pooled_cov[(i, i)].max(1e-12).sqrt();
+                let denom_infer = infer_cov[(i, i)].max(1e-12).sqrt();
+                z_pooled[i] = delta_infer[i].abs() / denom_pooled;
+                z_infer[i] = delta_infer[i].abs() / denom_infer;
+            }
+            eprintln!(
+                "[DEBUG_PIPELINE] delta_z pooled={:?}",
+                z_pooled
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] delta_z infer={:?}",
+                z_infer
+            );
+        }
 
         // Step 9: Run CI Gate (Layer 1)
         // CI gate operates on batch-total scale; scale theta accordingly (spec §2.4).
-        let theta_batch = min_effect * batching.k as f64;
+        // If discrete_mode, it operates in ticks.
+        let theta_units_raw = min_effect * batching.k as f64;
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG_PIPELINE] theta_raw min_effect={:.4} k={} theta_units_raw={:.4}",
+                min_effect, batching.k, theta_units_raw
+            );
+        }
+
+        // Spec §2.4: In discrete mode, clamp θ to 1 tick if θ < 1 tick.
+        // In continuous mode, no clamping (use θ as-is).
+        // Research mode (θ=0): preserve 0 to detect any statistical difference.
+        let theta_units = if discrete_mode && theta_units_raw > 0.0 {
+            // Discrete mode: clamp to 1 tick minimum (spec §2.4)
+            theta_units_raw.max(1.0)
+        } else {
+            // Continuous mode: no clamping; Research mode: preserve θ=0
+            theta_units_raw
+        };
         let ci_gate_input = CiGateInput {
             observed_diff: delta_infer,
             baseline_samples: if discrete_mode { &infer_baseline_ticks } else { &infer_baseline },
@@ -1538,63 +1695,165 @@ impl TimingOracle {
             bootstrap_iterations: self.config.ci_bootstrap_iterations,
             seed: self.config.measurement_seed,
             timer_resolution_ns: if discrete_mode { 1.0 } else { timer.resolution_ns() },
-            min_effect_of_concern: theta_batch,
+            min_effect_of_concern: theta_units,
             discrete_mode,
         };
         let mut ci_gate = run_ci_gate(&ci_gate_input);
         if debug_pipeline {
             let unit = if discrete_mode { "ticks" } else { "ns" };
             eprintln!(
-                "[DEBUG_PIPELINE] ci_gate passed={} threshold={:.2} max_observed={:.2} {}",
-                ci_gate.passed,
+                "[DEBUG_PIPELINE] ci_gate result={:?} threshold={:.2} max_observed={:.2} {}",
+                ci_gate.result,
                 ci_gate.threshold,
                 ci_gate.max_observed,
                 unit
             );
         }
 
-        // Step 10: Compute Bayes factor and posterior probability (Layer 2)
-        // theta = min_effect_of_concern, scaled by batch size
-        let theta = min_effect * batching.k as f64;
+        // Step 10: Compute posterior probability via Monte Carlo (Layer 2)
+        // theta = min_effect_of_concern, scaled by batch size (already clamped above)
+        let theta = theta_units;
         let bayes_result =
             compute_bayes_factor(&delta_infer, &cov_estimate, prior_sigmas, theta, self.config.measurement_seed);
+        // Use Monte Carlo probability directly - this IS the leak probability (spec §2.5)
         let leak_probability = bayes_result.posterior_probability;
         if debug_pipeline {
             let unit = if discrete_mode { "ticks" } else { "ns" };
             eprintln!(
-                "[DEBUG_PIPELINE] bayes leak_probability={:.3} theta_batch={:.2}{}",
+                "[DEBUG_PIPELINE] bayes leak_probability={:.3} theta={:.2}{}",
                 leak_probability,
                 theta,
                 unit
             );
+            // Debug: check with inference covariance instead of calibration
+            let bayes_infer =
+                compute_bayes_factor(&delta_infer, &infer_cov, prior_sigmas, theta, self.config.measurement_seed);
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes leak_probability_infer_cov={:.3}",
+                bayes_infer.posterior_probability
+            );
+            // Debug: check with zero delta (should be low probability)
+            let bayes_zero =
+                compute_bayes_factor(&Vector9::zeros(), &cov_estimate, prior_sigmas, theta, self.config.measurement_seed);
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes leak_probability_zero_delta={:.3}",
+                bayes_zero.posterior_probability
+            );
         }
 
-        // Step 11: Effect decomposition (if leak detected)
-        // Also compute for diagnostics even if not returning effect
+        // Step 11: Effect decomposition (always report per spec §2.5)
         let decomp = decompose_effect(
             &delta_infer,
             &cov_estimate,
             prior_sigmas,
         );
-        // Convert Vector2 to [f64; 2] for diagnostics
         let posterior_mean = [decomp.posterior_mean[0], decomp.posterior_mean[1]];
+        if debug_pipeline {
+            let shift_se = decomp.posterior_cov[(0, 0)].sqrt();
+            let tail_se = decomp.posterior_cov[(1, 1)].sqrt();
+            let shift_ci = (
+                decomp.posterior_mean[0] - 1.96 * shift_se,
+                decomp.posterior_mean[0] + 1.96 * shift_se,
+            );
+            let tail_ci = (
+                decomp.posterior_mean[1] - 1.96 * tail_se,
+                decomp.posterior_mean[1] + 1.96 * tail_se,
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes effect_mean shift={:.3} tail={:.3}{}",
+                decomp.posterior_mean[0],
+                decomp.posterior_mean[1],
+                if discrete_mode { "ticks" } else { "ns" }
+            );
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes effect_ci shift=({:.3},{:.3}) tail=({:.3},{:.3}){}",
+                shift_ci.0,
+                shift_ci.1,
+                tail_ci.0,
+                tail_ci.1,
+                if discrete_mode { "ticks" } else { "ns" }
+            );
+            let mut delta_hat = [0.0_f64; 9];
+            for k in 0..9 {
+                delta_hat[k] = decomp.posterior_mean[0] + decomp.posterior_mean[1] * B_TAIL[k];
+            }
+            eprintln!(
+                "[DEBUG_PIPELINE] bayes delta_hat={:?}",
+                delta_hat
+            );
 
-        let effect = if leak_probability > 0.5 || !ci_gate.passed {
-            // Scale batch-total effects to per-call effects by dividing by K
-            let k_scale = batching.k as f64;
-            let unit_scale = if discrete_mode { timer.resolution_ns() } else { 1.0 };
-            Some(Effect {
-                shift_ns: (decomp.posterior_mean[0] / k_scale) * unit_scale,
-                tail_ns: (decomp.posterior_mean[1] / k_scale) * unit_scale,
-                credible_interval_ns: (
-                    (decomp.effect_magnitude_ci.0 / k_scale) * unit_scale,
-                    (decomp.effect_magnitude_ci.1 / k_scale) * unit_scale,
-                ),
-                pattern: decomp.pattern,
-            })
-        } else {
-            None
-        };
+            let max_effect_ci = {
+                let mut cov_reg = bayes_result.lambda_post;
+                let trace = cov_reg[(0, 0)] + cov_reg[(1, 1)];
+                let jitter = 1e-10 + (trace / 2.0) * 1e-8;
+                cov_reg[(0, 0)] += jitter;
+                cov_reg[(1, 1)] += jitter;
+                let chol = Cholesky::new(cov_reg);
+                let mut rng = rand_xoshiro::Xoshiro256PlusPlus::seed_from_u64(42);
+                let mut max_vals = Vec::with_capacity(1000);
+                if let Some(chol) = chol {
+                    let l = chol.l();
+                    for _ in 0..1000 {
+                        let u1: f64 = rng.random();
+                        let u2: f64 = rng.random();
+                        let z0 = (-2.0_f64 * u1.ln()).sqrt()
+                            * (2.0_f64 * std::f64::consts::PI * u2).cos();
+                        let u3: f64 = rng.random();
+                        let u4: f64 = rng.random();
+                        let z1 = (-2.0_f64 * u3.ln()).sqrt()
+                            * (2.0_f64 * std::f64::consts::PI * u4).cos();
+                        let beta = bayes_result.beta_post + l * Vector2::new(z0, z1);
+                        let mut max_effect = 0.0_f64;
+                        for k in 0..9 {
+                            let pred = beta[0] + beta[1] * B_TAIL[k];
+                            let abs_pred = pred.abs();
+                            if abs_pred > max_effect {
+                                max_effect = abs_pred;
+                            }
+                        }
+                        max_vals.push(max_effect);
+                    }
+                    max_vals.sort_by(|a, b| a.total_cmp(b));
+                    let lo = max_vals[(0.025 * (max_vals.len() as f64)).round() as usize];
+                    let hi = max_vals[(0.975 * (max_vals.len() as f64)).round() as usize];
+                    Some((lo, hi))
+                } else {
+                    None
+                }
+            };
+            if let Some((lo, hi)) = max_effect_ci {
+                eprintln!(
+                    "[DEBUG_PIPELINE] bayes max_effect_ci=({:.3},{:.3}){}",
+                    lo,
+                    hi,
+                    if discrete_mode { "ticks" } else { "ns" }
+                );
+            } else {
+                eprintln!("[DEBUG_PIPELINE] bayes max_effect_ci=unavailable");
+            }
+        }
+
+        // Scale batch-total effects to per-call effects by dividing by K
+        let k_scale = batching.k as f64;
+        let unit_scale = if discrete_mode { timer.resolution_ns() } else { 1.0 };
+        let effect = Some(Effect {
+            shift_ns: (decomp.posterior_mean[0] / k_scale) * unit_scale,
+            tail_ns: (decomp.posterior_mean[1] / k_scale) * unit_scale,
+            shift_ci_ns: (
+                (decomp.shift_ci.0 / k_scale) * unit_scale,
+                (decomp.shift_ci.1 / k_scale) * unit_scale,
+            ),
+            tail_ci_ns: (
+                (decomp.tail_ci.0 / k_scale) * unit_scale,
+                (decomp.tail_ci.1 / k_scale) * unit_scale,
+            ),
+            // Note: magnitude CI has known issues when effect ≈ 0 (see TODO in result.rs)
+            credible_interval_ns: (
+                (bayes_result.effect_magnitude_ci.0 / k_scale) * unit_scale,
+                (bayes_result.effect_magnitude_ci.1 / k_scale) * unit_scale,
+            ),
+            pattern: decomp.pattern,
+        });
 
         // Scale CI gate reporting back to per-call units when batching is enabled.
         let k_scale = batching.k as f64;
@@ -1619,7 +1878,11 @@ impl TimingOracle {
             .as_ref()
             .map(|e| (e.shift_ns.powi(2) + e.tail_ns.powi(2)).sqrt())
             .unwrap_or(0.0);
-        let exploitability = Exploitability::from_effect_ns(effect_magnitude);
+        // Scale by posterior probability that effect exceeds θ to avoid
+        // reporting high exploitability when leak is unlikely.
+        let exploitability = Exploitability::from_effect_ns(
+            effect_magnitude * leak_probability,
+        );
 
         // Step 13: Measurement quality assessment
         // MDE also needs to be scaled to per-call
@@ -1628,14 +1891,16 @@ impl TimingOracle {
             shift_ns: (mde_estimate.shift_ns / k_scale) * unit_scale,
             tail_ns: (mde_estimate.tail_ns / k_scale) * unit_scale,
         };
-        let quality = MeasurementQuality::from_mde_ns(scaled_mde.shift_ns);
+        let mut quality = MeasurementQuality::from_mde_ns(scaled_mde.shift_ns);
+        if outlier_stats.outlier_fraction > 0.05 {
+            quality = MeasurementQuality::TooNoisy;
+        } else if outlier_stats.outlier_fraction > 0.01 && quality != MeasurementQuality::TooNoisy {
+            quality = MeasurementQuality::Poor;
+        }
 
         let runtime_secs = start_time.elapsed().as_secs_f64();
 
-        // Step 14: Compute Bayes factor from log BF (clamped for numerical stability)
-        let bayes_factor = bayes_result.log_bayes_factor.exp().clamp(1e-100, 1e100);
-
-        // Step 15: Compute diagnostics (stationarity, model fit, outlier asymmetry, preflight)
+        // Step 14: Compute diagnostics (stationarity, model fit, outlier asymmetry, preflight)
         // Compute duplicate fraction: how many samples have duplicate timing values
         let samples_per_class = infer_baseline.len().min(infer_sample.len());
         let duplicate_fraction = if discrete_mode {
@@ -1657,27 +1922,27 @@ impl TimingOracle {
 
         let diagnostics = compute_diagnostics(
             &calib_cov,
-            &infer_cov,
             &delta_infer,
             &posterior_mean,
             &outlier_stats,
             &preflight,
+            &interleaved_samples,
             &diagnostics_extra,
         );
 
-        // Step 16: Assemble and return TestResult
-        TestResult {
+        // Step 15: Assemble and return TestResult
+        Outcome::Completed(TestResult {
             leak_probability,
-            bayes_factor,
             effect,
             exploitability,
             min_detectable_effect: scaled_mde,
             ci_gate: CiGate {
                 alpha: ci_gate.alpha,
-                passed: ci_gate.passed,
+                result: ci_gate.result.clone(),
                 threshold: ci_gate.threshold,
                 max_observed: ci_gate.max_observed,
                 observed: ci_gate.observed,
+                p_value: ci_gate.p_value,
             },
             quality,
             outlier_fraction: outlier_stats.outlier_fraction,
@@ -1690,7 +1955,7 @@ impl TimingOracle {
                 batching,
                 runtime_secs,
             },
-        }
+        })
     }
 }
 
@@ -1790,7 +2055,7 @@ mod tests {
         assert_eq!(oracle.config().samples, 5_000);
         assert_eq!(oracle.config().warmup, 50);
         assert_eq!(oracle.config().cov_bootstrap_iterations, 50);
-        assert_eq!(oracle.config().ci_bootstrap_iterations, 50);
+        assert_eq!(oracle.config().ci_bootstrap_iterations, 500);
     }
 
     #[test]

@@ -41,7 +41,7 @@ fn main() {
     match outcome {
         Outcome::Completed(result) => {
             println!("=== CI Gate ===");
-            println!("Passed: {}", result.ci_gate.passed);
+            println!("Passed: {}", result.ci_gate.passed());
             println!("Alpha: {:.3}", result.ci_gate.alpha);
             println!("Threshold: {:.2} ns", result.ci_gate.threshold);
             println!("Max observed: {:.2} ns", result.ci_gate.max_observed);
@@ -52,7 +52,6 @@ fn main() {
 
             println!("\n=== Bayesian ===");
             println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-            println!("Bayes factor: {:.4}", result.bayes_factor);
 
             println!("\n=== Effect Estimate ===");
             if let Some(ref effect) = result.effect {
@@ -93,7 +92,7 @@ fn main() {
             println!("Duplicate fraction: {:.1}%", result.diagnostics.duplicate_fraction * 100.0);
 
             println!("\n=== Analysis ===");
-            if result.ci_gate.passed && result.leak_probability > 0.3 {
+            if result.ci_gate.passed() && result.leak_probability > 0.3 {
                 println!("*** DISCREPANCY DETECTED ***");
                 println!(
                     "CI gate passed but posterior is {:.1}%",
@@ -108,7 +107,7 @@ fn main() {
                     println!("This means ~{:.0}% of prior mass exceeds theta,", prior_exceedance * 100.0);
                     println!("causing high posterior even when data shows no leak.");
                 }
-            } else if result.ci_gate.passed {
+            } else if result.ci_gate.passed() {
                 println!("OK: CI gate passed, posterior is {:.1}% (< 30%)", result.leak_probability * 100.0);
             } else {
                 println!("LEAK: CI gate failed, posterior is {:.1}%", result.leak_probability * 100.0);

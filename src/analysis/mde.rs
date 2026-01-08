@@ -7,12 +7,12 @@
 //! concerned about 10ns effects, a passing test doesn't mean the code is safe—
 //! it means the measurement wasn't sensitive enough.
 //!
-//! Formula (spec §2.7) with 80% power:
+//! Formula (spec §2.7) with 50% power:
 //! ```text
-//! MDE_μ = (z_{1-α/2} + z_{0.8}) × sqrt((1ᵀ Σ₀⁻¹ 1)⁻¹)
-//! MDE_τ = (z_{1-α/2} + z_{0.8}) × sqrt((bᵀ Σ₀⁻¹ b)⁻¹)
+//! MDE_μ = z_{1-α/2} × sqrt((1ᵀ Σ₀⁻¹ 1)⁻¹)
+//! MDE_τ = z_{1-α/2} × sqrt((bᵀ Σ₀⁻¹ b)⁻¹)
 //! ```
-//! where z_{0.8} ≈ 0.842 is the 80th percentile of the standard normal.
+//! where z_{1-α/2} is the (1-α/2) percentile of the standard normal.
 
 use rand_distr::{Distribution, StandardNormal};
 
@@ -83,10 +83,8 @@ pub fn analytical_mde(covariance: &Matrix9, alpha: f64) -> (f64, f64) {
         1e12
     };
 
-    // MDE with 80% power: (z_{1-α/2} + z_{0.8}) × SE (spec §2.7)
-    let z_alpha = probit(1.0 - alpha / 2.0);
-    let z_power = probit(0.8); // z_{0.8} ≈ 0.842 for 80% power
-    let z = z_alpha + z_power;
+    // MDE with 50% power: z_{1-α/2} × SE (spec §2.7)
+    let z = probit(1.0 - alpha / 2.0);
     let mde_shift = z * var_shift.sqrt();
     let mde_tail = z * var_tail.sqrt();
 
@@ -271,19 +269,18 @@ mod tests {
 
     #[test]
     fn test_analytical_mde_iid_sanity_check() {
-        // For i.i.d. quantiles with Σ₀ = σ² I (σ = 1) and α = 0.05, with 80% power:
-        // - z_{0.975} ≈ 1.96, z_{0.8} ≈ 0.842
-        // - Combined z ≈ 2.80
+        // For i.i.d. quantiles with Σ₀ = σ² I (σ = 1) and α = 0.05, with 50% power:
+        // - z_{0.975} ≈ 1.96
         // - 1ᵀ Σ⁻¹ 1 = 9, Var(μ̂) = 1/9
-        // - MDE_μ = 2.80 / 3 ≈ 0.933
+        // - MDE_μ = 1.96 / 3 ≈ 0.653
         //
         // - bᵀ Σ⁻¹ b = 0.9375, Var(τ̂) = 1/0.9375
-        // - MDE_τ = 2.80 * sqrt(1/0.9375) ≈ 2.89
+        // - MDE_τ = 1.96 * sqrt(1/0.9375) ≈ 2.02
 
         let cov = Matrix9::identity();
         let (mde_shift, mde_tail) = analytical_mde(&cov, 0.05);
 
-        let z = 1.96 + 0.842; // z_alpha + z_power for 80% power
+        let z = 1.96; // z_alpha for 50% power
         let expected_shift = z / 3.0;
         let expected_tail = z * (1.0 / 0.9375_f64).sqrt();
 

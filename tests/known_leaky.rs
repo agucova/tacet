@@ -28,7 +28,7 @@ fn detects_early_exit_comparison() {
         result.leak_probability
     );
     assert!(
-        !result.ci_gate.passed,
+        !result.ci_gate.passed(),
         "CI gate should fail for leaky code"
     );
 }

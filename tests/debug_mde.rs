@@ -108,7 +108,7 @@ fn debug_mde_issue() {
         std::hint::black_box(sbox[*idx as usize]);
     });
 
-    let result = outcome.unwrap_completed();
+    let result = timing_oracle::skip_if_unreliable!(outcome, "debug_mde_issue");
 
     eprintln!("\n=== DIAGNOSTIC OUTPUT ===");
     eprintln!("Samples per class: {}", result.metadata.samples_per_class);
@@ -128,7 +128,7 @@ fn debug_mde_issue() {
     eprintln!("MDE tail_ns: {}", result.min_detectable_effect.tail_ns);
     eprintln!("Quality: {:?}", result.quality);
     eprintln!();
-    eprintln!("CI Gate passed: {}", result.ci_gate.passed);
+    eprintln!("CI Gate passed: {}", result.ci_gate.passed());
     eprintln!("CI Gate alpha: {}", result.ci_gate.alpha);
     eprintln!("CI Gate threshold: {:.2}", result.ci_gate.threshold);
     eprintln!("CI Gate max_observed: {:.2}", result.ci_gate.max_observed);

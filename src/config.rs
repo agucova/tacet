@@ -35,13 +35,16 @@ pub struct Config {
     /// Optional hard effect threshold in nanoseconds for reporting/panic.
     pub effect_threshold_ns: Option<f64>,
 
-    /// Bootstrap iterations for CI thresholds (default: 10,000).
+    /// Bootstrap iterations for CI thresholds (default: 2,000).
+    ///
+    /// The heuristic B ≥ 50/α ensures adequate tail resolution.
+    /// Use 10,000 for thorough mode (lower FPR variance).
     pub ci_bootstrap_iterations: usize,
 
     /// Bootstrap iterations for covariance estimation (default: 2,000).
     pub cov_bootstrap_iterations: usize,
 
-    /// Percentile for outlier filtering (default: 0.999).
+    /// Percentile for outlier winsorization (default: 0.9999).
     /// Set to 1.0 to disable filtering.
     pub outlier_percentile: f64,
 
@@ -102,9 +105,9 @@ impl Default for Config {
             min_effect_of_concern_ns: 10.0,
             attacker_model: None,
             effect_threshold_ns: None,
-            ci_bootstrap_iterations: 10_000,  // Distribution-free FPR guarantee requires sufficient iterations
+            ci_bootstrap_iterations: 2_000,   // Spec default; use 10,000 for thorough mode
             cov_bootstrap_iterations: 2_000,  // Accurate covariance estimation for MVN test
-            outlier_percentile: 0.999,
+            outlier_percentile: 0.9999,
             prior_no_leak: 0.75,
             calibration_fraction: 0.3,
             max_duration_ms: None,

@@ -14,7 +14,7 @@ mod diagnostics;
 mod effect;
 mod mde;
 
-pub use bayes::{compute_bayes_factor, compute_posterior_probability, BayesResult};
+pub use bayes::{compute_bayes_factor, BayesResult};
 pub use ci_gate::{run_ci_gate, CiGateInput};
 pub use diagnostics::{compute_diagnostics, DiagnosticsExtra};
 pub use effect::{decompose_effect, EffectDecomposition};

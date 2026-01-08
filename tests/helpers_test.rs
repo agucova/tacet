@@ -75,7 +75,7 @@ fn test_no_false_positive_with_helpers() {
     });
 
     if let Outcome::Completed(result) = outcome {
-        assert!(result.ci_gate.passed, "Should not detect leak with helpers");
+        assert!(result.ci_gate.passed(), "Should not detect leak with helpers");
         assert!(result.leak_probability < 0.5);
     }
 }

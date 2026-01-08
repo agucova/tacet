@@ -10,7 +10,7 @@
 //! Expected runtime: ~5-7 minutes
 
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 const SAMPLES: usize = 5_000;
 
@@ -35,7 +35,9 @@ fn ci_gate_fpr_calibration() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
+        // Use calibration() preset which has 2,000 CI bootstrap iterations
+        // (spec default) for accurate FPR testing at α=0.01.
+        let outcome = TimingOracle::calibration()
             .samples(SAMPLES)
             .alpha(ALPHA)
             .test(inputs, |data| {
@@ -45,7 +47,7 @@ fn ci_gate_fpr_calibration() {
         match outcome {
             Outcome::Completed(result) => {
                 completed_trials += 1;
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
 
@@ -175,7 +177,8 @@ fn fpr_alpha_001() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
+        // Use calibration() preset (2,000 CI bootstrap iterations).
+        let outcome = TimingOracle::calibration()
             .samples(SAMPLES)
             .alpha(ALPHA)
             .test(inputs, |data| {
@@ -185,7 +188,7 @@ fn fpr_alpha_001() {
         match outcome {
             Outcome::Completed(result) => {
                 completed_trials += 1;
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
             }
@@ -247,7 +250,8 @@ fn fpr_alpha_01() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
+        // Use calibration() preset (2,000 CI bootstrap iterations).
+        let outcome = TimingOracle::calibration()
             .samples(SAMPLES)
             .alpha(ALPHA)
             .test(inputs, |data| {
@@ -257,7 +261,7 @@ fn fpr_alpha_01() {
         match outcome {
             Outcome::Completed(result) => {
                 completed_trials += 1;
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
             }
@@ -317,7 +321,9 @@ fn fpr_alpha_005() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
+        // Use calibration() preset which has 2,000 CI bootstrap iterations
+        // (spec default), sufficient for α=0.05 (needs B ≥ 50/0.05 = 1,000).
+        let outcome = TimingOracle::calibration()
             .samples(SAMPLES)
             .alpha(ALPHA)
             .test(inputs, |data| {
@@ -327,7 +333,7 @@ fn fpr_alpha_005() {
         match outcome {
             Outcome::Completed(result) => {
                 completed_trials += 1;
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
             }
@@ -484,7 +490,9 @@ fn fpr_fixed_vs_fixed() {
             || [0u8; 32], // Fixed: all zeros (identical!)
         );
 
-        let outcome = TimingOracle::quick()
+        // Use calibration() preset which has 2,000 CI bootstrap iterations
+        // (spec default), sufficient for α=0.01.
+        let outcome = TimingOracle::calibration()
             .samples(SAMPLES)
             .alpha(ALPHA)
             .test(inputs, |data| {
@@ -494,7 +502,7 @@ fn fpr_fixed_vs_fixed() {
         match outcome {
             Outcome::Completed(result) => {
                 completed_trials += 1;
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
 
@@ -575,16 +583,18 @@ fn fpr_10k_trials() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
+        // Use Research mode (theta=0) to measure true CI gate FPR
         let outcome = TimingOracle::calibration()
             .samples(TEST_SAMPLES)
             .alpha(ALPHA)
+            .attacker_model(AttackerModel::Research)
             .test(inputs, |data| {
                 std::hint::black_box(data);
             });
 
         if let Outcome::Completed(result) = outcome {
             completed_trials += 1;
-            if !result.ci_gate.passed {
+            if !result.ci_gate.passed() {
                 rejections += 1;
             }
         }

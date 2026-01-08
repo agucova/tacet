@@ -15,7 +15,7 @@
   container_name = null;
   active_profiles = [
   ];
-  hostname = "hackbookv5";
+  hostname = "tachyon";
   username = "agucova";
   git_root = "/Users/agucova/repos/timing-oracle";
   secretspec = null;
@@ -52,7 +52,7 @@
   container_name = null;
   active_profiles = [
   ];
-  hostname = "hackbookv5";
+  hostname = "tachyon";
   username = "agucova";
   git_root = "/Users/agucova/repos/timing-oracle";
   secretspec = null;

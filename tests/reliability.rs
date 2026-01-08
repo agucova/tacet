@@ -1,7 +1,7 @@
 //! Tests for the reliability handling API (Outcome, UnreliablePolicy, skip_if_unreliable!).
 
 use timing_oracle::{
-    BatchingInfo, CiGate, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
+    BatchingInfo, CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
     Metadata, MinDetectableEffect, Outcome, TestResult, UnreliablePolicy,
 };
 
@@ -9,10 +9,11 @@ use timing_oracle::{
 fn make_result(leak_probability: f64, quality: MeasurementQuality) -> TestResult {
     TestResult {
         leak_probability,
-        bayes_factor: if leak_probability > 0.5 { 10.0 } else { 0.1 },
         effect: Some(Effect {
             shift_ns: 100.0,
             tail_ns: 50.0,
+            shift_ci_ns: (80.0, 120.0),
+            tail_ci_ns: (30.0, 70.0),
             credible_interval_ns: (80.0, 120.0),
             pattern: EffectPattern::Mixed,
         }),
@@ -23,10 +24,11 @@ fn make_result(leak_probability: f64, quality: MeasurementQuality) -> TestResult
         },
         ci_gate: CiGate {
             alpha: 0.01,
-            passed: false,
+            result: CiGateResult::Fail,
             threshold: 0.0,
             max_observed: 0.0,
             observed: [0.0; 9],
+            p_value: 0.01,
         },
         quality,
         outlier_fraction: 0.01,

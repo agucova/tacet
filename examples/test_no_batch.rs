@@ -16,7 +16,7 @@ fn main() {
 
     println!("=== Adaptive batching ===");
     println!("Leak probability: {:.4}", result.leak_probability);
-    println!("CI gate passed: {}", result.ci_gate.passed);
+    println!("CI gate passed: {}", result.ci_gate.passed());
     println!("Batching: enabled={}, K={}, ticks_per_batch={:.1}",
         result.metadata.batching.enabled,
         result.metadata.batching.k,

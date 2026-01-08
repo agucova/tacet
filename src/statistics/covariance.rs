@@ -326,10 +326,18 @@ pub fn bootstrap_difference_covariance(
 
     let n = interleaved.len();
     // Use Politis-White algorithm for optimal block length selection (spec §2.6)
-    // We need to compute on timing values, not the full TimingSample struct
-    let timing_values: Vec<f64> = interleaved.iter().map(|s| s.time_ns).collect();
-    let block_size = if n >= 10 {
-        optimal_block_length(&timing_values).circular.ceil() as usize
+    // CRITICAL: Spec §3.2.2 says compute per-class, not on interleaved sequence.
+    let mut baseline_data = Vec::new();
+    let mut sample_data = Vec::new();
+    for s in interleaved {
+        match s.class {
+            crate::types::Class::Baseline => baseline_data.push(s.time_ns),
+            crate::types::Class::Sample => sample_data.push(s.time_ns),
+        }
+    }
+
+    let block_size = if baseline_data.len() >= 10 && sample_data.len() >= 10 {
+        paired_optimal_block_length(&baseline_data, &sample_data)
     } else {
         // Fall back to simple formula for very small samples
         (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize

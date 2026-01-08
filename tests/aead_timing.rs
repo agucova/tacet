@@ -92,7 +92,7 @@ fn chacha20poly1305_encrypt_constant_time() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_encrypt_constant_time");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "ChaCha20-Poly1305 encryption should be constant-time (got leak_probability={:.3})",
         result.leak_probability
     );
@@ -161,7 +161,7 @@ fn chacha20poly1305_decrypt_constant_time() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_decrypt_constant_time");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "ChaCha20-Poly1305 decryption should be constant-time (got leak_probability={:.3})",
         result.leak_probability
     );
@@ -218,7 +218,7 @@ fn chacha20poly1305_nonce_independence() {
     // CI gate may pass while Bayesian posterior is high for tiny effects (~5ns) - this is OK
     // We care about exploitability, not just statistical detectability
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "ChaCha20-Poly1305 nonce should not affect timing (got leak_probability={:.3})",
         result.leak_probability
     );
@@ -290,7 +290,7 @@ fn aes_256_gcm_encrypt_constant_time() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "aes_256_gcm_encrypt_constant_time");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "AES-256-GCM encryption should be constant-time"
     );
     // Note: The CI gate is the definitive frequentist test for controlling false positives.
@@ -368,7 +368,7 @@ fn aes_256_gcm_decrypt_constant_time() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "aes_256_gcm_decrypt_constant_time");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "AES-256-GCM decryption should be constant-time"
     );
     // Note: The CI gate is the definitive frequentist test for controlling false positives.
@@ -429,7 +429,7 @@ fn ring_chacha20poly1305_constant_time() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "ring_chacha20poly1305_constant_time");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "ring ChaCha20-Poly1305 should be constant-time"
     );
     // Note: The CI gate is the definitive frequentist test for controlling false positives.
@@ -490,7 +490,7 @@ fn chacha20poly1305_hamming_weight_independence() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "chacha20poly1305_hamming_weight_independence");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "ChaCha20-Poly1305 Hamming weight should be constant-time (got leak_probability={:.3})",
         result.leak_probability
     );
@@ -552,7 +552,7 @@ fn aes_gcm_hamming_weight_independence() {
     let result = timing_oracle::skip_if_unreliable!(outcome, "aes_gcm_hamming_weight_independence");
 
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "AES-GCM Hamming weight should be constant-time"
     );
     // Note: The CI gate is the definitive frequentist test for controlling false positives.

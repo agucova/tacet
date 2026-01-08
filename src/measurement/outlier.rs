@@ -1,9 +1,9 @@
-//! Pooled symmetric outlier filtering.
+//! Pooled symmetric winsorization.
 //!
-//! Implements outlier filtering that:
+//! Implements outlier winsorization that:
 //! 1. Pools all samples from both classes
 //! 2. Computes a threshold at a given percentile
-//! 3. Applies the same threshold symmetrically to both classes
+//! 3. Caps samples above the threshold in both classes
 //!
 //! This approach prevents class-specific filtering that could
 //! artificially create or mask timing differences.
@@ -13,21 +13,21 @@
 pub struct OutlierStats {
     /// Total samples before filtering.
     pub total_samples: usize,
-    /// Samples remaining after filtering.
+    /// Samples remaining after winsorization.
     pub retained_samples: usize,
-    /// Number of outliers removed.
+    /// Number of outliers capped.
     pub outliers_removed: usize,
-    /// Fraction of samples that were outliers (0.0 to 1.0).
+    /// Fraction of samples that were capped (0.0 to 1.0).
     pub outlier_fraction: f64,
     /// The threshold value used for filtering.
     pub threshold: u64,
     /// Total samples in fixed class before filtering.
     pub total_fixed: usize,
-    /// Outliers removed from fixed class.
+    /// Outliers capped from fixed class.
     pub trimmed_fixed: usize,
     /// Total samples in random class before filtering.
     pub total_random: usize,
-    /// Outliers removed from random class.
+    /// Outliers capped from random class.
     pub trimmed_random: usize,
 }
 
@@ -66,22 +66,22 @@ impl OutlierStats {
     }
 }
 
-/// Filter outliers from both sample sets using pooled symmetric thresholding.
-///
-/// This function:
-/// 1. Combines all samples from both classes
-/// 2. Computes the threshold at the given percentile
-/// 3. Removes samples above the threshold from both classes
+    /// Winsorize outliers from both sample sets using pooled symmetric thresholding.
+    ///
+    /// This function:
+    /// 1. Combines all samples from both classes
+    /// 2. Computes the threshold at the given percentile
+    /// 3. Caps samples above the threshold in both classes
 ///
 /// # Arguments
 ///
 /// * `fixed` - Samples from the Fixed class (in cycles)
 /// * `random` - Samples from the Random class (in cycles)
-/// * `percentile` - Percentile for threshold (e.g., 0.999 for 99.9th percentile)
+    /// * `percentile` - Percentile for threshold (e.g., 0.9999 for 99.99th percentile)
 ///
 /// # Returns
 ///
-/// A tuple of (filtered_fixed, filtered_random, stats).
+    /// A tuple of (winsorized_fixed, winsorized_random, stats).
 ///
 /// # Note
 ///
@@ -120,14 +120,30 @@ pub fn filter_outliers(
     // Compute threshold at percentile
     let threshold = compute_percentile(&mut pooled, percentile);
 
-    // Filter both classes with the same threshold
-    let filtered_fixed: Vec<u64> = fixed.iter().copied().filter(|&x| x <= threshold).collect();
-    let filtered_random: Vec<u64> = random.iter().copied().filter(|&x| x <= threshold).collect();
+    // Winsorize both classes with the same threshold
+    let mut filtered_fixed: Vec<u64> = Vec::with_capacity(fixed.len());
+    let mut filtered_random: Vec<u64> = Vec::with_capacity(random.len());
+    let mut trimmed_fixed = 0;
+    let mut trimmed_random = 0;
+    for &x in fixed {
+        if x > threshold {
+            trimmed_fixed += 1;
+            filtered_fixed.push(threshold);
+        } else {
+            filtered_fixed.push(x);
+        }
+    }
+    for &x in random {
+        if x > threshold {
+            trimmed_random += 1;
+            filtered_random.push(threshold);
+        } else {
+            filtered_random.push(x);
+        }
+    }
 
     let retained = filtered_fixed.len() + filtered_random.len();
-    let removed = total_samples - retained;
-    let trimmed_fixed = fixed.len() - filtered_fixed.len();
-    let trimmed_random = random.len() - filtered_random.len();
+    let removed = trimmed_fixed + trimmed_random;
 
     let stats = OutlierStats {
         total_samples,
@@ -228,6 +244,8 @@ mod tests {
 
         // With 10 samples, 80th percentile should filter out high values
         assert!(stats.outliers_removed > 0);
+        assert_eq!(f.len(), fixed.len());
+        assert_eq!(r.len(), random.len());
         assert_eq!(f.len() + r.len(), stats.retained_samples);
     }
 

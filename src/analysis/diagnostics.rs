@@ -34,19 +34,19 @@ pub struct DiagnosticsExtra {
 /// # Arguments
 ///
 /// * `calib_cov` - Covariance matrix from calibration set
-/// * `infer_cov` - Covariance matrix from inference set
 /// * `observed_diff` - Observed quantile differences
 /// * `posterior_mean` - Posterior mean of (shift, tail) effects
 /// * `outlier_stats` - Statistics about outlier filtering
 /// * `preflight` - Preflight check results (sanity, generator, autocorrelation, system)
+/// * `interleaved_samples` - Raw timing samples in measurement order
 /// * `extra` - Additional diagnostic information (block length, filtered quantiles, etc.)
 pub fn compute_diagnostics(
     calib_cov: &Matrix9,
-    infer_cov: &Matrix9,
     observed_diff: &Vector9,
     posterior_mean: &[f64; 2],
     outlier_stats: &OutlierStats,
     preflight: &PreflightResult,
+    interleaved_samples: &[crate::types::TimingSample],
     extra: &DiagnosticsExtra,
 ) -> Diagnostics {
     let mut warnings = Vec::new();
@@ -68,23 +68,13 @@ pub fn compute_diagnostics(
         warnings.push(warning.description());
     }
 
-    // 1. Non-stationarity check
-    let (stationarity_ratio, stationarity_ok) = check_stationarity(calib_cov, infer_cov);
+    // 1. Stationarity check (spec §3.2.1)
+    let (stationarity_ratio, stationarity_ok) = check_stationarity_windowed(interleaved_samples);
     if !stationarity_ok {
-        if stationarity_ratio > 5.0 {
-            warnings.push(format!(
-                "Non-stationarity detected: variance ratio {:.2} (expected 0.5-2.0). Results may be unreliable.",
-                stationarity_ratio
-            ));
-        } else {
-            warnings.push(format!(
-                "Possible non-stationarity: variance ratio {:.2} (expected 0.5-2.0).",
-                stationarity_ratio
-            ));
-        }
+        warnings.push("Timing distribution appears to drift during measurement (stationarity suspect).".to_string());
     }
 
-    // 2. Model fit check
+    // 2. Model fit check (spec §4.1)
     let (model_fit_chi2, model_fit_ok) = check_model_fit(observed_diff, calib_cov, posterior_mean);
     if !model_fit_ok {
         warnings.push(format!(
@@ -93,7 +83,7 @@ pub fn compute_diagnostics(
         ));
     }
 
-    // 3. Outlier asymmetry check
+    // 3. Outlier asymmetry check (spec §3.3)
     let outlier_rate_fixed = outlier_stats.rate_fixed();
     let outlier_rate_random = outlier_stats.rate_random();
     let outlier_asymmetry_ok = check_outlier_asymmetry(outlier_rate_fixed, outlier_rate_random);
@@ -105,15 +95,23 @@ pub fn compute_diagnostics(
         ));
     }
 
-    // Compute effective sample size (ESS ≈ n / block_length)
-    let effective_sample_size = if extra.dependence_length > 0 {
-        extra.samples_per_class / extra.dependence_length
+    if outlier_stats.outlier_fraction > 0.001 {
+        warnings.push(format!(
+            "High winsorization rate: {:.2}% of samples capped. Results may be less reliable.",
+            outlier_stats.outlier_fraction * 100.0
+        ));
+    }
+
+    // 4. Per-class dependence estimation (spec §3.2.2)
+    let dependence_length = estimate_joint_dependence_length(interleaved_samples);
+    let effective_sample_size = if dependence_length > 0 {
+        extra.samples_per_class / dependence_length
     } else {
         extra.samples_per_class
     };
 
     Diagnostics {
-        dependence_length: extra.dependence_length,
+        dependence_length,
         effective_sample_size,
         stationarity_ratio,
         stationarity_ok,
@@ -131,23 +129,82 @@ pub fn compute_diagnostics(
     }
 }
 
-/// Check non-stationarity by comparing variance between calibration and inference.
-///
-/// Returns (ratio, ok) where ratio = tr(Σ_infer) / tr(Σ_calib).
-/// OK if ratio is in [0.5, 2.0].
-fn check_stationarity(calib_cov: &Matrix9, infer_cov: &Matrix9) -> (f64, bool) {
-    let calib_trace: f64 = (0..9).map(|i| calib_cov[(i, i)]).sum();
-    let infer_trace: f64 = (0..9).map(|i| infer_cov[(i, i)]).sum();
-
-    // Avoid division by zero
-    if calib_trace < 1e-12 {
-        return (f64::INFINITY, false);
+/// Check stationarity using windowed median/IQR (spec §3.2.1).
+fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, bool) {
+    let n = samples.len();
+    if n < 100 {
+        return (1.0, true); // Too few samples for windowing
     }
 
-    let ratio = infer_trace / calib_trace;
-    let ok = (0.5..=2.0).contains(&ratio);
+    let w = 10; // 10 windows
+    let window_size = n / w;
+    let mut window_medians = Vec::with_capacity(w);
+    let mut window_iqrs = Vec::with_capacity(w);
+    let mut window_variances = Vec::with_capacity(w);
 
-    (ratio, ok)
+    for i in 0..w {
+        let start = i * window_size;
+        let end = if i == w - 1 { n } else { (i + 1) * window_size };
+        let mut window_data: Vec<f64> = samples[start..end].iter().map(|s| s.time_ns).collect();
+        
+        window_data.sort_by(|a, b| a.total_cmp(b));
+        let median = window_data[window_data.len() / 2];
+        let q1 = window_data[window_data.len() / 4];
+        let q3 = window_data[window_data.len() * 3 / 4];
+        let iqr = q3 - q1;
+        
+        let mean = window_data.iter().sum::<f64>() / window_data.len() as f64;
+        let variance = window_data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / window_data.len() as f64;
+
+        window_medians.push(median);
+        window_iqrs.push(iqr);
+        window_variances.push(variance);
+    }
+
+    let mut global_data: Vec<f64> = samples.iter().map(|s| s.time_ns).collect();
+    global_data.sort_by(|a, b| a.total_cmp(b));
+    let global_median = global_data[global_data.len() / 2];
+    
+    let max_median = window_medians.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_median = window_medians.iter().cloned().fold(f64::INFINITY, f64::min);
+    let avg_iqr = window_iqrs.iter().sum::<f64>() / w as f64;
+    
+    let drift_floor = 0.05 * global_median;
+    let threshold = (2.0 * avg_iqr).max(drift_floor);
+    let median_drift_ok = (max_median - min_median) <= threshold;
+
+    // Check for monotonic variance drift (>50% change)
+    let first_var = window_variances[0];
+    let last_var = window_variances[w - 1];
+    let var_drift_ratio = if first_var > 1e-12 { last_var / first_var } else { 1.0 };
+    let var_drift_ok = (0.5..=1.5).contains(&var_drift_ratio);
+
+    let ratio = if min_median > 1e-12 { max_median / min_median } else { 1.0 };
+    (ratio, median_drift_ok && var_drift_ok)
+}
+
+/// Estimate dependence length using per-class ACF (spec §3.2.2).
+fn estimate_joint_dependence_length(samples: &[crate::types::TimingSample]) -> usize {
+    use crate::types::Class;
+    use crate::statistics::lag1_autocorrelation;
+
+    let mut fixed: Vec<f64> = Vec::new();
+    let mut random: Vec<f64> = Vec::new();
+    for s in samples {
+        match s.class {
+            Class::Baseline => fixed.push(s.time_ns),
+            Class::Sample => random.push(s.time_ns),
+        }
+    }
+
+    if fixed.len() < 10 || random.len() < 10 {
+        return 1;
+    }
+
+    let m_f = crate::statistics::estimate_dependence_length(&fixed, 100);
+    let m_r = crate::statistics::estimate_dependence_length(&random, 100);
+
+    m_f.max(m_r)
 }
 
 /// Check model fit using chi-squared test on residuals.
@@ -245,16 +302,23 @@ mod tests {
 
     #[test]
     fn test_stationarity_check() {
-        let calib = Matrix9::identity();
-        let infer = Matrix9::identity();
-        let (ratio, ok) = check_stationarity(&calib, &infer);
+        use crate::types::{TimingSample, Class};
+        let samples: Vec<TimingSample> = (0..200).map(|i| TimingSample {
+            time_ns: 100.0,
+            class: if i % 2 == 0 { Class::Baseline } else { Class::Sample },
+        }).collect();
+        
+        let (ratio, ok) = check_stationarity_windowed(&samples);
         assert!((ratio - 1.0).abs() < 1e-10);
         assert!(ok);
 
-        // 3x variance increase - warning territory
-        let infer_high = Matrix9::identity() * 3.0;
-        let (ratio, ok) = check_stationarity(&calib, &infer_high);
-        assert!((ratio - 3.0).abs() < 1e-10);
+        // Strong drift
+        let mut drifting_samples = samples.clone();
+        for i in 100..200 {
+            drifting_samples[i].time_ns = 200.0;
+        }
+        let (ratio, ok) = check_stationarity_windowed(&drifting_samples);
+        assert!(ratio > 1.5);
         assert!(!ok);
     }
 

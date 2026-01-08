@@ -70,34 +70,38 @@ const MAX_LAG: usize = 2;
 /// Minimum samples required for autocorrelation check.
 const MIN_SAMPLES_FOR_ACF: usize = 100;
 
-/// Perform autocorrelation check on interleaved timing sequence.
+/// Perform autocorrelation check on per-class timing sequences.
 ///
-/// Computes ACF for lag-1 and lag-2 and returns a warning if
-/// either exceeds the threshold (0.3).
+/// Computes ACF for lag-1 and lag-2 for both classes and returns a warning if
+/// any exceeds the threshold (0.3).
 ///
 /// # Arguments
 ///
-/// * `interleaved` - Full interleaved timing sequence (fixed, random, fixed, random, ...)
+/// * `fixed` - Timing samples from fixed class
+/// * `random` - Timing samples from random class
 ///
 /// # Returns
 ///
 /// `Some(AutocorrWarning)` if high autocorrelation detected, `None` otherwise.
-pub fn autocorrelation_check(interleaved: &[f64]) -> Option<AutocorrWarning> {
-    if interleaved.len() < MIN_SAMPLES_FOR_ACF {
+pub fn autocorrelation_check(fixed: &[f64], random: &[f64]) -> Option<AutocorrWarning> {
+    if fixed.len() < MIN_SAMPLES_FOR_ACF || random.len() < MIN_SAMPLES_FOR_ACF {
+        let n = fixed.len().min(random.len());
         return Some(AutocorrWarning::InsufficientSamples {
-            available: interleaved.len(),
+            available: n,
             required: MIN_SAMPLES_FOR_ACF,
         });
     }
 
-    // Check autocorrelation at lag-1 and lag-2
+    // Check autocorrelation at lag-1 and lag-2 for both classes
     for lag in 1..=MAX_LAG {
-        let acf = compute_acf(interleaved, lag);
+        let acf_f = compute_acf(fixed, lag);
+        let acf_r = compute_acf(random, lag);
+        let max_acf = if acf_f.abs() > acf_r.abs() { acf_f } else { acf_r };
 
-        if acf.abs() > ACF_THRESHOLD {
+        if max_acf.abs() > ACF_THRESHOLD {
             return Some(AutocorrWarning::PeriodicInterference {
                 lag,
-                acf_value: acf,
+                acf_value: max_acf,
                 threshold: ACF_THRESHOLD,
             });
         }
@@ -173,7 +177,7 @@ mod tests {
     #[test]
     fn test_insufficient_samples() {
         let data = vec![1.0; 50];
-        let result = autocorrelation_check(&data);
+        let result = autocorrelation_check(&data, &data);
         assert!(matches!(
             result,
             Some(AutocorrWarning::InsufficientSamples { .. })
@@ -204,7 +208,7 @@ mod tests {
         // If our generated sequence happens to have low autocorrelation, test it
         // Otherwise skip the assertion (this is a heuristic test)
         if acf1.abs() < ACF_THRESHOLD && acf2.abs() < ACF_THRESHOLD {
-            let result = autocorrelation_check(&data);
+            let result = autocorrelation_check(&data, &data);
             assert!(
                 result.is_none(),
                 "Low ACF sequence should not trigger warning: {:?}",
@@ -220,7 +224,7 @@ mod tests {
             .map(|i| if i % 2 == 0 { 100.0 } else { 200.0 })
             .collect();
 
-        let result = autocorrelation_check(&data);
+        let result = autocorrelation_check(&data, &data);
         assert!(
             matches!(result, Some(AutocorrWarning::PeriodicInterference { .. })),
             "Periodic signal should trigger warning"

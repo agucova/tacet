@@ -23,7 +23,7 @@ fn main() {
         }
     };
 
-    println!("CI gate passed: {}", result.ci_gate.passed);
+    println!("CI gate passed: {}", result.ci_gate.passed());
     println!("Leak probability: {:.4}", result.leak_probability);
     println!("Batching: enabled={}, K={}, ticks_per_batch={:.1}",
         result.metadata.batching.enabled,

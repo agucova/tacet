@@ -13,7 +13,7 @@ mod bootstrap;
 mod covariance;
 mod quantile;
 
-pub use autocorrelation::{lag1_autocorrelation, lag2_autocorrelation};
+pub use autocorrelation::{estimate_dependence_length, lag1_autocorrelation, lag2_autocorrelation};
 pub use block_length::{optimal_block_length, paired_optimal_block_length, OptimalBlockLength};
 pub use bootstrap::{
     block_bootstrap_resample, block_bootstrap_resample_into, block_bootstrap_resample_joint_into,

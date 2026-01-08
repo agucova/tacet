@@ -56,10 +56,18 @@ pub fn format_result(result: &TestResult) -> String {
     ));
     output.push('\n');
 
-    if result.ci_gate.passed {
-        output.push_str(&format!("  {}\n\n", "\u{2713} No timing leak detected".green().bold()));
-    } else {
-        output.push_str(&format!("  {}\n\n", "\u{26A0} Timing leak detected".yellow().bold()));
+    use crate::result::CiGateResult;
+    match &result.ci_gate.result {
+        CiGateResult::Pass => {
+            output.push_str(&format!("  {}\n\n", "\u{2713} No timing leak detected".green().bold()));
+        }
+        CiGateResult::Fail => {
+            output.push_str(&format!("  {}\n\n", "\u{26A0} Timing leak detected".yellow().bold()));
+        }
+        CiGateResult::Inconclusive { reason } => {
+            output.push_str(&format!("  {}\n", "? Inconclusive".cyan().bold()));
+            output.push_str(&format!("    {}\n\n", reason));
+        }
     }
 
     let prob_pct = result.leak_probability * 100.0;
@@ -69,12 +77,23 @@ pub fn format_result(result: &TestResult) -> String {
     ));
 
     if let Some(ref effect) = result.effect {
+        let magnitude = (effect.shift_ns.powi(2) + effect.tail_ns.powi(2)).sqrt();
         output.push_str(&format!(
-            "    Effect: {:.1} ns {} (95% CI: {:.1}–{:.1} ns)\n",
-            (effect.shift_ns.powi(2) + effect.tail_ns.powi(2)).sqrt(),
+            "    Effect: {:.1} ns {}\n",
+            magnitude,
             format_pattern(effect.pattern),
-            effect.credible_interval_ns.0,
-            effect.credible_interval_ns.1
+        ));
+        output.push_str(&format!(
+            "      Shift: {:.1} ns (95% CI: {:.1}–{:.1} ns)\n",
+            effect.shift_ns,
+            effect.shift_ci_ns.0,
+            effect.shift_ci_ns.1
+        ));
+        output.push_str(&format!(
+            "      Tail:  {:.1} ns (95% CI: {:.1}–{:.1} ns)\n",
+            effect.tail_ns,
+            effect.tail_ci_ns.0,
+            effect.tail_ci_ns.1
         ));
     }
 
@@ -139,16 +158,17 @@ fn exploitability_lines(exploit: Exploitability) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::{CiGate, Diagnostics, Effect, Metadata, MinDetectableEffect};
+    use crate::result::{CiGate, CiGateResult, Diagnostics, Effect, Metadata, MinDetectableEffect};
 
     fn make_test_result(passed: bool, leak_probability: f64) -> TestResult {
         TestResult {
             leak_probability,
-            bayes_factor: if leak_probability > 0.5 { 10.0 } else { 0.1 },
             effect: if leak_probability > 0.5 {
                 Some(Effect {
                     shift_ns: 150.0,
                     tail_ns: 25.0,
+                    shift_ci_ns: (100.0, 200.0),
+                    tail_ci_ns: (5.0, 45.0),
                     credible_interval_ns: (100.0, 200.0),
                     pattern: EffectPattern::UniformShift,
                 })
@@ -162,10 +182,11 @@ mod tests {
             },
             ci_gate: CiGate {
                 alpha: 0.001,
-                passed,
+                result: if passed { CiGateResult::Pass } else { CiGateResult::Fail },
                 threshold: 0.0,
                 max_observed: 0.0,
                 observed: [0.0; 9],
+                p_value: if passed { 0.5 } else { 0.0001 },
             },
             quality: MeasurementQuality::Good,
             outlier_fraction: 0.02,

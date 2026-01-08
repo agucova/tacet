@@ -215,7 +215,7 @@ fn discrete_mode_fpr_calibration() {
                 if result.diagnostics.discrete_mode {
                     discrete_mode_count += 1;
                 }
-                if !result.ci_gate.passed {
+                if !result.ci_gate.passed() {
                     rejections += 1;
                 }
 

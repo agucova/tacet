@@ -19,7 +19,7 @@ mod system;
 
 pub use autocorr::{autocorrelation_check, AutocorrWarning};
 pub use generator::{generator_cost_check, measure_generator_cost, GeneratorWarning};
-pub use resolution::{resolution_check, ResolutionWarning};
+pub use resolution::{resolution_check, timer_sanity_check, ResolutionWarning};
 pub use sanity::{sanity_check, SanityWarning};
 pub use system::{system_check, SystemWarning};
 
@@ -139,6 +139,7 @@ impl PreflightWarnings {
 /// * `interleaved` - Full interleaved timing sequence for autocorrelation
 /// * `fixed_gen_time_ns` - Optional: time to generate fixed inputs
 /// * `random_gen_time_ns` - Optional: time to generate random inputs
+/// * `timer` - The timer used for measurements
 ///
 /// # Returns
 ///
@@ -149,9 +150,20 @@ pub fn run_all_checks(
     interleaved: &[f64],
     fixed_gen_time_ns: Option<f64>,
     random_gen_time_ns: Option<f64>,
-    timer_resolution_ns: f64,
+    timer: &crate::measurement::BoxedTimer,
 ) -> PreflightResult {
     let mut result = PreflightResult::new();
+    let timer_resolution_ns = timer.resolution_ns();
+
+    // Run timer sanity (monotonicity)
+    if let Some(warning) = timer_sanity_check(timer) {
+        result.add_resolution_warning(warning);
+    }
+
+    // Run resolution check (quantization)
+    if let Some(warning) = resolution_check(fixed_samples, timer_resolution_ns) {
+        result.add_resolution_warning(warning);
+    }
 
     // Run sanity check (Fixed-vs-Fixed)
     if let Some(warning) = sanity_check(fixed_samples, timer_resolution_ns) {
@@ -166,7 +178,7 @@ pub fn run_all_checks(
     }
 
     // Run autocorrelation check
-    if let Some(warning) = autocorrelation_check(interleaved) {
+    if let Some(warning) = autocorrelation_check(fixed_samples, _random_samples) {
         result.add_autocorr_warning(warning);
     }
 

@@ -25,7 +25,7 @@
 use rand::prelude::*;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use crate::result::CiGate;
+use crate::result::{CiGate, CiGateResult};
 use crate::statistics::{compute_deciles_inplace, counter_rng_seed, paired_optimal_block_length};
 use crate::types::Vector9;
 use std::env;
@@ -99,7 +99,8 @@ pub fn run_ci_gate(input: &CiGateInput<'_>) -> CiGate {
 /// Continuous mode CI gate (standard SILENT with studentized statistics).
 fn run_ci_gate_continuous(input: &CiGateInput<'_>) -> CiGate {
     let base_seed = input.seed.unwrap_or(42);
-    let theta = input.min_effect_of_concern.max(input.timer_resolution_ns);
+    // theta is already clamped by the caller (oracle.rs) to ensure consistency with Bayesian layer
+    let theta = input.min_effect_of_concern;
     let debug_pipeline = env::var("TO_DEBUG_PIPELINE").map(|v| v != "0").unwrap_or(false);
 
     // Convert observed differences to absolute values A_k
@@ -126,17 +127,22 @@ fn run_ci_gate_continuous(input: &CiGateInput<'_>) -> CiGate {
     // Filter quantiles (spec §2.4: high-variance removal + power-boost filter)
     let filtered_indices = filter_quantiles(&observed_abs, &variance_result.sigmas, theta, input.baseline_samples.len());
 
-    // If no quantiles pass filtering, pass the gate (not enough evidence)
+    // If no quantiles pass filtering, PASS the gate.
+    // This happens when no quantile shows potential evidence of effect >= theta.
+    // Under null (A_k ≈ 0), the power-boost filter correctly identifies that
+    // all quantiles are consistent with effects < theta, so we should pass.
+    // P-value is 1.0 (no evidence against null).
     if filtered_indices.is_empty() {
         return CiGate {
             alpha: input.alpha,
-            passed: true,
+            result: CiGateResult::Pass,
             threshold: theta,
             max_observed,
             observed: {
                 let slice = input.observed_diff.as_slice();
                 [slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7], slice[8]]
             },
+            p_value: 1.0,
         };
     }
 
@@ -149,11 +155,12 @@ fn run_ci_gate_continuous(input: &CiGateInput<'_>) -> CiGate {
     );
 
     // Compute centered, studentized bootstrap statistics and critical value
-    let critical_value = compute_critical_value(
+    let (critical_value, p_value) = compute_critical_value_and_pvalue(
         &observed_abs,
         &variance_result,
         &filtered_indices,
         input.alpha,
+        q_max,
     );
 
     if debug_pipeline {
@@ -186,17 +193,18 @@ fn run_ci_gate_continuous(input: &CiGateInput<'_>) -> CiGate {
 
     CiGate {
         alpha: input.alpha,
-        passed,
+        result: if passed { CiGateResult::Pass } else { CiGateResult::Fail },
         threshold: threshold.max(theta),
         max_observed,
         observed: {
             let slice = input.observed_diff.as_slice();
             [slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7], slice[8]]
         },
+        p_value,
     }
 }
 
-/// Discrete mode CI gate (m-out-of-n bootstrap with √m scaling, spec §2.4).
+/// Discrete mode CI gate (m-out-of-n bootstrap with √m scaling and √n test statistic, spec §2.4).
 ///
 /// Key differences from continuous mode:
 /// - Uses mid-distribution quantiles that handle ties correctly
@@ -206,12 +214,14 @@ fn run_ci_gate_discrete(input: &CiGateInput<'_>) -> CiGate {
     use crate::statistics::compute_midquantile_deciles;
 
     let base_seed = input.seed.unwrap_or(42);
-    let theta = input.min_effect_of_concern.max(input.timer_resolution_ns);
+    // Theta is already clamped by caller (oracle.rs) per spec §2.4.
+    // Research mode (θ=0) is preserved to detect any statistical difference.
+    let theta = input.min_effect_of_concern;
     let n = input.baseline_samples.len().min(input.sample_samples.len());
 
-    // Compute resample size m = ⌊n^(2/3)⌋ (spec §2.4)
-    let m = (n as f64).powf(2.0 / 3.0).floor() as usize;
-    let m = m.max(10).min(n); // Ensure m is reasonable
+    // Compute resample size m (spec §2.4)
+    let m = discrete_resample_size(n);
+    let block_size = discrete_block_size(input.baseline_samples, input.sample_samples, n, m);
 
     // Compute observed quantiles using mid-distribution quantiles
     let q_baseline = compute_midquantile_deciles(input.baseline_samples);
@@ -229,27 +239,60 @@ fn run_ci_gate_discrete(input: &CiGateInput<'_>) -> CiGate {
     // Compute max observed for reporting
     let max_observed = observed_abs.iter().cloned().fold(0.0_f64, f64::max);
 
-    // Test statistic: √m × max_k(A_k - θ)  (non-studentized)
-    let sqrt_m = (m as f64).sqrt();
-    let t_observed = sqrt_m * (max_observed - theta);
-
-    // m-out-of-n bootstrap with √m scaling
+    // m-out-of-n paired block bootstrap with √m scaling (spec §2.4)
     let bootstrap_stats = run_m_out_of_n_bootstrap(
         input.baseline_samples,
         input.sample_samples,
         m,
+        block_size,
         input.bootstrap_iterations,
         base_seed,
     );
 
-    // Compute centered bootstrap statistics: √m × (max_k A*_k - max_k A_k)
+    // Estimate per-quantile sigmas for high-variance filtering
+    let sigmas = bootstrap_sigmas(&bootstrap_stats);
+    let filtered_indices = filter_quantiles_discrete(&sigmas);
+
+    // If no quantiles pass filtering, PASS (consistent with continuous mode)
+    // P-value is 1.0 (no evidence against null).
+    if filtered_indices.is_empty() {
+        return CiGate {
+            alpha: input.alpha,
+            result: CiGateResult::Pass,
+            threshold: theta,
+            max_observed,
+            observed: {
+                let slice = input.observed_diff.as_slice();
+                [slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7], slice[8]]
+            },
+            p_value: 1.0,
+        };
+    }
+
+    // Test statistic: √n × max_{k in K_sub}(A_k - θ) (non-studentized)
+    let sqrt_n = (n as f64).sqrt();
+    let t_observed = sqrt_n
+        * filtered_indices
+            .iter()
+            .map(|&k| observed_abs[k] - theta)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+    // Compute centered bootstrap statistics: √m × max_{k in K_sub}(A*_k - A_k)
+    let sqrt_m = (m as f64).sqrt();
     let mut centered_stats: Vec<f64> = bootstrap_stats
         .iter()
         .map(|a_star| {
-            let max_a_star = a_star.iter().cloned().fold(0.0_f64, f64::max);
-            sqrt_m * (max_a_star - max_observed)
+            let max_a_star = filtered_indices
+                .iter()
+                .map(|&k| a_star[k] - observed_abs[k])
+                .fold(f64::NEG_INFINITY, f64::max);
+            sqrt_m * max_a_star
         })
         .collect();
+
+    // Compute p-value before sorting: P(centered_stat >= t_observed)
+    let exceedances = centered_stats.iter().filter(|&&s| s >= t_observed).count();
+    let p_value = (exceedances as f64) / (centered_stats.len() as f64);
 
     // Compute critical value
     centered_stats.sort_by(|a, b| a.total_cmp(b));
@@ -261,32 +304,37 @@ fn run_ci_gate_discrete(input: &CiGateInput<'_>) -> CiGate {
     let passed = t_observed <= critical_value;
 
     // Threshold in ns
-    let threshold = theta + critical_value / sqrt_m;
+    let threshold = theta + critical_value / sqrt_n;
 
     CiGate {
         alpha: input.alpha,
-        passed,
+        result: if passed { CiGateResult::Pass } else { CiGateResult::Fail },
         threshold: threshold.max(theta),
         max_observed,
         observed: {
             let slice = input.observed_diff.as_slice();
             [slice[0], slice[1], slice[2], slice[3], slice[4], slice[5], slice[6], slice[7], slice[8]]
         },
+        p_value,
     }
 }
 
-/// Run m-out-of-n bootstrap for discrete mode.
+/// Run m-out-of-n paired block bootstrap for discrete mode.
 ///
-/// Resamples m observations (with replacement) from each class,
+/// Resamples m observations using the same block indices for both classes,
 /// computes mid-distribution quantiles, and returns the absolute differences.
 fn run_m_out_of_n_bootstrap(
     baseline: &[f64],
     sample: &[f64],
     m: usize,
+    block_size: usize,
     n_bootstrap: usize,
     seed: u64,
 ) -> Vec<[f64; 9]> {
     use crate::statistics::compute_midquantile_deciles;
+
+    let n = baseline.len().min(sample.len());
+    let block_size = block_size.max(1);
 
     #[cfg(feature = "parallel")]
     let result: Vec<[f64; 9]> = crate::thread_pool::install(|| {
@@ -303,11 +351,15 @@ fn run_m_out_of_n_bootstrap(
                 |(rng, baseline_buf, sample_buf), i| {
                     *rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
-                    // Resample m observations from each class
-                    for j in 0..m {
-                        baseline_buf[j] = baseline[rng.random_range(0..baseline.len())];
-                        sample_buf[j] = sample[rng.random_range(0..sample.len())];
+                    // Resample m observations from both classes with the same block indices
+                    let n_blocks = m.div_ceil(block_size);
+                    let max_start = n.saturating_sub(block_size);
+                    let mut indices = Vec::with_capacity(n_blocks);
+                    for _ in 0..n_blocks {
+                        indices.push(rng.random_range(0..=max_start));
                     }
+                    resample_with_indices(baseline, &indices, block_size, baseline_buf);
+                    resample_with_indices(sample, &indices, block_size, sample_buf);
 
                     // Compute mid-distribution quantiles
                     let q_baseline = compute_midquantile_deciles(baseline_buf);
@@ -333,11 +385,15 @@ fn run_m_out_of_n_bootstrap(
         for i in 0..n_bootstrap {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
-            // Resample m observations from each class
-            for j in 0..m {
-                baseline_buf[j] = baseline[rng.gen_range(0..baseline.len())];
-                sample_buf[j] = sample[rng.gen_range(0..sample.len())];
+            // Resample m observations from both classes with the same block indices
+            let n_blocks = m.div_ceil(block_size);
+            let max_start = n.saturating_sub(block_size);
+            let mut indices = Vec::with_capacity(n_blocks);
+            for _ in 0..n_blocks {
+                indices.push(rng.gen_range(0..=max_start));
             }
+            resample_with_indices(baseline, &indices, block_size, &mut baseline_buf);
+            resample_with_indices(sample, &indices, block_size, &mut sample_buf);
 
             // Compute mid-distribution quantiles
             let q_baseline = compute_midquantile_deciles(&baseline_buf);
@@ -354,6 +410,58 @@ fn run_m_out_of_n_bootstrap(
     };
 
     result
+}
+
+fn discrete_resample_size(n: usize) -> usize {
+    if n < 2_000 {
+        let m = (n / 2).max(200);
+        m.min(n).max(1)
+    } else {
+        let m = (n as f64).powf(2.0 / 3.0).floor() as usize;
+        let m = m.max(400);
+        m.min(n).max(1)
+    }
+}
+
+fn discrete_block_size(baseline: &[f64], sample: &[f64], n: usize, m: usize) -> usize {
+    let block_size = if n >= 10 {
+        paired_optimal_block_length(baseline, sample)
+    } else {
+        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil().max(1.0) as usize
+    };
+    let cap = (m / 5).max(1);
+    block_size.min(cap).max(1)
+}
+
+fn bootstrap_sigmas(bootstrap_diffs: &[[f64; 9]]) -> [f64; 9] {
+    let n_bootstrap = bootstrap_diffs.len().max(1);
+    let mut sigmas = [0.0; 9];
+    for k in 0..9 {
+        let mean: f64 = bootstrap_diffs.iter().map(|d| d[k]).sum::<f64>() / n_bootstrap as f64;
+        let variance: f64 = if n_bootstrap > 1 {
+            bootstrap_diffs
+                .iter()
+                .map(|d| (d[k] - mean).powi(2))
+                .sum::<f64>()
+                / (n_bootstrap - 1) as f64
+        } else {
+            0.0
+        };
+        sigmas[k] = variance.sqrt().max(1e-12);
+    }
+    sigmas
+}
+
+fn filter_quantiles_discrete(sigmas: &[f64; 9]) -> Vec<usize> {
+    let mean_variance: f64 = sigmas.iter().map(|s| s * s).sum::<f64>() / 9.0;
+    let variance_threshold = 5.0 * mean_variance;
+
+    (0..9)
+        .filter(|&k| {
+            let variance = sigmas[k] * sigmas[k];
+            variance <= variance_threshold
+        })
+        .collect()
 }
 
 /// Estimate per-quantile variances via paired block bootstrap (spec §2.4).
@@ -543,18 +651,21 @@ fn compute_studentized_max(
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
-/// Compute critical value c*_{1-α} from centered, studentized bootstrap distribution.
+/// Compute critical value c*_{1-α} and p-value from centered, studentized bootstrap distribution.
 ///
 /// Bootstrap statistic: Q̂*_max = max_{k ∈ K_sub} (A*_k - A_k) / σ̂_k
 /// Note: We subtract observed A_k (not θ) to center the bootstrap distribution around 0.
-fn compute_critical_value(
+///
+/// Returns (critical_value, p_value) where p_value = P(Q̂*_max >= Q̂_max).
+fn compute_critical_value_and_pvalue(
     observed_abs: &[f64; 9],
     variance_result: &BootstrapVarianceResult,
     filtered_indices: &[usize],
     alpha: f64,
-) -> f64 {
+    q_max: f64,
+) -> (f64, f64) {
     if filtered_indices.is_empty() {
-        return f64::INFINITY; // No rejection possible
+        return (f64::INFINITY, 1.0); // No rejection possible, p-value = 1
     }
 
     // Compute centered, studentized bootstrap statistics
@@ -570,6 +681,10 @@ fn compute_critical_value(
         })
         .collect();
 
+    // Compute p-value before sorting: P(Q̂*_max >= Q̂_max)
+    let exceedances = q_star_values.iter().filter(|&&q| q >= q_max).count();
+    let p_value = (exceedances as f64) / (q_star_values.len() as f64);
+
     // Sort to find (1-α) quantile
     q_star_values.sort_by(|a, b| a.total_cmp(b));
 
@@ -577,7 +692,9 @@ fn compute_critical_value(
     let idx = ((n as f64) * (1.0 - alpha)).ceil() as usize;
     let idx = idx.saturating_sub(1).min(n.saturating_sub(1));
 
-    q_star_values[idx]
+    let critical_value = q_star_values[idx];
+
+    (critical_value, p_value)
 }
 
 #[cfg(test)]
@@ -604,7 +721,7 @@ mod tests {
         };
 
         let result = run_ci_gate(&input);
-        assert!(result.passed, "CI gate should pass when no difference observed");
+        assert!(result.passed(), "CI gate should pass when no difference observed");
     }
 
     #[test]
@@ -637,7 +754,7 @@ mod tests {
         };
 
         let result = run_ci_gate(&input);
-        assert!(!result.passed, "CI gate should fail on large difference (~1000ns)");
+        assert!(!result.passed(), "CI gate should fail on large difference (~1000ns)");
     }
 
     #[test]
@@ -666,8 +783,8 @@ mod tests {
         let result3 = run_ci_gate(&input);
 
         // Verify results are identical across runs
-        assert_eq!(result1.passed, result2.passed, "Pass/fail should be deterministic");
-        assert_eq!(result2.passed, result3.passed, "Pass/fail should be deterministic");
+        assert_eq!(result1.result, result2.result, "Result should be deterministic");
+        assert_eq!(result2.result, result3.result, "Result should be deterministic");
         assert!(
             (result1.threshold - result2.threshold).abs() < 1e-10,
             "Threshold should be deterministic"

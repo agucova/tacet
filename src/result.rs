@@ -5,14 +5,12 @@ use serde::{Deserialize, Serialize};
 /// Complete result from a timing analysis.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
-    /// Probability of timing leak given data and model (0.0 to 1.0).
+    /// Posterior probability of timing leak: P(max_k |(Xβ)_k| > θ | Δ).
+    /// Computed via Monte Carlo integration over the posterior distribution (spec §2.5).
+    /// Range: 0.0 to 1.0
     pub leak_probability: f64,
 
-    /// Bayes factor (BF₁₀): evidence ratio for timing leak vs no leak.
-    /// Values > 10 indicate strong evidence for leak, < 0.1 strong evidence against.
-    pub bayes_factor: f64,
-
-    /// Effect size estimate (present if leak_probability > 0.5).
+    /// Effect size estimate (always reported per spec §2.5).
     pub effect: Option<Effect>,
 
     /// Exploitability assessment (heuristic).
@@ -46,7 +44,19 @@ pub struct Effect {
     /// Tail effect in nanoseconds (positive = fixed has heavier upper tail).
     pub tail_ns: f64,
 
+    /// 95% credible interval for shift component (proper Bayesian CI).
+    pub shift_ci_ns: (f64, f64),
+
+    /// 95% credible interval for tail component (proper Bayesian CI).
+    pub tail_ci_ns: (f64, f64),
+
+    // TODO(credible_interval): The magnitude CI (percentiles of ||β||) doesn't include
+    // the point estimate when β_post ≈ 0, because ||·|| is always non-negative.
+    // This is a spec design flaw (§2.5). For now we use component CIs above.
+    // Revisit: consider removing this field or fixing the CI construction.
     /// 95% credible interval for total effect magnitude.
+    /// **Note**: This CI may not contain the point estimate when effect ≈ 0.
+    /// Prefer using `shift_ci_ns` and `tail_ci_ns` for proper uncertainty bounds.
     pub credible_interval_ns: (f64, f64),
 
     /// Dominant pattern description.
@@ -75,19 +85,46 @@ pub struct MinDetectableEffect {
     pub tail_ns: f64,
 }
 
+/// Result of the CI gate test.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CiGateResult {
+    /// No timing leak detected at the specified alpha level.
+    Pass,
+    /// Timing leak detected at the specified alpha level.
+    Fail,
+    /// Inconclusive result (e.g., all quantiles filtered).
+    Inconclusive {
+        /// Reason why the result is inconclusive.
+        reason: String,
+    },
+}
+
 /// CI gate result for pass/fail decisions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CiGate {
     /// The alpha level used.
     pub alpha: f64,
-    /// Whether the test passed (no leak detected at this alpha).
-    pub passed: bool,
+    /// The result of the CI gate test.
+    pub result: CiGateResult,
     /// Bootstrap threshold for max statistic (single value).
     pub threshold: f64,
     /// Observed max|Δ_p| statistic.
     pub max_observed: f64,
     /// Per-quantile observed differences (for diagnostics).
     pub observed: [f64; 9],
+    /// P-value: P(bootstrap_stat >= observed_stat | H0).
+    /// Can be compared with `leak_probability` as `1 - p_value` for apples-to-apples.
+    pub p_value: f64,
+}
+
+impl CiGate {
+    /// Check if the CI gate passed (no leak detected).
+    ///
+    /// Returns `true` only if the result is `Pass`. Both `Fail` and `Inconclusive`
+    /// return `false` - use `result` field directly for more detailed handling.
+    pub fn passed(&self) -> bool {
+        matches!(self.result, CiGateResult::Pass)
+    }
 }
 
 /// Exploitability assessment based on effect magnitude.

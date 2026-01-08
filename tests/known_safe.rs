@@ -33,7 +33,7 @@ fn no_false_positive_xor_compare() {
         result.leak_probability
     );
     assert!(
-        result.ci_gate.passed,
+        result.ci_gate.passed(),
         "CI gate should pass for constant-time code"
     );
 }

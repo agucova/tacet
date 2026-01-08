@@ -4,7 +4,8 @@
 //!
 //! This crate provides statistical methodology for detecting timing variations
 //! between two input classes (baseline vs sample), outputting:
-//! - Probability of timing leak (0.0-1.0)
+//! - Posterior probability of timing leak (0.0-1.0)
+//! - Effect exceedance probability given leak (0.0-1.0)
 //! - Effect size estimates in nanoseconds
 //! - CI gate pass/fail with bounded false positive rate
 //! - Exploitability assessment
@@ -44,7 +45,14 @@
 //!
 //! match outcome {
 //!     Outcome::Completed(result) => {
-//!         println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
+//!         println!(
+//!             "Leak probability (BF posterior): {:.1}%",
+//!             result.leak_probability * 100.0
+//!         );
+//!         println!(
+//!             "Effect exceedance (given leak): {:.1}%",
+//!             result.effect_exceedance_probability * 100.0
+//!         );
 //!     }
 //!     Outcome::Unmeasurable { recommendation, .. } => {
 //!         println!("Skipping: {}", recommendation);
@@ -77,7 +85,7 @@ pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};
 pub use measurement::{BoxedTimer, Timer, TimerSpec};
 pub use oracle::{compute_min_uniqueness_ratio, TimingOracle};
 pub use result::{
-    BatchingInfo, CiGate, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
+    BatchingInfo, CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
     Metadata, MinDetectableEffect, Outcome, TestResult, UnmeasurableInfo, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, TimingSample};

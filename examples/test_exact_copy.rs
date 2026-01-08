@@ -25,7 +25,7 @@ fn test_no_false_positive_xor_compare() {
     };
 
     println!("Leak probability: {}", result.leak_probability);
-    println!("CI gate passed: {}", result.ci_gate.passed);
+    println!("CI gate passed: {}", result.ci_gate.passed());
 
     if result.leak_probability > 0.5 {
         println!(
@@ -35,7 +35,7 @@ fn test_no_false_positive_xor_compare() {
     } else {
         println!("OK: No false positive detected");
     }
-    if !result.ci_gate.passed {
+    if !result.ci_gate.passed() {
         println!("ERROR: CI gate failed!");
     } else {
         println!("OK: CI gate passed");

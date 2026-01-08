@@ -32,8 +32,6 @@ pub struct EffectDecomposition {
     pub shift_ci: (f64, f64),
     /// 95% credible interval for tail effect.
     pub tail_ci: (f64, f64),
-    /// 95% credible interval for total effect magnitude.
-    pub effect_magnitude_ci: (f64, f64),
     /// Classified effect pattern.
     pub pattern: EffectPattern,
 }
@@ -59,9 +57,8 @@ pub fn decompose_effect(
     covariance: &Matrix9,
     prior_sigmas: (f64, f64),
 ) -> EffectDecomposition {
-    // Build design matrix X = [ones | b_tail_ortho]
-    // Orthogonalize b_tail with respect to ones under the Σ⁻¹ metric
-    let design_matrix = build_orthogonal_design_matrix(covariance);
+    // Build design matrix X = [ones | b_tail]
+    let design_matrix = crate::analysis::bayes::build_design_matrix();
 
     // Compute posterior using Bayesian linear regression
     let (posterior_mean, posterior_cov) =
@@ -74,72 +71,13 @@ pub fn decompose_effect(
     // Classify the effect pattern
     let pattern = classify_pattern(&posterior_mean, &posterior_cov);
 
-    // Compute effect magnitude CI from posterior samples
-    // Reduced from 5000 to 500: for 2D Gaussian, 500 draws gives ~3-5% relative error
-    // on 95% CI bounds, which is acceptable for this heuristic estimate
-    let effect_magnitude_ci = sample_effect_magnitude_ci(&posterior_mean, &posterior_cov, 500);
-
     EffectDecomposition {
         posterior_mean,
         posterior_cov,
         shift_ci,
         tail_ci,
-        effect_magnitude_ci,
         pattern,
     }
-}
-
-/// Build the 9x2 design matrix [ones | b_tail_ortho].
-///
-/// The tail basis is orthogonalized with respect to ones under the Σ⁻¹ metric
-/// using Gram-Schmidt: b_tail_ortho = b_tail - ((ones^T Σ⁻¹ b_tail) / (ones^T Σ⁻¹ ones)) * ones
-///
-/// This ensures the shift and tail components are truly independent in the
-/// posterior, allowing proper attribution of effects.
-fn build_orthogonal_design_matrix(covariance: &Matrix9) -> Matrix9x2 {
-    // Build ones and b_tail vectors
-    let ones = Vector9::from_fn(|i, _| ONES[i]);
-    let b_tail = Vector9::from_fn(|i, _| B_TAIL[i]);
-
-    // Compute Σ⁻¹ (with regularization if needed)
-    let sigma_inv = match Cholesky::new(*covariance) {
-        Some(chol) => chol.inverse(),
-        None => {
-            // Regularize if not positive definite
-            let regularized = covariance + Matrix9::identity() * 1e-10;
-            Cholesky::new(regularized)
-                .expect("Regularized covariance should be positive definite")
-                .inverse()
-        }
-    };
-
-    // Gram-Schmidt orthogonalization under Σ⁻¹ metric:
-    // b_tail_ortho = b_tail - proj_{ones}(b_tail)
-    // where proj_{ones}(b_tail) = ((ones^T Σ⁻¹ b_tail) / (ones^T Σ⁻¹ ones)) * ones
-    let sigma_inv_ones = sigma_inv * ones;
-    let sigma_inv_b_tail = sigma_inv * b_tail;
-
-    let ones_sigma_inv_ones = ones.dot(&sigma_inv_ones); // ones^T Σ⁻¹ ones
-    let ones_sigma_inv_b_tail = ones.dot(&sigma_inv_b_tail); // ones^T Σ⁻¹ b_tail
-
-    // Avoid division by zero
-    let projection_coef = if ones_sigma_inv_ones.abs() > 1e-12 {
-        ones_sigma_inv_b_tail / ones_sigma_inv_ones
-    } else {
-        0.0
-    };
-
-    // b_tail_ortho = b_tail - projection_coef * ones
-    let b_tail_ortho = b_tail - ones * projection_coef;
-
-    // Build design matrix
-    let mut x = Matrix9x2::zeros();
-    for i in 0..9 {
-        x[(i, 0)] = ones[i];
-        x[(i, 1)] = b_tail_ortho[i];
-    }
-
-    x
 }
 
 /// Bayesian linear regression with Gaussian prior.
@@ -149,7 +87,7 @@ fn build_orthogonal_design_matrix(covariance: &Matrix9) -> Matrix9x2 {
 ///
 /// Posterior: beta | y ~ N(mu_post, Sigma_post)
 /// where:
-///   Sigma_post^-1 = X^T Sigma^-1 X + prior_var^-1 * I
+///   Sigma_post^-1 = X^T Sigma^-1 X + prior_precision
 ///   mu_post = Sigma_post * X^T * Sigma^-1 * y
 fn bayesian_linear_regression(
     design: &Matrix9x2,
@@ -157,107 +95,46 @@ fn bayesian_linear_regression(
     covariance: &Matrix9,
     prior_sigmas: (f64, f64),
 ) -> (Vector2, Matrix2) {
-    // Compute Cholesky of covariance for efficient inversion
-    let chol = match Cholesky::new(*covariance) {
+    // Apply variance floor regularization (spec §2.6)
+    // This prevents near-zero variance quantiles from dominating the regression
+    let regularized = regularize_covariance(covariance);
+
+    let chol = match Cholesky::new(regularized) {
         Some(c) => c,
         None => {
-            // Regularize if not positive definite
-            let regularized = covariance + Matrix9::identity() * 1e-10;
-            Cholesky::new(regularized).expect("Regularized covariance should be positive definite")
+            // Fallback: add more jitter if still failing
+            let extra_reg = regularized + Matrix9::identity() * 1e-6;
+            Cholesky::new(extra_reg).expect("Regularized covariance should be positive definite")
         }
     };
 
-    // Compute Sigma^-1 * X using forward/backward substitution
-    // We need X^T * Sigma^-1 * X and X^T * Sigma^-1 * y
-    let sigma_inv_x = solve_cholesky_matrix(&chol, design);
-    let sigma_inv_y = chol.solve(observed);
+    let sigma_inv = chol.inverse();
+    let xt_sigma_inv = design.transpose() * sigma_inv;
+    let xt_sigma_inv_x = xt_sigma_inv * design;
+    let xt_sigma_inv_y = xt_sigma_inv * observed;
 
-    // X^T * Sigma^-1 * X
-    let xt_sigma_inv_x = design.transpose() * sigma_inv_x;
-
-    // X^T * Sigma^-1 * y
-    let xt_sigma_inv_y = design.transpose() * sigma_inv_y;
-
-    // Prior precision: diag(1/sigma^2)
     let (sigma_mu, sigma_tau) = prior_sigmas;
     let mut prior_precision = Matrix2::zeros();
     prior_precision[(0, 0)] = 1.0 / sigma_mu.max(1e-12).powi(2);
     prior_precision[(1, 1)] = 1.0 / sigma_tau.max(1e-12).powi(2);
 
-    // Posterior precision: X^T Sigma^-1 X + prior precision
     let posterior_precision = xt_sigma_inv_x + prior_precision;
-
-    // Posterior covariance: inverse of posterior precision
     let posterior_cov = match Cholesky::new(posterior_precision) {
         Some(c) => c.inverse(),
-        None => {
-            // Fallback to large variance if inversion fails
-            Matrix2::identity() * 1e6
-        }
+        None => Matrix2::identity() * 1e6,
     };
 
-    // Posterior mean: Sigma_post * X^T * Sigma^-1 * y
     let posterior_mean = posterior_cov * xt_sigma_inv_y;
-
     (posterior_mean, posterior_cov)
 }
 
-/// Solve Sigma^-1 * M using Cholesky decomposition.
-fn solve_cholesky_matrix(
-    chol: &Cholesky<f64, nalgebra::Const<9>>,
-    matrix: &Matrix9x2,
-) -> Matrix9x2 {
-    // Solve column by column
-    let col0 = chol.solve(&matrix.column(0).into_owned());
-    let col1 = chol.solve(&matrix.column(1).into_owned());
-
-    let mut result = Matrix9x2::zeros();
-    result.set_column(0, &col0);
-    result.set_column(1, &col1);
-    result
-}
-
+/// Compute 95% credible interval assuming normal posterior.
 /// Compute 95% credible interval assuming normal posterior.
 fn compute_credible_interval(mean: f64, variance: f64) -> (f64, f64) {
     // 95% CI: mean +/- 1.96 * std
     let std = variance.sqrt();
     let z = 1.96;
     (mean - z * std, mean + z * std)
-}
-
-/// Sample posterior to estimate CI of total effect magnitude.
-fn sample_effect_magnitude_ci(
-    posterior_mean: &Vector2,
-    posterior_cov: &Matrix2,
-    n_samples: usize,
-) -> (f64, f64) {
-    let chol = match Cholesky::new(*posterior_cov) {
-        Some(c) => c,
-        None => {
-            let regularized = posterior_cov + Matrix2::identity() * 1e-12;
-            Cholesky::new(regularized).expect("Regularized covariance should be positive definite")
-        }
-    };
-
-    let mut rng = rand::rng();
-    let mut magnitudes = Vec::with_capacity(n_samples);
-
-    for _ in 0..n_samples {
-        let z0: f64 = StandardNormal.sample(&mut rng);
-        let z1: f64 = StandardNormal.sample(&mut rng);
-        let z = Vector2::new(z0, z1);
-        let sample = posterior_mean + chol.l() * z;
-        let magnitude = (sample[0].powi(2) + sample[1].powi(2)).sqrt();
-        magnitudes.push(magnitude);
-    }
-
-    magnitudes.sort_by(|a, b| a.total_cmp(b));
-    let lo_idx = ((n_samples as f64) * 0.025).round() as usize;
-    let hi_idx = ((n_samples as f64) * 0.975).round() as usize;
-    let lo = magnitudes[lo_idx.min(n_samples - 1)];
-    let hi = magnitudes[hi_idx.min(n_samples - 1)];
-
-    (lo, hi)
 }
 
 /// Classify the effect pattern based on posterior estimates.
@@ -277,8 +154,31 @@ fn classify_pattern(posterior_mean: &Vector2, posterior_cov: &Matrix2) -> Effect
         (true, false) => EffectPattern::UniformShift,
         (false, true) => EffectPattern::TailEffect,
         (true, true) => EffectPattern::Mixed,
+        // When neither effect is statistically significant, return Indeterminate
         (false, false) => EffectPattern::Indeterminate,
     }
+}
+
+/// Regularize covariance matrix for numerical stability (spec §2.6).
+///
+/// Ensures minimum diagonal value of 1% of mean variance, bounding
+/// condition number to ~100. This prevents near-zero variance quantiles
+/// from dominating the Bayesian regression.
+fn regularize_covariance(covariance: &Matrix9) -> Matrix9 {
+    let trace: f64 = (0..9).map(|i| covariance[(i, i)]).sum();
+    let mean_var = trace / 9.0;
+
+    // Use 1% of mean variance as floor, with absolute minimum of 1e-10
+    let min_var = (0.01 * mean_var).max(1e-10);
+
+    // Also add small jitter proportional to scale
+    let jitter = 1e-10 + mean_var * 1e-8;
+
+    let mut regularized = *covariance;
+    for i in 0..9 {
+        regularized[(i, i)] = regularized[(i, i)].max(min_var) + jitter;
+    }
+    regularized
 }
 
 #[cfg(test)]

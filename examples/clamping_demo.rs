@@ -24,7 +24,7 @@ fn main() {
 
     println!("Results for obvious timing leak (100μs difference):");
     println!("  Leak probability: {:.2}%", result.leak_probability * 100.0);
-    println!("  CI gate passed: {}", result.ci_gate.passed);
+    println!("  CI gate passed: {}", result.ci_gate.passed());
 
     if result.leak_probability >= 0.9999 {
         println!("\n✓ Probability capped at 99.99% (not 100%)");

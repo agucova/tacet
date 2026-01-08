@@ -25,7 +25,7 @@ fn main() {
 
     if let Outcome::Completed(result) = outcome {
         println!("  Leak probability: {:.1}%", result.leak_probability * 100.0);
-        println!("  CI gate passed: {}\n", result.ci_gate.passed);
+        println!("  CI gate passed: {}\n", result.ci_gate.passed());
     }
 
     // Test 2: Constant-time comparison (should not detect leak)
@@ -38,7 +38,7 @@ fn main() {
 
     if let Outcome::Completed(result) = outcome {
         println!("  Leak probability: {:.1}%", result.leak_probability * 100.0);
-        println!("  CI gate passed: {}", result.ci_gate.passed);
+        println!("  CI gate passed: {}", result.ci_gate.passed());
     }
 }
 

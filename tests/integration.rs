@@ -19,7 +19,7 @@ fn smoke_test() {
         Outcome::Unmeasurable { .. } => return, // Skip if unmeasurable
     };
     assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
-    assert!(result.ci_gate.passed, "Should not detect leak in simple operation");
+    assert!(result.ci_gate.passed(), "Should not detect leak in simple operation");
     assert!(result.min_detectable_effect.shift_ns > 0.0);
     assert!(result.metadata.samples_per_class > 0);
 }
@@ -54,7 +54,7 @@ fn convenience_function() {
         Outcome::Unmeasurable { .. } => return,
     };
     assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
-    assert!(result.ci_gate.passed, "Should not detect leak in constant-time operation");
+    assert!(result.ci_gate.passed(), "Should not detect leak in constant-time operation");
     assert!(result.min_detectable_effect.shift_ns > 0.0);
     assert!(result.metadata.samples_per_class > 0);
 }
@@ -76,7 +76,7 @@ fn macro_api() {
         Outcome::Unmeasurable { .. } => return,
     };
     assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
-    assert!(result.ci_gate.passed, "Should not detect leak in constant-time operation");
+    assert!(result.ci_gate.passed(), "Should not detect leak in constant-time operation");
     assert!(result.min_detectable_effect.shift_ns > 0.0);
     assert!(result.metadata.samples_per_class > 0);
 }

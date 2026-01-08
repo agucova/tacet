@@ -31,7 +31,7 @@ fn main() {
         .unwrap_completed();
 
     println!("Leak probability: {:.2}%", result.leak_probability * 100.0);
-    println!("CI gate: {}", if result.ci_gate.passed { "PASS" } else { "FAIL" });
+    println!("CI gate: {}", if result.ci_gate.passed() { "PASS" } else { "FAIL" });
 
     if let Some(effect) = result.effect {
         println!("Effect size: {:.1} ns", effect.shift_ns);
