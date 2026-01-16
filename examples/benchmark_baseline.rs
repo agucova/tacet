@@ -1,5 +1,5 @@
-use std::time::Instant;
-use timing_oracle::{helpers::InputPair, Outcome, TimingOracle};
+use std::time::{Duration, Instant};
+use timing_oracle::{helpers::InputPair, AttackerModel, TimingOracle};
 
 fn main() {
     println!("=== Performance Baseline (With Correct Bootstrap Counts) ===\n");
@@ -18,11 +18,14 @@ fn main() {
     println!("Testing Quick preset (5k samples, 50 CI bootstrap, 50 cov bootstrap)...");
     let inputs = InputPair::new(|| 1000u32, || 1100u32);
     let start = Instant::now();
-    let outcome = TimingOracle::quick().test(inputs, do_work);
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(10))
+        .max_samples(5_000)
+        .test(inputs, do_work);
     let quick_time = start.elapsed();
-    if let Outcome::Completed(result) = outcome {
+    if let Some(leak_prob) = outcome.leak_probability() {
         println!("  Time: {:>8.3}s", quick_time.as_secs_f64());
-        println!("  Leak prob: {:.3}", result.leak_probability);
+        println!("  Leak prob: {:.3}", leak_prob);
     }
     println!();
 
@@ -30,11 +33,14 @@ fn main() {
     println!("Testing Balanced preset (20k samples, 100 CI bootstrap, 50 cov bootstrap)...");
     let inputs = InputPair::new(|| 1000u32, || 1100u32);
     let start = Instant::now();
-    let outcome = TimingOracle::balanced().test(inputs, do_work);
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .max_samples(20_000)
+        .test(inputs, do_work);
     let balanced_time = start.elapsed();
-    if let Outcome::Completed(result) = outcome {
+    if let Some(leak_prob) = outcome.leak_probability() {
         println!("  Time: {:>8.3}s", balanced_time.as_secs_f64());
-        println!("  Leak prob: {:.3}", result.leak_probability);
+        println!("  Leak prob: {:.3}", leak_prob);
     }
     println!();
 
@@ -42,11 +48,14 @@ fn main() {
     println!("Testing Default preset (100k samples, 10k CI bootstrap, 2k cov bootstrap)...");
     let inputs = InputPair::new(|| 1000u32, || 1100u32);
     let start = Instant::now();
-    let outcome = TimingOracle::new().test(inputs, do_work);
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(60))
+        .max_samples(100_000)
+        .test(inputs, do_work);
     let default_time = start.elapsed();
-    if let Outcome::Completed(result) = outcome {
+    if let Some(leak_prob) = outcome.leak_probability() {
         println!("  Time: {:>8.3}s", default_time.as_secs_f64());
-        println!("  Leak prob: {:.3}", result.leak_probability);
+        println!("  Leak prob: {:.3}", leak_prob);
     }
     println!();
 
@@ -54,6 +63,5 @@ fn main() {
     println!("Quick:    {:>8.3}s", quick_time.as_secs_f64());
     println!("Balanced: {:>8.3}s", balanced_time.as_secs_f64());
     println!("Default:  {:>8.3}s", default_time.as_secs_f64());
-    println!("\nNote: Default uses CORRECT bootstrap counts (10k/2k)");
-    println!("      Presets use OLD bootstrap counts (need updating per plan)");
+    println!("\nNote: Using adaptive sampling with time budgets");
 }

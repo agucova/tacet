@@ -2,12 +2,11 @@
 //!
 //! Detect timing side channels in cryptographic code.
 //!
-//! This crate provides statistical methodology for detecting timing variations
+//! This crate provides adaptive Bayesian methodology for detecting timing variations
 //! between two input classes (baseline vs sample), outputting:
 //! - Posterior probability of timing leak (0.0-1.0)
-//! - Effect exceedance probability given leak (0.0-1.0)
-//! - Effect size estimates in nanoseconds
-//! - CI gate pass/fail with bounded false positive rate
+//! - Effect size estimates in nanoseconds (shift and tail components)
+//! - Pass/Fail/Inconclusive decisions with bounded FPR
 //! - Exploitability assessment
 //!
 //! ## Common Pitfall: Side-Effects in Closures
@@ -17,15 +16,15 @@
 //!
 //! ```ignore
 //! // WRONG - Sample closure has extra RNG/allocation overhead
-//! TimingOracle::balanced().test(
+//! TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(
 //!     InputPair::new(|| my_op(&[0u8; 32]), || my_op(&rand::random())),
 //!     |_| {},  // RNG called during measurement!
 //! );
 //!
 //! // CORRECT - Pre-generate inputs, both closures identical
-//! use timing_oracle::{TimingOracle, helpers::InputPair};
+//! use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
 //! let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-//! TimingOracle::balanced().test(inputs, |data| {
+//! TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
 //!     my_op(data);
 //! });
 //! ```
@@ -35,24 +34,24 @@
 //! ## Quick Start
 //!
 //! ```ignore
-//! use timing_oracle::{TimingOracle, helpers::InputPair, Outcome};
+//! use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, Outcome};
 //!
 //! // Builder API with InputPair
 //! let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-//! let outcome = TimingOracle::balanced().test(inputs, |data| {
-//!     my_function(data);
-//! });
+//! let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+//!     .test(inputs, |data| {
+//!         my_function(data);
+//!     });
 //!
 //! match outcome {
-//!     Outcome::Completed(result) => {
-//!         println!(
-//!             "Leak probability (BF posterior): {:.1}%",
-//!             result.leak_probability * 100.0
-//!         );
-//!         println!(
-//!             "Effect exceedance (given leak): {:.1}%",
-//!             result.effect_exceedance_probability * 100.0
-//!         );
+//!     Outcome::Pass { leak_probability, .. } => {
+//!         println!("No leak detected: P={:.1}%", leak_probability * 100.0);
+//!     }
+//!     Outcome::Fail { leak_probability, exploitability, .. } => {
+//!         println!("Leak detected: P={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+//!     }
+//!     Outcome::Inconclusive { reason, .. } => {
+//!         println!("Inconclusive: {:?}", reason);
 //!     }
 //!     Outcome::Unmeasurable { recommendation, .. } => {
 //!         println!("Skipping: {}", recommendation);
@@ -64,6 +63,7 @@
 #![warn(clippy::all)]
 
 // Core modules
+pub mod adaptive;
 mod config;
 mod constants;
 mod oracle;
@@ -85,13 +85,85 @@ pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};
 pub use measurement::{BoxedTimer, Timer, TimerSpec};
 pub use oracle::{compute_min_uniqueness_ratio, TimingOracle};
 pub use result::{
-    BatchingInfo, CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
-    Metadata, MinDetectableEffect, Outcome, TestResult, UnmeasurableInfo, UnreliablePolicy,
+    BatchingInfo, Diagnostics, EffectEstimate, EffectPattern, Exploitability,
+    InconclusiveReason, IssueCode, MeasurementQuality, Metadata, MinDetectableEffect,
+    Outcome, QualityIssue, UnmeasurableInfo, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, TimingSample};
 
 // Re-export helpers for convenience
 pub use helpers::InputPair;
+
+// ============================================================================
+// Assertion Macros
+// ============================================================================
+
+/// Assert that the result indicates constant-time behavior.
+/// Panics on Fail or Inconclusive.
+///
+/// # Example
+///
+/// ```ignore
+/// use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_constant_time};
+///
+/// let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+/// let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+///     .test(inputs, |data| my_crypto_function(data));
+/// assert_constant_time!(outcome);
+/// ```
+#[macro_export]
+macro_rules! assert_constant_time {
+    ($outcome:expr) => {
+        match $outcome {
+            $crate::Outcome::Pass { .. } => {}
+            $crate::Outcome::Fail { leak_probability, effect, .. } => {
+                panic!(
+                    "Timing leak detected: P={:.1}%, shift={:.1}ns, tail={:.1}ns",
+                    leak_probability * 100.0,
+                    effect.shift_ns,
+                    effect.tail_ns,
+                );
+            }
+            $crate::Outcome::Inconclusive { reason, leak_probability, .. } => {
+                panic!(
+                    "Could not confirm constant-time (P={:.1}%): {:?}",
+                    leak_probability * 100.0,
+                    reason,
+                );
+            }
+            $crate::Outcome::Unmeasurable { recommendation, .. } => {
+                panic!("Cannot measure operation: {}", recommendation);
+            }
+        }
+    };
+}
+
+/// Assert that no timing leak was detected.
+/// Panics only on Fail (lenient - allows Inconclusive and Pass).
+///
+/// # Example
+///
+/// ```ignore
+/// use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_no_timing_leak};
+///
+/// let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+/// let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+///     .test(inputs, |data| my_crypto_function(data));
+/// assert_no_timing_leak!(outcome);
+/// ```
+#[macro_export]
+macro_rules! assert_no_timing_leak {
+    ($outcome:expr) => {
+        if let $crate::Outcome::Fail { leak_probability, effect, .. } = $outcome {
+            panic!(
+                "Timing leak detected: P={:.1}%, shift={:.1}ns, tail={:.1}ns",
+                leak_probability * 100.0,
+                effect.shift_ns,
+                effect.tail_ns,
+            );
+        }
+    };
+}
 
 // ============================================================================
 // Reliability Handling Macros

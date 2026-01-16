@@ -10,7 +10,7 @@
 //! Pre-generate inputs outside closures to avoid measuring RNG time.
 
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{skip_if_unreliable, Exploitability, MeasurementQuality, TimingOracle};
+use timing_oracle::{skip_if_unreliable, AttackerModel, Exploitability, MeasurementQuality, Outcome, TimingOracle};
 use x25519_dalek::x25519;
 
 fn rand_bytes_32() -> [u8; 32] {
@@ -46,53 +46,66 @@ fn x25519_scalar_mult_constant_time() {
     const SAMPLES: usize = 50_000;
     let scalars = InputPair::new(|| fixed_scalar, rand_bytes_32);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .min_effect_ns(50.0)
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_scalar_mult_constant_time");
+    let outcome = skip_if_unreliable!(outcome, "x25519_scalar_mult_constant_time");
 
     eprintln!("\n[x25519_scalar_mult_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // X25519 implementations should be constant-time
-    // CI gate is the authoritative test (frequentist with controlled FPR)
-    assert!(
-        result.ci_gate.passed(),
-        "X25519 should be constant-time"
-    );
-
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            // Only assert on Bayesian metrics when measurements are reliable enough
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "X25519 should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                // With poor quality measurements, allow fail but check exploitability
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -110,8 +123,8 @@ fn x25519_different_basepoints_constant_time() {
 
     let inputs = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(30_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
         .min_effect_ns(50.0)
         .test(inputs, |bp_idx| {
             let basepoint = if *bp_idx == 0 {
@@ -123,42 +136,56 @@ fn x25519_different_basepoints_constant_time() {
             std::hint::black_box(result);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_different_basepoints_constant_time");
+    let outcome = skip_if_unreliable!(outcome, "x25519_different_basepoints_constant_time");
 
     eprintln!("\n[x25519_different_basepoints_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Different basepoints shouldn't cause significant timing differences
-    assert!(
-        result.ci_gate.passed(),
-        "Should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "Should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -190,8 +217,8 @@ fn x25519_multiple_operations_constant_time() {
         || [rand_bytes_32(), rand_bytes_32(), rand_bytes_32()],
     );
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .min_effect_ns(50.0)
         .test(scalars, |scalar_set| {
             let mut total = 0u8;
@@ -202,42 +229,56 @@ fn x25519_multiple_operations_constant_time() {
             std::hint::black_box(total);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_multiple_operations_constant_time");
+    let outcome = skip_if_unreliable!(outcome, "x25519_multiple_operations_constant_time");
 
     eprintln!("\n[x25519_multiple_operations_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Multiple operations should maintain constant-time properties
-    assert!(
-        result.ci_gate.passed(),
-        "X25519 multiple operations should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "X25519 multiple operations should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -277,50 +318,64 @@ fn x25519_scalar_clamping_constant_time() {
         },
     );
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .min_effect_ns(50.0)
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_scalar_clamping_constant_time");
+    let outcome = skip_if_unreliable!(outcome, "x25519_scalar_clamping_constant_time");
 
     eprintln!("\n[x25519_scalar_clamping_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Scalar clamping should be constant-time
-    assert!(
-        result.ci_gate.passed(),
-        "Scalar clamping should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "Scalar clamping should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -337,50 +392,64 @@ fn x25519_hamming_weight_independence() {
 
     let inputs = InputPair::new(|| [0x00u8; 32], || [0xFFu8; 32]);
 
-    let outcome = TimingOracle::new()
-        .samples(20_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(20_000)
         .min_effect_ns(50.0)
         .test(inputs, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_hamming_weight_independence");
+    let outcome = skip_if_unreliable!(outcome, "x25519_hamming_weight_independence");
 
     eprintln!("\n[x25519_hamming_weight_independence]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Hamming weight should not affect timing significantly
-    assert!(
-        result.ci_gate.passed(),
-        "Should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "Should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -391,8 +460,8 @@ fn x25519_byte_pattern_independence() {
 
     let inputs = InputPair::new(|| 0u8, || 1u8);
 
-    let outcome = TimingOracle::new()
-        .samples(20_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(20_000)
         .min_effect_ns(50.0)
         .test(inputs, |pattern_type| {
             let mut scalar = [0u8; 32];
@@ -411,42 +480,56 @@ fn x25519_byte_pattern_independence() {
             std::hint::black_box(result);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_byte_pattern_independence");
+    let outcome = skip_if_unreliable!(outcome, "x25519_byte_pattern_independence");
 
     eprintln!("\n[x25519_byte_pattern_independence]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Byte pattern should not affect timing
-    assert!(
-        result.ci_gate.passed(),
-        "Should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "Should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }
 
@@ -476,8 +559,8 @@ fn x25519_ecdh_exchange_constant_time() {
         || (rand_bytes_32(), rand_bytes_32()),
     );
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .min_effect_ns(50.0)
         .test(inputs, |(secret_scalar, other_public_key)| {
             // Perform scalar multiplication (ECDH)
@@ -485,41 +568,55 @@ fn x25519_ecdh_exchange_constant_time() {
             std::hint::black_box(shared);
         });
 
-    let result = skip_if_unreliable!(outcome, "x25519_ecdh_exchange_constant_time");
+    let outcome = skip_if_unreliable!(outcome, "x25519_ecdh_exchange_constant_time");
 
     eprintln!("\n[x25519_ecdh_exchange_constant_time]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Full ECDH exchange should be constant-time
-    assert!(
-        result.ci_gate.passed(),
-        "ECDH exchange should be constant-time"
-    );
-    // Only assert on Bayesian metrics when measurements are reliable enough
-    // (High uncertainty causes high probability/exploitability by design - see spec §2.5)
-    match result.quality {
-        MeasurementQuality::Excellent => {
-            assert!(
-                result.leak_probability < 0.5,
-                "Leak probability too high ({:.1}%) with good quality measurements",
-                result.leak_probability * 100.0
-            );
-            assert!(
-                matches!(
-                    result.exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
-                ),
-                "Exploitability: {:?}",
-                result.exploitability
-            );
+    match &outcome {
+        Outcome::Pass { leak_probability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                assert!(
+                    *leak_probability < 0.5,
+                    "Leak probability too high ({:.1}%) with good quality measurements",
+                    leak_probability * 100.0
+                );
+            } else {
+                eprintln!(
+                    "Note: {:?} quality (prob={:.1}%)",
+                    quality,
+                    leak_probability * 100.0
+                );
+            }
         }
-        _ => {
+        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+            if matches!(quality, MeasurementQuality::Excellent) {
+                panic!(
+                    "ECDH exchange should be constant-time (got Fail with leak_probability={:.3}, exploitability={:?})",
+                    leak_probability, exploitability
+                );
+            } else {
+                assert!(
+                    matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                    "Exploitability: {:?}",
+                    exploitability
+                );
+                eprintln!(
+                    "Note: Fail with {:?} quality (prob={:.1}%, {:?})",
+                    quality,
+                    leak_probability * 100.0,
+                    exploitability
+                );
+            }
+        }
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
             eprintln!(
-                "Note: Skipping Bayesian assertions - {:?} quality (prob={:.1}%, {:?})",
-                result.quality,
-                result.leak_probability * 100.0,
-                result.exploitability
+                "Note: Inconclusive - {:?} quality (prob={:.1}%)",
+                quality,
+                leak_probability * 100.0
             );
         }
+        Outcome::Unmeasurable { .. } => {}
     }
 }

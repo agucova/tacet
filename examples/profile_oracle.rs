@@ -1,5 +1,5 @@
-use std::time::Instant;
-use timing_oracle::{helpers::InputPair, TimingOracle};
+use std::time::{Duration, Instant};
+use timing_oracle::{helpers::InputPair, AttackerModel, TimingOracle};
 
 fn early_exit_compare(a: &[u8], b: &[u8]) -> bool {
     for i in 0..a.len().min(b.len()) {
@@ -26,14 +26,19 @@ fn main() {
     let start = Instant::now();
 
     let inputs = InputPair::new(|| [0u8; 512], rand_bytes_512);
-    let outcome = TimingOracle::balanced()
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .max_samples(20_000)
         .test(inputs, |input| {
             std::hint::black_box(early_exit_compare(&secret, input));
         });
 
     let total_time = start.elapsed();
 
-    let result = outcome.unwrap_completed();
     println!("\nTotal execution time: {:.2}s", total_time.as_secs_f64());
-    println!("Leak probability: {:.3}", result.leak_probability);
+    if let Some(leak_prob) = outcome.leak_probability() {
+        println!("Leak probability: {:.3}", leak_prob);
+    } else {
+        println!("Unmeasurable");
+    }
 }

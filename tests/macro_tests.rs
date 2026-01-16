@@ -3,7 +3,8 @@
 //! This file tests various invocation patterns of the macro to ensure
 //! it correctly handles all syntax variations.
 
-use timing_oracle::{timing_test, timing_test_checked, Outcome, TestResult, TimingOracle};
+use std::time::Duration;
+use timing_oracle::{timing_test, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
 // ===========================================================================
 // Basic Invocation Tests
@@ -21,7 +22,7 @@ fn macro_minimal_syntax() {
     };
 
     assert!(
-        matches!(result, Outcome::Completed(_) | Outcome::Unmeasurable { .. }),
+        result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }),
         "Macro should produce valid Outcome"
     );
 }
@@ -30,7 +31,7 @@ fn macro_minimal_syntax() {
 #[test]
 fn macro_with_oracle() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u8,
         sample: || rand::random::<u8>(),
         measure: |input| {
@@ -38,10 +39,7 @@ fn macro_with_oracle() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with pre-measurement setup done before the macro.
@@ -55,7 +53,7 @@ fn macro_with_pre_setup() {
     }
 
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 16],
         sample: || rand::random::<[u8; 16]>(),
         measure: |input| {
@@ -64,10 +62,7 @@ fn macro_with_pre_setup() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with captured variables from outer scope.
@@ -77,7 +72,7 @@ fn macro_with_captures() {
     let multiplier = 42u64;
 
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 1u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -86,10 +81,7 @@ fn macro_with_captures() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with oracle and captures from outer scope.
@@ -99,7 +91,7 @@ fn macro_all_fields() {
     let secret = [0xFFu8; 32];
 
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick().samples(1_000),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)).max_samples(1_000),
         baseline: || [0u8; 32],
         sample: || rand::random::<[u8; 32]>(),
         measure: |input| {
@@ -112,10 +104,7 @@ fn macro_all_fields() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -131,20 +120,17 @@ fn macro_field_order_oracle_last() {
         measure: |input| {
             std::hint::black_box(input);
         },
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test that field order doesn't matter (measure before baseline/sample).
 #[test]
 fn macro_field_order_measure_first() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         measure: |input| {
             std::hint::black_box(input);
         },
@@ -152,10 +138,7 @@ fn macro_field_order_measure_first() {
         sample: || rand::random::<u8>(),
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -166,7 +149,7 @@ fn macro_field_order_measure_first() {
 #[test]
 fn macro_tuple_input() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || ([0u8; 12], [0u8; 64]),
         sample: || (rand::random::<[u8; 12]>(), rand::random::<[u8; 64]>()),
         measure: |(nonce, plaintext)| {
@@ -174,17 +157,14 @@ fn macro_tuple_input() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with Vec inputs.
 #[test]
 fn macro_vec_input() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || vec![0u8; 64],
         sample: || (0..64).map(|_| rand::random::<u8>()).collect::<Vec<_>>(),
         measure: |input| {
@@ -192,17 +172,14 @@ fn macro_vec_input() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with String input.
 #[test]
 fn macro_string_input() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || String::from("constant_password"),
         sample: || format!("random_{:016x}", rand::random::<u64>()),
         measure: |input| {
@@ -210,17 +187,14 @@ fn macro_string_input() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with primitive u8.
 #[test]
 fn macro_primitive_u8() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u8,
         sample: || rand::random::<u8>(),
         measure: |input| {
@@ -228,17 +202,14 @@ fn macro_primitive_u8() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with larger arrays.
 #[test]
 fn macro_large_array() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 256],
         sample: || {
             let mut arr = [0u8; 256];
@@ -252,10 +223,7 @@ fn macro_large_array() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -266,7 +234,7 @@ fn macro_large_array() {
 #[test]
 fn macro_oracle_balanced() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::balanced(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(30)),
         baseline: || 0u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -274,17 +242,14 @@ fn macro_oracle_balanced() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with calibration oracle preset.
 #[test]
 fn macro_oracle_calibration() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::calibration(),
+        oracle: TimingOracle::for_attacker(AttackerModel::Research).time_budget(Duration::from_secs(5)),
         baseline: || 0u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -292,17 +257,14 @@ fn macro_oracle_calibration() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with chained oracle configuration.
 #[test]
 fn macro_oracle_chained() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick().samples(2_000).warmup(100),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)).max_samples(2_000).warmup(100),
         baseline: || 0u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -310,10 +272,7 @@ fn macro_oracle_chained() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -324,7 +283,7 @@ fn macro_oracle_chained() {
 #[test]
 fn macro_complex_measure_body() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 32],
         sample: || rand::random::<[u8; 32]>(),
         measure: |input| {
@@ -338,17 +297,14 @@ fn macro_complex_measure_body() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with early return in measure body.
 #[test]
 fn macro_measure_with_early_return() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -359,17 +315,14 @@ fn macro_measure_with_early_return() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with nested closures in measure body.
 #[test]
 fn macro_nested_closures() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 16],
         sample: || rand::random::<[u8; 16]>(),
         measure: |input| {
@@ -380,21 +333,18 @@ fn macro_nested_closures() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
 // Result Access Tests
 // ===========================================================================
 
-/// Test that we can access completed result fields.
+/// Test that we can access outcome fields.
 #[test]
 fn macro_result_access() {
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -403,17 +353,16 @@ fn macro_result_access() {
     };
 
     match outcome {
-        Outcome::Completed(result) => {
-            // Verify all result fields are accessible
-            let _leak_prob = result.leak_probability;
-            let _ci_gate = &result.ci_gate;
-            let _effect = &result.effect;
-            let _exploitability = &result.exploitability;
-            let _mde = &result.min_detectable_effect;
+        Outcome::Pass { leak_probability, effect, .. } |
+        Outcome::Fail { leak_probability, effect, .. } |
+        Outcome::Inconclusive { leak_probability, effect, .. } => {
+            // Verify fields are accessible
+            let _leak_prob = leak_probability;
+            let _effect = &effect;
 
             // Leak probability should be valid
             assert!(
-                (0.0..=1.0).contains(&result.leak_probability),
+                (0.0..=1.0).contains(&leak_probability),
                 "Leak probability should be between 0 and 1"
             );
         }
@@ -432,7 +381,7 @@ fn macro_result_access() {
 #[test]
 fn macro_no_trailing_comma() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u8,
         sample: || rand::random::<u8>(),
         measure: |input| {
@@ -440,10 +389,7 @@ fn macro_no_trailing_comma() {
         }
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -456,7 +402,7 @@ fn macro_move_closure() {
     let seed = 42u64;
 
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 0u64,
         sample: move || rand::random::<u64>().wrapping_add(seed),
         measure: |input| {
@@ -464,17 +410,14 @@ fn macro_move_closure() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with complex sample generator.
 #[test]
 fn macro_complex_sample_generator() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 32],
         sample: || {
             // Complex multi-line generator
@@ -489,10 +432,7 @@ fn macro_complex_sample_generator() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with mutable references in measure body.
@@ -504,7 +444,7 @@ fn macro_mutable_state_captured() {
     let counter = Cell::new(0u64);
 
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 1u64,
         sample: || rand::random::<u64>(),
         measure: |input| {
@@ -514,10 +454,7 @@ fn macro_mutable_state_captured() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
@@ -528,7 +465,7 @@ fn macro_mutable_state_captured() {
 #[test]
 fn macro_unit_type() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || (),
         sample: || (),
         measure: |_input| {
@@ -536,17 +473,14 @@ fn macro_unit_type() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 /// Test macro with bool type.
 #[test]
 fn macro_bool_type() {
     let result = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || false,
         sample: || rand::random::<bool>(),
         measure: |input| {
@@ -554,21 +488,18 @@ fn macro_bool_type() {
         },
     };
 
-    assert!(matches!(
-        result,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(result.is_measurable() || matches!(result, Outcome::Unmeasurable { .. }));
 }
 
 // ===========================================================================
 // Coverage Tests: Both timing_test! and timing_test_checked!
 // ===========================================================================
 
-/// Test that timing_test! returns TestResult directly (not Outcome).
+/// Test that timing_test! returns Outcome directly.
 #[test]
-fn timing_test_returns_test_result() {
-    let result: TestResult = timing_test! {
-        oracle: TimingOracle::quick(),
+fn timing_test_returns_outcome() {
+    let outcome = timing_test! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 128],
         sample: || {
             let mut arr = [0u8; 128];
@@ -587,17 +518,21 @@ fn timing_test_returns_test_result() {
         },
     };
 
-    // Should be able to access TestResult fields directly
-    assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
-    assert!(result.metadata.samples_per_class > 0);
+    // Should be able to access Outcome methods
+    if let Some(leak_prob) = outcome.leak_probability() {
+        assert!(leak_prob >= 0.0 && leak_prob <= 1.0);
+    }
+    if let Some(samples) = outcome.samples_used() {
+        assert!(samples > 0);
+    }
 }
 
-/// Test that timing_test! can be used without pattern matching.
+/// Test that timing_test! can be used with helper methods.
 #[test]
 fn timing_test_no_pattern_matching_needed() {
-    // This demonstrates the convenience of timing_test! - no need for match/if-let
-    let result = timing_test! {
-        oracle: TimingOracle::quick(),  // Use quick() for faster test
+    // This demonstrates the convenience of timing_test! helper methods
+    let outcome = timing_test! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 64],
         sample: || {
             let mut arr = [0u8; 64];
@@ -616,16 +551,19 @@ fn timing_test_no_pattern_matching_needed() {
         },
     };
 
-    // Direct field access without unwrapping
-    println!("Leak probability: {:.2}%", result.leak_probability * 100.0);
-    assert!(result.ci_gate.alpha > 0.0);
+    // Use helper methods without full pattern matching
+    if let Some(leak_prob) = outcome.leak_probability() {
+        println!("Leak probability: {:.2}%", leak_prob * 100.0);
+    }
+    // Verify we got some result
+    assert!(outcome.is_measurable() || matches!(outcome, Outcome::Unmeasurable { .. }));
 }
 
 /// Test that timing_test_checked! returns Outcome for explicit handling.
 #[test]
 fn timing_test_checked_returns_outcome() {
     let outcome: Outcome = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || 1u64,
         sample: || rand::random::<u64>(),
         measure: |x| {
@@ -635,8 +573,10 @@ fn timing_test_checked_returns_outcome() {
 
     // Must pattern match or use helper methods on Outcome
     match outcome {
-        Outcome::Completed(result) => {
-            assert!(result.leak_probability >= 0.0);
+        Outcome::Pass { leak_probability, .. } |
+        Outcome::Fail { leak_probability, .. } |
+        Outcome::Inconclusive { leak_probability, .. } => {
+            assert!(leak_probability >= 0.0);
         }
         Outcome::Unmeasurable { .. } => {
             // Test passes - this is a valid outcome
@@ -648,7 +588,7 @@ fn timing_test_checked_returns_outcome() {
 #[test]
 fn timing_test_checked_explicit_unmeasurable_handling() {
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || (),
         sample: || (),
         measure: |_| {
@@ -657,10 +597,11 @@ fn timing_test_checked_explicit_unmeasurable_handling() {
     };
 
     // This pattern is useful when you want to handle unmeasurable gracefully
-    let _result = match outcome {
-        Outcome::Completed(r) => {
-            println!("Measurable: {:.3}", r.leak_probability);
-            r
+    match outcome {
+        Outcome::Pass { leak_probability, .. } |
+        Outcome::Fail { leak_probability, .. } |
+        Outcome::Inconclusive { leak_probability, .. } => {
+            println!("Measurable: {:.3}", leak_probability);
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("Unmeasurable: {}", recommendation);
@@ -672,9 +613,9 @@ fn timing_test_checked_explicit_unmeasurable_handling() {
 /// Test side-by-side comparison of both macros with identical operations.
 #[test]
 fn both_macros_with_identical_config() {
-    // timing_test! - returns TestResult directly
-    let result_direct = timing_test! {
-        oracle: TimingOracle::quick(),
+    // timing_test! - returns Outcome
+    let outcome_direct = timing_test! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [100u8; 64],
         sample: || {
             let mut arr = [0u8; 64];
@@ -694,8 +635,8 @@ fn both_macros_with_identical_config() {
     };
 
     // timing_test_checked! - returns Outcome
-    let outcome = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+    let outcome_checked = timing_test_checked! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [100u8; 64],
         sample: || {
             let mut arr = [0u8; 64];
@@ -715,11 +656,12 @@ fn both_macros_with_identical_config() {
     };
 
     // Both should produce valid results
-    assert!(result_direct.leak_probability >= 0.0);
+    if let Some(prob) = outcome_direct.leak_probability() {
+        assert!(prob >= 0.0);
+    }
 
-    if let Outcome::Completed(result_checked) = outcome {
-        // Both approaches work, timing_test_checked! requires explicit handling
-        assert!(result_checked.leak_probability >= 0.0);
+    if let Some(prob) = outcome_checked.leak_probability() {
+        assert!(prob >= 0.0);
     }
 }
 
@@ -730,8 +672,8 @@ fn timing_test_all_optional_fields() {
     // Pre-measurement work done before macro
     std::hint::black_box(multiplier);
 
-    let result = timing_test! {
-        oracle: TimingOracle::quick().samples(1000),
+    let outcome = timing_test! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)).max_samples(1000),
         baseline: || [10u8; 64],
         sample: || {
             let mut arr = [0u8; 64];
@@ -751,7 +693,9 @@ fn timing_test_all_optional_fields() {
     };
 
     // Note: actual samples may be adjusted based on batching
-    assert!(result.metadata.samples_per_class > 0);
+    if let Some(samples) = outcome.samples_used() {
+        assert!(samples > 0);
+    }
 }
 
 /// Test that timing_test_checked! works with all optional fields.
@@ -762,7 +706,7 @@ fn timing_test_checked_all_optional_fields() {
     std::hint::black_box(divisor);
 
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::quick().samples(500),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)).max_samples(500),
         baseline: || 99u64,
         sample: || rand::random::<u64>() | 1, // Ensure non-zero
         measure: |x| {
@@ -770,17 +714,14 @@ fn timing_test_checked_all_optional_fields() {
         },
     };
 
-    assert!(matches!(
-        outcome,
-        Outcome::Completed(_) | Outcome::Unmeasurable { .. }
-    ));
+    assert!(outcome.is_measurable() || matches!(outcome, Outcome::Unmeasurable { .. }));
 }
 
 /// Test timing_test! with complex types (arrays).
 #[test]
 fn timing_test_complex_array_type() {
-    let result = timing_test! {
-        oracle: TimingOracle::quick(),  // Use quick() for faster test
+    let outcome = timing_test! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 64],  // Larger array
         sample: || {
             let mut arr = [0u8; 64];
@@ -800,14 +741,16 @@ fn timing_test_complex_array_type() {
         },
     };
 
-    assert!(result.leak_probability <= 1.0);
+    if let Some(prob) = outcome.leak_probability() {
+        assert!(prob <= 1.0);
+    }
 }
 
 /// Test timing_test_checked! with complex types (Vec).
 #[test]
 fn timing_test_checked_complex_vec_type() {
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::quick(),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(10)),
         baseline: || vec![0u32; 10],
         sample: || {
             (0..10).map(|_| rand::random::<u32>()).collect()

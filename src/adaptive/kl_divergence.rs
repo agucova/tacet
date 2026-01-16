@@ -1,0 +1,229 @@
+//! KL divergence computation for Gaussian distributions.
+//!
+//! Used to track the learning rate during adaptive sampling. When the posterior
+//! stops updating (KL divergence becomes very small), we've either converged or
+//! the data is uninformative.
+
+use crate::types::Matrix2;
+
+use super::Posterior;
+
+/// KL divergence KL(p || q) for 2D Gaussian distributions.
+///
+/// For Gaussians p ~ N(mu_p, Sigma_p) and q ~ N(mu_q, Sigma_q):
+///
+/// KL(p||q) = 0.5 * (tr(Sigma_q^{-1} Sigma_p) + (mu_q - mu_p)^T Sigma_q^{-1} (mu_q - mu_p)
+///            - k + ln(det(Sigma_q)/det(Sigma_p)))
+///
+/// where k = 2 (dimension).
+///
+/// This measures how much the posterior has changed from the previous iteration.
+/// Small KL indicates the posterior is no longer updating despite new data.
+///
+/// # Arguments
+///
+/// * `p` - The new posterior (typically more peaked)
+/// * `q` - The old posterior (reference distribution)
+///
+/// # Returns
+///
+/// KL divergence in nats. Returns f64::INFINITY if q has singular covariance.
+pub fn kl_divergence_gaussian(p: &Posterior, q: &Posterior) -> f64 {
+    let k = 2.0_f64;
+
+    // Compute Sigma_q^{-1}
+    let q_cov_inv = match invert_2x2(&q.beta_cov) {
+        Some(inv) => inv,
+        None => return f64::INFINITY, // Singular covariance
+    };
+
+    let mu_diff = [
+        p.beta_mean[0] - q.beta_mean[0],
+        p.beta_mean[1] - q.beta_mean[1],
+    ];
+
+    // tr(Sigma_q^{-1} Sigma_p)
+    let trace_term = trace_product_2x2(&q_cov_inv, &p.beta_cov);
+
+    // (mu_q - mu_p)^T Sigma_q^{-1} (mu_q - mu_p)
+    let mahalanobis = mahalanobis_2d(&mu_diff, &q_cov_inv);
+
+    // ln(det(Sigma_q)/det(Sigma_p))
+    let det_p = determinant_2x2(&p.beta_cov);
+    let det_q = determinant_2x2(&q.beta_cov);
+    let log_det_ratio = if det_p > 0.0 && det_q > 0.0 {
+        (det_q / det_p).ln()
+    } else {
+        f64::INFINITY
+    };
+
+    0.5 * (trace_term + mahalanobis - k + log_det_ratio)
+}
+
+/// Invert a 2x2 matrix.
+///
+/// For 2x2 matrix [[a,b],[c,d]], inverse is 1/det * [[d,-b],[-c,a]]
+fn invert_2x2(m: &Matrix2) -> Option<Matrix2> {
+    let det = determinant_2x2(m);
+    if det.abs() < 1e-10 {
+        return None;
+    }
+    Some(Matrix2::new(
+        m[(1, 1)] / det,
+        -m[(0, 1)] / det,
+        -m[(1, 0)] / det,
+        m[(0, 0)] / det,
+    ))
+}
+
+/// Compute determinant of a 2x2 matrix.
+fn determinant_2x2(m: &Matrix2) -> f64 {
+    m[(0, 0)] * m[(1, 1)] - m[(0, 1)] * m[(1, 0)]
+}
+
+/// Compute tr(AB) for 2x2 matrices.
+///
+/// tr(AB) = sum_i (AB)_ii = sum_i sum_j a_ij * b_ji
+fn trace_product_2x2(a: &Matrix2, b: &Matrix2) -> f64 {
+    // (AB)_00 = a_00*b_00 + a_01*b_10
+    // (AB)_11 = a_10*b_01 + a_11*b_11
+    // tr(AB) = (AB)_00 + (AB)_11
+    (a[(0, 0)] * b[(0, 0)] + a[(0, 1)] * b[(1, 0)])
+        + (a[(1, 0)] * b[(0, 1)] + a[(1, 1)] * b[(1, 1)])
+}
+
+/// Compute x^T Sigma^{-1} x (Mahalanobis distance squared) for 2D.
+fn mahalanobis_2d(x: &[f64; 2], sigma_inv: &Matrix2) -> f64 {
+    // temp = Sigma^{-1} x
+    let temp = [
+        sigma_inv[(0, 0)] * x[0] + sigma_inv[(0, 1)] * x[1],
+        sigma_inv[(1, 0)] * x[0] + sigma_inv[(1, 1)] * x[1],
+    ];
+    // x^T temp
+    x[0] * temp[0] + x[1] * temp[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::Vector2;
+
+    #[test]
+    fn test_kl_identical_distributions() {
+        let p = Posterior::new(
+            Vector2::new(5.0, 3.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+        let q = p.clone();
+
+        let kl = kl_divergence_gaussian(&p, &q);
+
+        // KL divergence of identical distributions should be 0
+        assert!(
+            kl.abs() < 1e-10,
+            "KL of identical distributions should be 0, got {}",
+            kl
+        );
+    }
+
+    #[test]
+    fn test_kl_different_means() {
+        let p = Posterior::new(
+            Vector2::new(5.0, 3.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+        let q = Posterior::new(
+            Vector2::new(0.0, 0.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+
+        let kl = kl_divergence_gaussian(&p, &q);
+
+        // For same covariance, KL = 0.5 * ||mu_p - mu_q||^2
+        // = 0.5 * (25 + 9) = 17.0
+        assert!((kl - 17.0).abs() < 1e-10, "KL should be 17.0, got {}", kl);
+    }
+
+    #[test]
+    fn test_kl_different_variances() {
+        let p = Posterior::new(
+            Vector2::new(0.0, 0.0),
+            Matrix2::new(2.0, 0.0, 0.0, 2.0), // More peaked
+            0.5,
+            100,
+        );
+        let q = Posterior::new(
+            Vector2::new(0.0, 0.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+
+        let kl = kl_divergence_gaussian(&p, &q);
+
+        // KL(p||q) with same mean:
+        // 0.5 * (tr(I * 2I) - 2 + ln(det(I)/det(2I)))
+        // = 0.5 * (4 - 2 + ln(1/4))
+        // = 0.5 * (2 - ln(4))
+        // = 0.5 * (2 - 1.386)
+        // = 0.307
+        assert!(kl > 0.0, "KL should be positive for different variances");
+    }
+
+    #[test]
+    fn test_kl_asymmetric() {
+        let p = Posterior::new(
+            Vector2::new(1.0, 0.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+        let q = Posterior::new(
+            Vector2::new(0.0, 0.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            0.5,
+            100,
+        );
+
+        let kl_pq = kl_divergence_gaussian(&p, &q);
+        let kl_qp = kl_divergence_gaussian(&q, &p);
+
+        // KL is symmetric when covariances are equal
+        assert!(
+            (kl_pq - kl_qp).abs() < 1e-10,
+            "With equal covariances, KL(p||q) = KL(q||p)"
+        );
+    }
+
+    #[test]
+    fn test_determinant_2x2() {
+        let m = Matrix2::new(3.0, 1.0, 2.0, 4.0);
+        let det = determinant_2x2(&m);
+        assert!((det - 10.0).abs() < 1e-10, "det should be 12-2=10");
+    }
+
+    #[test]
+    fn test_invert_2x2() {
+        let m = Matrix2::new(4.0, 0.0, 0.0, 2.0);
+        let inv = invert_2x2(&m).expect("Should be invertible");
+
+        // Check m * inv = I
+        let product = m * inv;
+        assert!((product[(0, 0)] - 1.0).abs() < 1e-10);
+        assert!((product[(1, 1)] - 1.0).abs() < 1e-10);
+        assert!(product[(0, 1)].abs() < 1e-10);
+        assert!(product[(1, 0)].abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_invert_singular() {
+        let m = Matrix2::new(1.0, 1.0, 1.0, 1.0); // Singular
+        assert!(invert_2x2(&m).is_none());
+    }
+}

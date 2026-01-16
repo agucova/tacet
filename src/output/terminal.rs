@@ -2,12 +2,12 @@
 
 use colored::Colorize;
 
-use crate::result::{EffectPattern, Exploitability, MeasurementQuality, TestResult};
+use crate::result::{EffectPattern, Exploitability, MeasurementQuality, Outcome};
 
-/// Format a TestResult for human-readable terminal output.
+/// Format an Outcome for human-readable terminal output.
 ///
 /// Uses ANSI colors and a spec-aligned layout for clear presentation.
-pub fn format_result(result: &TestResult) -> String {
+pub fn format_outcome(outcome: &Outcome) -> String {
     let mut output = String::new();
     let sep = "\u{2500}".repeat(62);
 
@@ -16,100 +16,158 @@ pub fn format_result(result: &TestResult) -> String {
     output.push('\n');
     output.push('\n');
 
-    output.push_str(&format!(
-        "  Samples: {} per class\n",
-        result.metadata.samples_per_class
-    ));
-    if let Some(unmeasurable) = &result.metadata.batching.unmeasurable {
-        output.push('\n');
-        output.push_str(&format!(
-            "  {}\n\n",
-            "\u{26A0} Operation too fast to measure reliably"
-                .yellow()
-                .bold()
-        ));
-        output.push_str(&format!(
-            "    Estimated duration: ~{:.0} ns\n",
-            unmeasurable.operation_ns
-        ));
-        output.push_str(&format!(
-            "    Timer resolution:   {:.1} ns ({})\n",
-            result.metadata.timer_resolution_ns, result.metadata.timer
-        ));
-        output.push_str(&format!(
-            "    Minimum measurable: ~{:.0} ns on this platform\n",
-            unmeasurable.threshold_ns
-        ));
-        output.push('\n');
-        output.push_str(&sep);
-        output.push('\n');
-        output.push_str(
-            "Note: Results are unmeasurable at this resolution; no leak probability is reported.\n",
-        );
-        return output;
-    }
+    match outcome {
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            samples_used,
+            quality,
+            diagnostics,
+        } => {
+            output.push_str(&format!("  Samples: {} per class\n", samples_used));
+            output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
+            output.push('\n');
 
-    output.push_str(&format!("  Quality: {}\n", format_quality(result.quality)));
-    output.push_str(&format!(
-        "  Min detectable effect: {:.1} ns (shift), {:.1} ns (tail)\n",
-        result.min_detectable_effect.shift_ns, result.min_detectable_effect.tail_ns
-    ));
-    output.push('\n');
+            output.push_str(&format!(
+                "  {}\n\n",
+                "\u{2713} No timing leak detected".green().bold()
+            ));
 
-    use crate::result::CiGateResult;
-    match &result.ci_gate.result {
-        CiGateResult::Pass => {
-            output.push_str(&format!("  {}\n\n", "\u{2713} No timing leak detected".green().bold()));
+            let prob_pct = leak_probability * 100.0;
+            output.push_str(&format!("    Probability of leak: {:.1}%\n", prob_pct));
+
+            let magnitude = effect.total_effect_ns();
+            output.push_str(&format!(
+                "    Effect: {:.1} ns {}\n",
+                magnitude,
+                format_pattern(effect.pattern),
+            ));
+            output.push_str(&format!(
+                "      Shift: {:.1} ns\n",
+                effect.shift_ns,
+            ));
+            output.push_str(&format!(
+                "      Tail:  {:.1} ns\n",
+                effect.tail_ns,
+            ));
+            output.push_str(&format!(
+                "      95% CI: {:.1}–{:.1} ns\n",
+                effect.credible_interval_ns.0,
+                effect.credible_interval_ns.1,
+            ));
         }
-        CiGateResult::Fail => {
-            output.push_str(&format!("  {}\n\n", "\u{26A0} Timing leak detected".yellow().bold()));
+
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            exploitability,
+            samples_used,
+            quality,
+            diagnostics,
+        } => {
+            output.push_str(&format!("  Samples: {} per class\n", samples_used));
+            output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
+            output.push('\n');
+
+            output.push_str(&format!(
+                "  {}\n\n",
+                "\u{26A0} Timing leak detected".yellow().bold()
+            ));
+
+            let prob_pct = leak_probability * 100.0;
+            output.push_str(&format!("    Probability of leak: {:.1}%\n", prob_pct));
+
+            let magnitude = effect.total_effect_ns();
+            output.push_str(&format!(
+                "    Effect: {:.1} ns {}\n",
+                magnitude,
+                format_pattern(effect.pattern),
+            ));
+            output.push_str(&format!(
+                "      Shift: {:.1} ns\n",
+                effect.shift_ns,
+            ));
+            output.push_str(&format!(
+                "      Tail:  {:.1} ns\n",
+                effect.tail_ns,
+            ));
+            output.push_str(&format!(
+                "      95% CI: {:.1}–{:.1} ns\n",
+                effect.credible_interval_ns.0,
+                effect.credible_interval_ns.1,
+            ));
+
+            output.push('\n');
+            output.push_str("    Exploitability (heuristic):\n");
+            let (lan, internet) = exploitability_lines(*exploitability);
+            output.push_str(&format!("      Local network:  {}\n", lan));
+            output.push_str(&format!("      Internet:       {}\n", internet));
         }
-        CiGateResult::Inconclusive { reason } => {
+
+        Outcome::Inconclusive {
+            reason,
+            leak_probability,
+            effect,
+            samples_used,
+            quality,
+            diagnostics,
+        } => {
+            output.push_str(&format!("  Samples: {} per class\n", samples_used));
+            output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
+            output.push('\n');
+
             output.push_str(&format!("  {}\n", "? Inconclusive".cyan().bold()));
-            output.push_str(&format!("    {}\n\n", reason));
+            output.push_str(&format!("    {:?}\n\n", reason));
+
+            let prob_pct = leak_probability * 100.0;
+            output.push_str(&format!(
+                "    Current probability of leak: {:.1}%\n",
+                prob_pct
+            ));
+        }
+
+        Outcome::Unmeasurable {
+            operation_ns,
+            threshold_ns,
+            platform,
+            recommendation,
+        } => {
+            output.push_str(&format!(
+                "  {}\n\n",
+                "\u{26A0} Operation too fast to measure reliably"
+                    .yellow()
+                    .bold()
+            ));
+            output.push_str(&format!(
+                "    Estimated duration: ~{:.1} ns\n",
+                operation_ns
+            ));
+            output.push_str(&format!(
+                "    Minimum measurable: ~{:.1} ns\n",
+                threshold_ns
+            ));
+            output.push_str(&format!("    Platform: {}\n", platform));
+            output.push('\n');
+            output.push_str(&format!("    Recommendation: {}\n", recommendation));
+            output.push('\n');
+            output.push_str(&sep);
+            output.push('\n');
+            output.push_str(
+                "Note: Results are unmeasurable at this resolution; no leak probability is reported.\n",
+            );
+            return output;
         }
     }
 
-    let prob_pct = result.leak_probability * 100.0;
-    output.push_str(&format!(
-        "    Probability of leak: {:.0}%\n",
-        prob_pct
-    ));
-
-    if let Some(ref effect) = result.effect {
-        let magnitude = (effect.shift_ns.powi(2) + effect.tail_ns.powi(2)).sqrt();
-        output.push_str(&format!(
-            "    Effect: {:.1} ns {}\n",
-            magnitude,
-            format_pattern(effect.pattern),
-        ));
-        output.push_str(&format!(
-            "      Shift: {:.1} ns (95% CI: {:.1}–{:.1} ns)\n",
-            effect.shift_ns,
-            effect.shift_ci_ns.0,
-            effect.shift_ci_ns.1
-        ));
-        output.push_str(&format!(
-            "      Tail:  {:.1} ns (95% CI: {:.1}–{:.1} ns)\n",
-            effect.tail_ns,
-            effect.tail_ci_ns.0,
-            effect.tail_ci_ns.1
-        ));
-    }
-
     output.push('\n');
-    output.push_str("    Exploitability (heuristic):\n");
-    let (lan, internet) = exploitability_lines(result.exploitability);
-    output.push_str(&format!("      Local network:  {}\n", lan));
-    output.push_str(&format!("      Internet:       {}\n", internet));
-    output.push('\n');
-
     output.push_str(&sep);
     output.push('\n');
 
-    output.push_str(
-        "Note: Exploitability is a heuristic estimate based on effect magnitude.\n",
-    );
+    if matches!(outcome, Outcome::Fail { .. }) {
+        output.push_str(
+            "Note: Exploitability is a heuristic estimate based on effect magnitude.\n",
+        );
+    }
 
     output
 }
@@ -158,70 +216,68 @@ fn exploitability_lines(exploit: Exploitability) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::{CiGate, CiGateResult, Diagnostics, Effect, Metadata, MinDetectableEffect};
+    use crate::result::{Diagnostics, EffectEstimate, InconclusiveReason};
 
-    fn make_test_result(passed: bool, leak_probability: f64) -> TestResult {
-        TestResult {
-            leak_probability,
-            effect: if leak_probability > 0.5 {
-                Some(Effect {
-                    shift_ns: 150.0,
-                    tail_ns: 25.0,
-                    shift_ci_ns: (100.0, 200.0),
-                    tail_ci_ns: (5.0, 45.0),
-                    credible_interval_ns: (100.0, 200.0),
-                    pattern: EffectPattern::UniformShift,
-                })
-            } else {
-                None
+    fn make_pass_outcome() -> Outcome {
+        Outcome::Pass {
+            leak_probability: 0.02,
+            effect: EffectEstimate {
+                shift_ns: 5.0,
+                tail_ns: 2.0,
+                credible_interval_ns: (0.0, 10.0),
+                pattern: EffectPattern::Indeterminate,
+            },
+            samples_used: 10000,
+            quality: MeasurementQuality::Good,
+            diagnostics: Diagnostics::all_ok(),
+        }
+    }
+
+    fn make_fail_outcome() -> Outcome {
+        Outcome::Fail {
+            leak_probability: 0.98,
+            effect: EffectEstimate {
+                shift_ns: 150.0,
+                tail_ns: 25.0,
+                credible_interval_ns: (100.0, 200.0),
+                pattern: EffectPattern::UniformShift,
             },
             exploitability: Exploitability::PossibleLAN,
-            min_detectable_effect: MinDetectableEffect {
-                shift_ns: 10.0,
-                tail_ns: 15.0,
-            },
-            ci_gate: CiGate {
-                alpha: 0.001,
-                result: if passed { CiGateResult::Pass } else { CiGateResult::Fail },
-                threshold: 0.0,
-                max_observed: 0.0,
-                observed: [0.0; 9],
-                p_value: if passed { 0.5 } else { 0.0001 },
-            },
+            samples_used: 10000,
             quality: MeasurementQuality::Good,
-            outlier_fraction: 0.02,
             diagnostics: Diagnostics::all_ok(),
-            metadata: Metadata {
-                samples_per_class: 10000,
-                cycles_per_ns: 3.0,
-                timer: "rdtsc".to_string(),
-                timer_resolution_ns: 0.33,
-                batching: crate::result::BatchingInfo {
-                    enabled: false,
-                    k: 1,
-                    ticks_per_batch: 1.0,
-                    rationale: "No batching".to_string(),
-                    unmeasurable: None,
-                },
-                runtime_secs: 1.5,
-            },
         }
     }
 
     #[test]
-    fn test_format_passing_result() {
-        let result = make_test_result(true, 0.1);
-        let output = format_result(&result);
+    fn test_format_pass_outcome() {
+        let outcome = make_pass_outcome();
+        let output = format_outcome(&outcome);
         assert!(output.contains("timing-oracle"));
-        assert!(output.contains("Probability of leak: 10%"));
+        assert!(output.contains("No timing leak detected"));
+        assert!(output.contains("2.0%")); // 0.02 * 100
     }
 
     #[test]
-    fn test_format_failing_result() {
-        let result = make_test_result(false, 0.95);
-        let output = format_result(&result);
+    fn test_format_fail_outcome() {
+        let outcome = make_fail_outcome();
+        let output = format_outcome(&outcome);
         assert!(output.contains("Timing leak detected"));
-        assert!(output.contains("Probability of leak: 95%"));
+        assert!(output.contains("98.0%")); // 0.98 * 100
         assert!(output.contains("Effect:"));
+        assert!(output.contains("Exploitability"));
+    }
+
+    #[test]
+    fn test_format_unmeasurable() {
+        let outcome = Outcome::Unmeasurable {
+            operation_ns: 0.5,
+            threshold_ns: 10.0,
+            platform: "macos (cntvct)".to_string(),
+            recommendation: "Run with sudo".to_string(),
+        };
+        let output = format_outcome(&outcome);
+        assert!(output.contains("too fast to measure"));
+        assert!(output.contains("unmeasurable"));
     }
 }

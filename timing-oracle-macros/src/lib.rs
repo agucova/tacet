@@ -13,24 +13,26 @@ mod parse;
 
 use parse::TimingTestInput;
 
-/// Create a timing test that panics on unmeasurable operations.
+/// Create a timing test that returns `Outcome` for pattern matching.
 ///
 /// This macro provides a declarative syntax for timing tests that prevents
-/// common mistakes through compile-time checks. Returns `TestResult` directly,
-/// panicking if the operation is too fast to measure reliably.
-///
-/// For explicit handling of unmeasurable operations, use `timing_test_checked!` instead.
+/// common mistakes through compile-time checks. Returns `Outcome` which can be
+/// `Pass`, `Fail`, `Inconclusive`, or `Unmeasurable`.
 ///
 /// # Returns
 ///
-/// Returns `TestResult` directly. Panics if the operation is unmeasurable.
+/// Returns `Outcome` which is one of:
+/// - `Outcome::Pass { leak_probability, effect, samples_used, quality, diagnostics }`
+/// - `Outcome::Fail { leak_probability, effect, exploitability, samples_used, quality, diagnostics }`
+/// - `Outcome::Inconclusive { reason, leak_probability, effect, samples_used, quality, diagnostics }`
+/// - `Outcome::Unmeasurable { operation_ns, timer_resolution_ns, platform, recommendation }`
 ///
 /// # Syntax
 ///
 /// ```ignore
 /// timing_test! {
-///     // Optional: custom oracle configuration (defaults to balanced())
-///     oracle: TimingOracle::quick(),
+///     // Optional: custom oracle configuration (defaults to AdjacentNetwork attacker model)
+///     oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
 ///
 ///     // Required: baseline input generator (closure returning the fixed/baseline value)
 ///     baseline: || [0u8; 32],
@@ -48,10 +50,10 @@ use parse::TimingTestInput;
 /// # Example
 ///
 /// ```ignore
-/// use timing_oracle::timing_test;
+/// use timing_oracle::{timing_test, Outcome};
 ///
 /// fn main() {
-///     let result = timing_test! {
+///     let outcome = timing_test! {
 ///         baseline: || [0u8; 32],
 ///         sample: || rand::random::<[u8; 32]>(),
 ///         measure: |input| {
@@ -59,7 +61,20 @@ use parse::TimingTestInput;
 ///         },
 ///     };
 ///
-///     println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
+///     match outcome {
+///         Outcome::Pass { leak_probability, .. } => {
+///             println!("No leak detected (P={:.1}%)", leak_probability * 100.0);
+///         }
+///         Outcome::Fail { leak_probability, exploitability, .. } => {
+///             println!("Leak detected! P={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+///         }
+///         Outcome::Inconclusive { reason, .. } => {
+///             println!("Inconclusive: {:?}", reason);
+///         }
+///         Outcome::Unmeasurable { recommendation, .. } => {
+///             println!("Operation too fast: {}", recommendation);
+///         }
+///     }
 /// }
 /// ```
 #[proc_macro]
@@ -70,13 +85,12 @@ pub fn timing_test(input: TokenStream) -> TokenStream {
 
 /// Create a timing test that returns `Outcome` for explicit handling.
 ///
-/// This macro is identical to `timing_test!` but returns `Outcome` instead of
-/// `TestResult`, allowing you to explicitly handle unmeasurable operations.
+/// This macro is identical to `timing_test!` - both return `Outcome`.
+/// It is kept for backwards compatibility.
 ///
 /// # Returns
 ///
-/// Returns `Outcome` which is either `Outcome::Completed(TestResult)` or
-/// `Outcome::Unmeasurable { ... }`.
+/// Returns `Outcome` which is one of `Pass`, `Fail`, `Inconclusive`, or `Unmeasurable`.
 ///
 /// # Example
 ///
@@ -93,8 +107,10 @@ pub fn timing_test(input: TokenStream) -> TokenStream {
 ///     };
 ///
 ///     match outcome {
-///         Outcome::Completed(result) => {
-///             println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
+///         Outcome::Pass { leak_probability, .. } |
+///         Outcome::Fail { leak_probability, .. } |
+///         Outcome::Inconclusive { leak_probability, .. } => {
+///             println!("Leak probability: {:.1}%", leak_probability * 100.0);
 ///         }
 ///         Outcome::Unmeasurable { recommendation, .. } => {
 ///             println!("Operation too fast: {}", recommendation);
@@ -108,7 +124,7 @@ pub fn timing_test_checked(input: TokenStream) -> TokenStream {
     expand_timing_test(input, true).into()
 }
 
-fn expand_timing_test(input: TimingTestInput, checked: bool) -> proc_macro2::TokenStream {
+fn expand_timing_test(input: TimingTestInput, _checked: bool) -> proc_macro2::TokenStream {
     let TimingTestInput {
         oracle,
         baseline,
@@ -116,13 +132,16 @@ fn expand_timing_test(input: TimingTestInput, checked: bool) -> proc_macro2::Tok
         measure,
     } = input;
 
-    // Default oracle if not specified - use balanced() for reasonable speed
+    // Default oracle if not specified - use AdjacentNetwork attacker model with 30s time budget
     let oracle_expr = oracle.unwrap_or_else(|| {
-        syn::parse_quote!(::timing_oracle::TimingOracle::balanced())
+        syn::parse_quote!(
+            ::timing_oracle::TimingOracle::for_attacker(::timing_oracle::AttackerModel::AdjacentNetwork)
+                .time_budget(::std::time::Duration::from_secs(30))
+        )
     });
 
-    // Generate the timing test code
-    let test_call = quote! {
+    // Generate the timing test code - both macros now return Outcome directly
+    quote! {
         {
             // Create InputPair from baseline and sample closures
             let __inputs = ::timing_oracle::helpers::InputPair::new(
@@ -132,31 +151,6 @@ fn expand_timing_test(input: TimingTestInput, checked: bool) -> proc_macro2::Tok
 
             // Run the test with the new API
             #oracle_expr.test(__inputs, #measure)
-        }
-    };
-
-    if checked {
-        // For timing_test_checked!, return Outcome directly
-        test_call
-    } else {
-        // For timing_test!, unwrap to TestResult and panic on unmeasurable
-        quote! {
-            {
-                let __outcome = #test_call;
-                match __outcome {
-                    ::timing_oracle::Outcome::Completed(result) => result,
-                    ::timing_oracle::Outcome::Unmeasurable { operation_ns, threshold_ns, platform, recommendation } => {
-                        panic!(
-                            "Operation too fast to measure reliably:\n  \
-                             Operation: {:.2}ns\n  \
-                             Threshold: {:.2}ns\n  \
-                             Platform: {}\n  \
-                             Recommendation: {}",
-                            operation_ns, threshold_ns, platform, recommendation
-                        );
-                    }
-                }
-            }
         }
     }
 }

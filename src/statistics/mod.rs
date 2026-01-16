@@ -21,7 +21,7 @@ pub use bootstrap::{
 };
 pub use covariance::{
     apply_variance_floor, bootstrap_covariance_matrix, bootstrap_difference_covariance,
-    bootstrap_difference_covariance_discrete,
+    bootstrap_difference_covariance_discrete, compute_covariance_rate, scale_covariance_rate,
     scale_covariance_for_inference, CovarianceEstimate,
 };
 pub use quantile::{

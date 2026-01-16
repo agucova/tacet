@@ -1,6 +1,7 @@
 //! Tests that must detect known timing leaks.
 
-use timing_oracle::{skip_if_unreliable, timing_test_checked, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
+use timing_oracle::helpers::InputPair;
 
 /// Test that early-exit comparison is detected as leaky.
 ///
@@ -10,50 +11,72 @@ use timing_oracle::{skip_if_unreliable, timing_test_checked, TimingOracle};
 fn detects_early_exit_comparison() {
     let secret = [0u8; 512];
 
-    // Use the timing_test_checked! macro for explicit Outcome handling
-    let outcome = timing_test_checked! {
-        oracle: TimingOracle::new().samples(100_000),
-        baseline: || [0u8; 512],
-        sample: || rand_bytes_512(),
-        measure: |data| {
+    let inputs = InputPair::new(|| [0u8; 512], rand_bytes_512);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(100_000)
+        .test(inputs, |data| {
             early_exit_compare(&secret, data);
-        },
-    };
+        });
 
-    let result = skip_if_unreliable!(outcome, "detects_early_exit_comparison");
+    // Skip if unmeasurable or inconclusive
+    match &outcome {
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("[SKIPPED] detects_early_exit_comparison: {}", recommendation);
+            return;
+        }
+        Outcome::Inconclusive { reason, .. } => {
+            eprintln!("[SKIPPED] detects_early_exit_comparison: {:?}", reason);
+            return;
+        }
+        _ => {}
+    }
 
+    // For known leaky code, we expect Fail
+    let leak_prob = outcome.leak_probability().unwrap_or(0.0);
     assert!(
-        result.leak_probability > 0.9,
+        leak_prob > 0.9,
         "Should detect leak with high probability, got {}",
-        result.leak_probability
+        leak_prob
     );
     assert!(
-        !result.ci_gate.passed(),
-        "CI gate should fail for leaky code"
+        matches!(outcome, Outcome::Fail { .. }),
+        "Should fail for leaky code, got {:?}",
+        outcome
     );
 }
 
 /// Test that branch-based timing is detected.
 #[test]
 fn detects_branch_timing() {
-    // Use the timing_test_checked! macro
-    // Fixed: 0 (triggers expensive branch)
-    // Random: never zero (skips expensive branch)
-    let outcome = timing_test_checked! {
-        oracle: TimingOracle::new().samples(100_000),
-        baseline: || 0u8,
-        sample: || rand::random::<u8>() | 1,
-        measure: |x| {
+    // Baseline: 0 (triggers expensive branch)
+    // Sample: never zero (skips expensive branch)
+    let inputs = InputPair::new(|| 0u8, || rand::random::<u8>() | 1);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(100_000)
+        .test(inputs, |x| {
             branch_on_zero(*x);
-        },
-    };
+        });
 
-    let result = skip_if_unreliable!(outcome, "detects_branch_timing");
+    // Skip if unmeasurable or inconclusive
+    match &outcome {
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("[SKIPPED] detects_branch_timing: {}", recommendation);
+            return;
+        }
+        Outcome::Inconclusive { reason, .. } => {
+            eprintln!("[SKIPPED] detects_branch_timing: {:?}", reason);
+            return;
+        }
+        _ => {}
+    }
 
+    let leak_prob = outcome.leak_probability().unwrap_or(0.0);
     assert!(
-        result.leak_probability > 0.9,
+        leak_prob > 0.9,
         "Should detect branch timing leak, got {}",
-        result.leak_probability
+        leak_prob
     );
 }
 

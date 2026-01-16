@@ -1,7 +1,8 @@
 //! Tests for timing_oracle::helpers utilities
 
+use std::time::Duration;
 use timing_oracle::helpers::{byte_arrays_32, byte_vecs, InputPair};
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 #[test]
 fn test_input_pair_basic() {
@@ -64,8 +65,10 @@ fn test_no_false_positive_with_helpers() {
     // Use helpers for constant-time XOR - should not false positive
     let inputs = byte_arrays_32();
 
-    // Use balanced() for reasonable speed while still being accurate
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    // Use for_attacker() for reasonable speed while still being accurate
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(10))
+        .test(inputs, |data| {
         // XOR with zeros is identity - constant time
         let mut result = [0u8; 32];
         for i in 0..32 {
@@ -74,9 +77,20 @@ fn test_no_false_positive_with_helpers() {
         std::hint::black_box(result);
     });
 
-    if let Outcome::Completed(result) = outcome {
-        assert!(result.ci_gate.passed(), "Should not detect leak with helpers");
-        assert!(result.leak_probability < 0.5);
+    match outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            assert!(leak_probability < 0.5);
+        }
+        Outcome::Fail { leak_probability, .. } => {
+            panic!("Unexpected failure for constant-time XOR: P={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Inconclusive { leak_probability, .. } => {
+            // Acceptable - inconclusive is not a false positive
+            assert!(leak_probability < 0.5, "Should not detect leak with helpers");
+        }
+        Outcome::Unmeasurable { .. } => {
+            // Skip if unmeasurable
+        }
     }
 }
 

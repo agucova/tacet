@@ -7,7 +7,8 @@
 //!
 //! Run with: cargo test --test discrete_mode
 
-use timing_oracle::{compute_min_uniqueness_ratio, helpers::InputPair, Outcome, TimingOracle};
+use std::time::Duration;
+use timing_oracle::{compute_min_uniqueness_ratio, helpers::InputPair, AttackerModel, Outcome, TimingOracle};
 
 // =============================================================================
 // UNIT TESTS: Uniqueness Ratio
@@ -181,8 +182,7 @@ fn midquantile_symmetric_ties() {
 /// Verify that discrete mode FPR is bounded at the configured alpha level.
 ///
 /// This test forces discrete mode on using the `force_discrete_mode` config
-/// option, then runs FPR calibration to ensure the CI gate still respects
-/// the alpha threshold.
+/// option, then runs FPR calibration to ensure false positive rate is bounded.
 #[test]
 fn discrete_mode_fpr_calibration() {
     const TRIALS: usize = 100;
@@ -201,38 +201,49 @@ fn discrete_mode_fpr_calibration() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
-            .samples(SAMPLES)
-            .alpha(ALPHA)
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+            .max_samples(SAMPLES)
             .force_discrete_mode(true) // Force discrete mode
             .test(inputs, |data| {
                 std::hint::black_box(data);
             });
 
         match outcome {
-            Outcome::Completed(result) => {
+            Outcome::Pass { diagnostics, .. } => {
                 completed_trials += 1;
-                if result.diagnostics.discrete_mode {
+                if diagnostics.discrete_mode {
                     discrete_mode_count += 1;
                 }
-                if !result.ci_gate.passed() {
-                    rejections += 1;
+            }
+            Outcome::Fail { diagnostics, .. } => {
+                completed_trials += 1;
+                if diagnostics.discrete_mode {
+                    discrete_mode_count += 1;
                 }
-
-                if (trial + 1) % 25 == 0 {
-                    let rate = rejections as f64 / completed_trials as f64;
-                    eprintln!(
-                        "[discrete_mode_fpr] Trial {}/{}: {} rejections (rate={:.1}%)",
-                        trial + 1,
-                        TRIALS,
-                        rejections,
-                        rate * 100.0
-                    );
+                rejections += 1;
+            }
+            Outcome::Inconclusive { diagnostics, .. } => {
+                completed_trials += 1;
+                if diagnostics.discrete_mode {
+                    discrete_mode_count += 1;
                 }
+                // Don't count inconclusive as rejection
             }
             Outcome::Unmeasurable { .. } => {
                 // Skip unmeasurable trials
             }
+        }
+
+        if (trial + 1) % 25 == 0 && completed_trials > 0 {
+            let rate = rejections as f64 / completed_trials as f64;
+            eprintln!(
+                "[discrete_mode_fpr] Trial {}/{}: {} rejections (rate={:.1}%)",
+                trial + 1,
+                TRIALS,
+                rejections,
+                rate * 100.0
+            );
         }
     }
 
@@ -279,17 +290,20 @@ fn discrete_mode_fpr_calibration() {
 fn force_discrete_mode_activates() {
     let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-    let outcome = TimingOracle::quick()
-        .samples(5_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(10))
+        .max_samples(5_000)
         .force_discrete_mode(true)
         .test(inputs, |data| {
             std::hint::black_box(data);
         });
 
     match outcome {
-        Outcome::Completed(result) => {
+        Outcome::Pass { diagnostics, .. } |
+        Outcome::Fail { diagnostics, .. } |
+        Outcome::Inconclusive { diagnostics, .. } => {
             assert!(
-                result.diagnostics.discrete_mode,
+                diagnostics.discrete_mode,
                 "force_discrete_mode(true) should activate discrete mode"
             );
         }

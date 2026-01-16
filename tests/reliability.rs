@@ -1,52 +1,55 @@
 //! Tests for the reliability handling API (Outcome, UnreliablePolicy, skip_if_unreliable!).
 
 use timing_oracle::{
-    BatchingInfo, CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
-    Metadata, MinDetectableEffect, Outcome, TestResult, UnreliablePolicy,
+    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
+    MeasurementQuality, Outcome, UnreliablePolicy,
 };
 
-/// Create a test result with the given parameters.
-fn make_result(leak_probability: f64, quality: MeasurementQuality) -> TestResult {
-    TestResult {
+/// Create a Pass outcome with the given parameters.
+fn make_pass(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Pass {
         leak_probability,
-        effect: Some(Effect {
+        effect: EffectEstimate {
+            shift_ns: 5.0,
+            tail_ns: 2.0,
+            credible_interval_ns: (0.0, 10.0),
+            pattern: EffectPattern::Indeterminate,
+        },
+        samples_used: 10000,
+        quality,
+        diagnostics: Diagnostics::all_ok(),
+    }
+}
+
+/// Create a Fail outcome with the given parameters.
+fn make_fail(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Fail {
+        leak_probability,
+        effect: EffectEstimate {
             shift_ns: 100.0,
             tail_ns: 50.0,
-            shift_ci_ns: (80.0, 120.0),
-            tail_ci_ns: (30.0, 70.0),
             credible_interval_ns: (80.0, 120.0),
             pattern: EffectPattern::Mixed,
-        }),
+        },
         exploitability: Exploitability::PossibleLAN,
-        min_detectable_effect: MinDetectableEffect {
-            shift_ns: 5.0,
-            tail_ns: 10.0,
-        },
-        ci_gate: CiGate {
-            alpha: 0.01,
-            result: CiGateResult::Fail,
-            threshold: 0.0,
-            max_observed: 0.0,
-            observed: [0.0; 9],
-            p_value: 0.01,
-        },
+        samples_used: 10000,
         quality,
-        outlier_fraction: 0.01,
         diagnostics: Diagnostics::all_ok(),
-        metadata: Metadata {
-            samples_per_class: 10000,
-            cycles_per_ns: 3.0,
-            timer: "rdtsc".to_string(),
-            timer_resolution_ns: 0.33,
-            batching: BatchingInfo {
-                enabled: false,
-                k: 1,
-                ticks_per_batch: 100.0,
-                rationale: "no batching needed".to_string(),
-                unmeasurable: None,
-            },
-            runtime_secs: 1.0,
+    }
+}
+
+/// Create an Inconclusive outcome.
+fn make_inconclusive(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Inconclusive {
+        reason: InconclusiveReason::DataTooNoisy {
+            message: "Test message".to_string(),
+            guidance: "Test guidance".to_string(),
         },
+        leak_probability,
+        effect: EffectEstimate::default(),
+        samples_used: 5000,
+        quality,
+        diagnostics: Diagnostics::all_ok(),
     }
 }
 
@@ -66,85 +69,62 @@ fn is_reliable_unmeasurable_returns_false() {
 }
 
 #[test]
-fn is_reliable_too_noisy_inconclusive_returns_false() {
-    // TooNoisy quality with inconclusive posterior (0.5) should be unreliable
-    let result = make_result(0.5, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn is_reliable_inconclusive_returns_false() {
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
     assert!(!outcome.is_reliable());
 }
 
 #[test]
-fn is_reliable_too_noisy_but_conclusive_high_returns_true() {
-    // TooNoisy but posterior > 0.9 is still reliable (signal overcame noise)
-    let result = make_result(0.95, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn is_reliable_too_noisy_pass_inconclusive_returns_false() {
+    // TooNoisy quality with non-conclusive posterior (not < 0.01) should be unreliable
+    let outcome = make_pass(0.04, MeasurementQuality::TooNoisy);
+    assert!(!outcome.is_reliable());
+}
+
+#[test]
+fn is_reliable_too_noisy_fail_inconclusive_returns_false() {
+    // TooNoisy quality with non-conclusive posterior (not > 0.99) should be unreliable
+    let outcome = make_fail(0.96, MeasurementQuality::TooNoisy);
+    assert!(!outcome.is_reliable());
+}
+
+#[test]
+fn is_reliable_too_noisy_pass_but_conclusive_returns_true() {
+    // TooNoisy but posterior < 0.01 is still reliable (confidently no leak)
+    let outcome = make_pass(0.005, MeasurementQuality::TooNoisy);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn is_reliable_too_noisy_but_conclusive_low_returns_true() {
-    // TooNoisy but posterior < 0.1 is still reliable (confidently no leak)
-    let result = make_result(0.05, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn is_reliable_too_noisy_fail_but_conclusive_returns_true() {
+    // TooNoisy but posterior > 0.99 is still reliable (signal overcame noise)
+    let outcome = make_fail(0.995, MeasurementQuality::TooNoisy);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn is_reliable_good_quality_returns_true() {
+fn is_reliable_good_quality_pass_returns_true() {
     // Good quality, any posterior, should be reliable
-    let result = make_result(0.5, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_pass(0.03, MeasurementQuality::Good);
+    assert!(outcome.is_reliable());
+}
+
+#[test]
+fn is_reliable_good_quality_fail_returns_true() {
+    let outcome = make_fail(0.97, MeasurementQuality::Good);
     assert!(outcome.is_reliable());
 }
 
 #[test]
 fn is_reliable_excellent_quality_returns_true() {
-    let result = make_result(0.3, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_pass(0.02, MeasurementQuality::Excellent);
     assert!(outcome.is_reliable());
 }
 
 #[test]
 fn is_reliable_poor_quality_returns_true() {
     // Poor quality is not TooNoisy, so it's still considered reliable
-    let result = make_result(0.7, MeasurementQuality::Poor);
-    let outcome = Outcome::Completed(result);
-    assert!(outcome.is_reliable());
-}
-
-#[test]
-fn is_reliable_zero_mde_returns_false_even_if_conclusive() {
-    // MDE of 0.0 indicates timer resolution failure - even conclusive posteriors are garbage
-    let mut result = make_result(0.99, MeasurementQuality::TooNoisy);
-    result.min_detectable_effect.shift_ns = 0.0;
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn is_reliable_nan_mde_returns_false() {
-    // NaN MDE indicates measurement failure
-    let mut result = make_result(0.99, MeasurementQuality::Good);
-    result.min_detectable_effect.shift_ns = f64::NAN;
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn is_reliable_infinite_mde_returns_false() {
-    // Infinite MDE indicates measurement failure
-    let mut result = make_result(0.01, MeasurementQuality::Good);
-    result.min_detectable_effect.shift_ns = f64::INFINITY;
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn is_reliable_valid_mde_with_conclusive_posterior_returns_true() {
-    // Valid MDE (> 0.01ns) with conclusive posterior is reliable
-    let mut result = make_result(0.99, MeasurementQuality::TooNoisy);
-    result.min_detectable_effect.shift_ns = 1.0; // Valid MDE
-    let outcome = Outcome::Completed(result);
+    let outcome = make_fail(0.98, MeasurementQuality::Poor);
     assert!(outcome.is_reliable());
 }
 
@@ -153,19 +133,26 @@ fn is_reliable_valid_mde_with_conclusive_posterior_returns_true() {
 // ============================================================================
 
 #[test]
-fn handle_unreliable_reliable_returns_some() {
-    let result = make_result(0.95, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
+fn handle_unreliable_reliable_pass_returns_some() {
+    let outcome = make_pass(0.02, MeasurementQuality::Good);
 
     let handled = outcome.handle_unreliable("test", UnreliablePolicy::FailOpen);
     assert!(handled.is_some());
-    assert_eq!(handled.unwrap().leak_probability, 0.95);
+    assert!(handled.unwrap().passed());
+}
+
+#[test]
+fn handle_unreliable_reliable_fail_returns_some() {
+    let outcome = make_fail(0.98, MeasurementQuality::Good);
+
+    let handled = outcome.handle_unreliable("test", UnreliablePolicy::FailOpen);
+    assert!(handled.is_some());
+    assert!(handled.unwrap().failed());
 }
 
 #[test]
 fn handle_unreliable_fail_open_returns_none() {
-    let result = make_result(0.5, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
 
     let handled = outcome.handle_unreliable("test", UnreliablePolicy::FailOpen);
     assert!(handled.is_none());
@@ -174,8 +161,7 @@ fn handle_unreliable_fail_open_returns_none() {
 #[test]
 #[should_panic(expected = "[UNRELIABLE]")]
 fn handle_unreliable_fail_closed_panics() {
-    let result = make_result(0.5, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
 
     let _ = outcome.handle_unreliable("test", UnreliablePolicy::FailClosed);
 }
@@ -207,51 +193,98 @@ fn handle_unreliable_unmeasurable_fail_closed_panics() {
 }
 
 // ============================================================================
-// Outcome::unwrap_completed() and completed() tests
+// Outcome helper method tests
 // ============================================================================
 
 #[test]
-fn unwrap_completed_returns_result() {
-    let result = make_result(0.8, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
-
-    let unwrapped = outcome.unwrap_completed();
-    assert_eq!(unwrapped.leak_probability, 0.8);
+fn outcome_passed_returns_true_for_pass() {
+    let outcome = make_pass(0.02, MeasurementQuality::Good);
+    assert!(outcome.passed());
+    assert!(!outcome.failed());
 }
 
 #[test]
-#[should_panic(expected = "unmeasurable")]
-fn unwrap_completed_panics_on_unmeasurable() {
-    let outcome = Outcome::Unmeasurable {
-        operation_ns: 15.0,
-        threshold_ns: 200.0,
-        platform: "Test Platform".to_string(),
-        recommendation: "N/A".to_string(),
+fn outcome_failed_returns_true_for_fail() {
+    let outcome = make_fail(0.98, MeasurementQuality::Good);
+    assert!(outcome.failed());
+    assert!(!outcome.passed());
+}
+
+#[test]
+fn outcome_is_conclusive() {
+    let pass = make_pass(0.02, MeasurementQuality::Good);
+    assert!(pass.is_conclusive());
+
+    let fail = make_fail(0.98, MeasurementQuality::Good);
+    assert!(fail.is_conclusive());
+
+    let inconclusive = make_inconclusive(0.5, MeasurementQuality::Good);
+    assert!(!inconclusive.is_conclusive());
+
+    let unmeasurable = Outcome::Unmeasurable {
+        operation_ns: 10.0,
+        threshold_ns: 100.0,
+        platform: "test".to_string(),
+        recommendation: "test".to_string(),
     };
-
-    let _ = outcome.unwrap_completed();
+    assert!(!unmeasurable.is_conclusive());
 }
 
 #[test]
-fn completed_returns_some_for_completed() {
-    let result = make_result(0.8, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_measurable() {
+    let pass = make_pass(0.02, MeasurementQuality::Good);
+    assert!(pass.is_measurable());
 
-    let completed = outcome.completed();
-    assert!(completed.is_some());
-}
+    let fail = make_fail(0.98, MeasurementQuality::Good);
+    assert!(fail.is_measurable());
 
-#[test]
-fn completed_returns_none_for_unmeasurable() {
-    let outcome = Outcome::Unmeasurable {
-        operation_ns: 15.0,
-        threshold_ns: 200.0,
-        platform: "Test".to_string(),
-        recommendation: "N/A".to_string(),
+    let inconclusive = make_inconclusive(0.5, MeasurementQuality::Good);
+    assert!(inconclusive.is_measurable());
+
+    let unmeasurable = Outcome::Unmeasurable {
+        operation_ns: 10.0,
+        threshold_ns: 100.0,
+        platform: "test".to_string(),
+        recommendation: "test".to_string(),
     };
+    assert!(!unmeasurable.is_measurable());
+}
 
-    let completed = outcome.completed();
-    assert!(completed.is_none());
+#[test]
+fn outcome_leak_probability_returns_value() {
+    let pass = make_pass(0.02, MeasurementQuality::Good);
+    assert_eq!(pass.leak_probability(), Some(0.02));
+
+    let fail = make_fail(0.98, MeasurementQuality::Good);
+    assert_eq!(fail.leak_probability(), Some(0.98));
+
+    let inconclusive = make_inconclusive(0.5, MeasurementQuality::Good);
+    assert_eq!(inconclusive.leak_probability(), Some(0.5));
+
+    let unmeasurable = Outcome::Unmeasurable {
+        operation_ns: 10.0,
+        threshold_ns: 100.0,
+        platform: "test".to_string(),
+        recommendation: "test".to_string(),
+    };
+    assert_eq!(unmeasurable.leak_probability(), None);
+}
+
+#[test]
+fn outcome_quality_returns_value() {
+    let pass = make_pass(0.02, MeasurementQuality::Excellent);
+    assert_eq!(pass.quality(), Some(MeasurementQuality::Excellent));
+
+    let fail = make_fail(0.98, MeasurementQuality::Poor);
+    assert_eq!(fail.quality(), Some(MeasurementQuality::Poor));
+
+    let unmeasurable = Outcome::Unmeasurable {
+        operation_ns: 10.0,
+        threshold_ns: 100.0,
+        platform: "test".to_string(),
+        recommendation: "test".to_string(),
+    };
+    assert_eq!(unmeasurable.quality(), None);
 }
 
 // ============================================================================
@@ -295,27 +328,6 @@ fn unreliable_policy_from_env_fail_closed() {
 }
 
 // ============================================================================
-// TestResult::can_detect() tests
-// ============================================================================
-
-#[test]
-fn can_detect_true_when_mde_below_threshold() {
-    let result = make_result(0.5, MeasurementQuality::Good);
-    // MDE shift is 5.0, so can detect effects >= 5.0
-    assert!(result.can_detect(5.0));
-    assert!(result.can_detect(10.0));
-    assert!(result.can_detect(100.0));
-}
-
-#[test]
-fn can_detect_false_when_mde_above_threshold() {
-    let result = make_result(0.5, MeasurementQuality::Good);
-    // MDE shift is 5.0, so cannot detect effects < 5.0
-    assert!(!result.can_detect(4.0));
-    assert!(!result.can_detect(1.0));
-}
-
-// ============================================================================
 // Macro tests (basic functionality)
 // ============================================================================
 
@@ -325,8 +337,7 @@ fn skip_if_unreliable_macro_skips_unreliable() {
     static REACHED_END: AtomicBool = AtomicBool::new(false);
 
     fn test_fn() {
-        let result = make_result(0.5, MeasurementQuality::TooNoisy);
-        let outcome = Outcome::Completed(result);
+        let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
         let _result = timing_oracle::skip_if_unreliable!(outcome, "test");
         // If we get here, macro didn't skip
         REACHED_END.store(true, Ordering::SeqCst);
@@ -342,30 +353,27 @@ fn skip_if_unreliable_macro_skips_unreliable() {
 }
 
 #[test]
-fn skip_if_unreliable_macro_returns_result_when_reliable() {
-    let result = make_result(0.95, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
+fn skip_if_unreliable_macro_returns_outcome_when_reliable() {
+    let outcome = make_pass(0.02, MeasurementQuality::Good);
 
     // This should not skip
     let returned = timing_oracle::skip_if_unreliable!(outcome, "test");
-    assert_eq!(returned.leak_probability, 0.95);
+    assert!(returned.passed());
 }
 
 #[test]
-fn require_reliable_macro_returns_result_when_reliable() {
-    let result = make_result(0.95, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
+fn require_reliable_macro_returns_outcome_when_reliable() {
+    let outcome = make_fail(0.98, MeasurementQuality::Good);
 
-    // This should return the result
+    // This should return the outcome
     let returned = timing_oracle::require_reliable!(outcome, "test");
-    assert_eq!(returned.leak_probability, 0.95);
+    assert!(returned.failed());
 }
 
 #[test]
 #[should_panic(expected = "[UNRELIABLE]")]
 fn require_reliable_macro_panics_when_unreliable() {
-    let result = make_result(0.5, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
 
     // This should panic
     let _ = timing_oracle::require_reliable!(outcome, "test");

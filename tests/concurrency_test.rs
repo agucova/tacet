@@ -1,8 +1,9 @@
 //! Test that the library is safe to use concurrently from multiple threads.
 
 use std::thread;
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 #[test]
 fn library_is_thread_safe() {
@@ -24,7 +25,9 @@ fn library_is_thread_safe() {
                     },
                 );
 
-                let outcome = TimingOracle::quick().test(inputs, |arr| {
+                let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+                    .time_budget(Duration::from_secs(10))
+                    .test(inputs, |arr| {
                     let mut acc = 0u32;
                     for byte in arr {
                         acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
@@ -35,7 +38,10 @@ fn library_is_thread_safe() {
                 // Verify we got a result
                 matches!(
                     outcome,
-                    Outcome::Completed(_) | Outcome::Unmeasurable { .. }
+                    Outcome::Pass { .. }
+                        | Outcome::Fail { .. }
+                        | Outcome::Inconclusive { .. }
+                        | Outcome::Unmeasurable { .. }
                 )
             })
         })
@@ -66,7 +72,9 @@ fn library_works_with_many_sequential_calls() {
             },
         );
 
-        let outcome = TimingOracle::calibration().test(inputs, |arr| {
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(5))
+            .test(inputs, |arr| {
             let mut acc = 0u32;
             for byte in arr {
                 acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
@@ -76,7 +84,10 @@ fn library_works_with_many_sequential_calls() {
 
         assert!(matches!(
             outcome,
-            Outcome::Completed(_) | Outcome::Unmeasurable { .. }
+            Outcome::Pass { .. }
+                | Outcome::Fail { .. }
+                | Outcome::Inconclusive { .. }
+                | Outcome::Unmeasurable { .. }
         ));
     }
 }

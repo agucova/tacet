@@ -906,59 +906,111 @@ Anomaly detection requires the input type to be hashable. For types that don't s
 
 ### 4.1 Result Types
 
+The adaptive Bayesian oracle returns one of four outcomes:
+
 ```rust
-pub struct TestResult {
-    pub leak_probability: f64,        // P(effect > θ), from 0.0 to 1.0
-    pub effect: Effect,               // Shift/tail decomposition
-    pub exploitability: Exploitability,
-    pub min_detectable_effect: MinDetectableEffect,
-    pub ci_gate: CiGate,
-    pub quality: MeasurementQuality,
-    pub diagnostics: Diagnostics,
-    pub winsorized_fraction: f64,     // Fraction capped as outliers
-    pub attacker_model: AttackerModel,
-}
-
 pub enum Outcome {
-    Completed(TestResult),
-    Unmeasurable { operation_ns: f64, threshold_ns: f64, platform: String, recommendation: String },
+    /// No timing leak detected. P(leak) < pass_threshold (default 0.05).
+    Pass {
+        leak_probability: f64,     // P(effect > θ | data)
+        effect: EffectEstimate,    // Shift/tail decomposition
+        samples_used: usize,
+        quality: MeasurementQuality,
+        diagnostics: Diagnostics,
+    },
+
+    /// Timing leak confirmed. P(leak) > fail_threshold (default 0.95).
+    Fail {
+        leak_probability: f64,
+        effect: EffectEstimate,
+        exploitability: Exploitability,
+        samples_used: usize,
+        quality: MeasurementQuality,
+        diagnostics: Diagnostics,
+    },
+
+    /// Cannot reach a definitive conclusion.
+    Inconclusive {
+        reason: InconclusiveReason,
+        leak_probability: f64,     // Current posterior
+        effect: EffectEstimate,
+        samples_used: usize,
+        quality: MeasurementQuality,
+        diagnostics: Diagnostics,
+    },
+
+    /// Operation too fast to measure reliably.
+    Unmeasurable {
+        operation_ns: f64,
+        threshold_ns: f64,
+        platform: String,
+        recommendation: String,
+    },
 }
 
-pub struct Effect {
-    pub shift_ns: f64,                // Uniform shift (positive = fixed slower)
-    pub tail_ns: f64,                 // Tail effect (positive = fixed has heavier upper tail)
+pub enum InconclusiveReason {
+    /// Data is too noisy to reach a conclusion.
+    DataTooNoisy { message: String, guidance: String },
+
+    /// Posterior is not converging toward either threshold.
+    NotLearning { message: String, guidance: String },
+
+    /// Reaching a conclusion would take too long.
+    WouldTakeTooLong { estimated_time_secs: f64, samples_needed: usize, guidance: String },
+
+    /// Time budget exhausted.
+    Timeout { current_probability: f64, samples_collected: usize },
+
+    /// Sample budget exhausted.
+    SampleBudgetExceeded { current_probability: f64, samples_collected: usize },
+}
+
+pub struct EffectEstimate {
+    pub shift_ns: f64,                     // Uniform shift (positive = baseline slower)
+    pub tail_ns: f64,                      // Tail effect (positive = baseline has heavier upper tail)
     pub credible_interval_ns: (f64, f64),  // 95% CI for total effect
     pub pattern: EffectPattern,
-    pub prob_shift_exceeds_threshold: f64,  // Diagnostic: P(|μ| > θ)
-    pub prob_tail_exceeds_threshold: f64,   // Diagnostic: P(|τ| > θ)
 }
 
-pub enum EffectPattern { UniformShift, TailEffect, Mixed }
-
-pub struct CiGate {
-    pub passed: bool,                 // Q_hat_max ≤ critical_value
-    pub alpha: f64,                   // Target FPR
-    pub threshold_theta_ns: f64,      // θ in ns
-    pub q_hat_max: f64,               // Test statistic
-    pub critical_value: f64,          // Bootstrap critical value
-    pub max_distance_ns: f64,         // Raw max |q_F(k) - q_R(k)|
-    pub margin: f64,                  // critical_value - q_hat_max
-    pub discrete_mode: bool,
-    pub filtered_quantile_count: usize,
+pub enum EffectPattern {
+    UniformShift,   // All quantiles shifted equally
+    TailEffect,     // Upper quantiles shifted more
+    Mixed,          // Both components significant
+    Indeterminate,  // Neither significant
 }
 
 pub enum Exploitability {
-    Undetectable,      // < 1 cycle
-    ExploitableLocal,  // 1–100 cycles (SGX, shared hosting)
-    ExploitableLAN,    // 100–500 ns
-    LikelyExploitable, // 500 ns – 20 μs
-    ExploitableRemote, // > 20 μs
+    Negligible,     // < 100 ns
+    PossibleLAN,    // 100–500 ns
+    LikelyLAN,      // 500 ns – 20 μs
+    PossibleRemote, // > 20 μs
 }
 
 pub enum MeasurementQuality {
-    Good,
-    Acceptable { issues: Vec<QualityIssue> },
-    TooNoisy { issues: Vec<QualityIssue> },
+    Excellent,  // MDE < 5 ns
+    Good,       // MDE 5-20 ns
+    Poor,       // MDE 20-100 ns
+    TooNoisy,   // MDE > 100 ns
+}
+
+pub struct Diagnostics {
+    pub dependence_length: usize,
+    pub effective_sample_size: usize,
+    pub stationarity_ratio: f64,
+    pub stationarity_ok: bool,
+    pub model_fit_chi2: f64,
+    pub model_fit_ok: bool,
+    pub outlier_rate_baseline: f64,
+    pub outlier_rate_sample: f64,
+    pub outlier_asymmetry_ok: bool,
+    pub discrete_mode: bool,
+    pub timer_resolution_ns: f64,
+    pub duplicate_fraction: f64,
+    pub preflight_ok: bool,
+    pub calibration_samples: usize,
+    pub total_time_secs: f64,
+    pub warnings: Vec<String>,
+    pub quality_issues: Vec<QualityIssue>,
 }
 
 pub struct QualityIssue {
@@ -972,16 +1024,6 @@ pub enum IssueCode {
     SmallSampleDiscrete, HighGeneratorCost, LowUniqueInputs, QuantilesFiltered,
     ThresholdClamped, HighWinsorRate,
 }
-
-pub struct Diagnostics {
-    pub dependence_length: usize,      // Block size for bootstrap
-    pub effective_sample_size: usize,  // ESS ≈ n / dependence_length
-    pub stationarity_suspect: bool,
-    pub filtered_quantiles: Vec<FilteredQuantile>,
-    pub discrete_mode: bool,
-    pub timer_resolution_ns: f64,
-    pub duplicate_fraction: f64,
-}
 ```
 
 ### 4.2 Configuration
@@ -990,261 +1032,197 @@ pub struct Diagnostics {
 
 The most important configuration choice is your **attacker model**, which determines what size leak you consider "negligible." SILENT's key insight [2] is that the right question isn't "is there any timing difference?" but "is the difference > θ under my threat model?"
 
-**There is no single correct θ.** SILENT explicitly demonstrates this using KyberSlash: under Crosby-style thresholds (~100ns), the ~20-cycle leak isn't flagged as practically significant; under Kario-style thresholds (~1 cycle), it is. Your choice of preset is a statement about your threat model.
+**There is no single correct θ.** Your choice of preset is a statement about your threat model.
 
 ```rust
 pub enum AttackerModel {
-    // ═══════════════════════════════════════════════════════════════════
-    // LOCAL ATTACKER PRESETS
-    // ═══════════════════════════════════════════════════════════════════
-    
-    /// Local attacker with cycle-level timing (rdtsc, perf, kperf)
-    /// θ = 2 cycles
-    /// Use for: SGX enclaves, shared hosting, local privilege escalation
-    /// Source: Kario argues even 1 cycle is detectable over LAN—so for
-    /// same-host attackers, 1–2 cycles is the conservative stance.
-    LocalCycles,
-    
-    /// Local attacker but only coarse timers available
-    /// θ = 1 tick (whatever the timer resolution is)
-    /// Use for: Sandboxed environments, tick-only measurement, noisy scheduling
-    /// Rationale: This isn't "attacker is weaker"—it's "measurement primitive
-    /// is weaker." Picks the smallest meaningful θ for your timer.
-    LocalCoarseTimer,
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // LAN ATTACKER PRESETS
-    // ═══════════════════════════════════════════════════════════════════
-    
-    /// Strict LAN attacker ("Kario-style")
-    /// θ = 2 cycles
-    /// Use for: High-security internal services where LAN attackers are capable
-    /// Source: Kario argues even ~1 clock cycle can be detectable over LAN.
-    /// SILENT explicitly contrasts this with Crosby's more relaxed view.
-    /// Warning: May produce "TooNoisy" on coarse timers.
-    LANStrict,
-    
-    /// Conservative LAN attacker ("Crosby-style")
+    /// Co-resident attacker with cycle-level timing.
+    /// θ = 0.6 ns (~2 cycles @ 3GHz)
+    ///
+    /// Use for: SGX enclaves, cross-VM attacks, containers on shared hosts,
+    /// hyperthreading siblings, local privilege escalation.
+    ///
+    /// Source: Kario argues even 1 cycle is detectable when attacker shares
+    /// hardware. This is the strictest practical threshold.
+    SharedHardware,
+
+    /// Adjacent network attacker (LAN, HTTP/2 multiplexing).
     /// θ = 100 ns
-    /// Use for: Internal services, database servers, microservices
-    /// Source: Crosby et al. (2009) report attackers can measure with
-    /// "accuracy as good as 100ns over a local network."
-    LANConservative,
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // WAN ATTACKER PRESETS
-    // ═══════════════════════════════════════════════════════════════════
-    
-    /// Optimistic WAN attacker (low-jitter environments)
-    /// θ = 15 μs
-    /// Use for: Same-region cloud, datacenter-to-datacenter, low-jitter paths
-    /// Source: Best-case end of Crosby's 15–100μs internet range.
-    /// Note: Less anchored than Conservative; use when you have reason to
-    /// believe network conditions are favorable.
-    WANOptimistic,
-    
-    /// Conservative WAN attacker (general internet)
+    ///
+    /// Use for: Internal services, microservices, HTTP/2 APIs where
+    /// Timeless Timing Attacks apply (request multiplexing eliminates jitter).
+    ///
+    /// Source: Crosby et al. (2009) report ~100ns LAN accuracy.
+    /// Van Goethem et al. (2020) show HTTP/2 enables similar precision remotely.
+    AdjacentNetwork,
+
+    /// Remote network attacker (general internet).
     /// θ = 50 μs
-    /// Use for: Public APIs, web services, general internet exposure
-    /// Source: Crosby et al. (2009) report 15–100μs accuracy across internet;
-    /// 50μs is a reasonable midpoint.
-    WANConservative,
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // SPECIAL-PURPOSE PRESETS
-    // ═══════════════════════════════════════════════════════════════════
-    
-    /// Calibrated to catch KyberSlash-class vulnerabilities
-    /// θ = 10 cycles
-    /// Use for: Post-quantum crypto, division-based leaks, "don't ignore
-    /// 20-cycle class vulnerabilities"
-    /// Source: SILENT characterizes KyberSlash as ~20 cycles on Raspberry Pi
-    /// 2B (900MHz Cortex-A7). θ=10 ensures such leaks are non-negligible.
-    KyberSlashSentinel,
-    
-    /// Research mode: detect any statistical difference (θ → 0)
+    ///
+    /// Use for: Public APIs, web services, legacy HTTP/1.1 services.
+    ///
+    /// Source: Crosby et al. (2009) report 15–100μs internet accuracy;
+    /// 50μs is a reasonable midpoint for general internet exposure.
+    RemoteNetwork,
+
+    /// Research mode: detect any statistical difference (θ → 0).
+    ///
     /// Warning: Will flag tiny, unexploitable differences. Not for CI.
-    /// Use for: Profiling, debugging, academic analysis, finding any leak
+    /// Use for: Profiling, debugging, academic analysis.
     Research,
-    
-    // ═══════════════════════════════════════════════════════════════════
-    // CUSTOM THRESHOLDS
-    // ═══════════════════════════════════════════════════════════════════
-    
-    /// Custom threshold in nanoseconds
-    CustomNs { threshold_ns: f64 },
-    
-    /// Custom threshold in cycles (more portable across CPUs)
-    CustomCycles { threshold_cycles: u32 },
-    
-    /// Custom threshold in timer ticks (for tick-based timers)
-    CustomTicks { threshold_ticks: u32 },
+
+    /// Custom threshold in nanoseconds.
+    Custom { threshold_ns: f64 },
 }
 ```
 
 **Preset summary:**
 
-| Preset | θ | Native unit | Threat model |
-|--------|---|-------------|--------------|
-| `LocalCycles` | 2 cycles | cycles | Co-resident attacker, strong timer |
-| `LocalCoarseTimer` | 1 tick | ticks | Co-resident attacker, weak timer |
-| `LANStrict` | 2 cycles | cycles | LAN attacker, Kario-style (capable) |
-| `LANConservative` | 100 ns | ns | LAN attacker, Crosby-style |
-| `WANOptimistic` | 15 μs | ns | Internet, low-jitter path |
-| `WANConservative` | 50 μs | ns | Internet, general |
-| `KyberSlashSentinel` | 10 cycles | cycles | Catch ~20-cycle leaks |
-| `Research` | 0 | — | Detect any difference |
-
-**The LAN dispute:** SILENT goes out of its way to show that "what counts as negligible on LAN?" is genuinely disputed. `LANStrict` vs `LANConservative` represents this fork explicitly—pick based on your threat model, not based on what's convenient.
+| Preset | θ | Use case |
+|--------|---|----------|
+| `SharedHardware` | 0.6 ns (~2 cycles @ 3GHz) | SGX, cross-VM, containers, hyperthreading |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 (Timeless Timing Attacks) |
+| `RemoteNetwork` | 50 μs | Internet, legacy services |
+| `Research` | 0 | Profiling, debugging (not for CI) |
 
 **Sources:**
 
-- **Crosby et al. (2009)**: "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC. Reports ~100ns LAN accuracy, 15–100μs internet accuracy.
-- **Kario**: Argues timing differences as small as one clock cycle can be detectable over local networks. SILENT cites this as the "strict" alternative to Crosby.
-- **SILENT [2]**: Uses KyberSlash (~20 cycles on Raspberry Pi 2B @ 900MHz Cortex-A7) to demonstrate how conclusions flip based on θ choice.
+- **Crosby et al. (2009)**: "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC.
+- **Van Goethem et al. (2020)**: "Timeless Timing Attacks." USENIX Security. Shows HTTP/2 request multiplexing enables LAN-like precision over the internet.
+- **Kario**: Argues timing differences as small as one clock cycle can be detectable when sharing hardware.
 
 **Recommended usage:**
 
 ```rust
-// Internet: WANConservative | Internal LAN: LANConservative | Strict LAN: LANStrict
-// SGX/shared hosting: LocalCycles | Post-quantum: KyberSlashSentinel
-let result = timing_test! {
-    oracle: TimingOracle::for_attacker(AttackerModel::WANConservative),
-    fixed: || verify_signature(&secret_key, &msg),
-    random: || verify_signature(&random_key, &msg),
-};
-```
+use timing_oracle::{TimingOracle, AttackerModel, Outcome};
+use std::time::Duration;
 
-**Output always shows θ in context:**
+// Choose based on deployment scenario
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
+    .max_samples(100_000)
+    .test(inputs, |data| operation(data));
 
-```
-CI gate: FAIL (α=1%) for leaks > θ=100ns [LANConservative]
-Observed distance: d=247ns (≈741 cycles @ 3.0GHz)
-Margin: d−θ = 147ns
-```
-
-#### Native Units for θ
-
-**Critical:** θ should be applied in the timer's native units for robustness:
-
-| Timer type | θ applied as | Rationale |
-|------------|--------------|-----------|
-| Cycle counter (rdtsc, perf, kperf) | cycles | "10 cycles" is portable across CPUs |
-| Tick timer (cntvct_el0) | ticks | Avoids sub-tick thresholds |
-| Nanosecond timer | ns | Direct comparison |
-
-When a cycle-based preset (like `LocalCycles` or `LANStrict`) would collapse to < 1 tick on a coarse timer, the library warns and suggests alternatives:
-
-```
-Warning: LANStrict requires θ=2 cycles, but timer resolution is 41ns (~123 cycles).
-Effective θ clamped to 1 tick. Options:
-  - Use a cycle counter (perf/kperf) for this attacker model
-  - Switch to LANConservative (θ=100ns) which is measurable on this timer
-  - Accept reduced sensitivity with LocalCoarseTimer (θ=1 tick)
-```
-
-This prevents strict presets from being silently meaningless on coarse timers.
-
-#### TimingOracle
-
-The main configuration type with builder pattern:
-
-```rust
-impl TimingOracle {
-    // Attacker-model presets (recommended)
-    pub fn for_attacker(model: AttackerModel) -> Self;
-    
-    // Sample-count presets
-    pub fn new() -> Self;       // 100k samples, thorough
-    pub fn balanced() -> Self;  // 20k samples, good for CI
-    pub fn quick() -> Self;     // 5k samples, development
-    
-    // Fine-grained configuration
-    pub fn samples(self, n: usize) -> Self;
-    pub fn warmup(self, n: usize) -> Self;
-    pub fn ci_alpha(self, alpha: f64) -> Self;
-    pub fn min_effect_of_concern_ns(self, ns: f64) -> Self;
-    pub fn min_effect_of_concern_cycles(self, cycles: u32) -> Self;
-    pub fn attacker_model(self, model: AttackerModel) -> Self;
-    pub fn bootstrap_iterations(self, b: usize) -> Self;
+match outcome {
+    Outcome::Pass { leak_probability, effect, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+        println!("Leak detected: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+    }
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        println!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipping: {}", recommendation);
+    }
 }
 ```
 
-**Combining presets:**
+#### TimingOracle
+
+The main configuration type. Use `for_attacker()` as the entry point:
 
 ```rust
-// LANConservative threat model, but fewer samples for faster CI
-TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .samples(20_000)
+impl TimingOracle {
+    /// Create oracle for a specific attacker model (recommended entry point).
+    pub fn for_attacker(model: AttackerModel) -> Self;
 
-// Maximum sensitivity for thorough local investigation
-TimingOracle::new()
-    .bootstrap_iterations(10_000)
+    // Adaptive sampling configuration
+    pub fn time_budget(self, duration: Duration) -> Self;  // Max time to spend
+    pub fn max_samples(self, n: usize) -> Self;            // Max samples per class
+    pub fn batch_size(self, k: u32) -> Self;               // Force specific batch size
+
+    // Decision thresholds
+    pub fn pass_threshold(self, p: f64) -> Self;           // P(leak) < p → Pass (default 0.05)
+    pub fn fail_threshold(self, p: f64) -> Self;           // P(leak) > p → Fail (default 0.95)
+
+    // Run the test
+    pub fn test<T, F>(self, inputs: InputPair<T>, operation: F) -> Outcome
+    where
+        F: FnMut(&T);
+}
 ```
 
-Output always shows both cycles and nanoseconds when a cycle counter is available:
+**Example configurations:**
 
-```
-Threshold: θ = 100ns (≈300 cycles @ 3.0GHz)
-Threshold: θ = 10 cycles ≈ 3.3ns @ 3.0GHz
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+use std::time::Duration;
+
+// Quick check during development (10 second budget)
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(10))
+
+// Thorough CI check (60 second budget, up to 100k samples)
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .time_budget(Duration::from_secs(60))
+    .max_samples(100_000)
+
+// Custom thresholds for specific requirements
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
+    .pass_threshold(0.01)   // Very confident pass
+    .fail_threshold(0.99)   // Very confident fail
 ```
 
 #### Key Configuration Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| samples | 100,000 | Samples per class |
-| warmup | 1,000 | Warmup iterations |
-| ci_alpha | 0.01 | CI gate false positive rate (α) |
-| min_effect_of_concern | 10.0 ns | Threshold θ for practical significance; effects below this are considered negligible |
-| attacker_model | LANConservative | Determines default θ; can be overridden by explicit min_effect_of_concern |
-| bootstrap_iterations | 2,000 | B for CI gate; use 10,000 for thorough mode |
+| `time_budget` | 30 seconds | Maximum time to spend on analysis |
+| `max_samples` | 100,000 | Maximum samples per class |
+| `batch_size` | auto | Operations per timing measurement (auto-tuned) |
+| `pass_threshold` | 0.05 | P(leak) below this → Pass |
+| `fail_threshold` | 0.95 | P(leak) above this → Fail |
 
 ### 4.3 Macro API
 
 ```rust
-let result = timing_test! {
-    oracle: TimingOracle::balanced(),  // Optional
-    setup: { let key = Aes128::new(&KEY); },  // Optional
-    fixed: [0u8; 32],                  // Required: evaluated once
-    random: || rand::random::<[u8; 32]>(),  // Required: closure, called per sample
-    test: |input| { key.encrypt(&input); },  // Required
+use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use std::time::Duration;
+
+let outcome = timing_test_checked! {
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30)),
+    baseline: || [0u8; 32],
+    sample: || rand::random::<[u8; 32]>(),
+    measure: |input| my_function(&input),
 };
-assert!(result.ci_gate.passed);
+
+match outcome {
+    Outcome::Pass { .. } => println!("No timing leak"),
+    Outcome::Fail { exploitability, .. } => println!("Leak: {:?}", exploitability),
+    Outcome::Inconclusive { reason, .. } => println!("Inconclusive"),
+    Outcome::Unmeasurable { .. } => println!("Too fast to measure"),
+}
 ```
 
-The `random` field requires a closure (`|| expr`)—this syntax mirrors the semantics.
+The `sample` field requires a closure (`|| expr`)—this syntax mirrors the semantics.
 
-**Checked variant** (`timing_test_checked!`) returns `Outcome` for explicit unmeasurable handling.
-
-**Multiple inputs**: Use tuple destructuring: `fixed: (a, b), random: || (ra, rb), test: |(x, y)| ...`
+**Multiple inputs**: Use tuple destructuring: `baseline: || (a, b), sample: || (ra, rb), measure: |(x, y)| ...`
 
 ### 4.4 Builder API
 
 ```rust
-let result = TimingTest::new()
-    .oracle(TimingOracle::balanced())
-    .fixed([0u8; 32])
-    .random(|| rand::random::<[u8; 32]>())
-    .test(|input| secret.ct_eq(&input))
-    .run();  // Returns Outcome
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use std::time::Duration;
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
+    .test(inputs, |data| my_function(data));
 ```
 
-### 4.5 Raw API
-
-```rust
-let inputs = InputPair::new([0u8; 32], || rand::random());
-let result = test(|| encrypt(&inputs.fixed()), || encrypt(&inputs.random()));
-```
-
-`InputPair` separates input generation from measurement. Both `.fixed()` and `.random()` return owned `T`. Anomaly detection tracks uniqueness if the type is hashable.
+`InputPair` separates input generation from measurement. Both closures return owned `T`.
 
 | API | Returns | Best for |
 |-----|---------|----------|
-| `timing_test!` | `TestResult` | Most users; panics if unmeasurable |
-| `timing_test_checked!` | `Outcome` | Platform-adaptive tests |
-| `TimingTest` builder | `Outcome` | Macro-averse |
-| `InputPair` + `test()` | `Outcome` | Full control |
+| `timing_test_checked!` | `Outcome` | Most users |
+| Builder API | `Outcome` | Programmatic control |
 
 ---
 

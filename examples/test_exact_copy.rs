@@ -1,6 +1,7 @@
 //! Tests that must not false-positive on constant-time code.
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 fn main() {
     test_no_false_positive_xor_compare();
@@ -12,33 +13,40 @@ fn test_no_false_positive_xor_compare() {
     // Pre-generate inputs using InputPair
     let inputs = InputPair::new(|| [0xABu8; 32], rand_bytes);
 
-    let outcome = TimingOracle::new().samples(100_000).test(inputs, |data| {
-        constant_time_compare(&secret, data);
-    });
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .max_samples(100_000)
+        .test(inputs, |data| {
+            constant_time_compare(&secret, data);
+        });
 
-    let result = match outcome {
-        Outcome::Completed(r) => r,
+    let leak_probability = match &outcome {
+        Outcome::Pass { leak_probability, .. } => *leak_probability,
+        Outcome::Fail { leak_probability, .. } => *leak_probability,
+        Outcome::Inconclusive { leak_probability, .. } => *leak_probability,
         Outcome::Unmeasurable { .. } => {
             println!("Operation too fast to measure");
             return;
         }
     };
 
-    println!("Leak probability: {}", result.leak_probability);
-    println!("CI gate passed: {}", result.ci_gate.passed());
+    let passed = outcome.passed();
 
-    if result.leak_probability > 0.5 {
+    println!("Leak probability: {}", leak_probability);
+    println!("Test passed: {}", passed);
+
+    if leak_probability > 0.5 {
         println!(
             "ERROR: False positive! leak_probability={}",
-            result.leak_probability
+            leak_probability
         );
     } else {
         println!("OK: No false positive detected");
     }
-    if !result.ci_gate.passed() {
-        println!("ERROR: CI gate failed!");
+    if !passed {
+        println!("ERROR: Test failed!");
     } else {
-        println!("OK: CI gate passed");
+        println!("OK: Test passed");
     }
 }
 

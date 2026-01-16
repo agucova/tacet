@@ -1,7 +1,8 @@
 //! Debug test to understand Bayesian calibration issue
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 #[test]
 fn debug_bayesian_null_data() {
@@ -12,19 +13,35 @@ fn debug_bayesian_null_data() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(rand_bytes, rand_bytes);
 
-        let outcome = TimingOracle::quick()
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
             .test(inputs, |data| {
                 std::hint::black_box(data);
             });
 
         match outcome {
-            Outcome::Completed(result) => {
-                eprintln!("Trial {}: leak_prob={:.1}%  MDE={:.1}ns/{:.1}ns  effect={:?}",
+            Outcome::Pass { leak_probability, effect, .. } => {
+                eprintln!("Trial {}: PASS leak_prob={:.1}%  effect={:.1}ns/{:.1}ns",
                     trial + 1,
-                    result.leak_probability * 100.0,
-                    result.min_detectable_effect.shift_ns,
-                    result.min_detectable_effect.tail_ns,
-                    result.effect.as_ref().map(|e| format!("{:.1}ns/{:.1}ns", e.shift_ns, e.tail_ns))
+                    leak_probability * 100.0,
+                    effect.shift_ns,
+                    effect.tail_ns
+                );
+            }
+            Outcome::Fail { leak_probability, effect, .. } => {
+                eprintln!("Trial {}: FAIL leak_prob={:.1}%  effect={:.1}ns/{:.1}ns",
+                    trial + 1,
+                    leak_probability * 100.0,
+                    effect.shift_ns,
+                    effect.tail_ns
+                );
+            }
+            Outcome::Inconclusive { leak_probability, effect, .. } => {
+                eprintln!("Trial {}: INCONCLUSIVE leak_prob={:.1}%  effect={:.1}ns/{:.1}ns",
+                    trial + 1,
+                    leak_probability * 100.0,
+                    effect.shift_ns,
+                    effect.tail_ns
                 );
             }
             Outcome::Unmeasurable { operation_ns, threshold_ns, .. } => {

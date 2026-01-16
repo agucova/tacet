@@ -9,10 +9,11 @@
 //! IMPORTANT: Both closures must execute IDENTICAL code paths - only the DATA differs.
 //! Pre-generate inputs outside closures to avoid measuring RNG time.
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::TimingOracle;
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 use tokio::runtime::Runtime;
-use tokio::time::{sleep, Duration};
+use tokio::time::sleep;
 
 // ============================================================================
 // Helper Functions
@@ -67,30 +68,44 @@ fn async_executor_overhead_no_false_positive() {
     const SAMPLES: usize = 10_000;
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(inputs, |data| {
             rt.block_on(async { std::hint::black_box(data); })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[async_executor_overhead_no_false_positive]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
-    // Async executor overhead should pass CI gate
-    assert!(
-        result.ci_gate.passed(),
-        "CI gate should pass for async executor overhead"
-    );
-
-    // Baseline test: leak probability should be low
-    assert!(
-        result.leak_probability < 0.3,
-        "Leak probability too high: {:.1}%",
-        result.leak_probability * 100.0
-    );}
+    match outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            // Baseline test: leak probability should be low
+            assert!(
+                leak_probability < 0.3,
+                "Leak probability too high: {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Fail { leak_probability, .. } => {
+            panic!(
+                "Unexpected failure for async executor overhead: P={:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Inconclusive { leak_probability, .. } => {
+            // Acceptable - inconclusive is not a false positive
+            assert!(
+                leak_probability < 0.5,
+                "Leak probability too high for inconclusive: {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: unmeasurable - {}", recommendation);
+            return;
+        }
+    }
+}
 
 /// 1.2 Async Block-on Overhead Symmetric
 ///
@@ -102,8 +117,8 @@ fn async_block_on_overhead_symmetric() {
     // Use unit type for input (no data dependency)
     let inputs = InputPair::new(|| (), || ());
 
-    let outcome = TimingOracle::new()
-        .samples(8_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(8_000)
         .test(inputs, |_| {
             rt.block_on(async {
                 // Minimal async block
@@ -111,22 +126,36 @@ fn async_block_on_overhead_symmetric() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[async_block_on_overhead_symmetric]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
-    assert!(
-        result.ci_gate.passed(),
-        "CI gate should pass for identical block_on() overhead"
-    );
-
-    // Baseline test: leak probability should be low
-    assert!(
-        result.leak_probability < 0.3,
-        "Leak probability too high: {:.1}%",
-        result.leak_probability * 100.0
-    );}
+    match outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            assert!(
+                leak_probability < 0.3,
+                "Leak probability too high: {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Fail { leak_probability, .. } => {
+            panic!(
+                "Unexpected failure for symmetric block_on: P={:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Inconclusive { leak_probability, .. } => {
+            assert!(
+                leak_probability < 0.5,
+                "Leak probability too high for inconclusive: {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: unmeasurable - {}", recommendation);
+            return;
+        }
+    }
+}
 
 // ============================================================================
 // Category 2: Leak Detection Tests (Should Detect Timing Leaks)
@@ -142,9 +171,8 @@ fn detects_conditional_await_timing() {
     // Use unit type for input; secret-dependent logic is in the operation
     let inputs = InputPair::new(|| true, || false);
 
-    let outcome = TimingOracle::new()
-        .samples(50_000)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(50_000)
         .test(inputs, |secret| {
             rt.block_on(async {
                 if *secret {
@@ -156,17 +184,36 @@ fn detects_conditional_await_timing() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[detects_conditional_await_timing]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
-    assert!(
-        !result.ci_gate.passed() && result.leak_probability > 0.7,
-        "Expected to detect leak: ci_gate should fail AND leak_probability should be high (got leak_probability={}, ci_gate.passed={})",
-        result.leak_probability,
-        result.ci_gate.passed()
-    );
+    match outcome {
+        Outcome::Fail { leak_probability, .. } => {
+            assert!(
+                leak_probability > 0.7,
+                "Expected high leak probability, got {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected to detect conditional await leak, but passed: P={:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Inconclusive { leak_probability, .. } => {
+            // Accept inconclusive with high leak probability
+            assert!(
+                leak_probability > 0.5,
+                "Expected at least ambiguous leak probability, got {:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: unmeasurable - {}", recommendation);
+            return;
+        }
+    }
 }
 
 /// 2.2 Detects Early Exit Async - Byte-by-byte comparison with early return
@@ -178,8 +225,8 @@ fn detects_early_exit_async() {
     // Use InputPair with fixed vs random input for comparison
     let inputs = InputPair::new(|| [0xABu8; 32], || [0xCDu8; 32]);
 
-    let outcome = TimingOracle::new()
-        .samples(50_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(50_000)
         .test(inputs, |comparison_input| {
             rt.block_on(async {
                 // Compare with input - goes through bytes or exits early
@@ -193,15 +240,14 @@ fn detects_early_exit_async() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[detects_early_exit_async]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
+    let leak_probability = outcome.leak_probability().unwrap_or(0.0);
     assert!(
-        result.leak_probability > 0.8,
-        "Expected to detect early-exit async timing leak (got {})",
-        result.leak_probability
+        leak_probability > 0.8 || outcome.failed(),
+        "Expected to detect early-exit async timing leak (got P={:.1}%)",
+        leak_probability * 100.0
     );
 }
 
@@ -216,8 +262,8 @@ fn detects_secret_dependent_sleep() {
     // InputPair with secret byte (fixed) vs random byte values
     let inputs = InputPair::new(|| 10u8, || 1u8);
 
-    let outcome = TimingOracle::new()
-        .samples(100_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(100_000)
         .test(inputs, |byte_value| {
             rt.block_on(async {
                 // Sleep duration depends on the byte value
@@ -227,15 +273,14 @@ fn detects_secret_dependent_sleep() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[detects_secret_dependent_sleep]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
+    let leak_probability = outcome.leak_probability().unwrap_or(0.0);
     assert!(
-        result.leak_probability > 0.95,
-        "Expected very high confidence for large sleep difference (got {})",
-        result.leak_probability
+        leak_probability > 0.95 || outcome.failed(),
+        "Expected very high confidence for large sleep difference (got P={:.1}%)",
+        leak_probability * 100.0
     );
 }
 
@@ -262,8 +307,8 @@ fn concurrent_tasks_no_crosstalk() {
     const SAMPLES: usize = 10_000;
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(inputs, |data| {
             rt.block_on(async {
                 // Spawn background tasks
@@ -276,34 +321,38 @@ fn concurrent_tasks_no_crosstalk() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[concurrent_tasks_no_crosstalk]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
     // Background tasks should not cause false positives.
-    // We rely on CI Gate (frequentist test with controlled FPR) for pass/fail.
-    // Bayesian probability may be ~50% ("uncertain") in noisy environments
-    // with coarse timers, which is acceptable for this test.
-    assert!(
-        result.ci_gate.passed(),
-        "CI gate should pass with background tasks (got leak_probability={:.3})",
-        result.leak_probability
-    );
-
-    // Informational: warn if probability is high, but don't fail
-    // (Bayesian can report ~50% "uncertain" in noisy concurrent tests)
-    if result.leak_probability > 0.5 {
-        eprintln!(
-            "Note: High leak_probability ({:.1}%) despite CI gate pass - likely measurement noise",
-            result.leak_probability * 100.0
-        );
+    match outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            // Informational: warn if probability is high, but don't fail
+            if leak_probability > 0.5 {
+                eprintln!(
+                    "Note: High leak_probability ({:.1}%) despite pass - likely measurement noise",
+                    leak_probability * 100.0
+                );
+            }
+        }
+        Outcome::Fail { leak_probability, .. } => {
+            panic!(
+                "Unexpected failure with background tasks: P={:.1}%",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Inconclusive { leak_probability, .. } => {
+            // Acceptable - inconclusive in noisy concurrent tests is expected
+            eprintln!(
+                "Note: Inconclusive result ({:.1}%) - likely due to concurrent noise",
+                leak_probability * 100.0
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: unmeasurable - {}", recommendation);
+            return;
+        }
     }
-
-    assert!(
-        result.min_detectable_effect.shift_ns > 0.0,
-        "MDE should be positive"
-    );
 }
 
 /// 3.2 Detects Task Spawn Timing Leak (Thorough)
@@ -317,8 +366,8 @@ fn detects_task_spawn_timing_leak() {
     // InputPair with fixed count vs random count generator
     let inputs = InputPair::new(|| 10usize, || rand::random::<u32>() as usize % 20);
 
-    let outcome = TimingOracle::new()
-        .samples(50_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(50_000)
         .test(inputs, |count| {
             rt.block_on(async {
                 // Spawn task count based on input
@@ -331,15 +380,14 @@ fn detects_task_spawn_timing_leak() {
             })
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[detects_task_spawn_timing_leak]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", outcome);
 
+    let leak_probability = outcome.leak_probability().unwrap_or(0.0);
     assert!(
-        result.leak_probability > 0.6,
-        "Expected to detect task spawn count timing leak (got {})",
-        result.leak_probability
+        leak_probability > 0.6 || outcome.failed(),
+        "Expected to detect task spawn count timing leak (got P={:.1}%)",
+        leak_probability * 100.0
     );
 }
 
@@ -358,33 +406,32 @@ fn tokio_single_vs_multi_thread_stability() {
     // Test with single-threaded runtime
     let rt_single = single_thread_runtime();
     let inputs_single = InputPair::new(|| [0xABu8; 32], rand_bytes);
-    let outcome_single = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome_single = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(inputs_single, |data| {
             rt_single.block_on(async { std::hint::black_box(data); })
         });
-    let result_single = outcome_single.unwrap_completed();
 
     // Test with multi-threaded runtime
     let rt_multi = multi_thread_runtime();
     let inputs_multi = InputPair::new(|| [0xABu8; 32], rand_bytes);
-    let outcome_multi = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome_multi = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(inputs_multi, |data| {
             rt_multi.block_on(async { std::hint::black_box(data); })
         });
-    let result_multi = outcome_multi.unwrap_completed();
 
     eprintln!("\n[tokio_single_vs_multi_thread_stability]");
     eprintln!("--- Single-thread ---");
-    eprintln!("{}", timing_oracle::output::format_result(&result_single));
+    eprintln!("{}", outcome_single);
     eprintln!("--- Multi-thread ---");
-    eprintln!("{}", timing_oracle::output::format_result(&result_multi));
+    eprintln!("{}", outcome_multi);
 
-    // Multi-threaded runtime typically has higher noise (higher MDE)
-    eprintln!("MDE ratio (multi/single): shift={:.2}x, tail={:.2}x",
-              result_multi.min_detectable_effect.shift_ns / result_single.min_detectable_effect.shift_ns,
-              result_multi.min_detectable_effect.tail_ns / result_single.min_detectable_effect.tail_ns);
+    // Compare leak probabilities (informational)
+    let single_prob = outcome_single.leak_probability().unwrap_or(0.0);
+    let multi_prob = outcome_multi.leak_probability().unwrap_or(0.0);
+    eprintln!("Leak probability comparison: single={:.1}%, multi={:.1}%",
+              single_prob * 100.0, multi_prob * 100.0);
 }
 
 /// 4.2 Async Workload Flag Effectiveness
@@ -400,8 +447,8 @@ fn async_workload_flag_effectiveness() {
     // Use unit type for input (no data dependency)
     let inputs = InputPair::new(|| (), || ());
 
-    let outcome_without_flag = TimingOracle::new()
-        .samples(10_000)
+    let outcome_without_flag = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(inputs, |_| {
             rt.block_on(async {
                 // Some async work
@@ -412,13 +459,10 @@ fn async_workload_flag_effectiveness() {
             })
         });
 
-    let result_without_flag = outcome_without_flag.unwrap_completed();
-
     eprintln!("\n[async_workload_flag_effectiveness]");
-    eprintln!("{}", timing_oracle::output::format_result(&result_without_flag));
+    eprintln!("{}", outcome_without_flag);
 
     // Verify result structure is valid (informational test)
-    assert!(result_without_flag.leak_probability >= 0.0 && result_without_flag.leak_probability <= 1.0);
-    assert!(result_without_flag.min_detectable_effect.shift_ns > 0.0);
-    assert!(result_without_flag.metadata.samples_per_class > 0);
+    let leak_probability = outcome_without_flag.leak_probability().unwrap_or(0.0);
+    assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
 }

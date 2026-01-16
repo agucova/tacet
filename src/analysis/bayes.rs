@@ -1,37 +1,47 @@
-//! Layer 2: Bayesian inference for timing leak detection (spec §2.5).
+//! Layer 2: Bayesian inference for timing leak detection.
+//!
+//! See spec §2.5 (Bayesian Inference) for the full methodology.
 //!
 //! This module computes the posterior probability of a timing leak using:
-//! - Sample splitting (calibration/inference handled by the caller)
-//! - Conjugate Gaussian model with closed-form posterior
+//! - Conjugate Gaussian model with closed-form posterior (no MCMC required)
 //! - Monte Carlo integration for leak probability
 //!
-//! ## Model
+//! ## Model (spec §2.5)
 //!
-//! Δ = Xβ + ε,  ε ~ N(0, Σ₀)
+//! Δ = Xβ + ε,  ε ~ N(0, Σ_n)
 //!
 //! where:
 //! - Δ is the observed quantile differences (9-vector)
-//! - X is the design matrix [1 | b_tail] (9×2)
-//! - β = (μ, τ)ᵀ is the effect vector (shift and tail components)
-//! - Σ₀ is the null covariance from bootstrap estimation
+//! - X is the design matrix [1 | b_tail] (9×2) for effect decomposition
+//! - β = (μ, τ)ᵀ is the effect vector (uniform shift and tail components)
+//! - Σ_n is the covariance matrix (already scaled for inference sample size)
 //!
-//! ## Prior
+//! ## Prior (spec §2.5)
 //!
 //! β ~ N(0, Λ₀),  Λ₀ = diag(σ_μ², σ_τ²)
 //!
-//! ## Posterior
+//! The prior scale is set adaptively: max(2×MDE, θ)
+//!
+//! ## Posterior (spec §2.5)
 //!
 //! β | Δ ~ N(β_post, Λ_post)
 //!
 //! where:
-//! - Λ_post = (XᵀΣ₀⁻¹X + Λ₀⁻¹)⁻¹
-//! - β_post = Λ_post Xᵀ Σ₀⁻¹ Δ
+//! - Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
+//! - β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
 //!
-//! ## Leak Probability
+//! ## Leak Probability (spec §2.5)
 //!
 //! P(significant leak | Δ) = P(max_k |(Xβ)_k| > θ | Δ)
 //!
-//! Computed via Monte Carlo: draw samples from posterior, count exceedances.
+//! Computed via Monte Carlo: draw 1000 samples from posterior, count exceedances.
+//!
+//! ## Covariance Scaling
+//!
+//! The caller is responsible for providing appropriately scaled covariance.
+//! In the adaptive architecture, this is Σ_rate / n where:
+//! - Σ_rate is the asymptotic rate matrix from covariance estimation
+//! - n is the current inference sample size
 
 use nalgebra::Cholesky;
 use rand::prelude::*;
@@ -44,54 +54,90 @@ use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 /// Number of Monte Carlo samples for leak probability estimation.
 const N_MONTE_CARLO: usize = 1000;
 
-/// Result from Bayesian analysis.
+/// Result from Bayesian analysis (spec §2.5).
+///
+/// Contains the posterior distribution parameters and derived quantities
+/// needed for the adaptive sampling loop and effect estimation.
 #[derive(Debug, Clone)]
 pub struct BayesResult {
-    /// Posterior probability of a significant leak: P(max_k |(Xβ)_k| > θ | Δ)
-    /// This is THE leak probability from the Bayesian layer (spec §2.5).
-    pub posterior_probability: f64,
-    /// 95% credible interval for total effect magnitude: (2.5th, 97.5th) percentiles of ||β||₂
+    /// Posterior probability of a significant leak: P(max_k |(Xβ)_k| > θ | Δ).
+    ///
+    /// This is the leak probability from the Bayesian layer (spec §2.5).
+    /// Computed via Monte Carlo integration over the posterior distribution.
+    /// Range: 0.0 to 1.0
+    pub leak_probability: f64,
+
+    /// 95% credible interval for total effect magnitude: (2.5th, 97.5th) percentiles of ||β||₂.
+    ///
+    /// Note: This CI may not contain the point estimate when β ≈ 0 because ||·|| is non-negative.
     pub effect_magnitude_ci: (f64, f64),
-    /// Posterior mean of β = (μ, τ)
-    pub beta_post: Vector2,
-    /// Posterior covariance of β
-    pub lambda_post: Matrix2,
-    /// Whether the computation encountered numerical issues
+
+    /// Posterior mean of β = (μ, τ) in nanoseconds.
+    ///
+    /// - β[0] = μ (uniform shift): All quantiles move equally
+    /// - β[1] = τ (tail effect): Upper quantiles shift more than lower
+    pub beta_mean: Vector2,
+
+    /// Posterior covariance of β.
+    ///
+    /// Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
+    /// Used for effect significance testing and credible intervals.
+    pub beta_cov: Matrix2,
+
+    /// Whether the computation encountered numerical issues (e.g., Cholesky failure).
+    ///
+    /// If true, the posterior is set to the prior (maximally uncertain).
     pub is_clamped: bool,
-    /// Null covariance used for inference.
-    pub sigma0: Matrix9,
+
+    /// Covariance matrix used for inference (after regularization).
+    ///
+    /// This is the input Σ_n after applying variance floor regularization
+    /// for numerical stability.
+    pub sigma_n: Matrix9,
 }
 
-/// Compute the posterior probability of a timing leak via Monte Carlo integration.
+/// Compute Bayesian posterior for timing leak analysis (spec §2.5).
 ///
-/// This implements spec §2.5:
-/// 1. Compute posterior distribution β | Δ ~ N(β_post, Λ_post)
-/// 2. Draw N = 1000 samples from the posterior
-/// 3. For each sample, compute max_k |(Xβ)_k| and check if > θ
-/// 4. For each sample, compute ||β||₂
-/// 5. Return the exceedance probability (under H1) and the CI of magnitudes
+/// Uses conjugate Gaussian model: Δ = Xβ + ε, ε ~ N(0, Σ_n)
+/// - Prior: β ~ N(0, Λ₀)
+/// - Posterior: β|Δ ~ N(β_post, Λ_post)
+///   - Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
+///   - β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
+/// - Leak probability: P(max_k |Xβ|_k > θ | Δ) via Monte Carlo
 ///
 /// # Arguments
 ///
-/// * `observed_diff` - Observed quantile differences (baseline - sample)
-/// * `sigma0` - Covariance of delta under H0 (from calibration)
-/// * `prior_sigmas` - Prior standard deviations (shift, tail) in ns
+/// * `delta` - Observed quantile differences (9-vector, baseline - sample)
+/// * `sigma_n` - Covariance matrix already scaled for inference sample size.
+///              In the adaptive architecture, this is Σ_rate / n.
+/// * `prior_sigmas` - Prior standard deviations (σ_μ, σ_τ) in nanoseconds.
+///                    Typically set to max(2×MDE, θ).
 /// * `theta` - Minimum effect of concern (threshold for practical significance)
-/// * `seed` - Random seed for reproducibility
+/// * `seed` - Random seed for Monte Carlo reproducibility
+///
+/// # Returns
+///
+/// `BayesResult` containing:
+/// - `leak_probability`: P(max_k |(Xβ)_k| > θ | Δ)
+/// - `beta_mean`, `beta_cov`: Posterior distribution parameters
+/// - `effect_magnitude_ci`: 95% CI for ||β||₂
 pub fn compute_bayes_factor(
-    observed_diff: &Vector9,
-    sigma0: &Matrix9,
+    delta: &Vector9,
+    sigma_n: &Matrix9,
     prior_sigmas: (f64, f64),
     theta: f64,
     seed: Option<u64>,
 ) -> BayesResult {
-    compute_posterior_monte_carlo(observed_diff, sigma0, prior_sigmas, theta, seed)
+    compute_posterior_monte_carlo(delta, sigma_n, prior_sigmas, theta, seed)
 }
 
 /// Compute posterior probability via Monte Carlo integration (spec §2.5).
+///
+/// Internal implementation that handles all the linear algebra for
+/// conjugate Gaussian inference.
 pub fn compute_posterior_monte_carlo(
-    observed_diff: &Vector9,
-    sigma0: &Matrix9,
+    delta: &Vector9,
+    sigma_n: &Matrix9,
     prior_sigmas: (f64, f64),
     theta: f64,
     seed: Option<u64>,
@@ -100,61 +146,57 @@ pub fn compute_posterior_monte_carlo(
     let lambda0 = prior_covariance(prior_sigmas);
 
     // Compute posterior parameters (spec §2.5)
-    // Λ_post = (XᵀΣ₀⁻¹X + Λ₀⁻¹)⁻¹
-    // β_post = Λ_post Xᵀ Σ₀⁻¹ Δ
+    // Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
+    // β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
 
-    // Always regularize covariance for consistency with effect decomposition (spec §2.6)
+    // Always regularize covariance for numerical stability (spec §2.6)
     // This ensures CI and probability use the same posterior distribution
-    let regularized = add_jitter(*sigma0);
-    let sigma0_chol = match Cholesky::new(regularized) {
+    let regularized = add_jitter(*sigma_n);
+    let sigma_n_chol = match Cholesky::new(regularized) {
         Some(c) => c,
         None => {
-            // Fallback: return neutral result
-            return neutral_result(sigma0, &lambda0, &design);
+            // Fallback: return neutral result (maximally uncertain)
+            return neutral_result(sigma_n, &lambda0, &design);
         }
     };
 
-    // Σ₀⁻¹ = L⁻ᵀ L⁻¹
-    let sigma0_inv = sigma0_chol.inverse();
+    // Σ_n⁻¹ via Cholesky: L L^T = Σ_n, so Σ_n⁻¹ = L^{-T} L^{-1}
+    let sigma_n_inv = sigma_n_chol.inverse();
 
-    // XᵀΣ₀⁻¹X (2×2 matrix)
-    let xt_sigma0_inv_x = design.transpose() * sigma0_inv * design;
+    // Xᵀ Σ_n⁻¹ X (2×2 precision contribution from data)
+    let xt_sigma_n_inv_x = design.transpose() * sigma_n_inv * design;
 
-    // Λ₀⁻¹
+    // Λ₀⁻¹ (prior precision)
     let lambda0_inv = Matrix2::from_diagonal(&Vector2::new(
         1.0 / lambda0[(0, 0)].max(1e-12),
         1.0 / lambda0[(1, 1)].max(1e-12),
     ));
 
-    // Λ_post = (XᵀΣ₀⁻¹X + Λ₀⁻¹)⁻¹
-    let precision_post = xt_sigma0_inv_x + lambda0_inv;
+    // Posterior precision: Λ_post⁻¹ = Xᵀ Σ_n⁻¹ X + Λ₀⁻¹
+    let precision_post = xt_sigma_n_inv_x + lambda0_inv;
     let lambda_post_chol = match Cholesky::new(precision_post) {
         Some(c) => c,
         None => {
-            return neutral_result(sigma0, &lambda0, &design);
+            return neutral_result(sigma_n, &lambda0, &design);
         }
     };
-    let lambda_post = lambda_post_chol.inverse();
+    // Posterior covariance: Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
+    let beta_cov = lambda_post_chol.inverse();
 
-    // β_post = Λ_post Xᵀ Σ₀⁻¹ Δ
-    let beta_post = lambda_post * design.transpose() * sigma0_inv * observed_diff;
+    // Posterior mean: β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
+    let beta_mean = beta_cov * design.transpose() * sigma_n_inv * delta;
 
     // Monte Carlo integration for leak probability and effect CI
-    let (posterior_probability, effect_magnitude_ci) = run_monte_carlo(
-        &design,
-        &beta_post,
-        &lambda_post,
-        theta,
-        seed.unwrap_or(42),
-    );
+    let (leak_probability, effect_magnitude_ci) =
+        run_monte_carlo(&design, &beta_mean, &beta_cov, theta, seed.unwrap_or(42));
 
     BayesResult {
-        posterior_probability,
+        leak_probability,
         effect_magnitude_ci,
-        beta_post,
-        lambda_post,
+        beta_mean,
+        beta_cov,
         is_clamped: false,
-        sigma0: *sigma0,
+        sigma_n: regularized,
     }
 }
 
@@ -222,19 +264,29 @@ fn sample_standard_normal<R: Rng>(rng: &mut R) -> f64 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
 }
 
-/// Return a neutral result when computation fails.
-fn neutral_result(sigma0: &Matrix9, lambda0: &Matrix2, _design: &Matrix9x2) -> BayesResult {
+/// Return a neutral result when computation fails (maximally uncertain).
+///
+/// Sets leak_probability = 0.5 (no information) and posterior = prior.
+/// Marks is_clamped = true to signal the numerical issue to callers.
+fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix2, _design: &Matrix9x2) -> BayesResult {
     BayesResult {
-        posterior_probability: 0.5,
+        leak_probability: 0.5,
         effect_magnitude_ci: (0.0, 0.0),
-        beta_post: Vector2::zeros(),
-        lambda_post: *lambda0,
+        beta_mean: Vector2::zeros(),
+        beta_cov: *lambda0,
         is_clamped: true,
-        sigma0: *sigma0,
+        sigma_n: *sigma_n,
     }
 }
 
-
+/// Build design matrix for effect decomposition (spec §2.5).
+///
+/// X = [1 | b_tail] where:
+/// - Column 0 (ones): Uniform shift - all quantiles move equally
+/// - Column 1 (b_tail): Tail effect - upper quantiles shift more than lower
+///   b_tail = [-0.5, -0.375, -0.25, -0.125, 0, 0.125, 0.25, 0.375, 0.5]
+///
+/// The tail basis is centered (sums to zero) so μ and τ are orthogonal.
 pub(crate) fn build_design_matrix() -> Matrix9x2 {
     let mut x = Matrix9x2::zeros();
     for i in 0..9 {
@@ -275,18 +327,19 @@ fn mvn_log_pdf_zero(x: &Vector9, sigma: &Matrix9) -> Option<f64> {
     Some(-0.5 * (9.0 * LOG_2PI + log_det + mahal_sq))
 }
 
-/// Add diagonal jitter for numerical stability (spec §2.6).
+/// Apply variance floor regularization for numerical stability (spec §2.6).
 ///
-/// When some quantiles have zero variance (common in discrete mode with ties),
-/// the covariance matrix becomes ill-conditioned. Even if Cholesky succeeds,
-/// the inverse has huge values for near-zero variance elements, causing them
-/// to dominate the Bayesian regression incorrectly.
+/// When some quantiles have zero or near-zero variance (common in discrete mode
+/// with ties), the covariance matrix becomes ill-conditioned. Even if Cholesky
+/// succeeds, the inverse has huge values for near-zero variance elements,
+/// causing them to dominate the Bayesian regression incorrectly.
 ///
 /// We regularize by ensuring a minimum diagonal value of 1% of mean variance.
 /// This bounds the condition number to ~100, preventing numerical instability.
 ///
-/// Formula: σ²ᵢ = max(σ²ᵢ, 0.01 × mean_var) + ε
-/// where ε = 10⁻¹⁰ + mean_var × 10⁻⁸
+/// Formula (spec §2.6):
+///   σ²ᵢ ← max(σ²ᵢ, 0.01 × σ̄²) + ε
+/// where σ̄² = tr(Σ)/9 and ε = 10⁻¹⁰ + σ̄² × 10⁻⁸
 fn add_jitter(mut sigma: Matrix9) -> Matrix9 {
     let trace: f64 = (0..9).map(|i| sigma[(i, i)]).sum();
     let mean_var = trace / 9.0;
@@ -325,7 +378,7 @@ mod tests {
         // the computation falls back gracefully
         use crate::types::Vector9;
 
-        let observed_diff = Vector9::from_row_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        let delta = Vector9::from_row_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
 
         // Create a pathological covariance with huge condition number
         let mut pathological = Matrix9::identity();
@@ -333,101 +386,97 @@ mod tests {
             pathological[(i, i)] = if i == 0 { 1e20 } else { 1e-20 };
         }
 
-        let result = compute_bayes_factor(&observed_diff, &pathological, (10.0, 10.0), 10.0, Some(42));
+        let result = compute_bayes_factor(&delta, &pathological, (10.0, 10.0), 10.0, Some(42));
 
         // Result should be valid (probability between 0 and 1)
-        assert!(result.posterior_probability >= 0.0 && result.posterior_probability <= 1.0);
+        assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
     }
 
     #[test]
     fn test_monte_carlo_no_effect() {
         // With zero observed difference, leak probability should be low
-        let observed_diff = Vector9::zeros();
-        let sigma0 = Matrix9::identity();
+        let delta = Vector9::zeros();
+        let sigma_n = Matrix9::identity();
 
         let result = compute_posterior_monte_carlo(
-            &observed_diff,
-            &sigma0,
+            &delta,
+            &sigma_n,
             (10.0, 10.0),
             10.0, // threshold
             Some(42),
         );
 
         // With no effect and identity covariance, most samples should be below θ
-        assert!(result.posterior_probability < 0.5,
-            "With zero effect, leak probability should be low, got {}", result.posterior_probability);
+        assert!(
+            result.leak_probability < 0.5,
+            "With zero effect, leak probability should be low, got {}",
+            result.leak_probability
+        );
     }
 
     #[test]
     fn test_monte_carlo_large_effect() {
         // With large observed difference, leak probability should be high
-        let observed_diff = Vector9::from_row_slice(&[100.0; 9]);
-        let sigma0 = Matrix9::identity();
+        let delta = Vector9::from_row_slice(&[100.0; 9]);
+        let sigma_n = Matrix9::identity();
 
         let result = compute_posterior_monte_carlo(
-            &observed_diff,
-            &sigma0,
+            &delta,
+            &sigma_n,
             (10.0, 10.0),
             10.0, // threshold
             Some(42),
         );
 
         // With 100ns effect and 10ns threshold, almost all samples should exceed
-        assert!(result.posterior_probability > 0.9,
-            "With large effect, leak probability should be high, got {}", result.posterior_probability);
+        assert!(
+            result.leak_probability > 0.9,
+            "With large effect, leak probability should be high, got {}",
+            result.leak_probability
+        );
     }
 
     #[test]
     fn test_monte_carlo_determinism() {
         // Same seed should give same result
-        let observed_diff = Vector9::from_row_slice(&[5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]);
-        let sigma0 = Matrix9::identity();
+        let delta = Vector9::from_row_slice(&[5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]);
+        let sigma_n = Matrix9::identity();
 
-        let result1 = compute_posterior_monte_carlo(
-            &observed_diff,
-            &sigma0,
-            (10.0, 10.0),
-            10.0,
-            Some(42),
+        let result1 = compute_posterior_monte_carlo(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
+
+        let result2 = compute_posterior_monte_carlo(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
+
+        assert_eq!(
+            result1.leak_probability, result2.leak_probability,
+            "Same seed should give same result"
         );
-
-        let result2 = compute_posterior_monte_carlo(
-            &observed_diff,
-            &sigma0,
-            (10.0, 10.0),
-            10.0,
-            Some(42),
-        );
-
-        assert_eq!(result1.posterior_probability, result2.posterior_probability,
-            "Same seed should give same result");
     }
 
     #[test]
     fn test_zero_delta_gives_low_probability() {
         // With zero observed difference, the Monte Carlo probability should be low
-        let observed_diff = Vector9::zeros();
-        let sigma0 = Matrix9::identity();
-        let result = compute_bayes_factor(&observed_diff, &sigma0, (10.0, 10.0), 10.0, Some(42));
+        let delta = Vector9::zeros();
+        let sigma_n = Matrix9::identity();
+        let result = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
 
         // With zero effect, we shouldn't be confident about a leak
         assert!(
-            result.posterior_probability < 0.5,
+            result.leak_probability < 0.5,
             "Zero-delta should give low leak probability, got {}",
-            result.posterior_probability
+            result.leak_probability
         );
     }
 
     #[test]
     fn test_exceedance_monotonic_in_theta() {
-        let observed_diff = Vector9::zeros();
-        let sigma0 = Matrix9::identity();
+        let delta = Vector9::zeros();
+        let sigma_n = Matrix9::identity();
 
-        let result_small = compute_bayes_factor(&observed_diff, &sigma0, (10.0, 10.0), 1.0, Some(42));
-        let result_large = compute_bayes_factor(&observed_diff, &sigma0, (10.0, 10.0), 1.0e6, Some(42));
+        let result_small = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 1.0, Some(42));
+        let result_large = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 1.0e6, Some(42));
 
         assert!(
-            result_small.posterior_probability > result_large.posterior_probability,
+            result_small.leak_probability > result_large.leak_probability,
             "Exceedance probability should decrease as theta grows"
         );
     }

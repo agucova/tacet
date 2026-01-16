@@ -171,6 +171,10 @@ impl WelfordCovariance9 {
 /// and computes their sample covariance. Jitter is added to the diagonal
 /// for numerical stability.
 ///
+/// See spec section 2.6 (Covariance Estimation):
+/// - Uses block bootstrap to preserve autocorrelation structure
+/// - Block length from Politis-White algorithm
+///
 /// # Arguments
 ///
 /// * `data` - Timing measurements for a single input class
@@ -183,11 +187,11 @@ impl WelfordCovariance9 {
 ///
 /// # Algorithm
 ///
-/// 1. Compute block size as sqrt(n)
+/// 1. Compute block size using Politis-White algorithm
 /// 2. For each bootstrap replicate:
 ///    a. Resample measurements with block bootstrap
 ///    b. Compute deciles for the resampled data
-/// 3. Compute sample covariance of quantile vectors
+/// 3. Compute sample covariance of quantile vectors using Welford's online algorithm
 /// 4. Add jitter to diagonal for numerical stability
 pub fn bootstrap_covariance_matrix(
     data: &[f64],
@@ -296,10 +300,19 @@ fn resample_with_indices(data: &[f64], indices: &[usize], block_size: usize, buf
 /// This captures cross-covariance Cov(q_F, q_R) > 0 from common-mode noise, giving the
 /// correct (smaller) Var(Δ) and improving statistical power.
 ///
+/// See spec section 2.6 (Covariance Estimation):
+/// - Uses paired block bootstrap: same indices for both classes
+/// - Block length from Politis-White algorithm
+/// - Σ_rate = Σ_cal × n_cal (covariance scales as 1/n)
+///
+/// This function is designed to work with calibration sample counts (default 5000)
+/// and supports the adaptive architecture by providing covariance estimates that
+/// can be scaled via `compute_covariance_rate` and `scale_covariance_rate`.
+///
 /// # Arguments
 ///
 /// * `interleaved` - Timing samples in measurement order, each tagged with class
-/// * `n_bootstrap` - Number of bootstrap replicates (typically 50-100)
+/// * `n_bootstrap` - Number of bootstrap replicates (typically 50-100 for adaptive, 2000 for thorough)
 /// * `seed` - Random seed for reproducibility
 ///
 /// # Returns
@@ -308,13 +321,13 @@ fn resample_with_indices(data: &[f64], indices: &[usize], block_size: usize, buf
 ///
 /// # Algorithm
 ///
-/// 1. Compute block size as ceil(1.3 * n^(1/3))
+/// 1. Compute block size using Politis-White algorithm (per-class, take max)
 /// 2. For each bootstrap replicate:
 ///    a. Block-resample the JOINT interleaved sequence (preserving temporal pairing)
 ///    b. Split by class AFTER resampling
 ///    c. Compute q_F* and q_R* from the split data
 ///    d. Compute Δ* = q_F* - q_R*
-/// 3. Compute sample covariance of Δ* vectors
+/// 3. Compute sample covariance of Δ* vectors using Welford's online algorithm
 /// 4. Add jitter to diagonal for numerical stability
 pub fn bootstrap_difference_covariance(
     interleaved: &[crate::types::TimingSample],
@@ -640,6 +653,8 @@ pub fn apply_variance_floor(mut matrix: Matrix9, timer_resolution_ns: f64) -> Ma
 /// for inference set (n_inf samples). Quantile variance scales as 1/n,
 /// so we must adjust.
 ///
+/// See spec section 2.6 (Covariance Estimation): "Covariance scales as 1/n"
+///
 /// # Arguments
 ///
 /// * `matrix` - Covariance matrix estimated from calibration set
@@ -656,6 +671,71 @@ pub fn scale_covariance_for_inference(
 ) -> Matrix9 {
     let scale = n_calibration as f64 / n_inference as f64;
     matrix * scale
+}
+
+/// Compute covariance rate from calibration covariance.
+///
+/// The covariance rate Σ_rate = Σ_cal × n_cal allows efficient
+/// scaling during adaptive sampling: Σ_n = Σ_rate / n.
+///
+/// This is useful for adaptive sampling where the sample count
+/// grows over multiple rounds. Rather than re-bootstrapping
+/// covariance at each round, compute the rate once from
+/// calibration data and scale as needed.
+///
+/// See spec section 2.6 (Covariance Estimation): "Covariance scales as 1/n"
+///
+/// # Arguments
+///
+/// * `covariance` - Covariance matrix estimated from calibration set
+/// * `n_calibration` - Number of samples used for calibration
+///
+/// # Returns
+///
+/// The covariance rate matrix (Σ_rate = Σ_cal × n_cal).
+///
+/// # Example
+///
+/// ```ignore
+/// // During calibration phase with 5000 samples
+/// let sigma_cal = bootstrap_difference_covariance(&calibration_samples, 50, seed);
+/// let sigma_rate = compute_covariance_rate(&sigma_cal.matrix, 5000);
+///
+/// // During adaptive phase with varying n
+/// let sigma_10k = scale_covariance_rate(&sigma_rate, 10_000);
+/// let sigma_50k = scale_covariance_rate(&sigma_rate, 50_000);
+/// ```
+pub fn compute_covariance_rate(covariance: &Matrix9, n_calibration: usize) -> Matrix9 {
+    let scale = n_calibration as f64;
+    covariance * scale
+}
+
+/// Scale covariance rate to get covariance for n samples.
+///
+/// Given a covariance rate Σ_rate (computed via `compute_covariance_rate`),
+/// returns the covariance matrix for n samples: Σ_n = Σ_rate / n.
+///
+/// This enables efficient covariance estimation during adaptive sampling
+/// without re-running the bootstrap at each sample count.
+///
+/// See spec section 2.6 (Covariance Estimation): "Covariance scales as 1/n"
+///
+/// # Arguments
+///
+/// * `rate` - Covariance rate matrix (Σ_rate = Σ_cal × n_cal)
+/// * `n` - Number of samples for which to compute covariance
+///
+/// # Returns
+///
+/// The scaled covariance matrix Σ_n = Σ_rate / n.
+///
+/// # Panics
+///
+/// Panics if n is 0 (would cause division by zero).
+pub fn scale_covariance_rate(rate: &Matrix9, n: usize) -> Matrix9 {
+    assert!(n > 0, "Cannot scale covariance rate for 0 samples");
+    let scale = 1.0 / (n as f64);
+    rate * scale
 }
 
 /// Estimate minimum eigenvalue of a matrix.
@@ -940,6 +1020,180 @@ mod tests {
                     "Edge case should be deterministic at ({}, {})",
                     i,
                     j
+                );
+            }
+        }
+    }
+
+    // ========== Covariance Rate Tests ==========
+
+    #[test]
+    fn test_covariance_rate_roundtrip() {
+        // compute_covariance_rate followed by scale_covariance_rate should
+        // return to the original covariance when using the same n
+        let original = Matrix9::from_fn(|i, j| {
+            if i == j {
+                10.0 + i as f64
+            } else {
+                (i as f64 - j as f64).abs() * 0.5
+            }
+        });
+
+        let n_cal = 5000;
+        let rate = compute_covariance_rate(&original, n_cal);
+        let recovered = scale_covariance_rate(&rate, n_cal);
+
+        for i in 0..9 {
+            for j in 0..9 {
+                let diff = (original[(i, j)] - recovered[(i, j)]).abs();
+                assert!(
+                    diff < 1e-10,
+                    "Roundtrip failed at ({}, {}): original={}, recovered={}, diff={}",
+                    i,
+                    j,
+                    original[(i, j)],
+                    recovered[(i, j)],
+                    diff
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_covariance_rate_scaling() {
+        // Verify that Σ_n = Σ_rate / n produces correct scaling
+        // If Σ_cal was estimated from n_cal samples, then:
+        // - Σ_rate = Σ_cal * n_cal
+        // - Σ_{2*n_cal} = Σ_rate / (2*n_cal) = Σ_cal / 2
+
+        let sigma_cal = Matrix9::from_fn(|i, j| {
+            if i == j {
+                100.0 // Diagonal variance
+            } else if (i as i32 - j as i32).abs() == 1 {
+                50.0 // Adjacent covariance
+            } else {
+                10.0 // Other covariance
+            }
+        });
+
+        let n_cal = 1000;
+        let rate = compute_covariance_rate(&sigma_cal, n_cal);
+
+        // Double the sample size should halve the covariance
+        let sigma_2n = scale_covariance_rate(&rate, 2 * n_cal);
+        for i in 0..9 {
+            for j in 0..9 {
+                let expected = sigma_cal[(i, j)] / 2.0;
+                let actual = sigma_2n[(i, j)];
+                let diff = (expected - actual).abs();
+                assert!(
+                    diff < 1e-10,
+                    "2n scaling failed at ({}, {}): expected={}, actual={}",
+                    i,
+                    j,
+                    expected,
+                    actual
+                );
+            }
+        }
+
+        // 10x samples should reduce covariance by 10x
+        let sigma_10n = scale_covariance_rate(&rate, 10 * n_cal);
+        for i in 0..9 {
+            for j in 0..9 {
+                let expected = sigma_cal[(i, j)] / 10.0;
+                let actual = sigma_10n[(i, j)];
+                let diff = (expected - actual).abs();
+                assert!(
+                    diff < 1e-10,
+                    "10n scaling failed at ({}, {}): expected={}, actual={}",
+                    i,
+                    j,
+                    expected,
+                    actual
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_covariance_rate_matches_scale_for_inference() {
+        // Verify that covariance rate approach gives same result as
+        // scale_covariance_for_inference for the same transformation
+        let sigma_cal = Matrix9::from_fn(|i, j| {
+            if i == j {
+                25.0 + i as f64 * 2.0
+            } else {
+                5.0 / (1.0 + (i as f64 - j as f64).abs())
+            }
+        });
+
+        let n_cal = 3000;
+        let n_inf = 7000;
+
+        // Method 1: Direct scaling
+        let scaled_direct = scale_covariance_for_inference(sigma_cal, n_cal, n_inf);
+
+        // Method 2: Via covariance rate
+        let rate = compute_covariance_rate(&sigma_cal, n_cal);
+        let scaled_via_rate = scale_covariance_rate(&rate, n_inf);
+
+        for i in 0..9 {
+            for j in 0..9 {
+                let diff = (scaled_direct[(i, j)] - scaled_via_rate[(i, j)]).abs();
+                assert!(
+                    diff < 1e-10,
+                    "Methods differ at ({}, {}): direct={}, via_rate={}",
+                    i,
+                    j,
+                    scaled_direct[(i, j)],
+                    scaled_via_rate[(i, j)]
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Cannot scale covariance rate for 0 samples")]
+    fn test_scale_covariance_rate_zero_panics() {
+        let rate = Matrix9::identity();
+        let _ = scale_covariance_rate(&rate, 0);
+    }
+
+    #[test]
+    fn test_covariance_rate_preserves_symmetry() {
+        // Symmetric covariance should remain symmetric after rate operations
+        let symmetric = Matrix9::from_fn(|i, j| {
+            if i == j {
+                50.0
+            } else {
+                25.0 / (1.0 + (i as i32 - j as i32).abs() as f64)
+            }
+        });
+
+        // Verify input is symmetric
+        for i in 0..9 {
+            for j in 0..9 {
+                assert!(
+                    (symmetric[(i, j)] - symmetric[(j, i)]).abs() < 1e-12,
+                    "Input not symmetric"
+                );
+            }
+        }
+
+        let rate = compute_covariance_rate(&symmetric, 5000);
+        let scaled = scale_covariance_rate(&rate, 10000);
+
+        // Verify output is symmetric
+        for i in 0..9 {
+            for j in 0..9 {
+                let diff = (scaled[(i, j)] - scaled[(j, i)]).abs();
+                assert!(
+                    diff < 1e-12,
+                    "Rate operations broke symmetry at ({}, {}): diff={}",
+                    i,
+                    j,
+                    diff
                 );
             }
         }

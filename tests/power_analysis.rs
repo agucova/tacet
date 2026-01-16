@@ -12,7 +12,7 @@
 
 use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 // =============================================================================
 // MDE-CALIBRATED POWER CURVE
@@ -43,15 +43,20 @@ fn mde_calibrated_power_curve() {
             || rand::random::<[u8; 32]>(),
         );
 
-        let outcome = TimingOracle::quick()
-            .samples(SAMPLES)
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+            .max_samples(SAMPLES)
             .test(inputs, |data| {
                 std::hint::black_box(data);
             });
 
         match outcome {
-            Outcome::Completed(result) => {
-                mde_estimates.push(result.min_detectable_effect.shift_ns);
+            Outcome::Pass { effect, .. } |
+            Outcome::Fail { effect, .. } |
+            Outcome::Inconclusive { effect, .. } => {
+                // Use credible interval width as proxy for MDE
+                let ci_width = effect.credible_interval_ns.1 - effect.credible_interval_ns.0;
+                mde_estimates.push(ci_width / 2.0); // Half-width is approximate MDE
             }
             Outcome::Unmeasurable { recommendation, .. } => {
                 panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
@@ -93,8 +98,9 @@ fn mde_calibrated_power_curve() {
         for trial in 0..TRIALS_PER_MULTIPLE {
             let inputs = InputPair::new(|| false, || true);
 
-            let outcome = TimingOracle::quick()
-                .samples(SAMPLES)
+            let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+                .max_samples(SAMPLES)
                 .test(inputs, |should_delay| {
                     if *should_delay && effect_ns > 0.0 {
                         spin_delay_us(effect_us);
@@ -103,9 +109,15 @@ fn mde_calibrated_power_curve() {
                 });
 
             match outcome {
-                Outcome::Completed(result) => {
-                    // Detection = CI gate fails OR leak probability > 50%
-                    if !result.ci_gate.passed() || result.leak_probability > 0.5 {
+                Outcome::Pass { .. } => {
+                    // Not detected
+                }
+                Outcome::Fail { .. } => {
+                    detections += 1;
+                }
+                Outcome::Inconclusive { leak_probability, .. } => {
+                    // Count as detection if leak_probability > 50%
+                    if leak_probability > 0.5 {
                         detections += 1;
                     }
                 }
@@ -220,15 +232,20 @@ fn mde_scaling_validation() {
                 || rand::random::<[u8; 32]>(),
             );
 
-            let outcome = TimingOracle::quick()
-                .samples(samples)
+            let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+                .max_samples(samples)
                 .test(inputs, |data| {
                     std::hint::black_box(data);
                 });
 
             match outcome {
-                Outcome::Completed(result) => {
-                    mdes.push(result.min_detectable_effect.shift_ns);
+                Outcome::Pass { effect, .. } |
+                Outcome::Fail { effect, .. } |
+                Outcome::Inconclusive { effect, .. } => {
+                    // Use credible interval width as proxy for MDE
+                    let ci_width = effect.credible_interval_ns.1 - effect.credible_interval_ns.0;
+                    mdes.push(ci_width / 2.0); // Half-width is approximate MDE
                 }
                 Outcome::Unmeasurable { recommendation, .. } => {
                     panic!("Trial {} at n={} returned Unmeasurable: {}", trial + 1, samples, recommendation);
@@ -307,8 +324,9 @@ fn large_effect_detection() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(|| false, || true);
 
-        let outcome = TimingOracle::quick()
-            .samples(SAMPLES)
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+            .max_samples(SAMPLES)
             .test(inputs, |should_delay| {
                 if *should_delay {
                     spin_delay_us(EFFECT_US);
@@ -317,25 +335,33 @@ fn large_effect_detection() {
             });
 
         match outcome {
-            Outcome::Completed(result) => {
-                leak_probs.push(result.leak_probability);
-
-                if !result.ci_gate.passed() || result.leak_probability > 0.5 {
+            Outcome::Pass { leak_probability, .. } => {
+                leak_probs.push(leak_probability);
+                // Not detected
+            }
+            Outcome::Fail { leak_probability, .. } => {
+                leak_probs.push(leak_probability);
+                detections += 1;
+            }
+            Outcome::Inconclusive { leak_probability, .. } => {
+                leak_probs.push(leak_probability);
+                // Count as detection if leak_probability > 50%
+                if leak_probability > 0.5 {
                     detections += 1;
-                }
-
-                if (trial + 1) % 10 == 0 {
-                    let rate = detections as f64 / (trial + 1) as f64;
-                    eprintln!(
-                        "  Trial {}/{}: {}/{} detected ({:.0}%), avg P(leak)={:.1}%",
-                        trial + 1, TRIALS, detections, trial + 1, rate * 100.0,
-                        leak_probs.iter().sum::<f64>() / leak_probs.len() as f64 * 100.0
-                    );
                 }
             }
             Outcome::Unmeasurable { recommendation, .. } => {
                 panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
             }
+        }
+
+        if (trial + 1) % 10 == 0 && !leak_probs.is_empty() {
+            let rate = detections as f64 / (trial + 1) as f64;
+            eprintln!(
+                "  Trial {}/{}: {}/{} detected ({:.0}%), avg P(leak)={:.1}%",
+                trial + 1, TRIALS, detections, trial + 1, rate * 100.0,
+                leak_probs.iter().sum::<f64>() / leak_probs.len() as f64 * 100.0
+            );
         }
     }
 
@@ -388,8 +414,9 @@ fn negligible_effect_fpr() {
     for trial in 0..TRIALS {
         let inputs = InputPair::new(|| false, || true);
 
-        let outcome = TimingOracle::quick()
-            .samples(SAMPLES)
+        let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10))
+            .max_samples(SAMPLES)
             .test(inputs, |should_delay| {
                 if *should_delay {
                     spin_delay_ns(EFFECT_NS);
@@ -398,8 +425,15 @@ fn negligible_effect_fpr() {
             });
 
         match outcome {
-            Outcome::Completed(result) => {
-                if !result.ci_gate.passed() || result.leak_probability > 0.5 {
+            Outcome::Pass { .. } => {
+                // Not detected
+            }
+            Outcome::Fail { .. } => {
+                detections += 1;
+            }
+            Outcome::Inconclusive { leak_probability, .. } => {
+                // Count as detection if leak_probability > 50%
+                if leak_probability > 0.5 {
                     detections += 1;
                 }
             }

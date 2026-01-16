@@ -6,12 +6,12 @@
 //! - Outcome reliability checks
 //! - UnreliablePolicy env parsing
 //! - Diagnostics checks
-//! - TestResult methods
+//! - EffectEstimate methods
 //! - Serialization round-trips
 
 use timing_oracle::{
-    CiGate, CiGateResult, Diagnostics, Effect, EffectPattern, Exploitability, MeasurementQuality,
-    MinDetectableEffect, Outcome, TestResult, UnreliablePolicy,
+    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
+    MeasurementQuality, Outcome, UnreliablePolicy,
 };
 
 // ============================================================================
@@ -194,15 +194,17 @@ fn diagnostics_all_checks_passed_all_true() {
         stationarity_ok: true,
         model_fit_chi2: 5.0,
         model_fit_ok: true,
-        outlier_rate_fixed: 0.001,
-        outlier_rate_random: 0.001,
+        outlier_rate_baseline: 0.001,
+        outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
-        filtered_quantiles: vec![],
         discrete_mode: false,
         timer_resolution_ns: 1.0,
         duplicate_fraction: 0.0,
         preflight_ok: true,
+        calibration_samples: 5000,
+        total_time_secs: 1.0,
         warnings: vec![],
+        quality_issues: vec![],
     };
     assert!(diag.all_checks_passed());
 }
@@ -217,15 +219,17 @@ fn diagnostics_all_checks_passed_one_false() {
         stationarity_ok: false,
         model_fit_chi2: 5.0,
         model_fit_ok: true,
-        outlier_rate_fixed: 0.001,
-        outlier_rate_random: 0.001,
+        outlier_rate_baseline: 0.001,
+        outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
-        filtered_quantiles: vec![],
         discrete_mode: false,
         timer_resolution_ns: 1.0,
         duplicate_fraction: 0.0,
         preflight_ok: true,
+        calibration_samples: 5000,
+        total_time_secs: 1.0,
         warnings: vec![],
+        quality_issues: vec![],
     };
     assert!(!diag1.all_checks_passed());
 
@@ -237,15 +241,17 @@ fn diagnostics_all_checks_passed_one_false() {
         stationarity_ok: true,
         model_fit_chi2: 50.0,
         model_fit_ok: false,
-        outlier_rate_fixed: 0.001,
-        outlier_rate_random: 0.001,
+        outlier_rate_baseline: 0.001,
+        outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
-        filtered_quantiles: vec![],
         discrete_mode: false,
         timer_resolution_ns: 1.0,
         duplicate_fraction: 0.0,
         preflight_ok: true,
+        calibration_samples: 5000,
+        total_time_secs: 1.0,
         warnings: vec![],
+        quality_issues: vec![],
     };
     assert!(!diag2.all_checks_passed());
 
@@ -257,15 +263,17 @@ fn diagnostics_all_checks_passed_one_false() {
         stationarity_ok: true,
         model_fit_chi2: 5.0,
         model_fit_ok: true,
-        outlier_rate_fixed: 0.1,
-        outlier_rate_random: 0.001,
+        outlier_rate_baseline: 0.1,
+        outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,
-        filtered_quantiles: vec![],
         discrete_mode: false,
         timer_resolution_ns: 1.0,
         duplicate_fraction: 0.0,
         preflight_ok: true,
+        calibration_samples: 5000,
+        total_time_secs: 1.0,
         warnings: vec![],
+        quality_issues: vec![],
     };
     assert!(!diag3.all_checks_passed());
 }
@@ -279,57 +287,94 @@ fn diagnostics_all_checks_passed_all_false() {
         stationarity_ok: false,
         model_fit_chi2: 50.0,
         model_fit_ok: false,
-        outlier_rate_fixed: 0.1,
-        outlier_rate_random: 0.001,
+        outlier_rate_baseline: 0.1,
+        outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,
-        filtered_quantiles: vec![],
         discrete_mode: false,
         timer_resolution_ns: 1.0,
         duplicate_fraction: 0.0,
         preflight_ok: false,
+        calibration_samples: 5000,
+        total_time_secs: 1.0,
         warnings: vec!["warning".to_string()],
+        quality_issues: vec![],
     };
     assert!(!diag.all_checks_passed());
+}
+
+// ============================================================================
+// EffectEstimate tests
+// ============================================================================
+
+#[test]
+fn effect_estimate_total_effect() {
+    let effect = EffectEstimate {
+        shift_ns: 3.0,
+        tail_ns: 4.0,
+        credible_interval_ns: (0.0, 10.0),
+        pattern: EffectPattern::Mixed,
+    };
+    // sqrt(3^2 + 4^2) = 5
+    assert!((effect.total_effect_ns() - 5.0).abs() < 0.001);
+}
+
+#[test]
+fn effect_estimate_is_negligible() {
+    let effect = EffectEstimate {
+        shift_ns: 5.0,
+        tail_ns: 5.0,
+        credible_interval_ns: (0.0, 15.0),
+        pattern: EffectPattern::Mixed,
+    };
+
+    assert!(!effect.is_negligible(4.0)); // Both components > 4
+    assert!(effect.is_negligible(10.0)); // Both components < 10
+}
+
+#[test]
+fn effect_estimate_default() {
+    let effect = EffectEstimate::default();
+    assert_eq!(effect.shift_ns, 0.0);
+    assert_eq!(effect.tail_ns, 0.0);
+    assert_eq!(effect.pattern, EffectPattern::Indeterminate);
 }
 
 // ============================================================================
 // Outcome::is_reliable() tests
 // ============================================================================
 
-fn make_test_result(leak_prob: f64, mde_shift: f64, quality: MeasurementQuality) -> TestResult {
-    TestResult {
+fn make_pass(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Pass {
         leak_probability: leak_prob,
-        effect: None,
-        exploitability: Exploitability::Negligible,
-        min_detectable_effect: MinDetectableEffect {
-            shift_ns: mde_shift,
-            tail_ns: mde_shift,
-        },
-        ci_gate: CiGate {
-            alpha: 0.01,
-            result: CiGateResult::Pass,
-            threshold: 10.0,
-            max_observed: 5.0,
-            observed: [0.0; 9],
-            p_value: 0.5,
-        },
+        effect: EffectEstimate::default(),
+        samples_used: 10000,
         quality,
-        outlier_fraction: 0.001,
         diagnostics: Diagnostics::all_ok(),
-        metadata: timing_oracle::Metadata {
-            samples_per_class: 1000,
-            cycles_per_ns: 3.0,
-            timer: "test".to_string(),
-            timer_resolution_ns: 1.0,
-            batching: timing_oracle::BatchingInfo {
-                enabled: false,
-                k: 1,
-                ticks_per_batch: 100.0,
-                rationale: "test".to_string(),
-                unmeasurable: None,
-            },
-            runtime_secs: 1.0,
+    }
+}
+
+fn make_fail(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Fail {
+        leak_probability: leak_prob,
+        effect: EffectEstimate::default(),
+        exploitability: Exploitability::Negligible,
+        samples_used: 10000,
+        quality,
+        diagnostics: Diagnostics::all_ok(),
+    }
+}
+
+fn make_inconclusive(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
+    Outcome::Inconclusive {
+        reason: InconclusiveReason::DataTooNoisy {
+            message: "test".to_string(),
+            guidance: "test".to_string(),
         },
+        leak_probability: leak_prob,
+        effect: EffectEstimate::default(),
+        samples_used: 5000,
+        quality,
+        diagnostics: Diagnostics::all_ok(),
     }
 }
 
@@ -345,132 +390,60 @@ fn outcome_is_reliable_unmeasurable() {
 }
 
 #[test]
+fn outcome_is_reliable_inconclusive() {
+    // Inconclusive is always unreliable
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
+    assert!(!outcome.is_reliable());
+}
+
+#[test]
 fn outcome_is_reliable_good_quality() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
-    assert!(outcome.is_reliable());
+    let pass = make_pass(0.02, MeasurementQuality::Good);
+    assert!(pass.is_reliable());
+
+    let fail = make_fail(0.98, MeasurementQuality::Good);
+    assert!(fail.is_reliable());
 }
 
 #[test]
 fn outcome_is_reliable_excellent_quality() {
-    let result = make_test_result(0.5, 3.0, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
+    let outcome = make_pass(0.03, MeasurementQuality::Excellent);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn outcome_is_reliable_poor_quality_inconclusive() {
-    // Poor quality but inconclusive (0.5) - still reliable (Poor != TooNoisy)
-    let result = make_test_result(0.5, 50.0, MeasurementQuality::Poor);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_reliable_poor_quality() {
+    // Poor quality is not TooNoisy, so it's still reliable
+    let outcome = make_fail(0.97, MeasurementQuality::Poor);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn outcome_is_reliable_too_noisy_conclusive_high() {
-    // TooNoisy but conclusive (> 0.9) - reliable because signal overcame noise
-    let result = make_test_result(0.95, 150.0, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_reliable_too_noisy_pass_conclusive() {
+    // TooNoisy but conclusive (< 0.01) - reliable because signal overcame noise
+    let outcome = make_pass(0.005, MeasurementQuality::TooNoisy);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn outcome_is_reliable_too_noisy_conclusive_low() {
-    // TooNoisy but conclusive (< 0.1) - reliable because signal overcame noise
-    let result = make_test_result(0.05, 150.0, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_reliable_too_noisy_fail_conclusive() {
+    // TooNoisy but conclusive (> 0.99) - reliable because signal overcame noise
+    let outcome = make_fail(0.995, MeasurementQuality::TooNoisy);
     assert!(outcome.is_reliable());
 }
 
 #[test]
-fn outcome_is_reliable_too_noisy_inconclusive() {
-    // TooNoisy AND inconclusive - NOT reliable
-    let result = make_test_result(0.5, 150.0, MeasurementQuality::TooNoisy);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_reliable_too_noisy_pass_not_conclusive() {
+    // TooNoisy AND not very conclusive - NOT reliable
+    let outcome = make_pass(0.04, MeasurementQuality::TooNoisy);
     assert!(!outcome.is_reliable());
 }
 
 #[test]
-fn outcome_is_reliable_mde_too_small() {
-    // MDE <= 0.01 indicates timer resolution failure - NOT reliable even with good quality
-    let result = make_test_result(0.5, 0.01, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
+fn outcome_is_reliable_too_noisy_fail_not_conclusive() {
+    // TooNoisy AND not very conclusive - NOT reliable
+    let outcome = make_fail(0.96, MeasurementQuality::TooNoisy);
     assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn outcome_is_reliable_mde_zero() {
-    let result = make_test_result(0.5, 0.0, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn outcome_is_reliable_mde_nan() {
-    let result = make_test_result(0.5, f64::NAN, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn outcome_is_reliable_mde_infinity() {
-    let result = make_test_result(0.5, f64::INFINITY, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
-    assert!(!outcome.is_reliable());
-}
-
-#[test]
-fn outcome_is_reliable_mde_just_above_threshold() {
-    // MDE just above 0.01 should be valid
-    let result = make_test_result(0.5, 0.011, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
-    assert!(outcome.is_reliable());
-}
-
-// ============================================================================
-// Outcome::unwrap_completed() tests
-// ============================================================================
-
-#[test]
-fn outcome_unwrap_completed_success() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result.clone());
-    let unwrapped = outcome.unwrap_completed();
-    assert_eq!(unwrapped.leak_probability, 0.5);
-}
-
-#[test]
-#[should_panic(expected = "Test was unmeasurable")]
-fn outcome_unwrap_completed_unmeasurable_panics() {
-    let outcome = Outcome::Unmeasurable {
-        operation_ns: 10.0,
-        threshold_ns: 100.0,
-        platform: "test".to_string(),
-        recommendation: "test".to_string(),
-    };
-    let _ = outcome.unwrap_completed();
-}
-
-// ============================================================================
-// Outcome::completed() tests
-// ============================================================================
-
-#[test]
-fn outcome_completed_returns_some() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    let outcome = Outcome::Completed(result);
-    assert!(outcome.completed().is_some());
-}
-
-#[test]
-fn outcome_completed_returns_none() {
-    let outcome = Outcome::Unmeasurable {
-        operation_ns: 10.0,
-        threshold_ns: 100.0,
-        platform: "test".to_string(),
-        recommendation: "test".to_string(),
-    };
-    assert!(outcome.completed().is_none());
 }
 
 // ============================================================================
@@ -527,86 +500,23 @@ fn unreliable_policy_from_env_empty() {
 }
 
 // ============================================================================
-// TestResult::can_detect() tests
-// ============================================================================
-
-#[test]
-fn test_result_can_detect_above_mde() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    assert!(result.can_detect(15.0));
-    assert!(result.can_detect(100.0));
-}
-
-#[test]
-fn test_result_can_detect_below_mde() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    assert!(!result.can_detect(5.0));
-    assert!(!result.can_detect(1.0));
-}
-
-#[test]
-fn test_result_can_detect_at_boundary() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    // At exactly MDE, can_detect returns true (MDE <= effect_ns)
-    assert!(result.can_detect(10.0));
-}
-
-#[test]
-fn test_result_can_detect_just_below() {
-    let result = make_test_result(0.5, 10.0, MeasurementQuality::Good);
-    assert!(!result.can_detect(9.99));
-}
-
-// ============================================================================
 // Serialization round-trip tests
 // ============================================================================
 
 #[test]
-fn test_result_json_roundtrip() {
-    let result = make_test_result(0.75, 8.0, MeasurementQuality::Good);
-    let json = serde_json::to_string(&result).unwrap();
-    let deserialized: TestResult = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(result.leak_probability, deserialized.leak_probability);
-    assert_eq!(result.quality, deserialized.quality);
-    assert_eq!(result.ci_gate.passed(), deserialized.ci_gate.passed());
-}
-
-#[test]
-fn effect_json_roundtrip() {
-    let effect = Effect {
+fn effect_estimate_json_roundtrip() {
+    let effect = EffectEstimate {
         shift_ns: 15.5,
         tail_ns: 3.2,
-        shift_ci_ns: (10.0, 20.0),
-        tail_ci_ns: (0.0, 6.5),
         credible_interval_ns: (10.0, 20.0),
         pattern: EffectPattern::UniformShift,
     };
     let json = serde_json::to_string(&effect).unwrap();
-    let deserialized: Effect = serde_json::from_str(&json).unwrap();
+    let deserialized: EffectEstimate = serde_json::from_str(&json).unwrap();
 
     assert_eq!(effect.shift_ns, deserialized.shift_ns);
     assert_eq!(effect.tail_ns, deserialized.tail_ns);
     assert_eq!(effect.pattern, deserialized.pattern);
-}
-
-#[test]
-fn ci_gate_json_roundtrip() {
-    let gate = CiGate {
-        alpha: 0.01,
-        result: CiGateResult::Pass,
-        threshold: 12.5,
-        max_observed: 8.3,
-        observed: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 8.3],
-        p_value: 0.15,
-    };
-    let json = serde_json::to_string(&gate).unwrap();
-    let deserialized: CiGate = serde_json::from_str(&json).unwrap();
-
-    assert_eq!(gate.alpha, deserialized.alpha);
-    assert_eq!(gate.passed(), deserialized.passed());
-    assert_eq!(gate.threshold, deserialized.threshold);
-    assert_eq!(gate.observed, deserialized.observed);
 }
 
 #[test]
@@ -652,17 +562,47 @@ fn effect_pattern_json_roundtrip() {
 }
 
 #[test]
-fn outcome_completed_json_roundtrip() {
-    let result = make_test_result(0.8, 5.0, MeasurementQuality::Excellent);
-    let outcome = Outcome::Completed(result);
+fn outcome_pass_json_roundtrip() {
+    let outcome = make_pass(0.02, MeasurementQuality::Excellent);
     let json = serde_json::to_string(&outcome).unwrap();
     let deserialized: Outcome = serde_json::from_str(&json).unwrap();
 
     match deserialized {
-        Outcome::Completed(r) => {
-            assert_eq!(r.leak_probability, 0.8);
+        Outcome::Pass { leak_probability, quality, .. } => {
+            assert!((leak_probability - 0.02).abs() < 0.001);
+            assert_eq!(quality, MeasurementQuality::Excellent);
         }
-        _ => panic!("Expected Completed variant"),
+        _ => panic!("Expected Pass variant"),
+    }
+}
+
+#[test]
+fn outcome_fail_json_roundtrip() {
+    let outcome = make_fail(0.98, MeasurementQuality::Good);
+    let json = serde_json::to_string(&outcome).unwrap();
+    let deserialized: Outcome = serde_json::from_str(&json).unwrap();
+
+    match deserialized {
+        Outcome::Fail { leak_probability, quality, .. } => {
+            assert!((leak_probability - 0.98).abs() < 0.001);
+            assert_eq!(quality, MeasurementQuality::Good);
+        }
+        _ => panic!("Expected Fail variant"),
+    }
+}
+
+#[test]
+fn outcome_inconclusive_json_roundtrip() {
+    let outcome = make_inconclusive(0.5, MeasurementQuality::Poor);
+    let json = serde_json::to_string(&outcome).unwrap();
+    let deserialized: Outcome = serde_json::from_str(&json).unwrap();
+
+    match deserialized {
+        Outcome::Inconclusive { leak_probability, quality, .. } => {
+            assert!((leak_probability - 0.5).abs() < 0.001);
+            assert_eq!(quality, MeasurementQuality::Poor);
+        }
+        _ => panic!("Expected Inconclusive variant"),
     }
 }
 
@@ -693,128 +633,45 @@ fn outcome_unmeasurable_json_roundtrip() {
 use timing_oracle::AttackerModel;
 
 #[test]
-fn attacker_model_default_is_lan_conservative() {
-    assert_eq!(AttackerModel::default(), AttackerModel::LANConservative);
+fn attacker_model_default_is_adjacent_network() {
+    assert_eq!(AttackerModel::default(), AttackerModel::AdjacentNetwork);
 }
 
 #[test]
-fn attacker_model_to_threshold_ns_nanosecond_presets() {
-    // These presets don't need CPU freq or timer resolution
-    assert_eq!(
-        AttackerModel::LANConservative.to_threshold_ns(None, None),
-        Some(100.0)
-    );
-    assert_eq!(
-        AttackerModel::WANOptimistic.to_threshold_ns(None, None),
-        Some(15_000.0)
-    );
-    assert_eq!(
-        AttackerModel::WANConservative.to_threshold_ns(None, None),
-        Some(50_000.0)
-    );
-    assert_eq!(
-        AttackerModel::Research.to_threshold_ns(None, None),
-        Some(0.0)
-    );
+fn attacker_model_to_threshold_ns_presets() {
+    // SharedHardware: ~0.6ns (2 cycles @ 3GHz)
+    assert!((AttackerModel::SharedHardware.to_threshold_ns() - 0.6).abs() < 0.01);
+
+    // AdjacentNetwork: 100ns
+    assert_eq!(AttackerModel::AdjacentNetwork.to_threshold_ns(), 100.0);
+
+    // RemoteNetwork: 50μs
+    assert_eq!(AttackerModel::RemoteNetwork.to_threshold_ns(), 50_000.0);
+
+    // Research: 0 (detect any difference)
+    assert_eq!(AttackerModel::Research.to_threshold_ns(), 0.0);
 }
 
 #[test]
-fn attacker_model_to_threshold_ns_cycle_presets() {
-    // 3 GHz CPU: 1 cycle = 1/3 ns
-    let cpu_freq = Some(3.0);
-
-    // LocalCycles and LANStrict: 2 cycles = 2/3 ns ≈ 0.667 ns
-    let threshold = AttackerModel::LocalCycles.to_threshold_ns(cpu_freq, None);
-    assert!(threshold.is_some());
-    assert!((threshold.unwrap() - 2.0 / 3.0).abs() < 0.001);
-
-    let threshold = AttackerModel::LANStrict.to_threshold_ns(cpu_freq, None);
-    assert!(threshold.is_some());
-    assert!((threshold.unwrap() - 2.0 / 3.0).abs() < 0.001);
-
-    // KyberSlashSentinel: 10 cycles = 10/3 ns ≈ 3.333 ns
-    let threshold = AttackerModel::KyberSlashSentinel.to_threshold_ns(cpu_freq, None);
-    assert!(threshold.is_some());
-    assert!((threshold.unwrap() - 10.0 / 3.0).abs() < 0.001);
-
-    // Without CPU freq, returns None
-    assert_eq!(AttackerModel::LocalCycles.to_threshold_ns(None, None), None);
-    assert_eq!(AttackerModel::LANStrict.to_threshold_ns(None, None), None);
-}
-
-#[test]
-fn attacker_model_to_threshold_ns_tick_preset() {
-    // LocalCoarseTimer uses timer resolution
-    let timer_res = Some(41.0); // 41 ns per tick
-
-    let threshold = AttackerModel::LocalCoarseTimer.to_threshold_ns(None, timer_res);
-    assert_eq!(threshold, Some(41.0));
-
-    // Without timer resolution, returns None
-    assert_eq!(
-        AttackerModel::LocalCoarseTimer.to_threshold_ns(None, None),
-        None
-    );
-}
-
-#[test]
-fn attacker_model_custom_ns() {
-    let model = AttackerModel::CustomNs { threshold_ns: 250.0 };
-    assert_eq!(model.to_threshold_ns(None, None), Some(250.0));
-}
-
-#[test]
-fn attacker_model_custom_cycles() {
-    let model = AttackerModel::CustomCycles { threshold_cycles: 50 };
-    // 3 GHz: 50 cycles = 50/3 ns ≈ 16.67 ns
-    let threshold = model.to_threshold_ns(Some(3.0), None);
-    assert!(threshold.is_some());
-    assert!((threshold.unwrap() - 50.0 / 3.0).abs() < 0.001);
-
-    // Without CPU freq, returns None
-    assert_eq!(model.to_threshold_ns(None, None), None);
-}
-
-#[test]
-fn attacker_model_custom_ticks() {
-    let model = AttackerModel::CustomTicks { threshold_ticks: 5 };
-    // 41 ns per tick: 5 ticks = 205 ns
-    let threshold = model.to_threshold_ns(None, Some(41.0));
-    assert_eq!(threshold, Some(205.0));
-
-    // Without timer resolution, returns None
-    assert_eq!(model.to_threshold_ns(None, None), None);
-}
-
-#[test]
-fn attacker_model_is_cycle_based() {
-    assert!(AttackerModel::LocalCycles.is_cycle_based());
-    assert!(AttackerModel::LANStrict.is_cycle_based());
-    assert!(AttackerModel::KyberSlashSentinel.is_cycle_based());
-    assert!(AttackerModel::CustomCycles { threshold_cycles: 10 }.is_cycle_based());
-
-    assert!(!AttackerModel::LANConservative.is_cycle_based());
-    assert!(!AttackerModel::WANOptimistic.is_cycle_based());
-    assert!(!AttackerModel::LocalCoarseTimer.is_cycle_based());
-    assert!(!AttackerModel::CustomNs { threshold_ns: 100.0 }.is_cycle_based());
-}
-
-#[test]
-fn attacker_model_is_tick_based() {
-    assert!(AttackerModel::LocalCoarseTimer.is_tick_based());
-    assert!(AttackerModel::CustomTicks { threshold_ticks: 5 }.is_tick_based());
-
-    assert!(!AttackerModel::LocalCycles.is_tick_based());
-    assert!(!AttackerModel::LANConservative.is_tick_based());
-    assert!(!AttackerModel::WANOptimistic.is_tick_based());
-    assert!(!AttackerModel::CustomCycles { threshold_cycles: 10 }.is_tick_based());
+fn attacker_model_custom() {
+    let model = AttackerModel::Custom { threshold_ns: 250.0 };
+    assert_eq!(model.to_threshold_ns(), 250.0);
 }
 
 #[test]
 fn attacker_model_description() {
     // Just verify descriptions are non-empty and descriptive
-    assert!(AttackerModel::LocalCycles.description().contains("2 cycles"));
-    assert!(AttackerModel::LANConservative.description().contains("100ns"));
-    assert!(AttackerModel::WANOptimistic.description().contains("15μs"));
-    assert!(AttackerModel::Research.description().contains("θ→0"));
+    assert!(AttackerModel::SharedHardware.description().contains("hardware"));
+    assert!(
+        AttackerModel::AdjacentNetwork.description().contains("network")
+            || AttackerModel::AdjacentNetwork.description().contains("LAN")
+    );
+    assert!(
+        AttackerModel::RemoteNetwork.description().contains("remote")
+            || AttackerModel::RemoteNetwork.description().contains("internet")
+    );
+    assert!(
+        AttackerModel::Research.description().contains("research")
+            || AttackerModel::Research.description().contains("any")
+    );
 }

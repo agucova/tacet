@@ -5,7 +5,8 @@
 //! - The test closure executes identical code for fixed and random inputs
 //! - Only the input data differs
 
-use timing_oracle::{helpers::InputPair, timing_test_checked, Outcome, TimingOracle};
+use std::time::Duration;
+use timing_oracle::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
 fn main() {
     println!("timing-oracle simple example\n");
@@ -25,43 +26,63 @@ fn main() {
         },
     );
 
-    // Simple API with default config
-    let outcome = TimingOracle::new().test(inputs, |data| {
-        compare_bytes(&secret, data);
-    });
+    // Simple API with attacker model
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |data| {
+            compare_bytes(&secret, data);
+        });
 
-    let result = match outcome {
-        Outcome::Completed(r) => r,
+    match &outcome {
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            diagnostics,
+            ..
+        } => {
+            println!("Result: PASS");
+            println!("Leak probability: {:.1}%", leak_probability * 100.0);
+            println!("Quality: {:?}", quality);
+            println!(
+                "Timer resolution: {:.1}ns",
+                diagnostics.timer_resolution_ns
+            );
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
+            println!("Result: FAIL");
+            println!("Leak probability: {:.1}%", leak_probability * 100.0);
+            println!("Exploitability: {:?}", exploitability);
+            println!(
+                "Effect: shift={:.1}ns, tail={:.1}ns",
+                effect.shift_ns, effect.tail_ns
+            );
+        }
+        Outcome::Inconclusive {
+            reason,
+            leak_probability,
+            ..
+        } => {
+            println!("Result: INCONCLUSIVE");
+            println!("Leak probability: {:.1}%", leak_probability * 100.0);
+            println!("Reason: {:?}", reason);
+        }
         Outcome::Unmeasurable {
             recommendation, ..
         } => {
             println!("Could not measure: {}", recommendation);
             return;
         }
-    };
-
-    println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-    println!("CI gate passed: {}", result.ci_gate.passed());
-    println!("Quality: {:?}", result.quality);
-    println!(
-        "Timer: {} ({:.1}ns resolution)",
-        result.metadata.timer, result.metadata.timer_resolution_ns
-    );
-    println!(
-        "Batching: enabled={}, K={}, ticks_per_batch={:.1}",
-        result.metadata.batching.enabled,
-        result.metadata.batching.k,
-        result.metadata.batching.ticks_per_batch
-    );
-    println!("Rationale: {}", result.metadata.batching.rationale);
-    println!(
-        "MDE shift: {:.2}ns, tail: {:.2}ns",
-        result.min_detectable_effect.shift_ns, result.min_detectable_effect.tail_ns
-    );
+    }
 
     // Using timing_test_checked! macro with custom config
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::new().samples(10_000).alpha(0.01),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(10)),
         baseline: || [0u8; 32],
         sample: || {
             let mut arr = [0u8; 32];
@@ -75,9 +96,11 @@ fn main() {
         },
     };
 
-    if let Outcome::Completed(result) = outcome {
+    if let Outcome::Pass { leak_probability, .. } | Outcome::Fail { leak_probability, .. } =
+        outcome
+    {
         println!("\nWith custom config:");
-        println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
+        println!("Leak probability: {:.1}%", leak_probability * 100.0);
     }
 }
 

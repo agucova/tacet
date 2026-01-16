@@ -25,13 +25,7 @@ cargo run --example <name>
 |---------|-------------|-------------|
 | `aes` | Test AES-256-GCM encryption for timing leaks | `cargo run --example aes` |
 
-### CI Integration
-
-| Example | Description | Run Command |
-|---------|-------------|-------------|
-| `ci_integration` | Using CiTestBuilder with FailCriterion | `cargo run --example ci_integration` |
-
-### Development & Debugging
+### Development and Debugging
 
 | Example | Description | Run Command |
 |---------|-------------|-------------|
@@ -55,10 +49,6 @@ cargo run --example <name>
 3. `test_xor` - Verify constant-time operations don't false-positive
 4. `aes` - Real-world crypto testing
 
-**If you're integrating with CI:**
-1. `ci_integration` - CiTestBuilder pattern
-2. See [troubleshooting.md](../docs/troubleshooting.md) for handling flakiness
-
 **If you're debugging performance:**
 1. `profile_oracle` - Identify bottlenecks
 2. `benchmark_baseline` - Establish baseline
@@ -71,33 +61,47 @@ Select a threat model that matches your deployment scenario:
 
 ```rust
 use timing_oracle::{TimingOracle, AttackerModel};
+use std::time::Duration;
 
 // Internet-facing API
-let oracle = TimingOracle::for_attacker(AttackerModel::WANConservative);
+let oracle = TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+    .time_budget(Duration::from_secs(30));
 
-// Internal LAN service
-let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative);
+// Internal LAN service or HTTP/2 API
+let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30));
 
-// SGX or shared hosting (strictest)
-let oracle = TimingOracle::for_attacker(AttackerModel::LocalCycles);
+// SGX, containers, or shared hosting (strictest)
+let oracle = TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .time_budget(Duration::from_secs(60));
 ```
 
-### Correct Input Generation
-
-All examples use InputPair to pre-generate inputs:
+### Handling All Outcomes
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use std::time::Duration;
 
-// Pre-generate BEFORE measurement
-let inputs = InputPair::new(
-    [0u8; 32],              // Fixed value
-    || rand::random(),      // Random generator
-);
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
 
-// Use attacker model + InputPair
-let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
     .test(inputs, |data| operation(data));
+
+match outcome {
+    Outcome::Pass { leak_probability, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { leak_probability, exploitability, .. } => {
+        println!("Leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+    }
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        println!("Inconclusive: {:?}", reason);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipping: {}", recommendation);
+    }
+}
 ```
 
 ### Common Mistakes to Avoid
@@ -110,8 +114,8 @@ test(|| op(&FIXED), || op(&rand::random()));
 test(|| op_a(), || op_b());
 
 // CORRECT - Use InputPair
-let inputs = InputPair::new(FIXED, || rand::random());
-test(|| op(inputs.fixed()), || op(inputs.random()));
+let inputs = InputPair::new(|| FIXED, || rand::random());
+oracle.test(inputs, |data| op(data));
 ```
 
 See the [README](../README.md#common-mistakes) for more details.

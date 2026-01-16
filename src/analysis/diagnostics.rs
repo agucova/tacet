@@ -8,7 +8,7 @@
 use crate::constants::{B_TAIL, ONES};
 use crate::measurement::OutlierStats;
 use crate::preflight::PreflightResult;
-use crate::result::{Diagnostics, FilteredQuantile};
+use crate::result::Diagnostics;
 use crate::types::{Matrix9, Matrix9x2, Vector9};
 use nalgebra::Cholesky;
 
@@ -19,14 +19,14 @@ pub struct DiagnosticsExtra {
     pub dependence_length: usize,
     /// Number of samples per class after filtering.
     pub samples_per_class: usize,
-    /// Quantiles filtered from CI gate with reasons.
-    pub filtered_quantiles: Vec<FilteredQuantile>,
     /// Whether discrete timer mode was used.
     pub discrete_mode: bool,
     /// Timer resolution in nanoseconds.
     pub timer_resolution_ns: f64,
     /// Fraction of samples with duplicate values.
     pub duplicate_fraction: f64,
+    /// Number of calibration samples used.
+    pub calibration_samples: usize,
 }
 
 /// Compute all diagnostic checks.
@@ -117,15 +117,17 @@ pub fn compute_diagnostics(
         stationarity_ok,
         model_fit_chi2,
         model_fit_ok,
-        outlier_rate_fixed,
-        outlier_rate_random,
+        outlier_rate_baseline: outlier_rate_fixed,
+        outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,
-        filtered_quantiles: extra.filtered_quantiles.clone(),
         discrete_mode: extra.discrete_mode,
         timer_resolution_ns: extra.timer_resolution_ns,
         duplicate_fraction: extra.duplicate_fraction,
         preflight_ok: preflight.is_valid,
+        calibration_samples: extra.calibration_samples,
+        total_time_secs: 0.0, // Will be filled in by caller
         warnings,
+        quality_issues: Vec::new(),
     }
 }
 

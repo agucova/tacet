@@ -3,8 +3,10 @@
 //! Run with:
 //!   TO_DEBUG_PIPELINE=1 cargo run --example debug_pipeline
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{Outcome, TimingOracle};
+use timing_oracle::output::format_outcome;
+use timing_oracle::{AttackerModel, TimingOracle};
 
 fn rand_bytes_32() -> [u8; 32] {
     let mut arr = [0u8; 32];
@@ -57,8 +59,9 @@ fn main() {
         },
     );
 
-    let outcome = TimingOracle::new()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .max_samples(10_000)
         .min_effect_ns(50.0)
         .test(inputs, |scalar_set| {
             let mut total = 0u8;
@@ -69,21 +72,5 @@ fn main() {
             std::hint::black_box(total);
         });
 
-    match outcome {
-        Outcome::Completed(result) => {
-            println!("{}", timing_oracle::output::format_result(&result));
-        }
-        Outcome::Unmeasurable {
-            operation_ns,
-            threshold_ns,
-            platform,
-            recommendation,
-        } => {
-            println!(
-                "Unmeasurable: operation={:.2}ns < threshold={:.2}ns on {}",
-                operation_ns, threshold_ns, platform
-            );
-            println!("Recommendation: {}", recommendation);
-        }
-    }
+    println!("{}", format_outcome(&outcome));
 }

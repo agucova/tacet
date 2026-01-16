@@ -9,8 +9,8 @@ timing-oracle · aes_encrypt (16 bytes)
 ────────────────────────────────────────
   Leak probability:  2.3%
   Effect size:       < 1 ns (Negligible)
-  CI gate:           PASS (α = 1%)
-  
+  Decision:          PASS
+
   ✓ No significant timing leak detected
 ```
 
@@ -23,25 +23,33 @@ cargo add timing-oracle --dev
 ## Quick Start
 
 ```rust
-use timing_oracle::timing_test;
+use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use std::time::Duration;
 
 #[test]
 fn constant_time_compare() {
     let secret = [0u8; 32];
-    
-    let result = timing_test! {
+
+    let outcome = timing_test_checked! {
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .time_budget(Duration::from_secs(30)),
         baseline: || [0u8; 32],
         sample: || rand::random::<[u8; 32]>(),
         measure: |input| {
             constant_time_eq(&secret, &input);
         },
     };
-    
-    assert!(result.ci_gate.passed, "Timing leak detected!");
+
+    match outcome {
+        Outcome::Pass { .. } => { /* No leak */ }
+        Outcome::Fail { exploitability, .. } => panic!("Timing leak: {:?}", exploitability),
+        Outcome::Inconclusive { .. } => { /* Could not determine */ }
+        Outcome::Unmeasurable { .. } => { /* Operation too fast */ }
+    }
 }
 ```
 
-The macro handles measurement and statistical analysis, returning a `TestResult` with pass/fail plus detailed diagnostics.
+The macro handles measurement and statistical analysis, returning an `Outcome` with pass/fail/inconclusive plus detailed diagnostics.
 
 ---
 
@@ -82,39 +90,41 @@ Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are har
 Configure via the `oracle:` field with an **attacker model** that defines your threat scenario:
 
 ```rust
-use timing_oracle::{timing_test, TimingOracle, AttackerModel};
+use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use std::time::Duration;
 
-timing_test! {
+let outcome = timing_test_checked! {
     // Choose your threat model:
-    // - WANConservative (50μs): Public APIs, internet-facing
-    // - LANConservative (100ns): Internal services
-    // - LocalCycles (2 cycles): SGX, shared hosting
-    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
+    // - RemoteNetwork (50μs): Public APIs, internet-facing
+    // - AdjacentNetwork (100ns): Internal services, HTTP/2 APIs
+    // - SharedHardware (~2 cycles): SGX, containers, shared hosting
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30)),
     baseline: || my_fixed_input,
     sample: || generate_random(),
     measure: |input| operation(&input),
-}
+};
 ```
 
 **Attacker Model Presets:**
 
 | Preset | Threshold | Use case |
 |--------|-----------|----------|
-| `WANConservative` | 50 μs | Public APIs, general internet |
-| `WANOptimistic` | 15 μs | Low-jitter cloud paths |
-| `LANConservative` | 100 ns | Internal services (Crosby-style) |
-| `LANStrict` | 2 cycles | High-security LAN (Kario-style) |
-| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
-| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto |
+| `SharedHardware` | 0.6 ns (~2 cycles) | SGX, cross-VM, containers, hyperthreading |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 (Timeless Timing Attacks) |
+| `RemoteNetwork` | 50 μs | Public APIs, general internet |
 | `Research` | 0 | Detect any difference (not for CI) |
+| `Custom { threshold_ns }` | user-defined | Custom threshold |
 
-For sample count tuning, combine presets:
+For tuning, combine presets with configuration:
 
 ```rust
-timing_test! {
-    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative)
-        .samples(50_000)   // More samples for higher power
-        .alpha(0.05),      // 5% FPR instead of 1%
+timing_test_checked! {
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(60))  // Longer for thorough check
+        .max_samples(100_000)                   // Limit samples
+        .pass_threshold(0.01)                   // More confident pass
+        .fail_threshold(0.99),                  // More confident fail
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| operation(&input),
@@ -153,23 +163,35 @@ timing_test! {
 }
 ```
 
-### Handling Unmeasurable Operations
+### Handling All Outcomes
 
-`timing_test!` panics if the operation is too fast to measure. For explicit handling, use `timing_test_checked!`:
+`timing_test_checked!` returns an `Outcome` with four variants:
 
 ```rust
 use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use std::time::Duration;
 
 let outcome = timing_test_checked! {
-    oracle: TimingOracle::for_attacker(AttackerModel::LANConservative),
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30)),
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| very_fast_operation(&input),
 };
 
 match outcome {
-    Outcome::Completed(result) => assert!(result.ci_gate.passed),
-    Outcome::Unmeasurable { .. } => println!("Skipped: operation too fast"),
+    Outcome::Pass { leak_probability, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { exploitability, .. } => {
+        panic!("Timing leak detected: {:?}", exploitability);
+    }
+    Outcome::Inconclusive { reason, .. } => {
+        println!("Inconclusive: {:?}", reason);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipped: {}", recommendation);
+    }
 }
 ```
 
@@ -179,17 +201,23 @@ For programmatic access without macros:
 
 ```rust
 use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use std::time::Duration;
 
 let inputs = InputPair::new(|| [0u8; 32], || rand::random());
 
 // Use attacker model to define threat scenario
-let outcome = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .samples(20_000)  // Optional: tune sample count
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
     .test(inputs, |data| constant_time_eq(&secret, data));
 
-if let Outcome::Completed(result) = outcome {
-    println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-    println!("Exploitability: {:?}", result.exploitability);
+match outcome {
+    Outcome::Pass { leak_probability, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { leak_probability, exploitability, .. } => {
+        println!("Leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+    }
+    _ => {}
 }
 ```
 
@@ -199,16 +227,14 @@ See [API documentation](https://docs.rs/timing-oracle) for full details.
 
 ## Interpreting Results
 
-### TestResult Fields
+### Outcome Variants
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `ci_gate.passed` | `bool` | Use this for CI pass/fail decisions |
-| `leak_probability` | `f64` | Bayesian posterior probability (0.0–1.0) |
-| `effect` | `Option<Effect>` | Magnitude in ns, with shift/tail decomposition |
-| `exploitability` | `Exploitability` | How practical is exploitation? |
-| `quality` | `MeasurementQuality` | Confidence in results |
-| `min_detectable_effect` | `MinDetectableEffect` | Smallest effect we could have detected |
+| Variant | Meaning | Key Fields |
+|---------|---------|------------|
+| `Pass` | No timing leak (P(leak) < 5%) | `leak_probability`, `effect`, `quality` |
+| `Fail` | Timing leak confirmed (P(leak) > 95%) | `leak_probability`, `effect`, `exploitability` |
+| `Inconclusive` | Cannot determine (5% < P(leak) < 95%) | `reason`, `leak_probability`, `effect` |
+| `Unmeasurable` | Operation too fast to measure | `recommendation`, `platform` |
 
 ### Exploitability Levels
 
@@ -257,15 +283,16 @@ H₀: max|Δ| ≤ θ  (effect within acceptable bounds)
 H₁: max|Δ| > θ  (exploitable timing leak)
 ```
 
-This follows the [SILENT methodology](https://arxiv.org/abs/2504.19821), which properly controls false positives at the boundary—you won't get spurious failures on code that just barely meets your threshold.
+This follows the [SILENT methodology](https://arxiv.org/abs/2504.19821), which properly controls false positives at the boundary.
 
-### Two-Layer Analysis
+### Adaptive Bayesian Analysis
 
-1. **CI Gate** (SILENT bootstrap): Studentized max-statistic test with bounded FPR ≤ α. Uses paired block bootstrap to handle autocorrelation. Rejects only when the effect significantly exceeds θ.
+The oracle adaptively collects samples until it can reach a conclusion:
 
-2. **Bayesian Layer**: Computes posterior probability P(leak > θ) and decomposes effects into uniform shift (different code paths) vs tail effects (cache misses).
-
-Both layers use the same θ threshold and typically agree; divergence indicates edge cases worth investigating.
+1. **Posterior Probability**: Computes P(leak > θ | data) using Bayesian inference
+2. **Effect Decomposition**: Separates uniform shift (branch timing) from tail effects (cache misses)
+3. **Early Stopping**: Stops when posterior probability crosses pass/fail thresholds (default 0.05/0.95)
+4. **Inconclusive Handling**: Reports when conclusion cannot be reached within budget
 
 ### Sample Splitting
 

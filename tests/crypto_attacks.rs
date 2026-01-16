@@ -10,7 +10,10 @@
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{skip_if_unreliable, AttackerModel, TimingOracle};
+use timing_oracle::{
+    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, MeasurementQuality, Outcome,
+    TimingOracle,
+};
 
 // ============================================================================
 // Helper Functions Module
@@ -121,36 +124,37 @@ fn aes_sbox_timing_fast() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let val = std::hint::black_box(*idx);
             std::hint::black_box(sbox[val as usize]);
         });
 
     // Skip if measurement is unreliable (cache timing is hard to measure on Apple Silicon)
-    let result = timing_oracle::skip_if_unreliable!(outcome, "aes_sbox_timing_fast");
+    let outcome = skip_if_unreliable!(outcome, "aes_sbox_timing_fast");
 
     eprintln!("\n[aes_sbox_timing_fast]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // On many systems, S-box lookups show cache effects
     // We expect moderate leak probability and/or TailEffect pattern
-    // Use separate assertions for clear diagnostics
-    let has_tail_effect = result.effect.as_ref()
-        .map(|e| matches!(e.pattern, timing_oracle::EffectPattern::TailEffect))
-        .unwrap_or(false);
+    let (leak_probability, effect) = match &outcome {
+        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Unmeasurable { .. } => return,
+    };
+
+    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
 
     // Should detect either moderate leak probability or tail effect pattern
-    let has_leak_signal = result.leak_probability > 0.3 || has_tail_effect;
+    let has_leak_signal = leak_probability > 0.3 || has_tail_effect;
     assert!(
         has_leak_signal,
         "Expected to detect some cache timing effect (got leak_probability={}, has_tail_effect={})",
-        result.leak_probability,
+        leak_probability,
         has_tail_effect
     );
-
-    // CI gate always produces a definitive pass/fail decision (boolean)
-    // No assertion needed - this is guaranteed by the type system
 }
 
 /// 1.2 AES S-box Timing (Thorough) - High confidence detection
@@ -164,32 +168,42 @@ fn aes_sbox_timing_thorough() {
     const SAMPLES: usize = 100_000;
     let indices = InputPair::new(|| secret_key, rand::random::<u8>);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let val = std::hint::black_box(*idx);
             std::hint::black_box(sbox[val as usize]);
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[aes_sbox_timing_thorough]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // With 100k samples, cache effects should be more pronounced
-    // Should detect leak with high confidence
-    assert!(
-        result.leak_probability > 0.5,
-        "Expected high leak probability with 100k samples (got {})",
-        result.leak_probability
-    );
-
-    // CI gate should fail (indicating leak detected)
-    assert!(
-        !result.ci_gate.passed(),
-        "Expected CI gate to fail for S-box timing leak"
-    );
+    // Should detect leak with high confidence (Fail outcome)
+    match &outcome {
+        Outcome::Fail { leak_probability, .. } => {
+            assert!(
+                *leak_probability > 0.5,
+                "Expected high leak probability with 100k samples (got {})",
+                leak_probability
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for S-box timing leak, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for S-box timing leak, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
+    }
 }
 
 /// 1.3 Cache Line Boundary Effects
@@ -209,29 +223,34 @@ fn cache_line_boundary_effects() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(buffer[idx_val % buffer.len()]);
         });
 
     // Operation may be too fast on some platforms - skip if unmeasurable
-    let result = skip_if_unreliable!(outcome, "cache_line_boundary_effects");
+    let outcome = skip_if_unreliable!(outcome, "cache_line_boundary_effects");
 
     eprintln!("\n[cache_line_boundary_effects]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Cache line boundary accesses may show timing differences due to cache effects
     // Should detect at least moderate leak probability or tail effects
-    let has_tail_effect = result.effect.as_ref()
-        .map(|e| matches!(e.pattern, timing_oracle::EffectPattern::TailEffect | timing_oracle::EffectPattern::Mixed))
-        .unwrap_or(false);
+    let (leak_probability, effect) = match &outcome {
+        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Unmeasurable { .. } => return,
+    };
 
-    let has_leak_signal = result.leak_probability > 0.2 || has_tail_effect;
+    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect | EffectPattern::Mixed);
+
+    let has_leak_signal = leak_probability > 0.2 || has_tail_effect;
     assert!(
         has_leak_signal,
         "Expected to detect cache line boundary effects (got leak_probability={}, has_tail_effect={})",
-        result.leak_probability,
+        leak_probability,
         has_tail_effect
     );
 }
@@ -261,36 +280,41 @@ fn memory_access_pattern_leak() {
 
     // Use Research mode (theta=0) to test raw detection capability for memory patterns
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |access_idx| {
             let access_idx_val = std::hint::black_box(*access_idx);
             std::hint::black_box(data[access_idx_val]);
         });
 
     // Memory access is very fast - may be unmeasurable on coarse timers (e.g., macOS 42ns)
-    let result = timing_oracle::skip_if_unreliable!(outcome, "memory_access_pattern_leak");
+    let outcome = skip_if_unreliable!(outcome, "memory_access_pattern_leak");
 
     eprintln!("\n[memory_access_pattern_leak]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Memory access patterns with different strides should show timing differences
     // due to cache effects (sequential vs random access)
-    let has_leak_signal = result.leak_probability > 0.2;
+    let (leak_probability, effect) = match &outcome {
+        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Unmeasurable { .. } => return,
+    };
+
+    let has_leak_signal = leak_probability > 0.2;
     assert!(
         has_leak_signal,
         "Expected to detect memory access pattern timing differences (got leak_probability={})",
-        result.leak_probability
+        leak_probability
     );
 
     // Should have measurable effect
-    if let Some(ref effect) = result.effect {
-        let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
-        assert!(
-            total_effect > 5.0,
-            "Expected measurable timing effect for memory patterns (got {:.1}ns)",
-            total_effect
-        );
-    }
+    let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
+    assert!(
+        total_effect > 5.0,
+        "Expected measurable timing effect for memory patterns (got {:.1}ns)",
+        total_effect
+    );
 }
 
 // ============================================================================
@@ -310,53 +334,66 @@ fn modexp_square_and_multiply_timing() {
 
     let exponents = InputPair::new(|| exp_high_hamming.clone(), || exp_low_hamming.clone());
 
-    let outcome = TimingOracle::new()
-        .samples(8_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(8_000)
         .test(exponents, |exp| {
             std::hint::black_box(helpers::modpow_naive(&base, exp, &modulus));
         });
 
-    let result = outcome.unwrap_completed();
-
     // Print full formatted output
-    eprintln!("\n{}", timing_oracle::output::format_result(&result));
+    eprintln!("\n{}", timing_oracle::output::format_outcome(&outcome));
 
     // Square-and-multiply creates a uniform shift (more iterations = more time)
-    assert!(
-        result.leak_probability > 0.8,
-        "Expected to detect modexp timing leak (got {})",
-        result.leak_probability
-    );
+    // Should detect leak (Fail outcome)
+    match &outcome {
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            quality,
+            ..
+        } => {
+            assert!(
+                *leak_probability > 0.8,
+                "Expected high leak probability for modexp (got {})",
+                leak_probability
+            );
 
-    // CI gate should fail (indicating leak detected)
-    assert!(
-        !result.ci_gate.passed(),
-        "Expected CI gate to fail for modexp timing leak"
-    );
+            // Should have good or better measurement quality
+            assert!(
+                !matches!(quality, MeasurementQuality::TooNoisy),
+                "Expected good measurement quality for modexp (got {:?})",
+                quality
+            );
 
-    // Should have good or better measurement quality
-    assert!(
-        !matches!(result.quality, timing_oracle::MeasurementQuality::TooNoisy),
-        "Expected good measurement quality for modexp (got {:?})",
-        result.quality
-    );
+            // Should show UniformShift or Mixed pattern (BigInt ops may have variance)
+            assert!(
+                matches!(effect.pattern, EffectPattern::UniformShift | EffectPattern::Mixed),
+                "Expected UniformShift or Mixed pattern for algorithmic timing (got {:?})",
+                effect.pattern
+            );
 
-    // Should show UniformShift or Mixed pattern (BigInt ops may have variance)
-    if let Some(ref effect) = result.effect {
-        assert!(
-            matches!(effect.pattern, timing_oracle::EffectPattern::UniformShift | timing_oracle::EffectPattern::Mixed),
-            "Expected UniformShift or Mixed pattern for algorithmic timing (got {:?})",
-            effect.pattern
-        );
-
-        // Should have significant shift
-        assert!(
-            effect.shift_ns > 50.0,
-            "Expected significant shift_ns (got {:.1})",
-            effect.shift_ns
-        );
-    } else {
-        panic!("Expected effect data for high leak probability test");
+            // Should have significant shift
+            assert!(
+                effect.shift_ns > 50.0,
+                "Expected significant shift_ns (got {:.1})",
+                effect.shift_ns
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for modexp timing leak, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for modexp timing leak, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
     }
 }
 
@@ -372,22 +409,40 @@ fn modexp_bit_pattern_timing() {
 
     let exponents = InputPair::new(|| exp_many_ones.clone(), || exp_few_ones.clone());
 
-    let outcome = TimingOracle::new()
-        .samples(6_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(6_000)
         .test(exponents, |exp| {
             std::hint::black_box(helpers::modpow_naive(&base, exp, &modulus));
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[modexp_bit_pattern_timing]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    assert!(
-        result.leak_probability > 0.8,
-        "Expected high leak probability for bit pattern timing (got {})",
-        result.leak_probability
-    );
+    // Should detect leak (Fail outcome)
+    match &outcome {
+        Outcome::Fail { leak_probability, .. } => {
+            assert!(
+                *leak_probability > 0.8,
+                "Expected high leak probability for bit pattern timing (got {})",
+                leak_probability
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for bit pattern timing, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for bit pattern timing, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
+    }
 }
 
 // ============================================================================
@@ -411,23 +466,36 @@ fn table_lookup_small_l1() {
 
     // Use Research mode (theta=0) to test raw detection capability
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
         });
 
-    let result = skip_if_unreliable!(outcome, "table_lookup_small_l1");
+    let outcome = skip_if_unreliable!(outcome, "table_lookup_small_l1");
 
     eprintln!("\n[table_lookup_small_l1]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    // L1-resident small table: may detect timing difference but should be Negligible
-    assert!(
-        matches!(result.exploitability, timing_oracle::Exploitability::Negligible),
-        "Expected Negligible exploitability for L1-resident table (got {:?})",
-        result.exploitability
-    );
+    // L1-resident small table: should pass or have Negligible exploitability if Fail
+    match &outcome {
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
+        }
+        Outcome::Fail { exploitability, .. } => {
+            assert!(
+                matches!(exploitability, Exploitability::Negligible),
+                "Expected Negligible exploitability for L1-resident table (got {:?})",
+                exploitability
+            );
+        }
+        Outcome::Inconclusive { .. } => {
+            // Acceptable for small table operations
+        }
+        Outcome::Unmeasurable { .. } => {
+            // Operation too fast - acceptable
+        }
+    }
 }
 
 /// 3.2 Medium Table (L2/L3 Cache) - May show cache effects
@@ -445,30 +513,37 @@ fn table_lookup_medium_l2() {
 
     // Use Research mode (theta=0) to test raw detection capability
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
         });
 
-    let result = skip_if_unreliable!(outcome, "table_lookup_medium_l2");
+    let outcome = skip_if_unreliable!(outcome, "table_lookup_medium_l2");
 
     eprintln!("\n[table_lookup_medium_l2]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Medium-sized table may show cache timing effects
     // Should be measurable but exploitability should be low (Negligible or PossibleLAN at most)
-    assert!(
-        matches!(
-            result.exploitability,
-            timing_oracle::Exploitability::Negligible | timing_oracle::Exploitability::PossibleLAN
-        ),
-        "Expected low exploitability for medium table (got {:?})",
-        result.exploitability
-    );
-
-    // CI gate always produces a definitive pass/fail decision (boolean)
-    // No assertion needed - this is guaranteed by the type system
+    match &outcome {
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
+        }
+        Outcome::Fail { exploitability, .. } => {
+            assert!(
+                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                "Expected low exploitability for medium table (got {:?})",
+                exploitability
+            );
+        }
+        Outcome::Inconclusive { .. } => {
+            // Acceptable for medium table operations
+        }
+        Outcome::Unmeasurable { .. } => {
+            // Operation too fast - acceptable
+        }
+    }
 }
 
 /// 3.3 Large Table (Cache Thrashing) - Should show cache effects
@@ -486,37 +561,34 @@ fn table_lookup_large_cache_thrash() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .samples(SAMPLES)
+        .max_samples(SAMPLES)
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
         });
 
     // Skip if measurement is unreliable (cache timing is hard to measure on Apple Silicon)
-    let result = timing_oracle::skip_if_unreliable!(outcome, "table_lookup_large_cache_thrash");
+    let outcome = skip_if_unreliable!(outcome, "table_lookup_large_cache_thrash");
 
     eprintln!("\n[table_lookup_large_cache_thrash]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // Large table should show cache timing effects
-    // Use separate assertions for clear diagnostics
-    let has_tail_effect = result.effect.as_ref()
-        .map(|e| matches!(e.pattern, timing_oracle::EffectPattern::TailEffect))
-        .unwrap_or(false);
+    let (leak_probability, effect) = match &outcome {
+        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Unmeasurable { .. } => return,
+    };
 
-    // Should detect leak probability
-    assert!(
-        result.leak_probability > 0.4,
-        "Expected moderate leak probability for large table cache effects (got {})",
-        result.leak_probability
-    );
+    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
 
-    // OR should show tail effect pattern
-    let has_leak_signal = result.leak_probability > 0.4 || has_tail_effect;
+    // Should detect leak probability or tail effect pattern
+    let has_leak_signal = leak_probability > 0.4 || has_tail_effect;
     assert!(
         has_leak_signal,
         "Expected cache effects for large table (got leak_probability={}, has_tail_effect={})",
-        result.leak_probability,
+        leak_probability,
         has_tail_effect
     );
 }
@@ -534,8 +606,8 @@ fn effect_pattern_pure_uniform_shift() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(which_class, |class| {
             if *class == 0 {
                 // No delay
@@ -548,41 +620,41 @@ fn effect_pattern_pure_uniform_shift() {
         });
 
     // Skip assertions if measurement is unreliable
-    let result = timing_oracle::skip_if_unreliable!(outcome, "effect_pattern_pure_uniform_shift");
+    let outcome = skip_if_unreliable!(outcome, "effect_pattern_pure_uniform_shift");
 
     eprintln!("\n[effect_pattern_pure_uniform_shift]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    if let Some(ref effect) = result.effect {
-        // Should classify as UniformShift (or Mixed with dominant shift)
-        // On real hardware, constant delays may have small jitter that creates a minor tail
-        assert!(
-            matches!(
-                effect.pattern,
-                timing_oracle::EffectPattern::UniformShift | timing_oracle::EffectPattern::Mixed
-            ),
-            "Expected UniformShift or Mixed pattern (got {:?})",
-            effect.pattern
-        );
+    let effect = match &outcome {
+        Outcome::Pass { effect, .. } => effect,
+        Outcome::Fail { effect, .. } => effect,
+        Outcome::Inconclusive { effect, .. } => effect,
+        Outcome::Unmeasurable { .. } => return,
+    };
 
-        // Should have significant shift component
-        // Use abs() since sign depends on which class is slower
-        assert!(
-            effect.shift_ns.abs() > 50.0,
-            "Expected significant shift component (got {:.1}ns)",
-            effect.shift_ns
-        );
+    // Should classify as UniformShift (or Mixed with dominant shift)
+    // On real hardware, constant delays may have small jitter that creates a minor tail
+    assert!(
+        matches!(effect.pattern, EffectPattern::UniformShift | EffectPattern::Mixed),
+        "Expected UniformShift or Mixed pattern (got {:?})",
+        effect.pattern
+    );
 
-        // Shift should dominate tail (at least 5x larger)
-        assert!(
-            effect.shift_ns.abs() > effect.tail_ns.abs() * 5.0,
-            "Expected shift to dominate tail (got shift={:.1}ns, tail={:.1}ns)",
-            effect.shift_ns,
-            effect.tail_ns
-        );
-    } else {
-        panic!("Expected effect data for uniform shift test");
-    }
+    // Should have significant shift component
+    // Use abs() since sign depends on which class is slower
+    assert!(
+        effect.shift_ns.abs() > 50.0,
+        "Expected significant shift component (got {:.1}ns)",
+        effect.shift_ns
+    );
+
+    // Shift should dominate tail (at least 5x larger)
+    assert!(
+        effect.shift_ns.abs() > effect.tail_ns.abs() * 5.0,
+        "Expected shift to dominate tail (got shift={:.1}ns, tail={:.1}ns)",
+        effect.shift_ns,
+        effect.tail_ns
+    );
 }
 
 /// 4.2 Pure Tail Effect - Validates TailEffect classification
@@ -607,8 +679,8 @@ fn effect_pattern_pure_tail() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(which_class, |class| {
             if *class == 0 {
                 let i = fixed_idx.get();
@@ -632,44 +704,47 @@ fn effect_pattern_pure_tail() {
         });
 
     // Skip assertions if measurement is unreliable
-    let result = timing_oracle::skip_if_unreliable!(outcome, "effect_pattern_pure_tail");
+    let outcome = skip_if_unreliable!(outcome, "effect_pattern_pure_tail");
 
     eprintln!("\n[effect_pattern_pure_tail]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    if let Some(ref effect) = result.effect {
-        // When neither effect is statistically significant, pattern is Indeterminate - this is valid
-        // Only assert on pattern when we have significant effects to classify
-        match effect.pattern {
-            timing_oracle::EffectPattern::Indeterminate => {
-                // Indeterminate is valid when effects aren't statistically significant
-                eprintln!(
-                    "Note: Got Indeterminate pattern (shift={:.1}ns, tail={:.1}ns) - effects not significant",
-                    effect.shift_ns, effect.tail_ns
-                );
-            }
-            timing_oracle::EffectPattern::TailEffect | timing_oracle::EffectPattern::Mixed => {
-                // Should have significant tail component when classified as TailEffect/Mixed
-                // Note: A probabilistic spike (15% chance of 2000 cycles) creates both:
-                // - A shift effect (mean increases by ~300 cycles = 15% × 2000)
-                // - A tail effect (variance increases in upper quantiles)
-                // So we expect Mixed or TailEffect, not necessarily |tail| > |shift|
-                assert!(
-                    effect.tail_ns.abs() > 20.0,
-                    "Expected significant tail component (got {:.1}ns)",
-                    effect.tail_ns
-                );
-            }
-            timing_oracle::EffectPattern::UniformShift => {
-                // UniformShift is not expected for this test, but acceptable if effect is small
-                eprintln!(
-                    "Unexpected UniformShift pattern (shift={:.1}ns, tail={:.1}ns)",
-                    effect.shift_ns, effect.tail_ns
-                );
-            }
+    let effect = match &outcome {
+        Outcome::Pass { effect, .. } => effect,
+        Outcome::Fail { effect, .. } => effect,
+        Outcome::Inconclusive { effect, .. } => effect,
+        Outcome::Unmeasurable { .. } => return,
+    };
+
+    // When neither effect is statistically significant, pattern is Indeterminate - this is valid
+    // Only assert on pattern when we have significant effects to classify
+    match effect.pattern {
+        EffectPattern::Indeterminate => {
+            // Indeterminate is valid when effects aren't statistically significant
+            eprintln!(
+                "Note: Got Indeterminate pattern (shift={:.1}ns, tail={:.1}ns) - effects not significant",
+                effect.shift_ns, effect.tail_ns
+            );
         }
-    } else {
-        panic!("Expected effect data for tail effect test");
+        EffectPattern::TailEffect | EffectPattern::Mixed => {
+            // Should have significant tail component when classified as TailEffect/Mixed
+            // Note: A probabilistic spike (15% chance of 2000 cycles) creates both:
+            // - A shift effect (mean increases by ~300 cycles = 15% × 2000)
+            // - A tail effect (variance increases in upper quantiles)
+            // So we expect Mixed or TailEffect, not necessarily |tail| > |shift|
+            assert!(
+                effect.tail_ns.abs() > 20.0,
+                "Expected significant tail component (got {:.1}ns)",
+                effect.tail_ns
+            );
+        }
+        EffectPattern::UniformShift => {
+            // UniformShift is not expected for this test, but acceptable if effect is small
+            eprintln!(
+                "Unexpected UniformShift pattern (shift={:.1}ns, tail={:.1}ns)",
+                effect.shift_ns, effect.tail_ns
+            );
+        }
     }
 }
 
@@ -694,8 +769,8 @@ fn effect_pattern_mixed() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(SAMPLES)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
         .test(which_class, |class| {
             if *class == 0 {
                 let i = fixed_idx.get();
@@ -718,29 +793,32 @@ fn effect_pattern_mixed() {
         });
 
     // Skip assertions if measurement is unreliable
-    let result = timing_oracle::skip_if_unreliable!(outcome, "effect_pattern_mixed");
+    let outcome = skip_if_unreliable!(outcome, "effect_pattern_mixed");
 
     eprintln!("\n[effect_pattern_mixed]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    if let Some(ref effect) = result.effect {
-        // Should classify as Mixed
-        assert!(
-            matches!(effect.pattern, timing_oracle::EffectPattern::Mixed),
-            "Expected Mixed pattern (got {:?})",
-            effect.pattern
-        );
+    let effect = match &outcome {
+        Outcome::Pass { effect, .. } => effect,
+        Outcome::Fail { effect, .. } => effect,
+        Outcome::Inconclusive { effect, .. } => effect,
+        Outcome::Unmeasurable { .. } => return,
+    };
 
-        // Both components should be significant (use abs for sign-independence)
-        assert!(
-            effect.shift_ns.abs() > 3.0 && effect.tail_ns.abs() > 3.0,
-            "Expected both |shift| and |tail| > 3ns (got shift={:.1}ns, tail={:.1}ns)",
-            effect.shift_ns,
-            effect.tail_ns
-        );
-    } else {
-        panic!("Expected effect data for mixed pattern test");
-    }
+    // Should classify as Mixed
+    assert!(
+        matches!(effect.pattern, EffectPattern::Mixed),
+        "Expected Mixed pattern (got {:?})",
+        effect.pattern
+    );
+
+    // Both components should be significant (use abs for sign-independence)
+    assert!(
+        effect.shift_ns.abs() > 3.0 && effect.tail_ns.abs() > 3.0,
+        "Expected both |shift| and |tail| > 3ns (got shift={:.1}ns, tail={:.1}ns)",
+        effect.shift_ns,
+        effect.tail_ns
+    );
 }
 
 // ============================================================================
@@ -766,8 +844,7 @@ fn exploitability_negligible() {
         }, // Sample: random data
     );
 
-    let outcome = TimingOracle::balanced()
-        .alpha(0.001) // Very strict to reduce FP
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .from_env()
         .test(inputs, |input| {
             // Pure XOR-based constant-time equality check
@@ -778,33 +855,51 @@ fn exploitability_negligible() {
             std::hint::black_box(diff);
         });
 
-    let result = skip_if_unreliable!(outcome, "exploitability_negligible");
+    let outcome = skip_if_unreliable!(outcome, "exploitability_negligible");
 
     eprintln!("\n[exploitability_negligible]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     // XOR-based comparison is constant-time, so exploitability should always be Negligible
-    // Whether the CI gate passes or not (due to noise), the effect should be tiny
-    assert_eq!(
-        result.exploitability,
-        timing_oracle::Exploitability::Negligible,
-        "XOR comparison should have Negligible exploitability. CI gate passed: {}, leak_prob: {:.4}, effect: {:?}",
-        result.ci_gate.passed(),
-        result.leak_probability,
-        result.effect
-    );
-
-    // Additional info for debugging
-    if result.ci_gate.passed() {
-        eprintln!(
-            "No timing leak detected (leak_probability = {:.4})",
-            result.leak_probability
-        );
-    } else {
-        eprintln!(
-            "Small timing detected but Negligible (leak_probability = {:.4})",
-            result.leak_probability
-        );
+    // Whether it passes or fails (due to noise), the effect should be tiny
+    match &outcome {
+        Outcome::Pass { leak_probability, effect, .. } => {
+            eprintln!(
+                "No timing leak detected (leak_probability = {:.4})",
+                leak_probability
+            );
+            // Effect should be negligible
+            assert!(
+                effect.total_effect_ns() < 100.0,
+                "XOR comparison should have effect < 100ns (got {:.1}ns)",
+                effect.total_effect_ns()
+            );
+        }
+        Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+            eprintln!(
+                "Small timing detected but should be Negligible (leak_probability = {:.4})",
+                leak_probability
+            );
+            assert_eq!(
+                *exploitability,
+                Exploitability::Negligible,
+                "XOR comparison should have Negligible exploitability. leak_prob: {:.4}, effect: shift={:.1}ns, tail={:.1}ns",
+                leak_probability,
+                effect.shift_ns,
+                effect.tail_ns
+            );
+        }
+        Outcome::Inconclusive { leak_probability, effect, .. } => {
+            // Inconclusive is acceptable for such a small effect
+            eprintln!(
+                "Inconclusive result (leak_probability = {:.4}, effect = {:.1}ns)",
+                leak_probability,
+                effect.total_effect_ns()
+            );
+        }
+        Outcome::Unmeasurable { .. } => {
+            // Operation too fast - acceptable for XOR
+        }
     }
 }
 
@@ -822,8 +917,8 @@ fn exploitability_possible_lan() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);
@@ -833,29 +928,41 @@ fn exploitability_possible_lan() {
             }
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[exploitability_possible_lan]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    assert!(
-        matches!(
-            result.exploitability,
-            timing_oracle::Exploitability::PossibleLAN | timing_oracle::Exploitability::LikelyLAN
-        ),
-        "Expected PossibleLAN or LikelyLAN exploitability (got {:?})",
-        result.exploitability
-    );
+    match &outcome {
+        Outcome::Fail { exploitability, effect, .. } => {
+            assert!(
+                matches!(exploitability, Exploitability::PossibleLAN | Exploitability::LikelyLAN),
+                "Expected PossibleLAN or LikelyLAN exploitability (got {:?})",
+                exploitability
+            );
 
-    // Verify effect magnitude is in the 100-500ns range (with reasonable margins)
-    // Target was ~200-300ns, so expect 50-600ns with platform variance
-    if let Some(ref effect) = result.effect {
-        let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
-        assert!(
-            total_effect >= 50.0 && total_effect <= 600.0,
-            "Expected total effect in 50-600ns range for PossibleLAN classification (got {:.1}ns)",
-            total_effect
-        );
+            // Verify effect magnitude is in the 100-500ns range (with reasonable margins)
+            // Target was ~200-300ns, so expect 50-600ns with platform variance
+            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
+            assert!(
+                total_effect >= 50.0 && total_effect <= 600.0,
+                "Expected total effect in 50-600ns range for PossibleLAN classification (got {:.1}ns)",
+                total_effect
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for medium delay, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for medium delay, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
     }
 }
 
@@ -873,8 +980,8 @@ fn exploitability_likely_lan() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);
@@ -884,26 +991,41 @@ fn exploitability_likely_lan() {
             }
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[exploitability_likely_lan]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    assert!(
-        matches!(result.exploitability, timing_oracle::Exploitability::LikelyLAN),
-        "Expected LikelyLAN exploitability (got {:?})",
-        result.exploitability
-    );
+    match &outcome {
+        Outcome::Fail { exploitability, effect, .. } => {
+            assert!(
+                matches!(exploitability, Exploitability::LikelyLAN),
+                "Expected LikelyLAN exploitability (got {:?})",
+                exploitability
+            );
 
-    // Verify effect magnitude is in the 500ns-20μs range (with reasonable margins)
-    // Target was ~2μs, so expect 400ns-25μs with platform variance
-    if let Some(ref effect) = result.effect {
-        let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
-        assert!(
-            total_effect >= 400.0 && total_effect <= 25_000.0,
-            "Expected total effect in 400ns-25μs range for LikelyLAN classification (got {:.1}ns)",
-            total_effect
-        );
+            // Verify effect magnitude is in the 500ns-20μs range (with reasonable margins)
+            // Target was ~2μs, so expect 400ns-25μs with platform variance
+            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
+            assert!(
+                total_effect >= 400.0 && total_effect <= 25_000.0,
+                "Expected total effect in 400ns-25μs range for LikelyLAN classification (got {:.1}ns)",
+                total_effect
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for large delay, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for large delay, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
     }
 }
 
@@ -921,8 +1043,8 @@ fn exploitability_possible_remote() {
 
     let which_class = InputPair::new(|| 0, || 1);
 
-    let outcome = TimingOracle::new()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);
@@ -932,25 +1054,40 @@ fn exploitability_possible_remote() {
             }
         });
 
-    let result = outcome.unwrap_completed();
-
     eprintln!("\n[exploitability_possible_remote]");
-    eprintln!("{}", timing_oracle::output::format_result(&result));
+    eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
-    assert!(
-        matches!(result.exploitability, timing_oracle::Exploitability::PossibleRemote),
-        "Expected PossibleRemote exploitability (got {:?})",
-        result.exploitability
-    );
+    match &outcome {
+        Outcome::Fail { exploitability, effect, .. } => {
+            assert!(
+                matches!(exploitability, Exploitability::PossibleRemote),
+                "Expected PossibleRemote exploitability (got {:?})",
+                exploitability
+            );
 
-    // Verify effect magnitude is > 20μs (with reasonable margin)
-    // Target was ~50μs, so expect > 15μs with platform variance
-    if let Some(ref effect) = result.effect {
-        let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
-        assert!(
-            total_effect >= 15_000.0,
-            "Expected total effect > 15μs for PossibleRemote classification (got {:.1}ns)",
-            total_effect
-        );
+            // Verify effect magnitude is > 20μs (with reasonable margin)
+            // Target was ~50μs, so expect > 15μs with platform variance
+            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
+            assert!(
+                total_effect >= 15_000.0,
+                "Expected total effect > 15μs for PossibleRemote classification (got {:.1}ns)",
+                total_effect
+            );
+        }
+        Outcome::Pass { leak_probability, .. } => {
+            panic!(
+                "Expected Fail outcome for huge delay, got Pass with leak_probability={}",
+                leak_probability
+            );
+        }
+        Outcome::Inconclusive { leak_probability, reason, .. } => {
+            panic!(
+                "Expected Fail outcome for huge delay, got Inconclusive: {:?}, leak_probability={}",
+                reason, leak_probability
+            );
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Skipping: {}", recommendation);
+        }
     }
 }

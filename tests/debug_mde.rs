@@ -1,8 +1,9 @@
 //! Temporary diagnostic test for MDE issue
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::statistics::compute_deciles;
-use timing_oracle::TimingOracle;
+use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 fn generate_sbox() -> [u8; 256] {
     let mut sbox = [0u8; 256];
@@ -103,44 +104,64 @@ fn debug_mde_issue() {
     const SAMPLES: usize = 10_000;
     let indices = InputPair::new(|| secret_key, || rand::random::<u8>());
 
-    let outcome = TimingOracle::new().samples(SAMPLES).test(indices, |idx| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(10))
+        .max_samples(SAMPLES)
+        .test(indices, |idx| {
         std::hint::black_box(());
         std::hint::black_box(sbox[*idx as usize]);
     });
 
-    let result = timing_oracle::skip_if_unreliable!(outcome, "debug_mde_issue");
-
     eprintln!("\n=== DIAGNOSTIC OUTPUT ===");
-    eprintln!("Samples per class: {}", result.metadata.samples_per_class);
-    eprintln!("Cycles per ns: {}", result.metadata.cycles_per_ns);
-    eprintln!("Timer: {}", result.metadata.timer);
-    eprintln!(
-        "Timer resolution: {} ns",
-        result.metadata.timer_resolution_ns
-    );
-    eprintln!(
-        "Batching enabled: {}, k={}",
-        result.metadata.batching.enabled, result.metadata.batching.k
-    );
-    eprintln!("Outlier fraction: {}", result.outlier_fraction);
-    eprintln!();
-    eprintln!("MDE shift_ns: {}", result.min_detectable_effect.shift_ns);
-    eprintln!("MDE tail_ns: {}", result.min_detectable_effect.tail_ns);
-    eprintln!("Quality: {:?}", result.quality);
-    eprintln!();
-    eprintln!("CI Gate passed: {}", result.ci_gate.passed());
-    eprintln!("CI Gate alpha: {}", result.ci_gate.alpha);
-    eprintln!("CI Gate threshold: {:.2}", result.ci_gate.threshold);
-    eprintln!("CI Gate max_observed: {:.2}", result.ci_gate.max_observed);
-    eprintln!("CI Gate observed: {:?}", result.ci_gate.observed);
-    eprintln!();
-    eprintln!("Leak probability: {}", result.leak_probability);
-    eprintln!("Exploitability: {:?}", result.exploitability);
-    if let Some(ref effect) = result.effect {
-        eprintln!("Effect shift_ns: {}", effect.shift_ns);
-        eprintln!("Effect tail_ns: {}", effect.tail_ns);
-        eprintln!("Effect pattern: {:?}", effect.pattern);
-        eprintln!("Effect CI: {:?}", effect.credible_interval_ns);
+
+    match outcome {
+        Outcome::Pass { leak_probability, effect, samples_used, quality, diagnostics } => {
+            eprintln!("Outcome: PASS");
+            eprintln!("Samples used: {}", samples_used);
+            eprintln!("Quality: {:?}", quality);
+            eprintln!("Discrete mode: {}", diagnostics.discrete_mode);
+            eprintln!();
+            eprintln!("Leak probability: {:.3}", leak_probability);
+            eprintln!("Effect shift_ns: {:.2}", effect.shift_ns);
+            eprintln!("Effect tail_ns: {:.2}", effect.tail_ns);
+            eprintln!("Effect pattern: {:?}", effect.pattern);
+            eprintln!("Effect CI: {:?}", effect.credible_interval_ns);
+        }
+        Outcome::Fail { leak_probability, effect, exploitability, samples_used, quality, diagnostics } => {
+            eprintln!("Outcome: FAIL");
+            eprintln!("Samples used: {}", samples_used);
+            eprintln!("Quality: {:?}", quality);
+            eprintln!("Discrete mode: {}", diagnostics.discrete_mode);
+            eprintln!();
+            eprintln!("Leak probability: {:.3}", leak_probability);
+            eprintln!("Exploitability: {:?}", exploitability);
+            eprintln!("Effect shift_ns: {:.2}", effect.shift_ns);
+            eprintln!("Effect tail_ns: {:.2}", effect.tail_ns);
+            eprintln!("Effect pattern: {:?}", effect.pattern);
+            eprintln!("Effect CI: {:?}", effect.credible_interval_ns);
+        }
+        Outcome::Inconclusive { reason, leak_probability, effect, samples_used, quality, diagnostics } => {
+            eprintln!("Outcome: INCONCLUSIVE");
+            eprintln!("Reason: {:?}", reason);
+            eprintln!("Samples used: {}", samples_used);
+            eprintln!("Quality: {:?}", quality);
+            eprintln!("Discrete mode: {}", diagnostics.discrete_mode);
+            eprintln!();
+            eprintln!("Leak probability: {:.3}", leak_probability);
+            eprintln!("Effect shift_ns: {:.2}", effect.shift_ns);
+            eprintln!("Effect tail_ns: {:.2}", effect.tail_ns);
+            eprintln!("Effect pattern: {:?}", effect.pattern);
+            eprintln!("Effect CI: {:?}", effect.credible_interval_ns);
+        }
+        Outcome::Unmeasurable { operation_ns, threshold_ns, platform, recommendation } => {
+            eprintln!("Outcome: UNMEASURABLE");
+            eprintln!("Operation: {:.1}ns", operation_ns);
+            eprintln!("Threshold: {:.1}ns", threshold_ns);
+            eprintln!("Platform: {}", platform);
+            eprintln!("Recommendation: {}", recommendation);
+            return; // Skip the rest
+        }
     }
+
     eprintln!("=========================\n");
 }
