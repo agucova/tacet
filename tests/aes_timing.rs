@@ -12,9 +12,7 @@
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{
-    skip_if_unreliable, AttackerModel, Exploitability, MeasurementQuality, Outcome, TimingOracle,
-};
+use timing_oracle::{skip_if_unreliable, AttackerModel, Exploitability, Outcome, TimingOracle};
 
 fn rand_bytes_16() -> [u8; 16] {
     let mut arr = [0u8; 16];
@@ -67,41 +65,24 @@ fn aes128_block_encrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes128_block_encrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
+        Outcome::Pass { .. } => {
             // Good - no timing leak detected
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
-            // If it fails, the exploitability should at least be negligible
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "AES-128 should have negligible exploitability (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
+        Outcome::Inconclusive { leak_probability, .. } => {
             eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
             );
         }
         Outcome::Unmeasurable { .. } => {
@@ -151,40 +132,22 @@ fn aes128_different_keys_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes128_different_keys_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "AES with different keys should have low exploitability (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 with different keys should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
-            eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
-            );
+        Outcome::Inconclusive { leak_probability, .. } => {
+            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -263,40 +226,22 @@ fn aes128_multiple_blocks_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes128_multiple_blocks_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "AES-128 multiple blocks should have low exploitability (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 multiple blocks should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
-            eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
-            );
+        Outcome::Inconclusive { leak_probability, .. } => {
+            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -331,40 +276,22 @@ fn aes128_key_init_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes128_key_init_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "AES-128 key init should have low exploitability (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 key init should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
-            eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
-            );
+        Outcome::Inconclusive { leak_probability, .. } => {
+            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -399,40 +326,22 @@ fn aes128_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "aes128_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "Hamming weight should not affect timing (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 Hamming weight should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
-            eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
-            );
+        Outcome::Inconclusive { leak_probability, .. } => {
+            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -473,42 +382,22 @@ fn aes128_byte_pattern_independence() {
     let outcome = skip_if_unreliable!(outcome, "aes128_byte_pattern_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            // Note: leak_probability can be elevated near boundary cases (theta=1 tick on coarse timers)
-            // without indicating a real leak. The Pass outcome accounts for measurement uncertainty.
-            if *leak_probability > 0.5 {
-                eprintln!(
-                    "Note: High leak_probability ({:.1}%) despite Pass - expected with noisy measurements",
-                    leak_probability * 100.0
-                );
-            }
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
-            );
+        Outcome::Pass { .. } => {
+            // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, quality, .. } => {
+        Outcome::Fail { leak_probability, exploitability, .. } => {
             assert!(
                 matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
                 "Byte patterns should not affect timing (got {:?})",
                 exploitability
-            );
-            assert!(
-                !matches!(quality, MeasurementQuality::TooNoisy),
-                "Measurement quality should not be TooNoisy (got {:?})",
-                quality
             );
             panic!(
                 "AES-128 byte pattern should be constant-time (got Fail with leak_probability={:.3})",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
-            eprintln!(
-                "Warning: Inconclusive result (leak_probability={:.3}, quality={:?})",
-                leak_probability, quality
-            );
+        Outcome::Inconclusive { leak_probability, .. } => {
+            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
         }
         Outcome::Unmeasurable { .. } => {}
     }

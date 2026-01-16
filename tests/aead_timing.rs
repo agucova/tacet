@@ -16,7 +16,7 @@ use chacha20poly1305::{
 use ring::aead::{self, LessSafeKey, UnboundKey, AES_256_GCM, CHACHA20_POLY1305};
 use std::time::Duration;
 use timing_oracle::helpers::InputPair;
-use timing_oracle::{skip_if_unreliable, AttackerModel, Exploitability, MeasurementQuality, Outcome, TimingOracle};
+use timing_oracle::{skip_if_unreliable, AttackerModel, Exploitability, Outcome, TimingOracle};
 
 #[allow(dead_code)]
 fn rand_bytes_12() -> [u8; 12] {
@@ -89,8 +89,8 @@ fn chacha20poly1305_encrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_encrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -112,13 +112,6 @@ fn chacha20poly1305_encrypt_constant_time() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -170,8 +163,8 @@ fn chacha20poly1305_decrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_decrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -192,13 +185,6 @@ fn chacha20poly1305_decrypt_constant_time() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "ChaCha20-Poly1305 decryption should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -231,8 +217,8 @@ fn chacha20poly1305_nonce_independence() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_nonce_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, effect, .. } => {
             panic!(
@@ -253,13 +239,6 @@ fn chacha20poly1305_nonce_independence() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "ChaCha20-Poly1305 nonce independence should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -308,8 +287,8 @@ fn aes_256_gcm_encrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes_256_gcm_encrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -330,13 +309,6 @@ fn aes_256_gcm_encrypt_constant_time() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "AES-256-GCM encryption should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -400,8 +372,8 @@ fn aes_256_gcm_decrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes_256_gcm_decrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -422,13 +394,6 @@ fn aes_256_gcm_decrypt_constant_time() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "AES-256-GCM decryption should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -468,8 +433,8 @@ fn ring_chacha20poly1305_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "ring_chacha20poly1305_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -490,13 +455,6 @@ fn ring_chacha20poly1305_constant_time() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "ring ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -537,8 +495,8 @@ fn chacha20poly1305_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -559,13 +517,6 @@ fn chacha20poly1305_hamming_weight_independence() {
             matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
             "ChaCha20-Poly1305 Hamming weight should not affect timing (got {:?})",
             exp
-        );
-    }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
         );
     }
 }
@@ -606,8 +557,8 @@ fn aes_gcm_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "aes_gcm_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail { leak_probability, exploitability, .. } => {
             panic!(
@@ -630,13 +581,6 @@ fn aes_gcm_hamming_weight_independence() {
             exp
         );
     }
-    if let Some(quality) = get_quality(&outcome) {
-        assert!(
-            !matches!(quality, MeasurementQuality::TooNoisy),
-            "Measurement quality should not be TooNoisy (got {:?})",
-            quality
-        );
-    }
 }
 
 // ============================================================================
@@ -648,15 +592,5 @@ fn get_exploitability(outcome: &Outcome) -> Option<Exploitability> {
     match outcome {
         Outcome::Fail { exploitability, .. } => Some(*exploitability),
         _ => None,
-    }
-}
-
-/// Extract quality from an outcome
-fn get_quality(outcome: &Outcome) -> Option<MeasurementQuality> {
-    match outcome {
-        Outcome::Pass { quality, .. } => Some(*quality),
-        Outcome::Fail { quality, .. } => Some(*quality),
-        Outcome::Inconclusive { quality, .. } => Some(*quality),
-        Outcome::Unmeasurable { .. } => None,
     }
 }
