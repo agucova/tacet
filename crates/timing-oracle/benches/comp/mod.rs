@@ -9,6 +9,8 @@
 //!
 //! Run with: `cargo bench --bench comparison`
 
+#![allow(dead_code)]
+
 pub mod adapters;
 pub mod metrics;
 pub mod report;
@@ -386,11 +388,9 @@ pub fn run_efficiency_analysis(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_basic_comparison() {
-        let config = BenchmarkConfig {
+        let config = super::BenchmarkConfig {
             samples: 5_000,
             detection_trials: 2,
             roc_trials_per_case: 2,
@@ -399,6 +399,6 @@ mod tests {
             json_path: None,
         };
 
-        run_comparison_benchmark(config);
+        super::run_comparison_benchmark(config);
     }
 }

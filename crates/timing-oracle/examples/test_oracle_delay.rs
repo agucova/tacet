@@ -1,5 +1,5 @@
 //! Minimal test to verify oracle can detect injected delays
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 // Simple spin loop delay - no system calls
 #[inline(never)]

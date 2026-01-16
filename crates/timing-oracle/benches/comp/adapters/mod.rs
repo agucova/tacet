@@ -3,6 +3,8 @@
 //! Each adapter wraps a tool and provides a uniform interface for
 //! running timing analysis and extracting results.
 
+#![allow(dead_code)]
+
 pub mod dudect_adapter;
 pub mod dudect_parser;
 pub mod dudect_template;

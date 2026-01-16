@@ -26,7 +26,6 @@ use timing_oracle::{Outcome, TimingOracle};
 
 /// Trial runner specialized for coverage tests.
 pub struct CoverageRunner {
-    test_name: String,
     config: CalibrationConfig,
     requested: usize,
     completed: usize,
@@ -38,16 +37,10 @@ pub struct CoverageRunner {
 }
 
 impl CoverageRunner {
-    pub fn new(
-        test_name: &str,
-        config: CalibrationConfig,
-        requested: usize,
-        injected_effect_ns: f64,
-    ) -> Self {
+    pub fn new(config: CalibrationConfig, requested: usize, injected_effect_ns: f64) -> Self {
         calibration_utils::set_max_inject_ns(config.tier.max_inject_ns());
 
         Self {
-            test_name: test_name.to_string(),
             config,
             requested,
             completed: 0,
@@ -199,7 +192,7 @@ fn coverage_quick_300ns() {
 
     let injected_ns: u64 = 300;
     let trials = config.tier.coverage_trials();
-    let mut runner = CoverageRunner::new(test_name, config.clone(), trials, injected_ns as f64);
+    let mut runner = CoverageRunner::new(config.clone(), trials, injected_ns as f64);
 
     eprintln!(
         "[{}] Starting {} trials with {}ns injected effect (tier: {})",
@@ -309,15 +302,9 @@ fn coverage_quick_multi_effect() {
 
     for &effect_ns in &effect_sizes {
         let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(effect_ns));
-        let sub_test = format!("{}_{}ns", test_name, effect_ns);
-        let mut runner = CoverageRunner::new(
-            &sub_test,
-            config.clone(),
-            trials_per_effect,
-            effect_ns as f64,
-        );
+        let mut runner = CoverageRunner::new(config.clone(), trials_per_effect, effect_ns as f64);
 
-        for trial in 0..trials_per_effect {
+        for _ in 0..trials_per_effect {
             if runner.should_stop() {
                 break;
             }
@@ -426,7 +413,7 @@ fn coverage_validation_rigorous() {
 
     let injected_ns: u64 = 500;
     let trials = config.tier.coverage_trials();
-    let mut runner = CoverageRunner::new(test_name, config.clone(), trials, injected_ns as f64);
+    let mut runner = CoverageRunner::new(config.clone(), trials, injected_ns as f64);
 
     eprintln!(
         "[{}] Starting {} trials with {}ns injected effect (tier: {})",

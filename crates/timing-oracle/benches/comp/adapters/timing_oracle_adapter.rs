@@ -1,5 +1,7 @@
 //! Adapter for timing-oracle library.
 
+#![allow(dead_code)]
+
 use super::{DetectionResult, Detector, RawData};
 use std::any::Any;
 use std::time::Instant;
@@ -38,7 +40,7 @@ impl Detector for TimingOracleDetector {
     fn detect(&self, fixed: &dyn Fn(), random: &dyn Fn(), samples: usize) -> DetectionResult {
         let start = Instant::now();
 
-        let oracle = TimingOracle::for_attacker(self.attacker_model.clone());
+        let oracle = TimingOracle::for_attacker(self.attacker_model);
 
         // Create an InputPair that wraps the closures
         // Note: We use () as the input type since the original closures don't take inputs

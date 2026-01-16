@@ -950,7 +950,7 @@ fn exploitability_lines(exploit: Exploitability) -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::{Diagnostics, EffectEstimate, InconclusiveReason};
+    use crate::result::{Diagnostics, EffectEstimate};
 
     fn make_pass_outcome() -> Outcome {
         Outcome::Pass {

@@ -8,7 +8,6 @@
 mod calibration_utils;
 
 use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, TrialRunner};
-use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, TimingOracle};
 
@@ -235,7 +234,7 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
     let mut results = Vec::new();
     let mut any_failed = false;
 
-    for (idx, (multiplier, effect_ns)) in effect_sizes.effects.iter().enumerate() {
+    for &(multiplier, effect_ns) in &effect_sizes.effects {
         let sub_test_name = format!("{}_{:.1}x", test_name, multiplier);
         let mut runner = TrialRunner::new(&sub_test_name, config.clone(), trials);
 
@@ -250,7 +249,7 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
                 break;
             }
 
-            let effect = *effect_ns;
+            let effect = effect_ns;
             let inputs = InputPair::new(|| false, || true);
 
             let outcome = TimingOracle::for_attacker(effect_sizes.attacker_model)
@@ -276,10 +275,10 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
             }
         }
 
-        let (decision, report) = runner.finalize_power(*multiplier);
+        let (decision, _report) = runner.finalize_power(multiplier);
         let power = runner.power();
 
-        results.push((*multiplier, power, decision.clone()));
+        results.push((multiplier, power, decision.clone()));
 
         if decision.is_fail() {
             any_failed = true;

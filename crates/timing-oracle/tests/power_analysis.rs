@@ -41,7 +41,7 @@ fn mde_calibrated_power_curve() {
     let mut mde_estimates = Vec::with_capacity(MDE_ESTIMATION_TRIALS);
 
     for trial in 0..MDE_ESTIMATION_TRIALS {
-        let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
+        let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
 
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .time_budget(Duration::from_secs(10))
@@ -259,7 +259,7 @@ fn mde_scaling_validation() {
         let mut mdes = Vec::with_capacity(TRIALS_PER_N);
 
         for trial in 0..TRIALS_PER_N {
-            let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
+            let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
 
             let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
                 .time_budget(Duration::from_secs(10))

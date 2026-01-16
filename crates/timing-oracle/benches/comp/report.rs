@@ -1,5 +1,7 @@
 //! Reporting and output formatting for comparison results.
 
+#![allow(dead_code)]
+
 use super::metrics::{DetectionRateResult, RocCurveResult, SampleEfficiencyResult};
 use serde::{Deserialize, Serialize};
 

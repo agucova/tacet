@@ -24,7 +24,7 @@ fn smoke_test() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
         Outcome::Fail {
@@ -33,7 +33,7 @@ fn smoke_test() {
             ..
         } => {
             // Unexpected but valid
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
         Outcome::Inconclusive {
@@ -41,10 +41,10 @@ fn smoke_test() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
-        Outcome::Unmeasurable { .. } => return, // Skip if unmeasurable
+        Outcome::Unmeasurable { .. } => (), // Skip if unmeasurable
     }
 }
 
@@ -79,7 +79,7 @@ fn convenience_function() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
         Outcome::Fail {
@@ -96,15 +96,16 @@ fn convenience_function() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
-        Outcome::Unmeasurable { .. } => return,
+        Outcome::Unmeasurable { .. } => (),
     }
 }
 
 /// Test macro API.
 #[test]
+#[allow(clippy::redundant_closure)]
 fn macro_api() {
     let outcome = timing_test_checked! {
         oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget(Duration::from_secs(5)).max_samples(100),
@@ -121,7 +122,7 @@ fn macro_api() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
         Outcome::Fail {
@@ -130,7 +131,7 @@ fn macro_api() {
             ..
         } => {
             // Shouldn't happen for constant-time operation
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
         Outcome::Inconclusive {
@@ -138,10 +139,10 @@ fn macro_api() {
             samples_used,
             ..
         } => {
-            assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+            assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
-        Outcome::Unmeasurable { .. } => return,
+        Outcome::Unmeasurable { .. } => (),
     }
 }
 

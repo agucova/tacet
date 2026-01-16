@@ -43,7 +43,6 @@ fn x25519_scalar_mult_constant_time() {
     ];
 
     // Pre-generate inputs using InputPair helper
-    const SAMPLES: usize = 50_000;
     let scalars = InputPair::new(|| fixed_scalar, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -172,7 +171,6 @@ fn x25519_multiple_operations_constant_time() {
     ];
 
     // Pre-generate inputs using InputPair - 3 scalars per sample
-    const SAMPLES: usize = 10_000;
     let scalars = InputPair::new(
         || fixed_scalars,
         || [rand_bytes_32(), rand_bytes_32(), rand_bytes_32()],
@@ -237,7 +235,6 @@ fn x25519_scalar_clamping_constant_time() {
     ];
 
     // Pre-generate inputs using InputPair - both pre-clamped
-    const SAMPLES: usize = 20_000;
     let scalars = InputPair::new(
         || {
             // Pre-clamp fixed scalar
@@ -430,7 +427,6 @@ fn x25519_ecdh_exchange_constant_time() {
     ];
 
     // Pre-generate inputs using InputPair - scalar and public key per sample
-    const SAMPLES: usize = 15_000;
     let inputs = InputPair::new(
         || (fixed_scalar, fixed_pubkey),
         || (rand_bytes_32(), rand_bytes_32()),

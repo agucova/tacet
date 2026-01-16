@@ -470,8 +470,10 @@ mod tests {
         state.add_batch(vec![100; 1000], vec![101; 1000]);
 
         let posterior = make_posterior(0.5, 10.0);
-        let mut config = QualityGateConfig::default();
-        config.time_budget = Duration::from_nanos(1); // Immediate timeout
+        let config = QualityGateConfig {
+            time_budget: Duration::from_nanos(1), // Immediate timeout
+            ..Default::default()
+        };
 
         // Wait a tiny bit to ensure we exceed budget
         std::thread::sleep(Duration::from_micros(10));
@@ -489,8 +491,10 @@ mod tests {
         state.add_batch(vec![100; 1000], vec![101; 1000]);
 
         let posterior = make_posterior(0.5, 10.0);
-        let mut config = QualityGateConfig::default();
-        config.max_samples = 500; // Below what we have
+        let config = QualityGateConfig {
+            max_samples: 500, // Below what we have
+            ..Default::default()
+        };
 
         let result = check_sample_budget(&state, &posterior, &config);
         assert!(matches!(

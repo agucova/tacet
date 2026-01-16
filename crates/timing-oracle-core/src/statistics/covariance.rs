@@ -519,7 +519,7 @@ pub fn bootstrap_difference_covariance_discrete(
                     Xoshiro256PlusPlus::seed_from_u64(seed),
                     vec![0.0; m],
                     vec![0.0; m],
-                    Vec::<usize>::with_capacity((m + block_size - 1) / block_size),
+                    Vec::<usize>::with_capacity(m.div_ceil(block_size)),
                     WelfordCovariance9::new(),
                 ),
                 |(_, mut baseline_buf, mut sample_buf, mut indices, mut acc), i| {
@@ -527,7 +527,7 @@ pub fn bootstrap_difference_covariance_discrete(
                         Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
                     indices.clear();
-                    let n_blocks = (m + block_size - 1) / block_size;
+                    let n_blocks = m.div_ceil(block_size);
                     let max_start = n.saturating_sub(block_size);
                     for _ in 0..n_blocks {
                         indices.push(rng.random_range(0..=max_start));
@@ -556,13 +556,13 @@ pub fn bootstrap_difference_covariance_discrete(
         let mut accumulator = WelfordCovariance9::new();
         let mut baseline_buf = vec![0.0; m];
         let mut sample_buf = vec![0.0; m];
-        let mut indices = Vec::with_capacity((m + block_size - 1) / block_size);
+        let mut indices = Vec::with_capacity(m.div_ceil(block_size));
 
         for i in 0..n_bootstrap {
             let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
             indices.clear();
-            let n_blocks = (m + block_size - 1) / block_size;
+            let n_blocks = m.div_ceil(block_size);
             let max_start = n.saturating_sub(block_size);
             for _ in 0..n_blocks {
                 indices.push(rng.random_range(0..=max_start));

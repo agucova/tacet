@@ -74,9 +74,7 @@ fn test_no_false_positive_with_helpers() {
         .test(inputs, |data| {
             // XOR with zeros is identity - constant time
             let mut result = [0u8; 32];
-            for i in 0..32 {
-                result[i] = data[i] ^ 0;
-            }
+            result.copy_from_slice(data);
             std::hint::black_box(result);
         });
 

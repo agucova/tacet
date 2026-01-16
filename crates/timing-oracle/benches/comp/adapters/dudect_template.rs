@@ -3,6 +3,8 @@
 //! Since dudect-bencher is designed for macro-based standalone binaries,
 //! we generate source code, compile it, and run it as a subprocess.
 
+#![allow(dead_code)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
@@ -272,11 +274,9 @@ impl BinaryCache {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_generate_source() {
-        let source = generate_binary_source(
+        let source = super::generate_binary_source(
             "test_bench",
             "let x = 0u8;",
             "let x = 1u8;",
@@ -291,7 +291,7 @@ mod tests {
 
     #[test]
     fn test_generate_cargo_toml() {
-        let toml = generate_cargo_toml("my_bench");
+        let toml = super::generate_cargo_toml("my_bench");
         assert!(toml.contains("name = \"dudect-my_bench\""));
         assert!(toml.contains("dudect-bencher = \"0.6\""));
     }

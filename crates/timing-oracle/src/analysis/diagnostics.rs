@@ -343,8 +343,8 @@ mod tests {
 
         // Strong drift
         let mut drifting_samples = samples.clone();
-        for i in 100..200 {
-            drifting_samples[i].time_ns = 200.0;
+        for sample in drifting_samples.iter_mut().take(200).skip(100) {
+            sample.time_ns = 200.0;
         }
         let (ratio, ok) = check_stationarity_windowed(&drifting_samples);
         assert!(ratio > 1.5);

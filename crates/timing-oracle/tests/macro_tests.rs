@@ -3,6 +3,8 @@
 //! This file tests various invocation patterns of the macro to ensure
 //! it correctly handles all syntax variations.
 
+#![allow(clippy::redundant_closure)]
+
 use std::time::Duration;
 use timing_oracle::{timing_test, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
@@ -536,7 +538,7 @@ fn timing_test_returns_outcome() {
 
     // Should be able to access Outcome methods
     if let Some(leak_prob) = outcome.leak_probability() {
-        assert!(leak_prob >= 0.0 && leak_prob <= 1.0);
+        assert!((0.0..=1.0).contains(&leak_prob));
     }
     if let Some(samples) = outcome.samples_used() {
         assert!(samples > 0);
@@ -633,7 +635,6 @@ fn timing_test_checked_explicit_unmeasurable_handling() {
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("Unmeasurable: {}", recommendation);
-            return; // Skip test gracefully
         }
     };
 }

@@ -4,6 +4,8 @@
 //! this adapter generates source code, compiles binaries, and runs them
 //! as subprocesses.
 
+#![allow(dead_code)]
+
 use super::dudect_parser::parse_dudect_output;
 use super::dudect_template::{generate_binary_source, BinaryCache};
 use super::{DetectionResult, Detector, RawData};

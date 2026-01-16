@@ -113,8 +113,6 @@ pub fn parse_dudect_output(stdout: &str) -> Result<DudectOutput, ParseError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn test_parse_millions_format() {
         let stdout = r#"
@@ -123,7 +121,7 @@ meas: 26.77 M, var: 14.85688837, max t: +0.67175, max tau: +0.00041, (5/tau)^2: 
 n == +0.046M, max t = +61.61472, max tau = +0.28863, (5/tau)^2 = 300
 "#;
 
-        let result = parse_dudect_output(stdout).unwrap();
+        let result = super::parse_dudect_output(stdout).unwrap();
         assert_eq!(result.n_samples, 46_000);
         assert!((result.max_t - 61.61472).abs() < 0.001);
         assert!((result.max_tau - 0.28863).abs() < 0.00001);
@@ -133,7 +131,7 @@ n == +0.046M, max t = +61.61472, max tau = +0.28863, (5/tau)^2 = 300
     fn test_parse_thousands_format() {
         let stdout = "n == +25K, max t = -2.35, max tau = +0.01, (5/tau)^2 = 50000";
 
-        let result = parse_dudect_output(stdout).unwrap();
+        let result = super::parse_dudect_output(stdout).unwrap();
         assert_eq!(result.n_samples, 25_000);
         assert!((result.max_t + 2.35).abs() < 0.001);
         assert!((result.max_tau - 0.01).abs() < 0.0001);

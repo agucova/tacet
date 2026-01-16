@@ -310,7 +310,7 @@ fn fpr_validation_per_attacker_model() {
             test_name, model_name, trials_per_model
         );
 
-        for trial in 0..trials_per_model {
+        for _ in 0..trials_per_model {
             if runner.should_stop() {
                 break;
             }
@@ -335,7 +335,7 @@ fn fpr_validation_per_attacker_model() {
             rng = StdRng::seed_from_u64(rng.random());
         }
 
-        let (decision, report) = runner.finalize_fpr();
+        let (decision, _report) = runner.finalize_fpr();
 
         eprintln!(
             "[{}] {}: {} failures / {} completed ({:.1}% FPR) - {}",

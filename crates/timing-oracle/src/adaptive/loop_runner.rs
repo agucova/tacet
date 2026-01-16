@@ -67,8 +67,10 @@ impl Default for AdaptiveConfig {
 impl AdaptiveConfig {
     /// Create a new config with the given theta threshold.
     pub fn with_theta(theta_ns: f64) -> Self {
-        let mut config = Self::default();
-        config.theta_ns = theta_ns;
+        let mut config = Self {
+            theta_ns,
+            ..Self::default()
+        };
         config.quality_gates.pass_threshold = config.pass_threshold;
         config.quality_gates.fail_threshold = config.fail_threshold;
         config

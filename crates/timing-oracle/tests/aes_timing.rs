@@ -48,7 +48,6 @@ fn aes128_block_encrypt_constant_time() {
     ];
 
     // Pre-generate inputs using InputPair helper
-    const SAMPLES: usize = 100_000;
     let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_16);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -307,7 +306,6 @@ fn aes128_key_init_constant_time() {
     ];
 
     // Pre-generate keys using InputPair helper
-    const SAMPLES: usize = 50_000;
     let keys = InputPair::new(|| fixed_key, rand_bytes_16);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)

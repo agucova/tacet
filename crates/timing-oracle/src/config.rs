@@ -566,13 +566,17 @@ mod tests {
         let valid = Config::default();
         assert!(valid.validate().is_ok());
 
-        let mut invalid = Config::default();
-        invalid.pass_threshold = 0.0;
+        let invalid = Config {
+            pass_threshold: 0.0,
+            ..Default::default()
+        };
         assert!(invalid.validate().is_err());
 
-        let mut invalid = Config::default();
-        invalid.pass_threshold = 0.99;
-        invalid.fail_threshold = 0.01;
+        let invalid = Config {
+            pass_threshold: 0.99,
+            fail_threshold: 0.01,
+            ..Default::default()
+        };
         assert!(invalid.validate().is_err());
     }
 

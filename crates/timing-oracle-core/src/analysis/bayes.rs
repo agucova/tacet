@@ -116,9 +116,9 @@ pub struct BayesResult {
 ///
 /// * `delta` - Observed quantile differences (9-vector, baseline - sample)
 /// * `sigma_n` - Covariance matrix already scaled for inference sample size.
-///              In the adaptive architecture, this is Σ_rate / n.
+///   In the adaptive architecture, this is Σ_rate / n.
 /// * `prior_sigmas` - Prior standard deviations (σ_μ, σ_τ) in nanoseconds.
-///                    Typically set to 2θ to ensure calibrated priors.
+///   Typically set to 2θ to ensure calibrated priors.
 /// * `theta` - Minimum effect of concern (threshold for practical significance)
 /// * `seed` - Random seed for Monte Carlo reproducibility
 ///

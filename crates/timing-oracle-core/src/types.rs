@@ -52,7 +52,7 @@ pub struct TimingSample {
 ///   Achieved 100ns accuracy over the internet using HTTP/2 request multiplexing.
 /// - **Flush+Reload, Prime+Probe literature**: Documents cycle-level timing attacks
 ///   on shared hardware (SGX, cross-VM, containers).
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum AttackerModel {
     /// Attacker shares physical hardware with the target.
     ///
@@ -88,6 +88,7 @@ pub enum AttackerModel {
     /// distinction is weaker than previously thought.
     ///
     /// Sources: Crosby et al. 2009 (LAN), Van Goethem et al. 2020 (HTTP/2)
+    #[default]
     AdjacentNetwork,
 
     /// Attacker over the internet using traditional timing techniques.
@@ -137,11 +138,5 @@ impl AttackerModel {
             AttackerModel::Research => "research (detect any difference)",
             AttackerModel::Custom { .. } => "custom threshold",
         }
-    }
-}
-
-impl Default for AttackerModel {
-    fn default() -> Self {
-        AttackerModel::AdjacentNetwork // Safe default for most use cases
     }
 }

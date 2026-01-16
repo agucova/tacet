@@ -10,6 +10,8 @@
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
+#![allow(dead_code)]
+
 mod calibration_utils;
 
 use calibration_utils::{select_attacker_model, CalibrationConfig, Decision, TrialRunner};
@@ -42,7 +44,7 @@ fn stress_threads() -> usize {
         .map(|p| p.get())
         .unwrap_or(4);
 
-    from_env.min(num_cpus / 4).min(MAX_STRESS_THREADS).max(1)
+    from_env.min(num_cpus / 4).clamp(1, MAX_STRESS_THREADS)
 }
 
 /// Get the memory pressure in MB to use.

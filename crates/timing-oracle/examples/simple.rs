@@ -21,8 +21,8 @@ fn main() {
         || [0u8; 32], // Baseline: all zeros (same as secret)
         || {
             let mut arr = [0u8; 32];
-            for i in 0..32 {
-                arr[i] = rand::random();
+            for item in &mut arr {
+                *item = rand::random();
             }
             arr
         },
@@ -83,8 +83,8 @@ fn main() {
         baseline: || [0u8; 32],
         sample: || {
             let mut arr = [0u8; 32];
-            for i in 0..32 {
-                arr[i] = rand::random();
+            for item in &mut arr {
+                *item = rand::random();
             }
             arr
         },

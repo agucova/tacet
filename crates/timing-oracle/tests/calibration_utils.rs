@@ -10,6 +10,8 @@
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
+#![allow(dead_code)]
+
 use rand::{rngs::StdRng, SeedableRng};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};

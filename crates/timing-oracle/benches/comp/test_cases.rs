@@ -118,7 +118,7 @@ impl TestCase for BranchOnZero {
 
     fn random_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {
-            let x = rand::rng().gen::<u8>() | 1; // Never zero
+            let x = rand::rng().random::<u8>() | 1; // Never zero
             std::hint::black_box(branch_on_zero(x));
         })
     }

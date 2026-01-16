@@ -50,13 +50,13 @@ mod helpers {
     /// Generate a simplified AES S-box or permutation table
     pub fn generate_sbox() -> [u8; 256] {
         let mut sbox = [0u8; 256];
-        for i in 0..256 {
+        for (i, item) in sbox.iter_mut().enumerate() {
             // Simple permutation based on bit reversal and XOR
             let mut x = i as u8;
             x = (x & 0xF0) >> 4 | (x & 0x0F) << 4;
             x = (x & 0xCC) >> 2 | (x & 0x33) << 2;
             x = (x & 0xAA) >> 1 | (x & 0x55) << 1;
-            sbox[i] = x ^ 0x63;
+            *item = x ^ 0x63;
         }
         sbox
     }
@@ -124,7 +124,6 @@ fn aes_sbox_timing_fast() {
     let secret_key = 0xABu8;
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 10_000;
     let indices = InputPair::new(|| secret_key, rand::random::<u8>);
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
@@ -183,7 +182,6 @@ fn aes_sbox_timing_thorough() {
     let secret_key = 0xABu8;
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 100_000;
     let indices = InputPair::new(|| secret_key, rand::random::<u8>);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -243,7 +241,6 @@ fn cache_line_boundary_effects() {
     let secret_offset_diff_line = 64usize; // Different cache line
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 10_000;
     let indices = InputPair::new(
         || secret_offset_same_line,
         || secret_offset_diff_line + (rand::random::<u32>() as usize % 4) * 64,
@@ -309,7 +306,6 @@ fn memory_access_pattern_leak() {
     let secret_pattern = [0usize, 64, 128, 192]; // Sequential in large strides
 
     // Pre-generate access indices using InputPair
-    const SAMPLES: usize = 8_000;
     let data_len = data.len();
     let pattern_idx = Cell::new(0usize);
     let indices = InputPair::new(
@@ -529,7 +525,6 @@ fn table_lookup_small_l1() {
     let table = [rand::random::<u64>(); 4]; // 32 bytes, fits in L1
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 10_000;
     let table_len = table.len();
     let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
@@ -575,7 +570,6 @@ fn table_lookup_medium_l2() {
     let table = vec![rand::random::<u64>(); 32]; // 256 bytes (AES S-box size)
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 10_000;
     let table_len = table.len();
     let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
@@ -625,7 +619,6 @@ fn table_lookup_large_cache_thrash() {
     let table = vec![rand::random::<u64>(); 512]; // 4KB
 
     // Pre-generate indices using InputPair
-    const SAMPLES: usize = 10_000;
     let table_len = table.len();
     let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
@@ -1134,7 +1127,7 @@ fn exploitability_likely_lan() {
             // Target was ~2μs, so expect 400ns-25μs with platform variance
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                total_effect >= 400.0 && total_effect <= 25_000.0,
+                (400.0..=25_000.0).contains(&total_effect),
                 "Expected total effect in 400ns-25μs range for LikelyLAN classification (got {:.1}ns)",
                 total_effect
             );

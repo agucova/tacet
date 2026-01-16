@@ -10,6 +10,7 @@ use timing_oracle::{
     helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
 };
 
+#[allow(clippy::redundant_closure)]
 fn main() {
     println!("Comparing constant-time vs variable-time implementations\n");
 

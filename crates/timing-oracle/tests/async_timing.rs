@@ -64,7 +64,6 @@ fn async_executor_overhead_no_false_positive() {
     ];
 
     // Pre-generate inputs using InputPair helper
-    const SAMPLES: usize = 10_000;
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -111,7 +110,6 @@ fn async_executor_overhead_no_false_positive() {
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
-            return;
         }
     }
 }
@@ -169,7 +167,6 @@ fn async_block_on_overhead_symmetric() {
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
-            return;
         }
     }
 }
@@ -236,7 +233,6 @@ fn detects_conditional_await_timing() {
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
-            return;
         }
     }
 }
@@ -332,7 +328,6 @@ fn concurrent_tasks_no_crosstalk() {
     ];
 
     // Pre-generate inputs using InputPair helper
-    const SAMPLES: usize = 10_000;
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -448,8 +443,6 @@ fn detects_task_spawn_timing_leak() {
 #[test]
 #[ignore = "slow comparative test - run with --ignored"]
 fn tokio_single_vs_multi_thread_stability() {
-    const SAMPLES: usize = 20_000;
-
     // Test with single-threaded runtime
     let rt_single = single_thread_runtime();
     let inputs_single = InputPair::new(|| [0xABu8; 32], rand_bytes);
@@ -524,5 +517,5 @@ fn async_workload_flag_effectiveness() {
 
     // Verify result structure is valid (informational test)
     let leak_probability = outcome_without_flag.leak_probability().unwrap_or(0.0);
-    assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
+    assert!((0.0..=1.0).contains(&leak_probability));
 }

@@ -100,8 +100,8 @@ fn kyber768_encapsulate_constant_time() {
     let batch1_keypairs: Vec<_> = (0..SAMPLES).map(|_| kyber768::keypair()).collect();
     let batch2_keypairs: Vec<_> = (0..SAMPLES).map(|_| kyber768::keypair()).collect();
 
-    let batch1_pks: Vec<_> = batch1_keypairs.iter().map(|(pk, _)| pk.clone()).collect();
-    let batch2_pks: Vec<_> = batch2_keypairs.iter().map(|(pk, _)| pk.clone()).collect();
+    let batch1_pks: Vec<_> = batch1_keypairs.iter().map(|(pk, _)| *pk).collect();
+    let batch2_pks: Vec<_> = batch2_keypairs.iter().map(|(pk, _)| *pk).collect();
 
     let idx0 = std::cell::Cell::new(0usize);
     let idx1 = std::cell::Cell::new(0usize);
@@ -173,7 +173,7 @@ fn kyber768_decapsulate_constant_time() {
 
     // Class 0 (baseline): Repeat the same ciphertext
     // Class 1 (sample): Use different ciphertexts
-    let baseline_cts: Vec<_> = (0..SAMPLES).map(|_| fixed_ct.clone()).collect();
+    let baseline_cts: Vec<_> = (0..SAMPLES).map(|_| fixed_ct).collect();
     let sample_cts: Vec<_> = (0..SAMPLES)
         .map(|_| {
             let (_, ct) = kyber768::encapsulate(&pk);
@@ -296,8 +296,6 @@ fn dilithium3_keypair_constant_time() {
 /// dependent timing (which is expected).
 #[test]
 fn dilithium3_sign_constant_time() {
-    const SAMPLES: usize = 5_000;
-
     let (_pk, sk) = dilithium3::keypair();
 
     // Use the SAME message for both classes to test timing consistency
@@ -361,7 +359,7 @@ fn dilithium3_verify_constant_time() {
     // Class 0 (baseline): Repeat same message/sig
     // Class 1 (sample): Use different messages/sigs
     let baseline_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| fixed_message).collect();
-    let baseline_sigs: Vec<_> = (0..SAMPLES).map(|_| fixed_sig.clone()).collect();
+    let baseline_sigs: Vec<_> = (0..SAMPLES).map(|_| fixed_sig).collect();
 
     let sample_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| rand_bytes_64()).collect();
     let sample_sigs: Vec<_> = sample_msgs
@@ -436,8 +434,6 @@ fn dilithium3_verify_constant_time() {
 /// This test verifies timing consistency by using the same message for both classes.
 #[test]
 fn falcon512_sign_constant_time() {
-    const SAMPLES: usize = 3_000; // Falcon is slower
-
     let (_pk, sk) = falcon512::keypair();
 
     // Use the SAME message for both classes to test timing consistency
@@ -509,7 +505,7 @@ fn falcon512_verify_constant_time() {
     // Class 0 (baseline): Repeat same message/sig
     // Class 1 (sample): Use different messages/sigs
     let baseline_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| fixed_message).collect();
-    let baseline_sigs: Vec<_> = (0..SAMPLES).map(|_| fixed_sig.clone()).collect();
+    let baseline_sigs: Vec<_> = (0..SAMPLES).map(|_| fixed_sig).collect();
 
     let sample_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| rand_bytes_64()).collect();
     let sample_sigs: Vec<_> = sample_msgs
@@ -590,8 +586,6 @@ fn falcon512_verify_constant_time() {
 #[test]
 #[ignore] // SPHINCS+ is very slow, run with --ignored
 fn sphincs_sha2_128f_sign_constant_time() {
-    const SAMPLES: usize = 500; // SPHINCS+ is VERY slow
-
     let (_pk, sk) = sphincssha2128fsimple::keypair();
 
     let fixed_message: [u8; 32] = [0x42; 32];
@@ -799,8 +793,6 @@ fn kyber768_ciphertext_independence() {
 /// behavior rather than asserting it should be constant-time.
 #[test]
 fn dilithium3_message_hamming_weight() {
-    const SAMPLES: usize = 5_000;
-
     let (_, sk) = dilithium3::keypair();
 
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);

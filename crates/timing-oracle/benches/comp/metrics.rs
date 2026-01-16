@@ -1,5 +1,7 @@
 //! Metrics collection for comparing timing analysis tools.
 
+#![allow(dead_code)]
+
 use super::adapters::dudect_adapter::DudectDetector;
 use super::adapters::Detector;
 use super::test_cases::TestCase;
