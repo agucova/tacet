@@ -159,7 +159,7 @@ fn handle_unreliable_fail_open_returns_none() {
 }
 
 #[test]
-#[should_panic(expected = "[UNRELIABLE]")]
+#[should_panic(expected = "[FAILED]")]
 fn handle_unreliable_fail_closed_panics() {
     let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
 
@@ -180,7 +180,7 @@ fn handle_unreliable_unmeasurable_fail_open_returns_none() {
 }
 
 #[test]
-#[should_panic(expected = "[UNRELIABLE]")]
+#[should_panic(expected = "[FAILED]")]
 fn handle_unreliable_unmeasurable_fail_closed_panics() {
     let outcome = Outcome::Unmeasurable {
         operation_ns: 15.0,
@@ -371,7 +371,7 @@ fn require_reliable_macro_returns_outcome_when_reliable() {
 }
 
 #[test]
-#[should_panic(expected = "[UNRELIABLE]")]
+#[should_panic(expected = "[FAILED]")]
 fn require_reliable_macro_panics_when_unreliable() {
     let outcome = make_inconclusive(0.5, MeasurementQuality::Good);
 
