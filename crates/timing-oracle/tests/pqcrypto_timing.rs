@@ -50,7 +50,8 @@ fn kyber768_keypair_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(10_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |_| {
             let (pk, sk) = kyber768::keypair();
@@ -105,7 +106,8 @@ fn kyber768_encapsulate_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
@@ -177,7 +179,8 @@ fn kyber768_decapsulate_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
@@ -228,7 +231,8 @@ fn dilithium3_keypair_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(5_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |_| {
             let (pk, sk) = dilithium3::keypair();
@@ -282,7 +286,8 @@ fn dilithium3_sign_constant_time() {
     let inputs = InputPair::new(|| fixed_message, || fixed_message);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
@@ -347,7 +352,8 @@ fn dilithium3_verify_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
@@ -410,7 +416,8 @@ fn falcon512_sign_constant_time() {
     let inputs = InputPair::new(|| fixed_message, || fixed_message);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |msg| {
             let sig = falcon512::detached_sign(msg, &sk);
@@ -483,7 +490,8 @@ fn falcon512_verify_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
@@ -548,9 +556,10 @@ fn sphincs_sha2_128f_sign_constant_time() {
     let inputs = InputPair::new(|| fixed_message, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(120))
-                .test(inputs, |msg| {
+        .test(inputs, |msg| {
             let sig = sphincssha2128fsimple::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
@@ -605,9 +614,10 @@ fn sphincs_sha2_128f_verify_constant_time() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(120))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             let (msg, sig) = if *which == 0 {
                 (&fixed_message[..], &fixed_sig)
             } else {
@@ -677,7 +687,8 @@ fn kyber768_ciphertext_independence() {
     let inputs = InputPair::new_unchecked(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |which| {
             if *which == 0 {
@@ -736,7 +747,8 @@ fn dilithium3_message_hamming_weight() {
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
                 .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);

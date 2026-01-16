@@ -3,15 +3,28 @@
 //! This check ensures that the input generators for fixed and random
 //! classes have similar overhead. If they differ significantly, it
 //! could introduce systematic bias in the timing measurements.
+//!
+//! **Severity**: Informational
+//!
+//! Generator cost asymmetry may inflate timing differences but doesn't
+//! invalidate the statistical analysis. The Bayesian model's assumptions
+//! are still valid; you just need to interpret the results knowing that
+//! some of the measured difference may come from generator overhead.
 
 use serde::{Deserialize, Serialize};
+
+use timing_oracle_core::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
 
 /// Warning from the generator cost check.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GeneratorWarning {
     /// Generator costs differ significantly between classes.
     ///
-    /// This is a critical warning as it can introduce systematic bias.
+    /// **Severity**: Informational
+    ///
+    /// This may inflate timing differences but doesn't invalidate the
+    /// statistical analysis. Consider using pre-generated inputs to
+    /// equalize overhead if this is a concern.
     CostMismatch {
         /// Time to generate fixed inputs (nanoseconds).
         fixed_time_ns: f64,
@@ -22,6 +35,11 @@ pub enum GeneratorWarning {
     },
 
     /// One of the generators has suspiciously high cost.
+    ///
+    /// **Severity**: Informational
+    ///
+    /// High generator cost adds measurement overhead but doesn't
+    /// invalidate the statistical analysis.
     HighCost {
         /// Which class has high cost.
         class: GeneratorClass,
@@ -42,9 +60,26 @@ pub enum GeneratorClass {
 }
 
 impl GeneratorWarning {
+    /// Check if this warning undermines result confidence.
+    ///
+    /// Generator warnings are always informational - they may affect
+    /// sampling efficiency but don't invalidate results.
+    pub fn is_result_undermining(&self) -> bool {
+        false
+    }
+
     /// Check if this warning indicates a critical issue.
+    ///
+    /// Deprecated: Use `is_result_undermining()` instead.
+    #[deprecated(note = "Use is_result_undermining() instead")]
     pub fn is_critical(&self) -> bool {
-        matches!(self, GeneratorWarning::CostMismatch { .. })
+        false
+    }
+
+    /// Get the severity of this warning.
+    pub fn severity(&self) -> PreflightSeverity {
+        // All generator warnings are informational
+        PreflightSeverity::Informational
     }
 
     /// Get a human-readable description of the warning.
@@ -53,13 +88,15 @@ impl GeneratorWarning {
             GeneratorWarning::CostMismatch {
                 fixed_time_ns,
                 random_time_ns,
-                difference_percent,
+                difference_percent: _,
             } => {
                 format!(
-                    "Generator cost mismatch: fixed={:.1}ns, random={:.1}ns \
-                     ({:.1}% difference). This may introduce systematic bias. \
-                     Consider equalizing generator overhead or accounting for it.",
-                    fixed_time_ns, random_time_ns, difference_percent
+                    "Generator cost asymmetry: baseline={:.0}ns, sample={:.0}ns ({:.1}x). \
+                     This may inflate timing differences. Consider using \
+                     pre-generated inputs to equalize overhead.",
+                    fixed_time_ns,
+                    random_time_ns,
+                    random_time_ns / fixed_time_ns.max(1.0)
                 )
             }
             GeneratorWarning::HighCost {
@@ -68,15 +105,48 @@ impl GeneratorWarning {
                 threshold_ns,
             } => {
                 let class_name = match class {
-                    GeneratorClass::Fixed => "Fixed",
-                    GeneratorClass::Random => "Random",
+                    GeneratorClass::Fixed => "Baseline",
+                    GeneratorClass::Random => "Sample",
                 };
                 format!(
-                    "{} generator has high overhead: {:.1}ns (threshold: {:.1}ns). \
+                    "{} generator has high overhead: {:.0}ns (threshold: {:.0}ns). \
                      This may dominate measurement noise.",
                     class_name, time_ns, threshold_ns
                 )
             }
+        }
+    }
+
+    /// Get guidance for addressing this warning.
+    pub fn guidance(&self) -> Option<String> {
+        match self {
+            GeneratorWarning::CostMismatch { .. } => Some(
+                "Consider pre-generating inputs before measurement to equalize overhead, \
+                 or verify that the detected difference accounts for expected timing differences."
+                    .to_string(),
+            ),
+            GeneratorWarning::HighCost { .. } => Some(
+                "Consider pre-generating inputs to reduce overhead, \
+                 or increasing the number of samples to compensate."
+                    .to_string(),
+            ),
+        }
+    }
+
+    /// Convert to a PreflightWarningInfo.
+    pub fn to_warning_info(&self) -> PreflightWarningInfo {
+        match self.guidance() {
+            Some(guidance) => PreflightWarningInfo::with_guidance(
+                PreflightCategory::Generator,
+                self.severity(),
+                self.description(),
+                guidance,
+            ),
+            None => PreflightWarningInfo::new(
+                PreflightCategory::Generator,
+                self.severity(),
+                self.description(),
+            ),
         }
     }
 }
@@ -140,9 +210,6 @@ pub fn generator_cost_check(fixed_gen_time_ns: f64, random_gen_time_ns: f64) -> 
 }
 
 /// Measure generator cost by running the generator multiple times.
-///
-/// TODO: Implement actual timing measurement.
-/// This would be called by the harness to measure generator overhead.
 ///
 /// # Arguments
 ///
@@ -224,8 +291,27 @@ mod tests {
             difference_percent: 50.0,
         };
         let desc = warning.description();
-        assert!(desc.contains("100.0ns"));
-        assert!(desc.contains("200.0ns"));
-        assert!(desc.contains("50.0%"));
+        assert!(desc.contains("100ns"));
+        assert!(desc.contains("200ns"));
+        assert!(desc.contains("2.0x"));
+    }
+
+    #[test]
+    fn test_severity() {
+        let mismatch = GeneratorWarning::CostMismatch {
+            fixed_time_ns: 100.0,
+            random_time_ns: 200.0,
+            difference_percent: 50.0,
+        };
+        assert_eq!(mismatch.severity(), PreflightSeverity::Informational);
+        assert!(!mismatch.is_result_undermining());
+
+        let high_cost = GeneratorWarning::HighCost {
+            class: GeneratorClass::Fixed,
+            time_ns: 2000.0,
+            threshold_ns: 1000.0,
+        };
+        assert_eq!(high_cost.severity(), PreflightSeverity::Informational);
+        assert!(!high_cost.is_result_undermining());
     }
 }

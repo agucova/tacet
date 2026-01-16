@@ -59,7 +59,7 @@ pub enum InconclusiveReason {
     },
 
     /// Time budget exceeded without reaching decision.
-    Timeout {
+    TimeBudgetExceeded {
         /// Current leak probability.
         current_probability: f64,
         /// Samples collected so far.
@@ -93,14 +93,14 @@ impl std::fmt::Display for InconclusiveReason {
                     estimated_time_secs, samples_needed
                 )
             }
-            InconclusiveReason::Timeout {
+            InconclusiveReason::TimeBudgetExceeded {
                 current_probability,
                 samples_collected,
                 elapsed_secs,
             } => {
                 write!(
                     f,
-                    "Timeout after {:.1}s with {} samples (P={:.1}%)",
+                    "Time budget exceeded after {:.1}s with {} samples (P={:.1}%)",
                     elapsed_secs,
                     samples_collected,
                     current_probability * 100.0
@@ -310,7 +310,7 @@ fn check_time_budget(
     let elapsed = state.elapsed();
 
     if elapsed > config.time_budget {
-        return Some(InconclusiveReason::Timeout {
+        return Some(InconclusiveReason::TimeBudgetExceeded {
             current_probability: posterior.leak_probability,
             samples_collected: state.n_total(),
             elapsed_secs: elapsed.as_secs_f64(),
@@ -408,6 +408,7 @@ mod tests {
             calibration_samples: 5000,
             mde_shift_ns: 5.0,
             mde_tail_ns: 10.0,
+            preflight_result: crate::preflight::PreflightResult::new(),
         }
     }
 
@@ -476,7 +477,7 @@ mod tests {
         std::thread::sleep(Duration::from_micros(10));
 
         let result = check_time_budget(&state, &posterior, &config);
-        assert!(matches!(result, Some(InconclusiveReason::Timeout { .. })));
+        assert!(matches!(result, Some(InconclusiveReason::TimeBudgetExceeded { .. })));
     }
 
     #[test]
@@ -524,7 +525,7 @@ mod tests {
 
     #[test]
     fn test_inconclusive_reason_display() {
-        let reason = InconclusiveReason::Timeout {
+        let reason = InconclusiveReason::TimeBudgetExceeded {
             current_probability: 0.5,
             samples_collected: 10000,
             elapsed_secs: 30.0,

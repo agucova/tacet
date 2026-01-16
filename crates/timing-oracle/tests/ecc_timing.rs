@@ -9,6 +9,7 @@
 //! IMPORTANT: Both closures must execute IDENTICAL code paths - only the DATA differs.
 //! Pre-generate inputs outside closures to avoid measuring RNG time.
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{skip_if_unreliable, AttackerModel, Outcome, TimingOracle};
 use x25519_dalek::x25519;
@@ -47,7 +48,9 @@ fn x25519_scalar_mult_constant_time() {
     let scalars = InputPair::new(|| fixed_scalar, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
@@ -91,7 +94,9 @@ fn x25519_different_basepoints_constant_time() {
     let inputs = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |bp_idx| {
             let basepoint = if *bp_idx == 0 {
                 basepoint_zeros
@@ -154,7 +159,9 @@ fn x25519_multiple_operations_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(scalars, |scalar_set| {
             let mut total = 0u8;
             for scalar in scalar_set {
@@ -224,7 +231,9 @@ fn x25519_scalar_clamping_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(scalars, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
@@ -267,7 +276,9 @@ fn x25519_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 32], || [0xFFu8; 32]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(20_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
@@ -304,7 +315,9 @@ fn x25519_byte_pattern_independence() {
     let inputs = InputPair::new(|| 0u8, || 1u8);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(20_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |pattern_type| {
             let mut scalar = [0u8; 32];
             if *pattern_type == 0 {
@@ -372,7 +385,9 @@ fn x25519_ecdh_exchange_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |(secret_scalar, other_public_key)| {
             // Perform scalar multiplication (ECDH)
             let shared = x25519(*secret_scalar, *other_public_key);

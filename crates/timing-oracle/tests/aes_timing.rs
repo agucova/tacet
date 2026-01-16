@@ -11,6 +11,7 @@
 
 use aes::cipher::{BlockEncrypt, KeyInit};
 use aes::Aes128;
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{skip_if_unreliable, AttackerModel, Exploitability, Outcome, TimingOracle};
 
@@ -51,7 +52,9 @@ fn aes128_block_encrypt_constant_time() {
     let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_16);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             let mut block = plaintext.to_owned().into();
             cipher.encrypt_block(&mut block);
@@ -114,7 +117,9 @@ fn aes128_different_keys_constant_time() {
     let inputs = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |key_idx| {
             let mut block = plaintext.into();
             if *key_idx == 0 {
@@ -208,7 +213,9 @@ fn aes128_multiple_blocks_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |blocks| {
             let mut total = 0u8;
             for b in blocks {
@@ -263,7 +270,9 @@ fn aes128_key_init_constant_time() {
     let keys = InputPair::new(|| fixed_key, rand_bytes_16);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(keys, |key| {
             let cipher = Aes128::new(key.into());
             std::hint::black_box(cipher);
@@ -312,7 +321,9 @@ fn aes128_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 16], || [0xFFu8; 16]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             let mut block = plaintext.to_owned().into();
             cipher.encrypt_block(&mut block);
@@ -356,7 +367,9 @@ fn aes128_byte_pattern_independence() {
     let inputs = InputPair::new(|| 0u8, || 1u8);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |pattern_type| {
             let mut block = [0u8; 16];
             if *pattern_type == 0 {

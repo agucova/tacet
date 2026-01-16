@@ -2,13 +2,23 @@
 //!
 //! Platform-specific checks to ensure the system is configured
 //! optimally for timing measurements.
+//!
+//! **Severity**: Informational
+//!
+//! System configuration issues add variance to measurements but don't
+//! invalidate the statistical analysis. The Bayesian model's assumptions
+//! are still valid; you just need more samples to reach the same confidence.
 
 use serde::{Deserialize, Serialize};
+
+use timing_oracle_core::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
 
 /// Warning from system checks.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum SystemWarning {
     /// CPU frequency scaling is not set to performance mode.
+    ///
+    /// **Severity**: Informational
     CpuGovernorNotPerformance {
         /// Current governor setting.
         current: String,
@@ -17,24 +27,34 @@ pub enum SystemWarning {
     },
 
     /// Could not read CPU governor (permission or path issue).
+    ///
+    /// **Severity**: Informational
     CpuGovernorUnreadable {
         /// Error message.
         reason: String,
     },
 
     /// Turbo boost is enabled (can cause timing variability).
+    ///
+    /// **Severity**: Informational
     TurboBoostEnabled,
 
     /// Hyperthreading detected (can affect timing measurements).
+    ///
+    /// **Severity**: Informational
     HyperthreadingEnabled,
 
     /// Running in a virtual machine.
+    ///
+    /// **Severity**: Informational
     VirtualMachineDetected {
         /// Type of VM if known.
         vm_type: Option<String>,
     },
 
     /// High system load detected.
+    ///
+    /// **Severity**: Informational
     HighSystemLoad {
         /// Current load average.
         load_average: f64,
@@ -44,10 +64,26 @@ pub enum SystemWarning {
 }
 
 impl SystemWarning {
-    /// Check if this warning indicates a critical issue.
-    pub fn is_critical(&self) -> bool {
-        // System warnings are generally not critical, just informational
+    /// Check if this warning undermines result confidence.
+    ///
+    /// System warnings are always informational - they add variance but
+    /// don't invalidate results.
+    pub fn is_result_undermining(&self) -> bool {
         false
+    }
+
+    /// Check if this warning indicates a critical issue.
+    ///
+    /// Deprecated: Use `is_result_undermining()` instead.
+    #[deprecated(note = "Use is_result_undermining() instead")]
+    pub fn is_critical(&self) -> bool {
+        false
+    }
+
+    /// Get the severity of this warning.
+    pub fn severity(&self) -> PreflightSeverity {
+        // All system warnings are informational
+        PreflightSeverity::Informational
     }
 
     /// Get a human-readable description of the warning.
@@ -58,27 +94,21 @@ impl SystemWarning {
                 recommended,
             } => {
                 format!(
-                    "CPU frequency governor is '{}', recommend '{}' for stable timing. \
-                     Set with: sudo cpufreq-set -g performance",
+                    "CPU governor is '{}', recommend '{}'.",
                     current, recommended
                 )
             }
             SystemWarning::CpuGovernorUnreadable { reason } => {
                 format!(
-                    "Could not check CPU governor: {}. \
-                     This may indicate limited permissions or unsupported platform.",
+                    "Could not check CPU governor: {}.",
                     reason
                 )
             }
             SystemWarning::TurboBoostEnabled => {
-                "Turbo boost is enabled. This can cause timing variability. \
-                 Consider disabling for more stable measurements."
-                    .to_string()
+                "Turbo boost enabled - can cause timing variability.".to_string()
             }
             SystemWarning::HyperthreadingEnabled => {
-                "Hyperthreading detected. Consider pinning to physical cores \
-                 for more stable timing measurements."
-                    .to_string()
+                "Hyperthreading detected - consider pinning to physical cores.".to_string()
             }
             SystemWarning::VirtualMachineDetected { vm_type } => {
                 let vm_info = vm_type
@@ -86,8 +116,7 @@ impl SystemWarning {
                     .map(|t| format!(" ({})", t))
                     .unwrap_or_default();
                 format!(
-                    "Running in a virtual machine{}. Timing measurements may be \
-                     less reliable due to VM overhead and scheduling.",
+                    "Running in a virtual machine{}. Timing measurements may be less reliable.",
                     vm_info
                 )
             }
@@ -96,11 +125,49 @@ impl SystemWarning {
                 threshold,
             } => {
                 format!(
-                    "High system load detected: {:.2} (threshold: {:.2}). \
-                     This may affect timing measurement stability.",
+                    "High system load: {:.1} (threshold: {:.1}).",
                     load_average, threshold
                 )
             }
+        }
+    }
+
+    /// Get guidance for addressing this warning.
+    pub fn guidance(&self) -> Option<String> {
+        match self {
+            SystemWarning::CpuGovernorNotPerformance { .. } => Some(
+                "Set with: sudo cpufreq-set -g performance".to_string(),
+            ),
+            SystemWarning::CpuGovernorUnreadable { .. } => None,
+            SystemWarning::TurboBoostEnabled => Some(
+                "Consider disabling for more stable measurements.".to_string(),
+            ),
+            SystemWarning::HyperthreadingEnabled => Some(
+                "Pin to physical cores for more stable timing.".to_string(),
+            ),
+            SystemWarning::VirtualMachineDetected { .. } => Some(
+                "Consider running on bare metal for more reliable measurements.".to_string(),
+            ),
+            SystemWarning::HighSystemLoad { .. } => Some(
+                "Reduce background processes for more stable measurements.".to_string(),
+            ),
+        }
+    }
+
+    /// Convert to a PreflightWarningInfo.
+    pub fn to_warning_info(&self) -> PreflightWarningInfo {
+        match self.guidance() {
+            Some(guidance) => PreflightWarningInfo::with_guidance(
+                PreflightCategory::System,
+                self.severity(),
+                self.description(),
+                guidance,
+            ),
+            None => PreflightWarningInfo::new(
+                PreflightCategory::System,
+                self.severity(),
+                self.description(),
+            ),
         }
     }
 }
@@ -136,14 +203,12 @@ pub fn system_check() -> Vec<SystemWarning> {
     #[cfg(target_os = "macos")]
     {
         // macOS-specific checks could go here
-        // TODO: Check for macOS-specific power settings
         let _ = check_macos_power_settings();
     }
 
     #[cfg(target_os = "windows")]
     {
         // Windows-specific checks could go here
-        // TODO: Check power plan settings
         let _ = check_windows_power_settings();
     }
 
@@ -177,7 +242,6 @@ fn check_cpu_governor_linux() -> Option<SystemWarning> {
 #[cfg(target_os = "macos")]
 fn check_macos_power_settings() -> Option<SystemWarning> {
     // TODO: Check macOS power settings using pmset or similar
-    // For now, this is a no-op
     None
 }
 
@@ -185,7 +249,6 @@ fn check_macos_power_settings() -> Option<SystemWarning> {
 #[cfg(target_os = "windows")]
 fn check_windows_power_settings() -> Option<SystemWarning> {
     // TODO: Check Windows power plan using powercfg or WMI
-    // For now, this is a no-op
     None
 }
 
@@ -247,6 +310,7 @@ fn check_load_linux() -> Option<SystemWarning> {
         None
     }
 }
+
 #[allow(dead_code)]
 fn check_system_load() -> Option<SystemWarning> {
     const LOAD_THRESHOLD: f64 = 1.0;
@@ -296,7 +360,7 @@ mod tests {
             threshold: 1.0,
         };
         let desc = warning.description();
-        assert!(desc.contains("2.50"));
+        assert!(desc.contains("2.5"));
     }
 
     #[test]
@@ -317,9 +381,20 @@ mod tests {
 
         for warning in warnings {
             assert!(
-                !warning.is_critical(),
-                "System warnings should not be critical"
+                !warning.is_result_undermining(),
+                "System warnings should not undermine results"
             );
+            assert_eq!(warning.severity(), PreflightSeverity::Informational);
         }
+    }
+
+    #[test]
+    fn test_severity() {
+        let governor = SystemWarning::CpuGovernorNotPerformance {
+            current: "powersave".to_string(),
+            recommended: "performance".to_string(),
+        };
+        assert_eq!(governor.severity(), PreflightSeverity::Informational);
+        assert!(!governor.is_result_undermining());
     }
 }

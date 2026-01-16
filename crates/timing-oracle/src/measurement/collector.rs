@@ -147,7 +147,7 @@ impl Collector {
 
         // Calculate ticks per call (how many timer ticks per single operation)
         let ticks_per_call = median_ns / resolution_ns;
-        let threshold_ns = resolution_ns * TARGET_TICKS_PER_BATCH / MAX_BATCH_SIZE as f64;
+        let _threshold_ns = resolution_ns * TARGET_TICKS_PER_BATCH / MAX_BATCH_SIZE as f64;
 
         // Select K to achieve target tick density
         let (k, enabled, unmeasurable, rationale) = if ticks_per_call >= self.target_ticks_per_batch {

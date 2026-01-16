@@ -1,0 +1,116 @@
+# timing-oracle workspace commands
+# Run with: just <command> [subcommand]
+
+# Crate directory
+oracle_crate := "crates/timing-oracle"
+
+# Default output directories (at repo root)
+data_dir := env("CALIBRATION_DATA_DIR", justfile_directory() + "/calibration_data")
+plot_dir := env("CALIBRATION_PLOT_DIR", justfile_directory() + "/plots")
+
+# Load subcommand modules
+mod build
+mod test
+mod calibrate
+mod bench
+mod example
+mod doc
+mod quality
+
+# ============================================================================
+# TOP-LEVEL COMMANDS
+# ============================================================================
+
+# Check compilation without building
+check:
+    cargo check --workspace --all-targets
+
+# Run all CI checks
+ci: quality::check test::quick
+    @echo ""
+    @echo "CI checks passed!"
+
+# Pre-commit check (fast)
+pre-commit: quality::check check
+    @echo "Pre-commit checks passed!"
+
+# Pre-push check (thorough)
+pre-push: ci test::crypto calibrate::quick
+    @echo "Pre-push checks passed!"
+
+# ============================================================================
+# RELEASE
+# ============================================================================
+
+# Dry-run publish for all crates
+publish-dry:
+    cargo publish -p timing-oracle-core --dry-run
+    cargo publish -p timing-oracle-macros --dry-run
+    cargo publish -p timing-oracle --dry-run
+
+# Publish all crates (in dependency order)
+publish:
+    cargo publish -p timing-oracle-core
+    @echo "Waiting for crates.io to index timing-oracle-core..."
+    sleep 30
+    cargo publish -p timing-oracle-macros
+    @echo "Waiting for crates.io to index timing-oracle-macros..."
+    sleep 30
+    cargo publish -p timing-oracle
+
+# ============================================================================
+# CLEANUP
+# ============================================================================
+
+# Remove calibration data and plots
+clean-data:
+    rm -rf {{data_dir}} {{plot_dir}}
+
+# Cargo clean
+clean-build:
+    cargo clean
+
+# Clean everything
+clean: clean-data clean-build
+
+# ============================================================================
+# UTILITIES
+# ============================================================================
+
+# Show feature flags
+features:
+    @echo "Default features: parallel, kperf (macOS), perf (Linux), macros"
+    @echo ""
+    @echo "Build with specific features:"
+    @echo "  cargo build --no-default-features                    # Minimal"
+    @echo "  cargo build --no-default-features --features parallel # Parallel only"
+    @echo "  cargo build --features macros                        # With proc macros"
+
+# Show environment variables
+env:
+    @echo "Calibration environment variables:"
+    @echo "  CALIBRATION_TIER=quick|full|validation"
+    @echo "  CALIBRATION_DATA_DIR=<path>           # Enable CSV export"
+    @echo "  CALIBRATION_SEED=<u64>                # Fixed RNG seed"
+    @echo "  CALIBRATION_DISABLED=1                # Skip calibration tests"
+    @echo "  CALIBRATION_ENABLE_STRESS=1           # Enable stress tests"
+    @echo ""
+    @echo "Oracle environment variables:"
+    @echo "  TO_SAMPLES=<n>                        # Override sample count"
+    @echo "  TO_ALPHA=<f64>                        # Override alpha level"
+    @echo "  TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed  # Strict mode"
+
+# Print version info
+version:
+    @cargo pkgid -p timing-oracle | cut -d# -f2
+
+# Show workspace members
+workspace:
+    @echo "Workspace members:"
+    @echo "  timing-oracle-core   - Core types and traits"
+    @echo "  timing-oracle-macros - Proc macros (timing_test!, timing_test_checked!)"
+    @echo "  timing-oracle        - Main library"
+
+# Show all available recipes
+help:
+    @just --list --list-submodules

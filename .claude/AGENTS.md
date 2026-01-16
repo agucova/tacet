@@ -94,7 +94,7 @@ The timing oracle follows a two-phase adaptive Bayesian pipeline:
   - `DataTooNoisy` - Posterior ≈ prior after calibration
   - `NotLearning` - KL divergence collapsed for 5+ batches
   - `WouldTakeTooLong` - Projected time exceeds budget
-  - `Timeout` - Time budget exhausted
+  - `TimeBudgetExceeded` - Time budget exhausted
   - `SampleBudgetExceeded` - Sample limit reached
 - `EffectEstimate` - Decomposed effect: shift_ns, tail_ns, credible_interval_ns, pattern
 - `EffectPattern` - UniformShift, TailEffect, or Mixed

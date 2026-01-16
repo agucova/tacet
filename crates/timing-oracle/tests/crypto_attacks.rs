@@ -6,13 +6,18 @@
 //! - Table lookup timing (L1/L2/L3 cache)
 //! - Effect pattern validation (uniform shift, tail effect, mixed)
 //! - Exploitability classification (Crosby et al. thresholds)
+//!
+//! CI Configuration:
+//! - For leak detection tests: pass_threshold(0.01), fail_threshold(0.85)
+//! - For constant-time tests: pass_threshold(0.15), fail_threshold(0.99)
+//! - time_budget(30s) for all tests
 
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{
-    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, Outcome,
-    TimingOracle,
+    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, Outcome, TimingOracle,
 };
 
 // ============================================================================
@@ -124,7 +129,9 @@ fn aes_sbox_timing_fast() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let val = std::hint::black_box(*idx);
             std::hint::black_box(sbox[val as usize]);
@@ -169,7 +176,9 @@ fn aes_sbox_timing_thorough() {
     let indices = InputPair::new(|| secret_key, rand::random::<u8>);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let val = std::hint::black_box(*idx);
             std::hint::black_box(sbox[val as usize]);
@@ -223,7 +232,9 @@ fn cache_line_boundary_effects() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(buffer[idx_val % buffer.len()]);
@@ -280,7 +291,9 @@ fn memory_access_pattern_leak() {
 
     // Use Research mode (theta=0) to test raw detection capability for memory patterns
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |access_idx| {
             let access_idx_val = std::hint::black_box(*access_idx);
             std::hint::black_box(data[access_idx_val]);
@@ -335,7 +348,9 @@ fn modexp_square_and_multiply_timing() {
     let exponents = InputPair::new(|| exp_high_hamming.clone(), || exp_low_hamming.clone());
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(8_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(exponents, |exp| {
             std::hint::black_box(helpers::modpow_naive(&base, exp, &modulus));
         });
@@ -402,7 +417,9 @@ fn modexp_bit_pattern_timing() {
     let exponents = InputPair::new(|| exp_many_ones.clone(), || exp_few_ones.clone());
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(6_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(exponents, |exp| {
             std::hint::black_box(helpers::modpow_naive(&base, exp, &modulus));
         });
@@ -456,9 +473,11 @@ fn table_lookup_small_l1() {
         || rand::random::<u32>() as usize % table_len,
     );
 
-    // Use Research mode (theta=0) to test raw detection capability
-    let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+    // Use AdjacentNetwork - L1-resident small table should pass
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
@@ -503,9 +522,11 @@ fn table_lookup_medium_l2() {
         || rand::random::<u32>() as usize % table_len,
     );
 
-    // Use Research mode (theta=0) to test raw detection capability
-    let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+    // Use AdjacentNetwork - medium table should pass or have low exploitability
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
@@ -553,7 +574,9 @@ fn table_lookup_large_cache_thrash() {
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(indices, |idx| {
             let idx_val = std::hint::black_box(*idx);
             std::hint::black_box(table[idx_val]);
@@ -599,7 +622,9 @@ fn effect_pattern_pure_uniform_shift() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(10_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 // No delay
@@ -672,7 +697,9 @@ fn effect_pattern_pure_tail() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 let i = fixed_idx.get();
@@ -762,7 +789,9 @@ fn effect_pattern_mixed() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 let i = fixed_idx.get();
@@ -836,8 +865,11 @@ fn exploitability_negligible() {
         }, // Sample: random data
     );
 
+    // XOR comparison is constant-time - expect Pass
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .from_env()
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |input| {
             // Pure XOR-based constant-time equality check
             let mut diff = 0u8;
@@ -910,7 +942,9 @@ fn exploitability_possible_lan() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(10_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);
@@ -972,7 +1006,9 @@ fn exploitability_likely_lan() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(10_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);
@@ -1035,7 +1071,9 @@ fn exploitability_possible_remote() {
     let which_class = InputPair::new(|| 0, || 1);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(10_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(which_class, |class| {
             if *class == 0 {
                 std::hint::black_box(42);

@@ -128,6 +128,13 @@ pub fn compute_diagnostics(
         total_time_secs: 0.0, // Will be filled in by caller
         warnings,
         quality_issues: Vec::new(),
+        preflight_warnings: Vec::new(), // TODO: Populate from preflight results
+        // Reproduction info - to be filled in by caller with config context
+        seed: None,
+        attacker_model: None,
+        threshold_ns: 0.0,
+        timer_name: String::new(),
+        platform: String::new(),
     }
 }
 
@@ -188,7 +195,6 @@ fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, 
 /// Estimate dependence length using per-class ACF (spec §3.2.2).
 fn estimate_joint_dependence_length(samples: &[crate::types::TimingSample]) -> usize {
     use crate::types::Class;
-    use crate::statistics::lag1_autocorrelation;
 
     let mut fixed: Vec<f64> = Vec::new();
     let mut random: Vec<f64> = Vec::new();

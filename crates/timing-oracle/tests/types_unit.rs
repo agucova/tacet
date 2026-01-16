@@ -205,6 +205,8 @@ fn diagnostics_all_checks_passed_all_true() {
         total_time_secs: 1.0,
         warnings: vec![],
         quality_issues: vec![],
+        preflight_warnings: vec![],
+        ..Diagnostics::all_ok()
     };
     assert!(diag.all_checks_passed());
 }
@@ -230,6 +232,8 @@ fn diagnostics_all_checks_passed_one_false() {
         total_time_secs: 1.0,
         warnings: vec![],
         quality_issues: vec![],
+        preflight_warnings: vec![],
+        ..Diagnostics::all_ok()
     };
     assert!(!diag1.all_checks_passed());
 
@@ -252,6 +256,8 @@ fn diagnostics_all_checks_passed_one_false() {
         total_time_secs: 1.0,
         warnings: vec![],
         quality_issues: vec![],
+        preflight_warnings: vec![],
+        ..Diagnostics::all_ok()
     };
     assert!(!diag2.all_checks_passed());
 
@@ -274,6 +280,8 @@ fn diagnostics_all_checks_passed_one_false() {
         total_time_secs: 1.0,
         warnings: vec![],
         quality_issues: vec![],
+        preflight_warnings: vec![],
+        ..Diagnostics::all_ok()
     };
     assert!(!diag3.all_checks_passed());
 }
@@ -298,6 +306,8 @@ fn diagnostics_all_checks_passed_all_false() {
         total_time_secs: 1.0,
         warnings: vec!["warning".to_string()],
         quality_issues: vec![],
+        preflight_warnings: vec![],
+        ..Diagnostics::all_ok()
     };
     assert!(!diag.all_checks_passed());
 }

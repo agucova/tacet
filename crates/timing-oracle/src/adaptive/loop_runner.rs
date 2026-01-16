@@ -14,15 +14,12 @@
 
 use std::time::Duration;
 
-use nalgebra::Cholesky;
-
 use crate::adaptive::{
-    check_quality_gates, kl_divergence_gaussian, AdaptiveState, Calibration, InconclusiveReason,
-    Posterior, QualityGateConfig, QualityGateResult,
+    check_quality_gates, AdaptiveState, Calibration, InconclusiveReason, Posterior,
+    QualityGateConfig, QualityGateResult,
 };
-use crate::analysis::bayes::{build_design_matrix, compute_bayes_factor};
+use crate::analysis::bayes::compute_bayes_factor;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
-use crate::types::{Class, Matrix9, TimingSample, Vector2, Vector9};
 
 /// Configuration for the adaptive sampling loop.
 #[derive(Debug, Clone)]
@@ -140,6 +137,17 @@ pub enum AdaptiveOutcome {
         /// Time spent in adaptive loop.
         elapsed: Duration,
     },
+
+    /// Quality gates passed but no decision reached yet.
+    /// Caller should collect more samples and call again.
+    Continue {
+        /// Current posterior distribution.
+        posterior: Posterior,
+        /// Number of samples collected per class so far.
+        samples_per_class: usize,
+        /// Time spent so far.
+        elapsed: Duration,
+    },
 }
 
 impl AdaptiveOutcome {
@@ -148,6 +156,7 @@ impl AdaptiveOutcome {
         match self {
             AdaptiveOutcome::LeakDetected { posterior, .. } => Some(posterior.leak_probability),
             AdaptiveOutcome::NoLeakDetected { posterior, .. } => Some(posterior.leak_probability),
+            AdaptiveOutcome::Continue { posterior, .. } => Some(posterior.leak_probability),
             AdaptiveOutcome::Inconclusive { posterior, .. } => {
                 posterior.as_ref().map(|p| p.leak_probability)
             }
@@ -161,7 +170,10 @@ impl AdaptiveOutcome {
 
     /// Check if the outcome is conclusive (either pass or fail).
     pub fn is_conclusive(&self) -> bool {
-        !matches!(self, AdaptiveOutcome::Inconclusive { .. })
+        matches!(
+            self,
+            AdaptiveOutcome::LeakDetected { .. } | AdaptiveOutcome::NoLeakDetected { .. }
+        )
     }
 }
 
@@ -233,12 +245,8 @@ pub fn run_adaptive(
     match check_quality_gates(state, &posterior, calibration, &config.quality_gates) {
         QualityGateResult::Continue => {
             // Caller should add more samples and call again
-            AdaptiveOutcome::Inconclusive {
-                reason: InconclusiveReason::SampleBudgetExceeded {
-                    current_probability: posterior.leak_probability,
-                    samples_collected: state.n_total(),
-                },
-                posterior: Some(posterior),
+            AdaptiveOutcome::Continue {
+                posterior,
                 samples_per_class: state.n_total(),
                 elapsed: state.elapsed(),
             }
@@ -324,6 +332,7 @@ fn compute_posterior_from_state(
 /// - `Ok(None)` - Continue collecting samples
 /// - `Ok(Some(outcome))` - Decision reached or quality gate triggered
 /// - `Err(reason)` - Error during computation
+#[allow(dead_code)]
 pub fn adaptive_step(
     calibration: &Calibration,
     state: &mut AdaptiveState,
@@ -374,7 +383,7 @@ pub fn adaptive_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Matrix2;
+    use crate::types::{Matrix2, Matrix9, Vector2};
 
     fn make_calibration() -> Calibration {
         Calibration {
@@ -388,6 +397,7 @@ mod tests {
             calibration_samples: 5000,
             mde_shift_ns: 5.0,
             mde_tail_ns: 10.0,
+            preflight_result: crate::preflight::PreflightResult::new(),
         }
     }
 

@@ -1,16 +1,28 @@
 //! Autocorrelation check for periodic interference detection.
 //!
-//! This check computes the autocorrelation function (ACF) on the full
-//! interleaved timing sequence. High autocorrelation at low lags
-//! (especially lag-1 and lag-2) can indicate periodic interference
-//! from system processes.
+//! This check computes the autocorrelation function (ACF) on the timing
+//! sequences. High autocorrelation at low lags (especially lag-1 and lag-2)
+//! can indicate periodic interference from system processes.
+//!
+//! **Severity**: Informational
+//!
+//! High autocorrelation reduces effective sample size but the block bootstrap
+//! accounts for this. The Bayesian model's assumptions are still valid; you
+//! just needed more samples to reach the same confidence level.
 
 use serde::{Deserialize, Serialize};
+
+use timing_oracle_core::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
 
 /// Warning from the autocorrelation check.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AutocorrWarning {
     /// High autocorrelation detected at specific lag.
+    ///
+    /// **Severity**: Informational
+    ///
+    /// High autocorrelation reduces effective sample size but the block
+    /// bootstrap accounts for this. Results are still valid.
     PeriodicInterference {
         /// The lag with high autocorrelation.
         lag: usize,
@@ -21,6 +33,8 @@ pub enum AutocorrWarning {
     },
 
     /// Insufficient samples for autocorrelation analysis.
+    ///
+    /// **Severity**: Informational
     InsufficientSamples {
         /// Number of samples available.
         available: usize,
@@ -30,10 +44,26 @@ pub enum AutocorrWarning {
 }
 
 impl AutocorrWarning {
-    /// Check if this warning indicates a critical issue.
-    pub fn is_critical(&self) -> bool {
-        // Periodic interference is concerning but not necessarily critical
+    /// Check if this warning undermines result confidence.
+    ///
+    /// Autocorrelation warnings are always informational - they affect
+    /// sampling efficiency but don't invalidate results.
+    pub fn is_result_undermining(&self) -> bool {
         false
+    }
+
+    /// Check if this warning indicates a critical issue.
+    ///
+    /// Deprecated: Use `is_result_undermining()` instead.
+    #[deprecated(note = "Use is_result_undermining() instead")]
+    pub fn is_critical(&self) -> bool {
+        false
+    }
+
+    /// Get the severity of this warning.
+    pub fn severity(&self) -> PreflightSeverity {
+        // All autocorrelation warnings are informational
+        PreflightSeverity::Informational
     }
 
     /// Get a human-readable description of the warning.
@@ -45,9 +75,9 @@ impl AutocorrWarning {
                 threshold,
             } => {
                 format!(
-                    "High autocorrelation at lag {}: ACF={:.3} (threshold: {:.3}). \
-                     This suggests periodic interference from system processes. \
-                     Consider increasing sample count or checking for background tasks.",
+                    "High autocorrelation at lag {}: ACF={:.2} (threshold: {:.2}). \
+                     This reduces effective sample size but the block bootstrap \
+                     accounts for this.",
                     lag, acf_value, threshold
                 )
             }
@@ -57,6 +87,35 @@ impl AutocorrWarning {
                     available, required
                 )
             }
+        }
+    }
+
+    /// Get guidance for addressing this warning.
+    pub fn guidance(&self) -> Option<String> {
+        match self {
+            AutocorrWarning::PeriodicInterference { .. } => Some(
+                "Consider increasing sample count or checking for background tasks \
+                 that might cause periodic interference."
+                    .to_string(),
+            ),
+            AutocorrWarning::InsufficientSamples { .. } => None,
+        }
+    }
+
+    /// Convert to a PreflightWarningInfo.
+    pub fn to_warning_info(&self) -> PreflightWarningInfo {
+        match self.guidance() {
+            Some(guidance) => PreflightWarningInfo::with_guidance(
+                PreflightCategory::Autocorrelation,
+                self.severity(),
+                self.description(),
+                guidance,
+            ),
+            None => PreflightWarningInfo::new(
+                PreflightCategory::Autocorrelation,
+                self.severity(),
+                self.description(),
+            ),
         }
     }
 }
@@ -259,6 +318,24 @@ mod tests {
         };
         let desc = warning.description();
         assert!(desc.contains("lag 1"));
-        assert!(desc.contains("0.450"));
+        assert!(desc.contains("0.45"));
+    }
+
+    #[test]
+    fn test_severity() {
+        let periodic = AutocorrWarning::PeriodicInterference {
+            lag: 1,
+            acf_value: 0.45,
+            threshold: 0.3,
+        };
+        assert_eq!(periodic.severity(), PreflightSeverity::Informational);
+        assert!(!periodic.is_result_undermining());
+
+        let insufficient = AutocorrWarning::InsufficientSamples {
+            available: 50,
+            required: 100,
+        };
+        assert_eq!(insufficient.severity(), PreflightSeverity::Informational);
+        assert!(!insufficient.is_result_undermining());
     }
 }

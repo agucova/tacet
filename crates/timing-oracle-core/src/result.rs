@@ -163,10 +163,10 @@ pub enum InconclusiveReason {
     ///
     /// The configured time limit was reached before the posterior
     /// converged to a conclusive result.
-    Timeout {
-        /// Posterior probability at timeout.
+    TimeBudgetExceeded {
+        /// Posterior probability when budget was exhausted.
         current_probability: f64,
-        /// Number of samples collected before timeout.
+        /// Number of samples collected.
         samples_collected: usize,
     },
 
@@ -448,6 +448,32 @@ pub struct Diagnostics {
 
     /// Quality issues detected during measurement.
     pub quality_issues: Vec<QualityIssue>,
+
+    /// Preflight warnings from calibration phase.
+    ///
+    /// These warnings are categorized by severity:
+    /// - `Informational`: Sampling efficiency issues (results still valid)
+    /// - `ResultUndermining`: Statistical assumption violations (results may be unreliable)
+    pub preflight_warnings: Vec<PreflightWarningInfo>,
+
+    // =========================================================================
+    // Reproduction info (for verbose/debug output)
+    // =========================================================================
+
+    /// Measurement seed used for reproducibility.
+    pub seed: Option<u64>,
+
+    /// Attacker model name (e.g., "AdjacentNetwork", "SharedHardware").
+    pub attacker_model: Option<String>,
+
+    /// Effect threshold (theta) in nanoseconds.
+    pub threshold_ns: f64,
+
+    /// Timer implementation name (e.g., "rdtsc", "cntvct_el0", "kperf").
+    pub timer_name: String,
+
+    /// Platform description (e.g., "macos-aarch64").
+    pub platform: String,
 }
 
 impl Diagnostics {
@@ -474,6 +500,12 @@ impl Diagnostics {
             total_time_secs: 0.0,
             warnings: Vec::new(),
             quality_issues: Vec::new(),
+            preflight_warnings: Vec::new(),
+            seed: None,
+            attacker_model: None,
+            threshold_ns: 0.0,
+            timer_name: String::new(),
+            platform: String::new(),
         }
     }
 
@@ -538,6 +570,158 @@ pub enum IssueCode {
 
     /// High fraction of samples were winsorized.
     HighWinsorRate,
+}
+
+// ============================================================================
+// PreflightWarning - Preflight check results
+// ============================================================================
+
+/// Severity of a preflight warning.
+///
+/// This distinction is critical for interpreting results:
+///
+/// - **Informational**: Affects sampling efficiency but not result validity.
+///   The Bayesian posterior is still trustworthy; you just needed more samples
+///   to reach the same confidence level. Examples: high autocorrelation,
+///   coarse timer resolution, suboptimal CPU governor.
+///
+/// - **ResultUndermining**: Violates statistical assumptions the Bayesian model
+///   relies on. The posterior confidence may be misplaced because the model's
+///   assumptions don't hold. Examples: non-monotonic timer (measurements are
+///   garbage), severe non-stationarity (distribution changed during measurement),
+///   broken harness with mutable state (Fixed-vs-Fixed inconsistency).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PreflightSeverity {
+    /// Sampling efficiency issue - doesn't invalidate results.
+    ///
+    /// These warnings indicate that the measurement setup is suboptimal and
+    /// required more samples to reach a conclusion, but the Bayesian posterior
+    /// is still valid. The result can be trusted.
+    ///
+    /// Examples:
+    /// - High autocorrelation (reduces effective sample size)
+    /// - Coarse timer resolution (requires more samples)
+    /// - Suboptimal CPU governor (adds variance)
+    /// - Generator cost asymmetry (may inflate differences but doesn't invalidate)
+    Informational,
+
+    /// Statistical assumption violation - undermines result confidence.
+    ///
+    /// These warnings indicate that fundamental assumptions of the Bayesian
+    /// model may be violated. Even if the posterior appears confident, that
+    /// confidence may be misplaced.
+    ///
+    /// Examples:
+    /// - Non-monotonic timer (measurements are meaningless)
+    /// - Severe non-stationarity (distribution changed during measurement)
+    /// - Fixed-vs-Fixed inconsistency with randomization (likely mutable state bug)
+    ResultUndermining,
+}
+
+/// Category of preflight check.
+///
+/// Used for organizing warnings in output and for programmatic filtering.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum PreflightCategory {
+    /// Timer sanity checks (monotonicity, basic functionality).
+    ///
+    /// **Severity**: ResultUndermining if failed - measurements are unreliable.
+    TimerSanity,
+
+    /// Fixed-vs-Fixed internal consistency check.
+    ///
+    /// **Severity**: ResultUndermining if triggered - may indicate mutable state
+    /// captured in test closure, or severe environmental interference.
+    /// Note: May be intentional for FPR validation testing.
+    Sanity,
+
+    /// Generator cost comparison between classes.
+    ///
+    /// **Severity**: Informational - asymmetry may inflate differences but
+    /// doesn't invalidate the statistical analysis.
+    Generator,
+
+    /// Autocorrelation in timing samples.
+    ///
+    /// **Severity**: Informational - reduces effective sample size but the
+    /// block bootstrap accounts for this.
+    Autocorrelation,
+
+    /// System configuration (CPU governor, turbo boost, etc.).
+    ///
+    /// **Severity**: Informational - suboptimal config adds variance but
+    /// doesn't invalidate results.
+    System,
+
+    /// Timer resolution and precision.
+    ///
+    /// **Severity**: Informational - coarse timers require more samples but
+    /// adaptive batching compensates for this.
+    Resolution,
+
+    /// Stationarity of timing distribution.
+    ///
+    /// **Severity**: ResultUndermining if severely violated - indicates the
+    /// timing distribution changed during measurement.
+    Stationarity,
+}
+
+/// Information about a preflight warning.
+///
+/// Preflight warnings are collected during the calibration phase and reported
+/// to help users understand measurement quality and potential issues.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PreflightWarningInfo {
+    /// Category of the check that generated this warning.
+    pub category: PreflightCategory,
+
+    /// Severity of this warning.
+    ///
+    /// - `Informational`: Sampling efficiency issue, results still valid.
+    /// - `ResultUndermining`: Statistical assumption violation, results may be unreliable.
+    pub severity: PreflightSeverity,
+
+    /// Human-readable description of the warning.
+    pub message: String,
+
+    /// Optional guidance for addressing the issue.
+    pub guidance: Option<String>,
+}
+
+impl PreflightWarningInfo {
+    /// Create a new preflight warning.
+    pub fn new(
+        category: PreflightCategory,
+        severity: PreflightSeverity,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            category,
+            severity,
+            message: message.into(),
+            guidance: None,
+        }
+    }
+
+    /// Create a new preflight warning with guidance.
+    pub fn with_guidance(
+        category: PreflightCategory,
+        severity: PreflightSeverity,
+        message: impl Into<String>,
+        guidance: impl Into<String>,
+    ) -> Self {
+        Self {
+            category,
+            severity,
+            message: message.into(),
+            guidance: Some(guidance.into()),
+        }
+    }
+
+    /// Check if this warning undermines result confidence.
+    pub fn is_result_undermining(&self) -> bool {
+        self.severity == PreflightSeverity::ResultUndermining
+    }
 }
 
 // ============================================================================
@@ -891,7 +1075,7 @@ impl fmt::Display for Outcome {
                     InconclusiveReason::DataTooNoisy { .. } => "data too noisy",
                     InconclusiveReason::NotLearning { .. } => "not learning",
                     InconclusiveReason::WouldTakeTooLong { .. } => "would take too long",
-                    InconclusiveReason::Timeout { .. } => "timeout",
+                    InconclusiveReason::TimeBudgetExceeded { .. } => "time budget exceeded",
                     InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
                 };
                 write!(
@@ -942,6 +1126,52 @@ impl fmt::Display for MeasurementQuality {
             MeasurementQuality::Good => write!(f, "good"),
             MeasurementQuality::Poor => write!(f, "poor"),
             MeasurementQuality::TooNoisy => write!(f, "too noisy"),
+        }
+    }
+}
+
+impl fmt::Display for InconclusiveReason {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InconclusiveReason::DataTooNoisy { message, guidance } => {
+                write!(f, "Data too noisy: {}\n  \u{2192} {}", message, guidance)
+            }
+            InconclusiveReason::NotLearning { message, guidance } => {
+                write!(f, "Not learning: {}\n  \u{2192} {}", message, guidance)
+            }
+            InconclusiveReason::WouldTakeTooLong {
+                estimated_time_secs,
+                samples_needed,
+                guidance,
+            } => {
+                write!(
+                    f,
+                    "Would take too long: ~{:.0}s / {} samples needed\n  \u{2192} {}",
+                    estimated_time_secs, samples_needed, guidance
+                )
+            }
+            InconclusiveReason::TimeBudgetExceeded {
+                current_probability,
+                samples_collected,
+            } => {
+                write!(
+                    f,
+                    "Time budget exceeded: P(leak)={:.1}% after {} samples",
+                    current_probability * 100.0,
+                    samples_collected
+                )
+            }
+            InconclusiveReason::SampleBudgetExceeded {
+                current_probability,
+                samples_collected,
+            } => {
+                write!(
+                    f,
+                    "Sample budget exceeded: P(leak)={:.1}% after {} samples",
+                    current_probability * 100.0,
+                    samples_collected
+                )
+            }
         }
     }
 }

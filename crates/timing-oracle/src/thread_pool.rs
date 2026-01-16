@@ -3,6 +3,8 @@
 //! This module provides a shared thread pool with increased stack size
 //! to prevent stack overflow when running many concurrent timing tests.
 
+#![allow(dead_code)]
+
 #[cfg(feature = "parallel")]
 use rayon::ThreadPool;
 

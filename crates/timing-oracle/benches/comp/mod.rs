@@ -76,7 +76,7 @@ pub fn run_comparison_benchmark(config: BenchmarkConfig) {
     let mut results = BenchmarkResults::new();
 
     // Initialize detectors
-    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
     let detectors: Vec<Box<dyn Detector>> = vec![
@@ -219,7 +219,7 @@ pub fn run_detection_comparison(config: &BenchmarkConfig) -> BenchmarkResults {
     let mut results = BenchmarkResults::new();
 
     // Initialize detectors
-    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
     let detectors: Vec<Box<dyn Detector>> = vec![
@@ -298,7 +298,7 @@ pub fn run_roc_analysis(config: &BenchmarkConfig) -> Vec<metrics::RocCurveResult
     let mut results = Vec::new();
 
     // Initialize detectors
-    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
     let detectors: Vec<Box<dyn Detector>> = vec![
@@ -342,7 +342,7 @@ pub fn run_efficiency_analysis(config: &BenchmarkConfig) -> HashMap<String, Hash
     let mut results: HashMap<String, HashMap<String, SampleEfficiencyStats>> = HashMap::new();
 
     // Initialize detectors
-    let timing_oracle = TimingOracleDetector::new().with_balanced(true);
+    let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
     let detectors: Vec<(&str, Box<dyn Detector>)> = vec![

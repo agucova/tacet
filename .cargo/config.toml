@@ -1,0 +1,8 @@
+# Cargo configuration for timing-oracle
+#
+# Sets environment variables for tests to enable debug output by default.
+
+[env]
+# Enable debug output for tests - provides comprehensive diagnostics
+# This is useful for debugging test failures and understanding behavior
+TIMING_ORACLE_DEBUG = "1"

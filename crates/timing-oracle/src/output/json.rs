@@ -61,7 +61,7 @@ mod tests {
 
     fn make_inconclusive_outcome() -> Outcome {
         Outcome::Inconclusive {
-            reason: InconclusiveReason::Timeout {
+            reason: InconclusiveReason::TimeBudgetExceeded {
                 current_probability: 0.5,
                 samples_collected: 50000,
             },
@@ -104,7 +104,7 @@ mod tests {
         let outcome = make_inconclusive_outcome();
         let json = to_json(&outcome).unwrap();
         assert!(json.contains("Inconclusive"));
-        assert!(json.contains("Timeout"));
+        assert!(json.contains("TimeBudgetExceeded"));
     }
 
     #[test]

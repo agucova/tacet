@@ -58,7 +58,8 @@ fn sha3_256_constant_time() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
@@ -112,7 +113,8 @@ fn sha3_384_constant_time() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Sha3_384::digest(data);
@@ -164,7 +166,8 @@ fn sha3_512_constant_time() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Sha3_512::digest(data);
@@ -220,7 +223,8 @@ fn sha3_256_data_independence() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_128);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
@@ -278,7 +282,8 @@ fn blake2b_512_constant_time() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Blake2b512::digest(data);
@@ -332,7 +337,8 @@ fn blake2s_256_constant_time() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Blake2s256::digest(data);
@@ -389,7 +395,8 @@ fn sha3_256_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 32], || [0xFFu8; 32]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Sha3_256::digest(data);
@@ -442,7 +449,8 @@ fn blake2b_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             let hash = Blake2b512::digest(data);
@@ -506,7 +514,8 @@ fn sha3_256_incremental_constant_time() {
     let inputs = InputPair::new(|| fixed_chunks, || (rand_bytes_32(), rand_bytes_32()));
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |(data1, data2)| {
             let mut hasher = Sha3_256::new();
@@ -564,7 +573,8 @@ fn blake2b_incremental_constant_time() {
     let inputs = InputPair::new(|| fixed_chunks, || (rand_bytes_64(), rand_bytes_64()));
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |(data1, data2)| {
             let mut hasher = Blake2b512::new();

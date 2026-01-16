@@ -156,6 +156,7 @@ pub fn interleaved_autocorrelation(fixed: &[f64], random: &[f64], lag: usize) ->
 /// # Returns
 ///
 /// A vector of autocorrelation coefficients for lags 1 through max_lag.
+#[allow(dead_code)]
 pub fn autocorrelation_function(data: &[f64], max_lag: usize) -> Vec<f64> {
     (1..=max_lag)
         .map(|lag| compute_lag_autocorrelation(data, lag))

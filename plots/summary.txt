@@ -1,0 +1,11 @@
+
+    Calibration Summary
+    ===================
+
+    Total Trials: 400
+    Completed: 400 (100.0%)
+    Unmeasurable: 0 (0.0%)
+
+    FPR (null hypothesis): 0.0%
+    Power (max effect): 100.0%
+    

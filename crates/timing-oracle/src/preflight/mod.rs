@@ -50,7 +50,7 @@ impl PreflightResult {
 
     /// Add a sanity warning.
     pub fn add_sanity_warning(&mut self, warning: SanityWarning) {
-        if warning.is_critical() {
+        if warning.is_result_undermining() {
             self.has_critical = true;
             self.is_valid = false;
         }
@@ -59,7 +59,7 @@ impl PreflightResult {
 
     /// Add a generator warning.
     pub fn add_generator_warning(&mut self, warning: GeneratorWarning) {
-        if warning.is_critical() {
+        if warning.is_result_undermining() {
             self.has_critical = true;
         }
         self.warnings.generator.push(warning);
@@ -77,7 +77,7 @@ impl PreflightResult {
 
     /// Add a resolution warning.
     pub fn add_resolution_warning(&mut self, warning: ResolutionWarning) {
-        if warning.is_critical() {
+        if warning.is_result_undermining() {
             self.has_critical = true;
             self.is_valid = false;
         }
@@ -134,39 +134,33 @@ impl PreflightWarnings {
 ///
 /// # Arguments
 ///
-/// * `fixed_samples` - Timing samples from fixed input class
-/// * `random_samples` - Timing samples from random input class
-/// * `interleaved` - Full interleaved timing sequence for autocorrelation
+/// * `fixed_samples` - Timing samples from fixed input class (baseline)
+/// * `random_samples` - Timing samples from random input class (sample)
 /// * `fixed_gen_time_ns` - Optional: time to generate fixed inputs
 /// * `random_gen_time_ns` - Optional: time to generate random inputs
-/// * `timer` - The timer used for measurements
+/// * `timer_resolution_ns` - Timer resolution in nanoseconds
+/// * `seed` - Seed for reproducible randomization in sanity check
 ///
 /// # Returns
 ///
 /// A `PreflightResult` containing all warnings and validity assessment.
 pub fn run_all_checks(
     fixed_samples: &[f64],
-    _random_samples: &[f64],
-    interleaved: &[f64],
+    random_samples: &[f64],
     fixed_gen_time_ns: Option<f64>,
     random_gen_time_ns: Option<f64>,
-    timer: &crate::measurement::BoxedTimer,
+    timer_resolution_ns: f64,
+    seed: u64,
 ) -> PreflightResult {
     let mut result = PreflightResult::new();
-    let timer_resolution_ns = timer.resolution_ns();
-
-    // Run timer sanity (monotonicity)
-    if let Some(warning) = timer_sanity_check(timer) {
-        result.add_resolution_warning(warning);
-    }
 
     // Run resolution check (quantization)
     if let Some(warning) = resolution_check(fixed_samples, timer_resolution_ns) {
         result.add_resolution_warning(warning);
     }
 
-    // Run sanity check (Fixed-vs-Fixed)
-    if let Some(warning) = sanity_check(fixed_samples, timer_resolution_ns) {
+    // Run sanity check (Fixed-vs-Fixed) with randomization
+    if let Some(warning) = sanity_check(fixed_samples, timer_resolution_ns, seed) {
         result.add_sanity_warning(warning);
     }
 
@@ -178,13 +172,35 @@ pub fn run_all_checks(
     }
 
     // Run autocorrelation check
-    if let Some(warning) = autocorrelation_check(fixed_samples, _random_samples) {
+    if let Some(warning) = autocorrelation_check(fixed_samples, random_samples) {
         result.add_autocorr_warning(warning);
     }
 
     // Run system checks
     for warning in system_check() {
         result.add_system_warning(warning);
+    }
+
+    result
+}
+
+/// Run timer sanity check separately (requires timer access).
+///
+/// This checks that the timer is monotonic by taking consecutive timestamps.
+/// Should be called early in measurement setup where the timer is available.
+///
+/// # Arguments
+///
+/// * `timer` - The timer to check
+///
+/// # Returns
+///
+/// A `PreflightResult` with just the timer sanity check result.
+pub fn run_timer_sanity_check(timer: &crate::measurement::BoxedTimer) -> PreflightResult {
+    let mut result = PreflightResult::new();
+
+    if let Some(warning) = timer_sanity_check(timer) {
+        result.add_resolution_warning(warning);
     }
 
     result
@@ -209,7 +225,7 @@ mod tests {
         assert!(warnings.is_empty());
 
         warnings.sanity.push(SanityWarning::BrokenHarness {
-            leak_probability: 0.95,
+            variance_ratio: 7.5,
         });
         assert_eq!(warnings.count(), 1);
         assert!(!warnings.is_empty());

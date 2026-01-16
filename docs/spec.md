@@ -963,7 +963,7 @@ pub enum InconclusiveReason {
     WouldTakeTooLong { estimated_time_secs: f64, samples_needed: usize, guidance: String },
 
     /// Time budget exhausted.
-    Timeout { current_probability: f64, samples_collected: usize },
+    TimeBudgetExceeded { current_probability: f64, samples_collected: usize },
 
     /// Sample budget exhausted.
     SampleBudgetExceeded { current_probability: f64, samples_collected: usize },

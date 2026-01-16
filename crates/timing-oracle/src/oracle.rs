@@ -94,20 +94,6 @@ pub struct TimingOracle {
     timer_spec: TimerSpec,
 }
 
-/// Internal struct for passing measurement data through the pipeline.
-struct MeasurementData {
-    /// Baseline class timing samples (cycles/ticks).
-    baseline_cycles: Vec<u64>,
-    /// Sample class timing samples (cycles/ticks).
-    sample_cycles: Vec<u64>,
-    /// Generator overhead for baseline class (ns per call).
-    baseline_gen_time_ns: Option<f64>,
-    /// Generator overhead for sample class (ns per call).
-    sample_gen_time_ns: Option<f64>,
-    /// Batching configuration used.
-    batching: BatchingInfo,
-}
-
 impl TimingOracle {
     /// Create with an attacker model preset.
     ///
@@ -517,10 +503,13 @@ impl TimingOracle {
         let mut timer = self.timer_spec.create_timer();
 
         // Resolve the theta threshold based on attacker model and timer
-        let theta_ns = self.config.resolve_min_effect_ns(
+        let raw_theta_ns = self.config.resolve_min_effect_ns(
             Some(timer.cycles_per_ns()),
             Some(timer.resolution_ns()),
         );
+        // Clamp theta to at least timer resolution to avoid degenerate priors
+        // (Research mode returns 0, which causes zero prior covariance and Cholesky failure)
+        let theta_ns = raw_theta_ns.max(timer.resolution_ns());
 
         let debug_pipeline = env::var("TO_DEBUG_PIPELINE").map(|v| v != "0").unwrap_or(false);
         if debug_pipeline {
@@ -672,7 +661,14 @@ impl TimingOracle {
         }
 
         // Step 5: CALIBRATION PHASE - Collect calibration samples
-        let n_cal = self.config.calibration_samples;
+        // Cap calibration samples to at most 50% of max_samples to ensure room for inference
+        let n_cal = self.config.calibration_samples.min(self.config.max_samples / 2);
+        if debug_pipeline && n_cal < self.config.calibration_samples {
+            eprintln!(
+                "[DEBUG] calibration_samples capped: {} -> {} (max_samples={})",
+                self.config.calibration_samples, n_cal, self.config.max_samples
+            );
+        }
         let mut calibration_baseline_cycles = Vec::with_capacity(n_cal);
         let mut calibration_sample_cycles = Vec::with_capacity(n_cal);
 
@@ -707,6 +703,9 @@ impl TimingOracle {
             }
         }
 
+        // Check if preflight should be skipped
+        let skip_preflight = std::env::var("TIMING_ORACLE_SKIP_PREFLIGHT").is_ok();
+
         // Perform calibration
         let ns_per_tick = timer.resolution_ns();
         let cal_config = CalibrationConfig {
@@ -716,6 +715,9 @@ impl TimingOracle {
             theta_ns,
             alpha: 0.01,
             seed: self.config.measurement_seed.unwrap_or(42),
+            baseline_gen_time_ns: Some(baseline_gen_time_ns),
+            sample_gen_time_ns: Some(sample_gen_time_ns),
+            skip_preflight,
         };
 
         let calibration = match calibrate(
@@ -775,6 +777,13 @@ impl TimingOracle {
             calibration_sample_cycles.clone(),
         );
 
+        if debug_pipeline {
+            eprintln!(
+                "[DEBUG] after calibration: n_cal={} n_total={} max_samples={}",
+                n_cal, adaptive_state.n_total(), self.config.max_samples
+            );
+        }
+
         // Adaptive loop
         let mut input_idx = n_cal; // Start after calibration samples
         loop {
@@ -784,7 +793,7 @@ impl TimingOracle {
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
 
                 return self.build_inconclusive_outcome(
-                    InconclusiveReason::Timeout {
+                    InconclusiveReason::TimeBudgetExceeded {
                         current_probability: leak_probability,
                         samples_collected: adaptive_state.n_total(),
                     },
@@ -799,6 +808,13 @@ impl TimingOracle {
             // Check sample budget
             if adaptive_state.n_total() >= self.config.max_samples {
                 let posterior = adaptive_state.current_posterior();
+                if debug_pipeline {
+                    eprintln!(
+                        "[DEBUG] sample budget reached: n_total={} posterior={:?}",
+                        adaptive_state.n_total(),
+                        posterior.map(|p| (p.leak_probability, p.beta_mean[0], p.beta_mean[1]))
+                    );
+                }
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
 
                 return self.build_inconclusive_outcome(
@@ -880,8 +896,23 @@ impl TimingOracle {
                 &adaptive_config,
             );
 
+            if debug_pipeline {
+                let posterior = adaptive_state.current_posterior();
+                eprintln!(
+                    "[DEBUG] after run_adaptive: n_total={} outcome_type={} posterior={:?}",
+                    adaptive_state.n_total(),
+                    match &outcome {
+                        AdaptiveOutcome::LeakDetected { .. } => "Leak",
+                        AdaptiveOutcome::NoLeakDetected { .. } => "NoLeak",
+                        AdaptiveOutcome::Continue { .. } => "Continue",
+                        AdaptiveOutcome::Inconclusive { .. } => "Stop",
+                    },
+                    posterior.map(|p| (p.leak_probability, p.beta_mean[0], p.beta_mean[1]))
+                );
+            }
+
             match outcome {
-                AdaptiveOutcome::LeakDetected { posterior, samples_per_class, elapsed } => {
+                AdaptiveOutcome::LeakDetected { posterior, samples_per_class, elapsed: _ } => {
                     return self.build_fail_outcome(
                         &posterior,
                         samples_per_class,
@@ -891,7 +922,7 @@ impl TimingOracle {
                         theta_ns,
                     );
                 }
-                AdaptiveOutcome::NoLeakDetected { posterior, samples_per_class, elapsed } => {
+                AdaptiveOutcome::NoLeakDetected { posterior, samples_per_class, elapsed: _ } => {
                     return self.build_pass_outcome(
                         &posterior,
                         samples_per_class,
@@ -901,10 +932,14 @@ impl TimingOracle {
                         theta_ns,
                     );
                 }
-                AdaptiveOutcome::Inconclusive { reason, posterior, samples_per_class, elapsed } => {
-                    // Convert adaptive reason to result reason
+                AdaptiveOutcome::Continue { posterior, .. } => {
+                    // Quality gates passed but no decision yet - continue collecting samples
+                    adaptive_state.update_posterior(posterior);
+                    continue;
+                }
+                AdaptiveOutcome::Inconclusive { reason, .. } => {
+                    // Real stop condition (DataTooNoisy, NotLearning, WouldTakeTooLong, Timeout)
                     let result_reason = convert_adaptive_reason(&reason);
-
                     return self.build_inconclusive_outcome(
                         result_reason,
                         &adaptive_state,
@@ -933,7 +968,7 @@ impl TimingOracle {
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns);
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time);
+        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
 
         Outcome::Pass {
             leak_probability: posterior.leak_probability,
@@ -956,7 +991,7 @@ impl TimingOracle {
         let effect = build_effect_estimate(posterior, theta_ns);
         let exploitability = Exploitability::from_effect_ns(effect.total_effect_ns());
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time);
+        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
 
         Outcome::Fail {
             leak_probability: posterior.leak_probability,
@@ -983,7 +1018,7 @@ impl TimingOracle {
             .map(|p| build_effect_estimate(p, theta_ns))
             .unwrap_or_default();
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time);
+        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
 
         Outcome::Inconclusive {
             reason,
@@ -1003,7 +1038,7 @@ impl TimingOracle {
 use crate::adaptive::Posterior;
 
 /// Build an EffectEstimate from a posterior.
-fn build_effect_estimate(posterior: &Posterior, theta_ns: f64) -> EffectEstimate {
+fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64) -> EffectEstimate {
     let pattern = classify_pattern(&posterior.beta_mean, &posterior.beta_cov);
 
     // Compute credible interval from posterior covariance
@@ -1023,8 +1058,44 @@ fn build_effect_estimate(posterior: &Posterior, theta_ns: f64) -> EffectEstimate
     }
 }
 
-/// Build diagnostics from calibration and timer info.
-fn build_diagnostics(calibration: &Calibration, timer: &BoxedTimer, start_time: Instant) -> Diagnostics {
+/// Build diagnostics from calibration, timer, and config info.
+fn build_diagnostics(
+    calibration: &Calibration,
+    timer: &BoxedTimer,
+    start_time: Instant,
+    config: &Config,
+    theta_ns: f64,
+) -> Diagnostics {
+    // Convert preflight warnings to PreflightWarningInfo
+    let preflight = &calibration.preflight_result;
+    let mut preflight_warnings = Vec::new();
+
+    for warning in &preflight.warnings.sanity {
+        preflight_warnings.push(warning.to_warning_info());
+    }
+    for warning in &preflight.warnings.generator {
+        preflight_warnings.push(warning.to_warning_info());
+    }
+    for warning in &preflight.warnings.autocorr {
+        preflight_warnings.push(warning.to_warning_info());
+    }
+    for warning in &preflight.warnings.system {
+        preflight_warnings.push(warning.to_warning_info());
+    }
+    for warning in &preflight.warnings.resolution {
+        preflight_warnings.push(warning.to_warning_info());
+    }
+
+    // Format attacker model name
+    let attacker_model = config.attacker_model.as_ref().map(|m| format!("{:?}", m));
+
+    // Build platform string
+    let platform = format!(
+        "{}-{}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
+
     Diagnostics {
         dependence_length: calibration.block_length,
         effective_sample_size: calibration.calibration_samples / calibration.block_length.max(1),
@@ -1038,11 +1109,17 @@ fn build_diagnostics(calibration: &Calibration, timer: &BoxedTimer, start_time: 
         discrete_mode: calibration.discrete_mode,
         timer_resolution_ns: timer.resolution_ns(),
         duplicate_fraction: 0.0,
-        preflight_ok: true,
+        preflight_ok: preflight.is_valid,
         calibration_samples: calibration.calibration_samples,
         total_time_secs: start_time.elapsed().as_secs_f64(),
         warnings: Vec::new(),
         quality_issues: Vec::new(),
+        preflight_warnings,
+        seed: config.measurement_seed,
+        attacker_model,
+        threshold_ns: theta_ns,
+        timer_name: timer.name().to_string(),
+        platform,
     }
 }
 
@@ -1068,8 +1145,8 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
                 guidance: guidance.clone(),
             }
         }
-        AdaptiveInconclusiveReason::Timeout { current_probability, samples_collected, .. } => {
-            InconclusiveReason::Timeout {
+        AdaptiveInconclusiveReason::TimeBudgetExceeded { current_probability, samples_collected, .. } => {
+            InconclusiveReason::TimeBudgetExceeded {
                 current_probability: *current_probability,
                 samples_collected: *samples_collected,
             }
@@ -1109,10 +1186,6 @@ fn parse_u64_env(name: &str) -> Option<u64> {
 }
 
 fn parse_f64_env(name: &str) -> Option<f64> {
-    env::var(name).ok()?.parse().ok()
-}
-
-fn parse_f32_env(name: &str) -> Option<f32> {
     env::var(name).ok()?.parse().ok()
 }
 

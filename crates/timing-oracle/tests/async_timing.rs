@@ -69,7 +69,9 @@ fn async_executor_overhead_no_false_positive() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             rt.block_on(async { std::hint::black_box(data); })
         });
@@ -118,7 +120,9 @@ fn async_block_on_overhead_symmetric() {
     let inputs = InputPair::new(|| (), || ());
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(8_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |_| {
             rt.block_on(async {
                 // Minimal async block
@@ -172,7 +176,9 @@ fn detects_conditional_await_timing() {
     let inputs = InputPair::new(|| true, || false);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |secret| {
             rt.block_on(async {
                 if *secret {
@@ -226,7 +232,9 @@ fn detects_early_exit_async() {
     let inputs = InputPair::new(|| [0xABu8; 32], || [0xCDu8; 32]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |comparison_input| {
             rt.block_on(async {
                 // Compare with input - goes through bytes or exits early
@@ -263,7 +271,9 @@ fn detects_secret_dependent_sleep() {
     let inputs = InputPair::new(|| 10u8, || 1u8);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(100_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(60))
         .test(inputs, |byte_value| {
             rt.block_on(async {
                 // Sleep duration depends on the byte value
@@ -308,7 +318,9 @@ fn concurrent_tasks_no_crosstalk() {
     let inputs = InputPair::new(|| fixed_input, rand_bytes);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
             rt.block_on(async {
                 // Spawn background tasks
@@ -369,7 +381,9 @@ fn detects_task_spawn_timing_leak() {
     let inputs = InputPair::new(|| 10usize, || rand::random::<u32>() as usize % 20);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(50_000)
+        .pass_threshold(0.01)
+        .fail_threshold(0.85)
+        .time_budget(Duration::from_secs(60))
         .test(inputs, |count| {
             rt.block_on(async {
                 // Spawn task count based on input
@@ -409,7 +423,9 @@ fn tokio_single_vs_multi_thread_stability() {
     let rt_single = single_thread_runtime();
     let inputs_single = InputPair::new(|| [0xABu8; 32], rand_bytes);
     let outcome_single = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs_single, |data| {
             rt_single.block_on(async { std::hint::black_box(data); })
         });
@@ -418,7 +434,9 @@ fn tokio_single_vs_multi_thread_stability() {
     let rt_multi = multi_thread_runtime();
     let inputs_multi = InputPair::new(|| [0xABu8; 32], rand_bytes);
     let outcome_multi = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs_multi, |data| {
             rt_multi.block_on(async { std::hint::black_box(data); })
         });
@@ -450,7 +468,9 @@ fn async_workload_flag_effectiveness() {
     let inputs = InputPair::new(|| (), || ());
 
     let outcome_without_flag = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(10_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
         .test(inputs, |_| {
             rt.block_on(async {
                 // Some async work

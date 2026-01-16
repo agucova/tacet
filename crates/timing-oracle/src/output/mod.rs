@@ -8,4 +8,6 @@ mod json;
 mod terminal;
 
 pub use json::{to_json, to_json_pretty};
-pub use terminal::format_outcome;
+pub use terminal::{
+    format_debug_summary, format_diagnostics_section, format_outcome, is_verbose,
+};

@@ -13,9 +13,10 @@
 //!
 //! - **Discrete mode detection**: If < 10% unique values, use mid-quantile estimators.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::analysis::mde::estimate_mde;
+use crate::preflight::{run_all_checks, PreflightResult};
 use crate::statistics::{bootstrap_difference_covariance, paired_optimal_block_length};
 use crate::types::{Class, Matrix2, Matrix9, TimingSample};
 
@@ -58,6 +59,9 @@ pub struct Calibration {
 
     /// Minimum detectable tail effect from calibration.
     pub mde_tail_ns: f64,
+
+    /// Results of preflight checks run during calibration.
+    pub preflight_result: PreflightResult,
 }
 
 /// Errors that can occur during calibration.
@@ -144,8 +148,17 @@ pub struct CalibrationConfig {
     /// Alpha level for MDE computation.
     pub alpha: f64,
 
-    /// Random seed for bootstrap.
+    /// Random seed for bootstrap and preflight randomization.
     pub seed: u64,
+
+    /// Optional: time to generate baseline inputs (nanoseconds).
+    pub baseline_gen_time_ns: Option<f64>,
+
+    /// Optional: time to generate sample inputs (nanoseconds).
+    pub sample_gen_time_ns: Option<f64>,
+
+    /// Whether to skip preflight checks.
+    pub skip_preflight: bool,
 }
 
 impl Default for CalibrationConfig {
@@ -157,6 +170,9 @@ impl Default for CalibrationConfig {
             theta_ns: 100.0,
             alpha: 0.01,
             seed: 42,
+            baseline_gen_time_ns: None,
+            sample_gen_time_ns: None,
+            skip_preflight: false,
         }
     }
 }
@@ -284,6 +300,20 @@ pub fn calibrate(
         1_000_000.0 // Conservative default if measurement was instant
     };
 
+    // Run preflight checks (unless skipped)
+    let preflight_result = if config.skip_preflight {
+        PreflightResult::new()
+    } else {
+        run_all_checks(
+            &baseline_ns,
+            &sample_ns,
+            config.baseline_gen_time_ns,
+            config.sample_gen_time_ns,
+            config.timer_resolution_ns,
+            config.seed,
+        )
+    };
+
     Ok(Calibration {
         sigma_rate,
         block_length,
@@ -295,6 +325,7 @@ pub fn calibrate(
         calibration_samples: n,
         mde_shift_ns: mde.shift_ns,
         mde_tail_ns: mde.tail_ns,
+        preflight_result,
     })
 }
 
@@ -321,6 +352,7 @@ fn count_unique(values: &[f64]) -> usize {
 /// # Returns
 ///
 /// Estimated samples needed to achieve target MDE.
+#[allow(dead_code)]
 pub fn estimate_samples_for_mde(current_mde: f64, target_mde: f64, current_n: usize) -> usize {
     if target_mde >= current_mde || target_mde <= 0.0 {
         return current_n;
@@ -408,6 +440,9 @@ mod tests {
             theta_ns: 100.0,
             alpha: 0.01,
             seed: 42,
+            baseline_gen_time_ns: None,
+            sample_gen_time_ns: None,
+            skip_preflight: true, // Skip in tests for speed
         };
 
         let result = calibrate(&baseline, &sample, 1.0, &config);

@@ -99,7 +99,7 @@ pub use helpers::InputPair;
 // ============================================================================
 
 /// Assert that the result indicates constant-time behavior.
-/// Panics on Fail or Inconclusive.
+/// Panics on Fail or Inconclusive with detailed diagnostic output.
 ///
 /// # Example
 ///
@@ -114,25 +114,27 @@ pub use helpers::InputPair;
 #[macro_export]
 macro_rules! assert_constant_time {
     ($outcome:expr) => {
-        match $outcome {
+        match &$outcome {
             $crate::Outcome::Pass { .. } => {}
-            $crate::Outcome::Fail { leak_probability, effect, .. } => {
+            $crate::Outcome::Fail { .. } => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
-                    "Timing leak detected: P={:.1}%, shift={:.1}ns, tail={:.1}ns",
-                    leak_probability * 100.0,
-                    effect.shift_ns,
-                    effect.tail_ns,
+                    "Timing leak detected!\n\n{}",
+                    summary,
                 );
             }
             $crate::Outcome::Inconclusive { reason, leak_probability, .. } => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
-                    "Could not confirm constant-time (P={:.1}%): {:?}",
+                    "Could not confirm constant-time (P={:.1}%): {}\n\n{}",
                     leak_probability * 100.0,
                     reason,
+                    summary,
                 );
             }
             $crate::Outcome::Unmeasurable { recommendation, .. } => {
-                panic!("Cannot measure operation: {}", recommendation);
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!("Cannot measure operation: {}\n\n{}", recommendation, summary);
             }
         }
     };
@@ -140,6 +142,7 @@ macro_rules! assert_constant_time {
 
 /// Assert that no timing leak was detected.
 /// Panics only on Fail (lenient - allows Inconclusive and Pass).
+/// Includes detailed diagnostic output on failure.
 ///
 /// # Example
 ///
@@ -154,13 +157,59 @@ macro_rules! assert_constant_time {
 #[macro_export]
 macro_rules! assert_no_timing_leak {
     ($outcome:expr) => {
-        if let $crate::Outcome::Fail { leak_probability, effect, .. } = $outcome {
+        if let $crate::Outcome::Fail { .. } = &$outcome {
+            let summary = $crate::output::format_debug_summary(&$outcome);
             panic!(
-                "Timing leak detected: P={:.1}%, shift={:.1}ns, tail={:.1}ns",
-                leak_probability * 100.0,
-                effect.shift_ns,
-                effect.tail_ns,
+                "Timing leak detected!\n\n{}",
+                summary,
             );
+        }
+    };
+}
+
+/// Assert that a timing leak WAS detected (for testing known-leaky code).
+/// Panics on Pass with detailed diagnostic output showing why no leak was found.
+///
+/// # Example
+///
+/// ```ignore
+/// use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_leak_detected};
+///
+/// let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+/// let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+///     .test(inputs, |data| leaky_function(data));
+/// assert_leak_detected!(outcome);
+/// ```
+#[macro_export]
+macro_rules! assert_leak_detected {
+    ($outcome:expr) => {
+        match &$outcome {
+            $crate::Outcome::Fail { .. } => {}
+            $crate::Outcome::Pass { leak_probability, .. } => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!(
+                    "Expected timing leak but got Pass (P={:.1}%)\n\n{}",
+                    leak_probability * 100.0,
+                    summary,
+                );
+            }
+            $crate::Outcome::Inconclusive { reason, leak_probability, .. } => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!(
+                    "Expected timing leak but got Inconclusive (P={:.1}%): {}\n\n{}",
+                    leak_probability * 100.0,
+                    reason,
+                    summary,
+                );
+            }
+            $crate::Outcome::Unmeasurable { recommendation, .. } => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!(
+                    "Expected timing leak but operation unmeasurable: {}\n\n{}",
+                    recommendation,
+                    summary,
+                );
+            }
         }
     };
 }

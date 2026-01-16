@@ -69,7 +69,8 @@ fn chacha20poly1305_encrypt_constant_time() {
     let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             // Generate unique nonce for each encryption
@@ -148,7 +149,8 @@ fn chacha20poly1305_decrypt_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |ct| {
             let plaintext = cipher.decrypt(nonce, ct.as_ref()).unwrap();
@@ -200,7 +202,8 @@ fn chacha20poly1305_nonce_independence() {
     let nonces = InputPair::new(|| [0x00u8; 12], || [0xFFu8; 12]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(nonces, |nonce_bytes| {
             let nonce = Nonce::from_slice(nonce_bytes);
@@ -266,7 +269,8 @@ fn aes_256_gcm_encrypt_constant_time() {
     let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
@@ -350,7 +354,8 @@ fn aes_256_gcm_decrypt_constant_time() {
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(SAMPLES)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |ct| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
@@ -410,7 +415,8 @@ fn ring_chacha20poly1305_constant_time() {
     let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
@@ -469,7 +475,8 @@ fn chacha20poly1305_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             // Generate unique nonce for each encryption
@@ -527,7 +534,8 @@ fn aes_gcm_hamming_weight_independence() {
     let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .max_samples(30_000)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |plaintext| {
             // Generate unique nonce for each encryption

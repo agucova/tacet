@@ -3,23 +3,23 @@
 use super::{DetectionResult, Detector, RawData};
 use std::any::Any;
 use std::time::Instant;
-use timing_oracle::{helpers::InputPair, Outcome, TimingOracle};
+use timing_oracle::{helpers::InputPair, AttackerModel, Outcome, TimingOracle};
 
 /// Adapter for timing-oracle
 pub struct TimingOracleDetector {
-    /// Use balanced preset for faster comparison runs
-    use_balanced: bool,
+    /// Attacker model to use
+    attacker_model: AttackerModel,
 }
 
 impl TimingOracleDetector {
     pub fn new() -> Self {
         Self {
-            use_balanced: true,
+            attacker_model: AttackerModel::AdjacentNetwork,
         }
     }
 
-    pub fn with_balanced(mut self, balanced: bool) -> Self {
-        self.use_balanced = balanced;
+    pub fn with_attacker_model(mut self, model: AttackerModel) -> Self {
+        self.attacker_model = model;
         self
     }
 }
@@ -38,17 +38,13 @@ impl Detector for TimingOracleDetector {
     fn detect(&self, fixed: &dyn Fn(), random: &dyn Fn(), samples: usize) -> DetectionResult {
         let start = Instant::now();
 
-        let oracle = if self.use_balanced {
-            TimingOracle::balanced()
-        } else {
-            TimingOracle::new()
-        };
+        let oracle = TimingOracle::for_attacker(self.attacker_model.clone());
 
         // Create an InputPair that wraps the closures
         // Note: We use () as the input type since the original closures don't take inputs
         let inputs = InputPair::new(|| (), || ());
 
-        let outcome = oracle.samples(samples).test(inputs, |_: &()| {
+        let outcome = oracle.max_samples(samples).test(inputs, |_: &()| {
             // We alternate between fixed and random based on the internal scheduling
             // This is a simplification - the original API allowed separate closures
             // For the comparison benchmark, we just run both
@@ -59,14 +55,46 @@ impl Detector for TimingOracleDetector {
         let duration = start.elapsed();
 
         match outcome {
-            Outcome::Completed(result) => DetectionResult {
-                detected_leak: result.leak_probability > 0.5,
-                confidence_metric: result.leak_probability,
-                samples_used: result.metadata.samples_per_class,
+            Outcome::Pass {
+                leak_probability,
+                samples_used,
+                ..
+            } => DetectionResult {
+                detected_leak: false,
+                confidence_metric: leak_probability,
+                samples_used,
                 duration,
                 raw_data: Some(RawData::TimingOracle {
-                    leak_probability: result.leak_probability,
-                    ci_gate_passed: result.ci_gate.passed,
+                    leak_probability,
+                    ci_gate_passed: true,
+                }),
+            },
+            Outcome::Fail {
+                leak_probability,
+                samples_used,
+                ..
+            } => DetectionResult {
+                detected_leak: true,
+                confidence_metric: leak_probability,
+                samples_used,
+                duration,
+                raw_data: Some(RawData::TimingOracle {
+                    leak_probability,
+                    ci_gate_passed: false,
+                }),
+            },
+            Outcome::Inconclusive {
+                leak_probability,
+                samples_used,
+                ..
+            } => DetectionResult {
+                detected_leak: leak_probability > 0.5,
+                confidence_metric: leak_probability,
+                samples_used,
+                duration,
+                raw_data: Some(RawData::TimingOracle {
+                    leak_probability,
+                    ci_gate_passed: leak_probability < 0.5,
                 }),
             },
             Outcome::Unmeasurable { .. } => DetectionResult {
