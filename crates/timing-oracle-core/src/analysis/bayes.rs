@@ -56,6 +56,7 @@ use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::constants::{B_TAIL, ONES};
+use crate::math;
 use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 
 /// Number of Monte Carlo samples for leak probability estimation.
@@ -247,13 +248,13 @@ fn run_monte_carlo(
         }
 
         // 2. Effect magnitude: ||β||₂
-        let magnitude = (beta[0].powi(2) + beta[1].powi(2)).sqrt();
+        let magnitude = math::sqrt(math::sq(beta[0]) + math::sq(beta[1]));
         magnitudes.push(magnitude);
     }
 
     magnitudes.sort_by(|a, b| a.total_cmp(b));
-    let lo_idx = ((N_MONTE_CARLO as f64) * 0.025).round() as usize;
-    let hi_idx = ((N_MONTE_CARLO as f64) * 0.975).round() as usize;
+    let lo_idx = math::round((N_MONTE_CARLO as f64) * 0.025) as usize;
+    let hi_idx = math::round((N_MONTE_CARLO as f64) * 0.975) as usize;
     let ci = (
         magnitudes[lo_idx.min(N_MONTE_CARLO - 1)],
         magnitudes[hi_idx.min(N_MONTE_CARLO - 1)],
@@ -268,7 +269,7 @@ fn sample_standard_normal<R: Rng>(rng: &mut R) -> f64 {
     let u1: f64 = rng.random();
     let u2: f64 = rng.random();
 
-    (-2.0 * u1.ln()).sqrt() * (2.0 * PI * u2).cos()
+    math::sqrt(-2.0 * math::ln(u1)) * math::cos(2.0 * PI * u2)
 }
 
 /// Return a neutral result when computation fails (maximally uncertain).
@@ -306,8 +307,8 @@ pub fn build_design_matrix() -> Matrix9x2 {
 fn prior_covariance(prior_sigmas: (f64, f64)) -> Matrix2 {
     let (sigma_mu, sigma_tau) = prior_sigmas;
     let mut lambda0 = Matrix2::zeros();
-    lambda0[(0, 0)] = sigma_mu.max(1e-12).powi(2);
-    lambda0[(1, 1)] = sigma_tau.max(1e-12).powi(2);
+    lambda0[(0, 0)] = math::sq(sigma_mu.max(1e-12));
+    lambda0[(1, 1)] = math::sq(sigma_tau.max(1e-12));
     lambda0
 }
 
@@ -329,7 +330,7 @@ fn mvn_log_pdf_zero(x: &Vector9, sigma: &Matrix9) -> Option<f64> {
     // Solve L * z = x
     let z = chol.l().solve_lower_triangular(x).unwrap_or(*x);
     let mahal_sq = z.dot(&z);
-    let log_det = 2.0 * chol.l().diagonal().iter().map(|d| d.ln()).sum::<f64>();
+    let log_det = 2.0 * chol.l().diagonal().iter().map(|d| math::ln(*d)).sum::<f64>();
 
     Some(-0.5 * (9.0 * LOG_2PI + log_det + mahal_sq))
 }
@@ -485,6 +486,111 @@ mod tests {
         assert!(
             result_small.leak_probability > result_large.leak_probability,
             "Exceedance probability should decrease as theta grows"
+        );
+    }
+
+    /// Compute prior exceedance probability P(max_k |(Xβ)_k| > θ | prior) via Monte Carlo.
+    ///
+    /// This is used to calibrate the prior scale σ so that the prior exceedance
+    /// probability matches the spec's intended ~62%.
+    fn compute_prior_exceedance_probability(sigma_prior: f64, theta: f64, n_samples: usize) -> f64 {
+        use rand::SeedableRng;
+        use rand_xoshiro::Xoshiro256PlusPlus;
+
+        let design = build_design_matrix();
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
+        let mut count = 0usize;
+
+        for _ in 0..n_samples {
+            // Sample β ~ N(0, σ²I₂)
+            let beta = Vector2::new(
+                sample_standard_normal(&mut rng) * sigma_prior,
+                sample_standard_normal(&mut rng) * sigma_prior,
+            );
+
+            // Compute pred = Xβ
+            let pred = design * beta;
+
+            // Check if max_k |pred_k| > θ
+            let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            if max_effect > theta {
+                count += 1;
+            }
+        }
+
+        count as f64 / n_samples as f64
+    }
+
+    #[test]
+    fn test_prior_exceedance_with_current_scale() {
+        // Current spec: σ = 2θ
+        // The spec claims this gives P(|β| > θ) ≈ 62%, but the actual leak test
+        // computes P(max_k |(Xβ)_k| > θ), which is higher due to the design matrix.
+        let theta = 100.0;
+        let sigma_current = 2.0 * theta; // Current: σ = 2θ
+
+        let exceedance = compute_prior_exceedance_probability(sigma_current, theta, 100_000);
+
+        // This should show the actual prior exceedance is much higher than 62%
+        eprintln!(
+            "Prior exceedance with σ = 2θ: {:.1}% (spec claims ~62%)",
+            exceedance * 100.0
+        );
+
+        // The actual value should be around 85%, demonstrating the bug
+        assert!(
+            exceedance > 0.80,
+            "Expected high exceedance with σ=2θ, got {:.1}%",
+            exceedance * 100.0
+        );
+    }
+
+    #[test]
+    fn test_find_correct_prior_scale() {
+        // Find the σ/θ ratio that gives ~62% prior exceedance probability
+        let theta = 100.0;
+        let target = 0.62;
+        let tolerance = 0.02;
+
+        // Binary search for the correct ratio
+        let mut lo = 0.5;
+        let mut hi = 2.5;
+
+        for _ in 0..20 {
+            let mid = (lo + hi) / 2.0;
+            let sigma = mid * theta;
+            let exceedance = compute_prior_exceedance_probability(sigma, theta, 50_000);
+
+            if exceedance < target {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+
+        let optimal_ratio = (lo + hi) / 2.0;
+        let final_exceedance =
+            compute_prior_exceedance_probability(optimal_ratio * theta, theta, 100_000);
+
+        eprintln!(
+            "Optimal σ/θ ratio for 62% exceedance: {:.3} (actual: {:.1}%)",
+            optimal_ratio,
+            final_exceedance * 100.0
+        );
+
+        // Verify we found a good value
+        assert!(
+            (final_exceedance - target).abs() < tolerance,
+            "Could not find σ giving ~62% exceedance. Best: σ={:.3}θ gives {:.1}%",
+            optimal_ratio,
+            final_exceedance * 100.0
+        );
+
+        // The correct ratio should be around 1.0-1.2 (not 2.0)
+        assert!(
+            optimal_ratio > 0.8 && optimal_ratio < 1.5,
+            "Expected ratio between 0.8 and 1.5, got {:.3}",
+            optimal_ratio
         );
     }
 }

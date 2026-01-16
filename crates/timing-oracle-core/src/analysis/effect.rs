@@ -29,6 +29,7 @@
 
 use nalgebra::Cholesky;
 
+use crate::math;
 use crate::result::EffectPattern;
 use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 
@@ -191,8 +192,8 @@ fn bayesian_linear_regression(
     // Prior precision: Λ₀⁻¹ = diag(1/σ_μ², 1/σ_τ²)
     let (sigma_mu, sigma_tau) = prior_sigmas;
     let mut prior_precision = Matrix2::zeros();
-    prior_precision[(0, 0)] = 1.0 / sigma_mu.max(1e-12).powi(2);
-    prior_precision[(1, 1)] = 1.0 / sigma_tau.max(1e-12).powi(2);
+    prior_precision[(0, 0)] = 1.0 / math::sq(sigma_mu.max(1e-12));
+    prior_precision[(1, 1)] = 1.0 / math::sq(sigma_tau.max(1e-12));
 
     // Posterior precision: Λ_post⁻¹ = Xᵀ Σ_n⁻¹ X + Λ₀⁻¹
     let posterior_precision = xt_sigma_n_inv_x + prior_precision;
@@ -214,7 +215,7 @@ fn bayesian_linear_regression(
 /// For a Gaussian posterior with given mean and variance, the 95% CI is:
 ///   [mean - 1.96×σ, mean + 1.96×σ]
 fn compute_credible_interval(mean: f64, variance: f64) -> (f64, f64) {
-    let std = variance.sqrt();
+    let std = math::sqrt(variance);
     let z = 1.96; // 97.5th percentile of standard normal
     (mean - z * std, mean + z * std)
 }
@@ -239,8 +240,8 @@ pub fn classify_pattern(beta_mean: &Vector2, beta_cov: &Matrix2) -> EffectPatter
     let tail = beta_mean[1]; // τ
 
     // Posterior standard errors
-    let shift_se = beta_cov[(0, 0)].sqrt();
-    let tail_se = beta_cov[(1, 1)].sqrt();
+    let shift_se = math::sqrt(beta_cov[(0, 0)]);
+    let tail_se = math::sqrt(beta_cov[(1, 1)]);
 
     // Check if effects are "significant" (|effect| > 2×SE)
     let shift_significant = shift.abs() > 2.0 * shift_se;

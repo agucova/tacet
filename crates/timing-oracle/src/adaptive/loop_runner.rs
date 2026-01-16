@@ -15,11 +15,12 @@
 use std::time::Duration;
 
 use crate::adaptive::{
-    check_quality_gates, AdaptiveState, Calibration, InconclusiveReason, Posterior,
+    AdaptiveState, Calibration, InconclusiveReason, Posterior, QualityGateCheckInputs,
     QualityGateConfig, QualityGateResult,
 };
 use crate::analysis::bayes::compute_bayes_factor;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
+use timing_oracle_core::adaptive::check_quality_gates;
 
 /// Configuration for the adaptive sampling loop.
 #[derive(Debug, Clone)]
@@ -93,7 +94,7 @@ impl AdaptiveConfig {
     /// Builder method to set time budget.
     pub fn time_budget(mut self, budget: Duration) -> Self {
         self.time_budget = budget;
-        self.quality_gates.time_budget = budget;
+        self.quality_gates.time_budget_secs = budget.as_secs_f64();
         self
     }
 
@@ -244,7 +245,24 @@ pub fn run_adaptive(
     }
 
     // Check quality gates
-    match check_quality_gates(state, &posterior, calibration, &config.quality_gates) {
+    let current_stats = state.get_stats_snapshot();
+    let gate_inputs = QualityGateCheckInputs {
+        posterior: &posterior,
+        prior_cov: &calibration.prior_cov,
+        theta_ns: config.theta_ns,
+        n_total: state.n_total(),
+        elapsed_secs: state.elapsed().as_secs_f64(),
+        recent_kl_sum: if state.has_kl_history() {
+            Some(state.recent_kl_sum())
+        } else {
+            None
+        },
+        samples_per_second: calibration.samples_per_second,
+        calibration_snapshot: Some(&calibration.calibration_snapshot),
+        current_stats_snapshot: current_stats.as_ref(),
+    };
+
+    match check_quality_gates(&gate_inputs, &config.quality_gates) {
         QualityGateResult::Continue => {
             // Caller should add more samples and call again
             AdaptiveOutcome::Continue {
@@ -371,7 +389,24 @@ pub fn adaptive_step(
     }
 
     // Check quality gates
-    match check_quality_gates(state, &posterior, calibration, &config.quality_gates) {
+    let current_stats = state.get_stats_snapshot();
+    let gate_inputs = QualityGateCheckInputs {
+        posterior: &posterior,
+        prior_cov: &calibration.prior_cov,
+        theta_ns: config.theta_ns,
+        n_total: state.n_total(),
+        elapsed_secs: state.elapsed().as_secs_f64(),
+        recent_kl_sum: if state.has_kl_history() {
+            Some(state.recent_kl_sum())
+        } else {
+            None
+        },
+        samples_per_second: calibration.samples_per_second,
+        calibration_snapshot: Some(&calibration.calibration_snapshot),
+        current_stats_snapshot: current_stats.as_ref(),
+    };
+
+    match check_quality_gates(&gate_inputs, &config.quality_gates) {
         QualityGateResult::Continue => Ok(None),
         QualityGateResult::Stop(reason) => Ok(Some(AdaptiveOutcome::Inconclusive {
             reason,
@@ -388,6 +423,19 @@ mod tests {
     use crate::types::{Matrix2, Matrix9, Vector2};
 
     fn make_calibration() -> Calibration {
+        use crate::adaptive::CalibrationSnapshot;
+        use crate::statistics::StatsSnapshot;
+
+        // Create a default calibration snapshot for tests
+        let default_stats = StatsSnapshot {
+            mean: 1000.0,
+            variance: 25.0,
+            autocorr_lag1: 0.1,
+            count: 5000,
+        };
+        let calibration_snapshot =
+            CalibrationSnapshot::new(default_stats.clone(), default_stats.clone());
+
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
             block_length: 10,
@@ -400,6 +448,7 @@ mod tests {
             mde_shift_ns: 5.0,
             mde_tail_ns: 10.0,
             preflight_result: crate::preflight::PreflightResult::new(),
+            calibration_snapshot,
         }
     }
 

@@ -180,6 +180,19 @@ pub enum InconclusiveReason {
         /// Number of samples collected.
         samples_collected: usize,
     },
+
+    /// Measurement conditions changed during the test.
+    ///
+    /// Detected by comparing calibration statistics with post-test statistics.
+    /// This can indicate environmental interference (CPU frequency scaling,
+    /// concurrent processes, etc.) that invalidates the covariance estimate.
+    /// See spec Section 2.6, Gate 6.
+    ConditionsChanged {
+        /// Human-readable explanation.
+        message: String,
+        /// Suggested actions.
+        guidance: String,
+    },
 }
 
 // ============================================================================
@@ -1122,6 +1135,7 @@ impl fmt::Display for Outcome {
                     InconclusiveReason::WouldTakeTooLong { .. } => "would take too long",
                     InconclusiveReason::TimeBudgetExceeded { .. } => "time budget exceeded",
                     InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
+                    InconclusiveReason::ConditionsChanged { .. } => "conditions changed",
                 };
                 write!(
                     f,
@@ -1220,6 +1234,13 @@ impl fmt::Display for InconclusiveReason {
                     "Sample budget exceeded: P(leak)={:.1}% after {} samples",
                     current_probability * 100.0,
                     samples_collected
+                )
+            }
+            InconclusiveReason::ConditionsChanged { message, guidance } => {
+                write!(
+                    f,
+                    "Conditions changed: {}\n  \u{2192} {}",
+                    message, guidance
                 )
             }
         }

@@ -7,7 +7,7 @@
 
 mod calibration_utils;
 
-use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, TrialRunner};
+use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, TimerBackend, TrialRunner};
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, TimingOracle};
 
@@ -21,43 +21,74 @@ struct EffectSizes {
     model_name: &'static str,
     attacker_model: AttackerModel,
     theta_ns: f64,
-    effects: [(f64, u64); 4], // (multiplier, ns) for 0.5×, 1×, 2×, 5×
+    effects: [(f64, u64); 5], // (multiplier, ns) for 0.5×, 1×, 2×, 5×, 10×
 }
 
 const RESEARCH_EFFECTS: EffectSizes = EffectSizes {
     model_name: "Research",
     attacker_model: AttackerModel::Research,
     theta_ns: 50.0, // Nominal value for Research mode
-    effects: [(0.5, 25), (1.0, 50), (2.0, 100), (5.0, 250)],
+    effects: [(0.5, 25), (1.0, 50), (2.0, 100), (5.0, 250), (10.0, 500)],
 };
 
 const ADJACENT_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     model_name: "AdjacentNetwork",
     attacker_model: AttackerModel::AdjacentNetwork,
     theta_ns: 100.0,
-    effects: [(0.5, 50), (1.0, 100), (2.0, 200), (5.0, 500)],
+    effects: [(0.5, 50), (1.0, 100), (2.0, 200), (5.0, 500), (10.0, 1000)],
 };
 
 const REMOTE_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     model_name: "RemoteNetwork",
     attacker_model: AttackerModel::RemoteNetwork,
     theta_ns: 50_000.0, // 50μs
-    effects: [(0.5, 25_000), (1.0, 50_000), (2.0, 100_000), (5.0, 250_000)],
+    effects: [(0.5, 25_000), (1.0, 50_000), (2.0, 100_000), (5.0, 250_000), (10.0, 500_000)],
 };
 
 // PostQuantumSentinel has θ ≈ 3.3ns which is below Instant precision,
-// so we use larger multipliers
+// so we use larger multipliers (requires PMU timer)
 const PQ_SENTINEL_EFFECTS: EffectSizes = EffectSizes {
     model_name: "PostQuantumSentinel",
     attacker_model: AttackerModel::PostQuantumSentinel,
     theta_ns: 3.3,
     effects: [
-        (3.0, 10),    // ~3×θ ≈ 10ns (minimum measurable)
-        (10.0, 33),   // ~10×θ
-        (30.0, 100),  // ~30×θ
-        (100.0, 330), // ~100×θ
+        (3.0, 10),     // ~3×θ ≈ 10ns (minimum measurable)
+        (10.0, 33),    // ~10×θ
+        (30.0, 100),   // ~30×θ
+        (100.0, 330),  // ~100×θ
+        (300.0, 1000), // ~300×θ (1μs)
     ],
 };
+
+// SharedHardware has θ ≈ 0.6ns which requires PMU timer
+const SHARED_HARDWARE_EFFECTS: EffectSizes = EffectSizes {
+    model_name: "SharedHardware",
+    attacker_model: AttackerModel::SharedHardware,
+    theta_ns: 0.6,
+    effects: [
+        (10.0, 6),      // ~10×θ ≈ 6ns
+        (50.0, 30),     // ~50×θ
+        (100.0, 60),    // ~100×θ
+        (500.0, 300),   // ~500×θ
+        (1000.0, 600),  // ~1000×θ
+    ],
+};
+
+// =============================================================================
+// ITERATION TIER TESTS (quick feedback during development)
+// =============================================================================
+
+/// Quick iteration power test at 5×θ for AdjacentNetwork.
+///
+/// Runs fewer trials for faster iteration.
+#[test]
+fn power_iteration_adjacent_network() {
+    run_power_test(
+        "power_iteration_adjacent_network",
+        &ADJACENT_NETWORK_EFFECTS,
+        3, // Index of 5× effect
+    );
+}
 
 // =============================================================================
 // QUICK TIER TESTS (run on every PR)
@@ -68,6 +99,10 @@ const PQ_SENTINEL_EFFECTS: EffectSizes = EffectSizes {
 /// This is the primary power validation test. At 2×θ, we expect ≥70% power.
 #[test]
 fn power_quick_2x_theta_adjacent_network() {
+    if std::env::var("CALIBRATION_TIER").as_deref() == Ok("iteration") {
+        eprintln!("[power_quick_2x_theta_adjacent_network] Skipped: iteration tier");
+        return;
+    }
     run_power_test(
         "power_quick_2x_theta_adjacent_network",
         &ADJACENT_NETWORK_EFFECTS,
@@ -80,6 +115,10 @@ fn power_quick_2x_theta_adjacent_network() {
 /// At 5×θ, we expect ≥90% power (≥95% for validation tier).
 #[test]
 fn power_quick_5x_theta_adjacent_network() {
+    if std::env::var("CALIBRATION_TIER").as_deref() == Ok("iteration") {
+        eprintln!("[power_quick_5x_theta_adjacent_network] Skipped: iteration tier");
+        return;
+    }
     run_power_test(
         "power_quick_5x_theta_adjacent_network",
         &ADJACENT_NETWORK_EFFECTS,
@@ -87,9 +126,29 @@ fn power_quick_5x_theta_adjacent_network() {
     );
 }
 
+/// Power test at 10×θ for AdjacentNetwork model.
+///
+/// At 10×θ, we expect ≥95% power (≥99% for validation tier).
+#[test]
+fn power_quick_10x_theta_adjacent_network() {
+    if std::env::var("CALIBRATION_TIER").as_deref() == Ok("iteration") {
+        eprintln!("[power_quick_10x_theta_adjacent_network] Skipped: iteration tier");
+        return;
+    }
+    run_power_test(
+        "power_quick_10x_theta_adjacent_network",
+        &ADJACENT_NETWORK_EFFECTS,
+        4, // Index of 10× effect
+    );
+}
+
 /// Power test at 2×θ for Research model (θ=50ns nominal).
 #[test]
 fn power_quick_2x_theta_research() {
+    if std::env::var("CALIBRATION_TIER").as_deref() == Ok("iteration") {
+        eprintln!("[power_quick_2x_theta_research] Skipped: iteration tier");
+        return;
+    }
     run_power_test("power_quick_2x_theta_research", &RESEARCH_EFFECTS, 2);
 }
 
@@ -135,6 +194,47 @@ fn power_validation_curve_remote_network() {
 #[ignore]
 fn power_validation_curve_pq_sentinel() {
     run_power_curve("power_validation_curve_pq_sentinel", &PQ_SENTINEL_EFFECTS);
+}
+
+// =============================================================================
+// PMU-SPECIFIC TESTS (require elevated privileges)
+// =============================================================================
+
+/// Power curve for SharedHardware model with PMU timer.
+///
+/// SharedHardware has θ ≈ 0.6ns which is only measurable with PMU timers.
+/// Skip if PMU is not available.
+#[test]
+#[ignore]
+fn power_validation_curve_shared_hardware_pmu() {
+    if !TimerBackend::pmu_available() {
+        eprintln!("[power_validation_curve_shared_hardware_pmu] Skipped: PMU timer not available (run with sudo)");
+        return;
+    }
+
+    std::env::set_var("CALIBRATION_TIER", "validation");
+    run_power_curve(
+        "power_validation_curve_shared_hardware_pmu",
+        &SHARED_HARDWARE_EFFECTS,
+    );
+}
+
+/// Power curve for PostQuantumSentinel with PMU timer.
+///
+/// More accurate results with PMU timer for small effects.
+#[test]
+#[ignore]
+fn power_validation_curve_pq_sentinel_pmu() {
+    if !TimerBackend::pmu_available() {
+        eprintln!("[power_validation_curve_pq_sentinel_pmu] Skipped: PMU timer not available (run with sudo)");
+        return;
+    }
+
+    std::env::set_var("CALIBRATION_TIER", "validation");
+    run_power_curve(
+        "power_validation_curve_pq_sentinel_pmu",
+        &PQ_SENTINEL_EFFECTS,
+    );
 }
 
 // =============================================================================

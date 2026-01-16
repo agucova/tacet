@@ -22,6 +22,7 @@ extern crate alloc;
 use alloc::vec::Vec;
 
 use crate::constants::DECILES;
+use crate::math;
 use crate::types::Vector9;
 
 /// Compute a single quantile from a mutable slice using Type 2 quantiles.
@@ -65,8 +66,8 @@ pub fn compute_quantile(data: &mut [f64], p: f64) -> f64 {
     let h = n as f64 * p + 0.5;
 
     // Convert to 0-based indices with bounds checking
-    let floor_idx = (h.floor() as usize).saturating_sub(1).min(n - 1);
-    let ceil_idx = (h.ceil() as usize).saturating_sub(1).min(n - 1);
+    let floor_idx = (math::floor(h) as usize).saturating_sub(1).min(n - 1);
+    let ceil_idx = (math::ceil(h) as usize).saturating_sub(1).min(n - 1);
 
     if floor_idx == ceil_idx {
         // Single index case - just select that element
@@ -241,8 +242,8 @@ pub fn compute_deciles_sorted(sorted: &[f64]) -> Vector9 {
         let h = n as f64 * p + 0.5;
 
         // Convert to 0-based indices with bounds checking
-        let floor_idx = (h.floor() as usize).saturating_sub(1).min(n - 1);
-        let ceil_idx = (h.ceil() as usize).saturating_sub(1).min(n - 1);
+        let floor_idx = (math::floor(h) as usize).saturating_sub(1).min(n - 1);
+        let ceil_idx = (math::ceil(h) as usize).saturating_sub(1).min(n - 1);
 
         // Average the two values (handles the case where they're the same)
         result[i] = (sorted[floor_idx] + sorted[ceil_idx]) / 2.0;

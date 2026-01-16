@@ -1,0 +1,22 @@
+[package]
+name = "timing-oracle-c"
+version = "0.1.0"
+edition = "2021"
+description = "C/C++ FFI wrapper for timing-oracle"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/timing-oracle/timing-oracle"
+documentation = "https://docs.rs/timing-oracle-c"
+readme = "README.md"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+timing-oracle-core = { path = "../timing-oracle-core" }
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.0"
+
+[features]
+default = []

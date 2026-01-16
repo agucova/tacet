@@ -1129,6 +1129,12 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
             current_probability: *current_probability,
             samples_collected: *samples_collected,
         },
+        AdaptiveInconclusiveReason::ConditionsChanged {
+            message, guidance, ..
+        } => InconclusiveReason::ConditionsChanged {
+            message: message.clone(),
+            guidance: guidance.clone(),
+        },
     }
 }
 

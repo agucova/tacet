@@ -10,6 +10,8 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
+use crate::math;
+
 /// Compute lag-1 autocorrelation of a time series.
 ///
 /// The lag-1 autocorrelation measures the correlation between
@@ -74,7 +76,7 @@ pub fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
     let mean: f64 = data.iter().sum::<f64>() / n as f64;
 
     // Compute variance (denominator)
-    let variance: f64 = data.iter().map(|&x| (x - mean).powi(2)).sum();
+    let variance: f64 = data.iter().map(|&x| math::sq(x - mean)).sum();
 
     if variance == 0.0 {
         return 0.0;
@@ -107,7 +109,7 @@ pub fn estimate_dependence_length(data: &[f64], max_lag: usize) -> usize {
     if n == 0 {
         return 1;
     }
-    let threshold = 2.0 / (n as f64).sqrt();
+    let threshold = 2.0 / math::sqrt(n as f64);
 
     for h in 1..=max_lag.min(n - 1) {
         let rho = compute_lag_autocorrelation(data, h);

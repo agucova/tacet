@@ -27,8 +27,10 @@
 
 extern crate alloc;
 
+pub mod adaptive;
 pub mod analysis;
 pub mod constants;
+pub mod math;
 pub mod result;
 pub mod statistics;
 pub mod types;

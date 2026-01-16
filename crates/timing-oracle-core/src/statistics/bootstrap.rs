@@ -11,6 +11,7 @@ use alloc::vec::Vec;
 
 use rand::Rng;
 
+use crate::math;
 use crate::types::TimingSample;
 
 /// Counter-based RNG seed generation using SplitMix64.
@@ -58,7 +59,7 @@ pub fn counter_rng_seed(base_seed: u64, counter: u64) -> u64 {
 ///
 /// The recommended block size, minimum 1.
 pub fn compute_block_size(n: usize) -> usize {
-    let block_size = (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize;
+    let block_size = math::ceil(1.3 * math::cbrt(n as f64)) as usize;
     block_size.max(1)
 }
 

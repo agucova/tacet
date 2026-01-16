@@ -74,12 +74,8 @@ impl CoverageRunner {
 
                 // The CI is for total effect magnitude
                 // Check if the true injected effect falls within the CI
-                // Note: We use shift_ns directly since we inject pure uniform shifts
-                let detected_shift = effect.shift_ns.abs();
-                if detected_shift.min(true_effect) <= ci_high
-                    && detected_shift.max(true_effect) >= ci_low
-                {
-                    // Either the detected shift is close to true, or the CI is wide enough
+                let _detected_shift = effect.shift_ns.abs();
+                if ci_low <= true_effect && true_effect <= ci_high {
                     self.covered += 1;
                 } else {
                     self.not_covered += 1;
@@ -172,25 +168,63 @@ impl CoverageRunner {
 }
 
 // =============================================================================
-// QUICK TIER TESTS (run on every PR)
+// EFFECT SIZE DEFINITIONS
 // =============================================================================
 
-/// Coverage test with 300ns injected effect.
+/// Effect sizes to test for coverage calibration.
+/// These represent effects at various multiples of θ for AdjacentNetwork (θ=100ns).
 ///
-/// Injects a known 300ns timing difference and verifies the 95% CI
-/// contains the true value at least min_coverage% of the time.
+/// With PMU timers (requires sudo), measurement overhead is minimal (<1ns),
+/// so we can test coverage across a range of effect sizes.
+const COVERAGE_EFFECTS_NS: [u64; 5] = [
+    100,  // 1×θ - at threshold
+    200,  // 2×θ - above threshold
+    500,  // 5×θ - strong effect
+    1000, // 10×θ - very strong effect
+    2000, // 20×θ - large effect
+];
+
+// =============================================================================
+// ITERATION TIER TESTS (quick feedback during development)
+// =============================================================================
+
+/// Quick iteration coverage check.
+///
+/// Runs fewer trials for faster iteration during development.
+/// Uses 500ns and 1000ns effects (5×θ and 10×θ).
 #[test]
-fn coverage_quick_300ns() {
+fn coverage_iteration() {
     if CalibrationConfig::is_disabled() {
-        eprintln!("[coverage_quick_300ns] Skipped: CALIBRATION_DISABLED=1");
+        eprintln!("[coverage_iteration] Skipped: CALIBRATION_DISABLED=1");
         return;
     }
 
-    let test_name = "coverage_quick_300ns";
+    run_coverage_test(
+        "coverage_iteration",
+        &COVERAGE_EFFECTS_NS[2..4], // 500ns and 1000ns for quick check
+    );
+}
+
+// =============================================================================
+// QUICK TIER TESTS (run on every PR)
+// =============================================================================
+
+/// Coverage test with 500ns injected effect.
+///
+/// Injects a known 500ns timing difference and verifies the 95% CI
+/// contains the true value at least min_coverage% of the time.
+#[test]
+fn coverage_quick_500ns() {
+    if CalibrationConfig::is_disabled() {
+        eprintln!("[coverage_quick_500ns] Skipped: CALIBRATION_DISABLED=1");
+        return;
+    }
+
+    let test_name = "coverage_quick_500ns";
     let config = CalibrationConfig::from_env(test_name);
     let mut rng = config.rng();
 
-    let injected_ns: u64 = 300;
+    let injected_ns: u64 = 500;
     let trials = config.tier.coverage_trials();
     let mut runner = CoverageRunner::new(config.clone(), trials, injected_ns as f64);
 
@@ -205,27 +239,22 @@ fn coverage_quick_300ns() {
             break;
         }
 
-        // Baseline: all zeros
-        // Sample: all 0xFF (distinguishable for delay injection)
+        // Use simple boolean to distinguish baseline vs sample
         let delay = injected_ns;
-        let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
+        let inputs = InputPair::new(|| false, || true);
 
-        // Use AdjacentNetwork (100ns threshold) since our effect is 300ns (3× threshold)
+        // Use AdjacentNetwork (100ns threshold) since our effect is 500ns (5× threshold)
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)
             .time_budget(config.time_budget_per_trial)
-            .test(inputs, |data| {
-                // Base operation (~400ns) to ensure measurability
-                let mut acc: u64 = 0;
-                for _ in 0..100 {
-                    for &b in data.iter() {
-                        acc = acc.wrapping_add(std::hint::black_box(b) as u64);
-                    }
-                }
-                std::hint::black_box(acc);
+            .test(inputs, move |&is_sample| {
+                // Base operation (~2μs) to ensure:
+                // 1. Operation is measurable on coarse timers
+                // 2. Adaptive batching uses K=1 (no multiplier)
+                busy_wait_ns(2000);
 
-                // Inject delay only for sample class (0xFF data)
-                if data[0] == 0xFF {
+                // Inject delay only for sample class
+                if is_sample {
                     busy_wait_ns(delay);
                 }
             });
@@ -274,7 +303,7 @@ fn coverage_quick_300ns() {
 
 /// Coverage test with multiple effect sizes.
 ///
-/// Tests coverage calibration across 100ns, 300ns, and 500ns effects.
+/// Tests coverage calibration across 200ns, 500ns, and 1000ns effects.
 #[test]
 fn coverage_quick_multi_effect() {
     if CalibrationConfig::is_disabled() {
@@ -285,8 +314,8 @@ fn coverage_quick_multi_effect() {
     let test_name = "coverage_quick_multi_effect";
     let config = CalibrationConfig::from_env(test_name);
 
-    // Test multiple effect sizes: 100ns, 300ns, 500ns
-    let effect_sizes = [100u64, 300, 500];
+    // Test multiple effect sizes: 200ns (2×θ), 500ns (5×θ), 1000ns (10×θ)
+    let effect_sizes = [200u64, 500, 1000];
     let trials_per_effect = config.tier.coverage_trials() / effect_sizes.len();
 
     eprintln!(
@@ -310,23 +339,19 @@ fn coverage_quick_multi_effect() {
             }
 
             let delay = effect_ns;
-            let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
+            let inputs = InputPair::new(|| false, || true);
 
             let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
                 .max_samples(config.samples_per_trial)
                 .time_budget(config.time_budget_per_trial)
-                .test(inputs, |data| {
-                    // Base operation (~400ns)
-                    let mut acc: u64 = 0;
-                    for _ in 0..100 {
-                        for &b in data.iter() {
-                            acc = acc.wrapping_add(std::hint::black_box(b) as u64);
-                        }
-                    }
-                    std::hint::black_box(acc);
+                .test(inputs, move |&is_sample| {
+                    // Base operation (~2μs) to ensure:
+                    // 1. Operation is measurable on coarse timers
+                    // 2. Adaptive batching uses K=1 (no multiplier)
+                    busy_wait_ns(2000);
 
                     // Inject delay for sample class
-                    if data[0] == 0xFF {
+                    if is_sample {
                         busy_wait_ns(delay);
                     }
                 });
@@ -396,6 +421,7 @@ fn coverage_quick_multi_effect() {
 // =============================================================================
 
 /// Rigorous coverage validation with 500 trials.
+/// Uses 500ns effect (5×θ for AdjacentNetwork).
 #[test]
 #[ignore]
 fn coverage_validation_rigorous() {
@@ -427,21 +453,18 @@ fn coverage_validation_rigorous() {
         }
 
         let delay = injected_ns;
-        let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
+        let inputs = InputPair::new(|| false, || true);
 
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)
             .time_budget(config.time_budget_per_trial)
-            .test(inputs, |data| {
-                let mut acc: u64 = 0;
-                for _ in 0..100 {
-                    for &b in data.iter() {
-                        acc = acc.wrapping_add(std::hint::black_box(b) as u64);
-                    }
-                }
-                std::hint::black_box(acc);
+            .test(inputs, move |&is_sample| {
+                // Base operation (~2μs) to ensure:
+                // 1. Operation is measurable on coarse timers
+                // 2. Adaptive batching uses K=1 (no multiplier)
+                busy_wait_ns(2000);
 
-                if data[0] == 0xFF {
+                if is_sample {
                     busy_wait_ns(delay);
                 }
             });
@@ -485,4 +508,198 @@ fn coverage_validation_rigorous() {
             panic!("[{}] FAILED: {}", test_name, reason);
         }
     }
+}
+
+/// Comprehensive coverage validation across all effect sizes.
+#[test]
+#[ignore]
+fn coverage_validation_per_effect() {
+    if CalibrationConfig::is_disabled() {
+        eprintln!("[coverage_validation_per_effect] Skipped: CALIBRATION_DISABLED=1");
+        return;
+    }
+
+    // Force validation tier
+    std::env::set_var("CALIBRATION_TIER", "validation");
+
+    run_coverage_test("coverage_validation_per_effect", &COVERAGE_EFFECTS_NS);
+}
+
+// =============================================================================
+// TEST HELPERS
+// =============================================================================
+
+/// Coverage statistics for a single effect size.
+struct CoverageStats {
+    effect_ns: u64,
+    #[allow(dead_code)]
+    trials: usize,
+    covered: usize,
+    not_covered: usize,
+    unmeasurable: usize,
+}
+
+impl CoverageStats {
+    fn coverage(&self) -> f64 {
+        let completed = self.covered + self.not_covered;
+        if completed == 0 {
+            0.0
+        } else {
+            self.covered as f64 / completed as f64
+        }
+    }
+}
+
+/// Run a coverage test across multiple effect sizes.
+fn run_coverage_test(test_name: &str, effects: &[u64]) {
+    if CalibrationConfig::is_disabled() {
+        eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
+        return;
+    }
+
+    let config = CalibrationConfig::from_env(test_name);
+    let trials_per_effect = config.tier.coverage_trials() / effects.len().max(1);
+
+    eprintln!(
+        "[{}] Starting coverage test ({} effect sizes, {} trials each, tier: {})",
+        test_name,
+        effects.len(),
+        trials_per_effect,
+        config.tier
+    );
+
+    let mut stats: Vec<CoverageStats> = Vec::new();
+    let mut any_failed = false;
+
+    for &effect_ns in effects {
+        let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(effect_ns));
+        let mut runner = CoverageRunner::new(config.clone(), trials_per_effect, effect_ns as f64);
+
+        eprintln!("\n[{}] Testing effect = {}ns", test_name, effect_ns);
+
+        for trial in 0..trials_per_effect {
+            if runner.should_stop() {
+                eprintln!("[{}] Early stop at trial {}", test_name, trial);
+                break;
+            }
+
+            let delay = effect_ns;
+            let inputs = InputPair::new(|| false, || true);
+
+            let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
+                .max_samples(config.samples_per_trial)
+                .time_budget(config.time_budget_per_trial)
+                .test(inputs, move |&is_sample| {
+                    // Base operation (~2μs) to ensure:
+                    // 1. Operation is measurable on coarse timers
+                    // 2. Adaptive batching uses K=1 (no multiplier)
+                    busy_wait_ns(2000);
+
+                    // Inject delay for sample class
+                    if is_sample {
+                        busy_wait_ns(delay);
+                    }
+                });
+
+            runner.record(&outcome);
+
+            // Progress logging
+            if (trial + 1) % 20 == 0 || trial + 1 == trials_per_effect {
+                eprintln!(
+                    "  Trial {}/{}: {:.1}% coverage",
+                    trial + 1,
+                    trials_per_effect,
+                    runner.coverage() * 100.0
+                );
+            }
+
+            rng = StdRng::seed_from_u64(rng.random());
+        }
+
+        // Collect stats for this effect size
+        let completed = runner.completed();
+        let coverage = runner.coverage();
+        let covered = runner.covered_count();
+        let not_covered = completed - covered;
+
+        stats.push(CoverageStats {
+            effect_ns,
+            trials: trials_per_effect,
+            covered,
+            not_covered,
+            unmeasurable: trials_per_effect - completed,
+        });
+
+        eprintln!(
+            "[{}] {}ns: {}/{} covered ({:.1}% coverage)",
+            test_name, effect_ns, covered, completed, coverage * 100.0
+        );
+
+        // Check coverage for effects >= 2θ (200ns for AdjacentNetwork)
+        // With PMU timers, systematic bias is minimal so we can test smaller effects
+        if effect_ns >= 200 && coverage < config.tier.min_coverage() {
+            eprintln!(
+                "[{}] FAILED at {}ns: coverage {:.1}% below {:.0}%",
+                test_name,
+                effect_ns,
+                coverage * 100.0,
+                config.tier.min_coverage() * 100.0
+            );
+            any_failed = true;
+        }
+    }
+
+    // Print summary table
+    eprintln!("\n[{}] Coverage Summary:", test_name);
+    eprintln!("  Effect | Coverage | Covered | Not Covered | Unmeasurable");
+    eprintln!("  -------|----------|---------|-------------|-------------");
+    for stat in &stats {
+        let marker = if stat.effect_ns >= 200 && stat.coverage() < config.tier.min_coverage() {
+            " !!!"
+        } else {
+            ""
+        };
+        eprintln!(
+            "  {:>5}ns | {:>6.1}% | {:>7} | {:>11} | {:>12}{}",
+            stat.effect_ns,
+            stat.coverage() * 100.0,
+            stat.covered,
+            stat.not_covered,
+            stat.unmeasurable,
+            marker
+        );
+    }
+
+    // Overall statistics
+    let total_covered: usize = stats.iter().map(|s| s.covered).sum();
+    let total_completed: usize = stats.iter().map(|s| s.covered + s.not_covered).sum();
+    let overall_coverage = if total_completed > 0 {
+        total_covered as f64 / total_completed as f64
+    } else {
+        0.0
+    };
+
+    eprintln!(
+        "\n[{}] Overall: {}/{} covered ({:.1}% coverage)",
+        test_name, total_covered, total_completed, overall_coverage * 100.0
+    );
+
+    // Check if we have enough data
+    let min_trials = trials_per_effect * effects.len() / 2;
+    if total_completed < min_trials {
+        eprintln!(
+            "[{}] SKIPPED: Insufficient data ({} completed, need {})",
+            test_name, total_completed, min_trials
+        );
+        return;
+    }
+
+    if any_failed {
+        panic!(
+            "[{}] FAILED: One or more effect sizes did not meet coverage requirements",
+            test_name
+        );
+    }
+
+    eprintln!("\n[{}] PASSED", test_name);
 }

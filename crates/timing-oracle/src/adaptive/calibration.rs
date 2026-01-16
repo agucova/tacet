@@ -15,11 +15,12 @@
 
 use std::time::Instant;
 
+use super::CalibrationSnapshot;
 use crate::analysis::mde::estimate_mde;
 use crate::preflight::{run_all_checks, PreflightResult};
 use crate::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
-    paired_optimal_block_length,
+    paired_optimal_block_length, OnlineStats,
 };
 use crate::types::{Class, Matrix2, Matrix9, TimingSample};
 
@@ -65,6 +66,10 @@ pub struct Calibration {
 
     /// Results of preflight checks run during calibration.
     pub preflight_result: PreflightResult,
+
+    /// Statistics snapshot from calibration phase for drift detection.
+    /// Used to compare against post-test statistics (spec Section 2.6, Gate 6).
+    pub calibration_snapshot: CalibrationSnapshot,
 }
 
 /// Errors that can occur during calibration.
@@ -286,16 +291,25 @@ pub fn calibrate(
 
     // Set prior covariance: sigma proportional to theta (spec Section 2.5)
     //
-    // Previously we used max(2*MDE, theta), but this caused poor calibration:
-    // when MDE >> theta (noisy data, strict threshold), the prior became too
-    // diffuse and P(|β| > θ | prior) ≈ 99%, biasing toward "leak detected"
-    // even before seeing data.
+    // The prior scale is calibrated so that the prior leak probability
+    // P(max_k |(Xβ)_k| > θ | prior) ≈ 62%, representing reasonable uncertainty.
     //
-    // Using sigma = 2*theta ensures P(|β| > θ | prior) ≈ 62%, representing
-    // reasonable uncertainty. The variance ratio quality gate (Gate 1) catches
-    // cases where posterior ≈ prior (data uninformative).
-    let prior_sigma_shift = config.theta_ns * 2.0;
-    let prior_sigma_tail = config.theta_ns * 2.0;
+    // IMPORTANT: The leak test uses max over the 9-vector Xβ (predicted quantile
+    // differences), not just β itself. The design matrix X amplifies β, so the
+    // prior scale must account for this transformation.
+    //
+    // With β ~ N(0, σ²I₂) and X the 9×2 design matrix [1 | b_tail]:
+    //   - σ = 2θ gives P(max_k |(Xβ)_k| > θ) ≈ 85% (too high, causes FPR ~40%)
+    //   - σ = 1.12θ gives P(max_k |(Xβ)_k| > θ) ≈ 62% (matches spec intent)
+    //
+    // The 1.12 factor was determined via Monte Carlo calibration (see
+    // bayes.rs::tests::test_find_correct_prior_scale).
+    //
+    // The variance ratio quality gate (Gate 1) catches cases where
+    // posterior ≈ prior (data uninformative).
+    const PRIOR_SCALE_FACTOR: f64 = 1.12;
+    let prior_sigma_shift = config.theta_ns * PRIOR_SCALE_FACTOR;
+    let prior_sigma_tail = config.theta_ns * PRIOR_SCALE_FACTOR;
     let prior_cov = Matrix2::new(
         prior_sigma_shift.powi(2),
         0.0,
@@ -325,6 +339,9 @@ pub fn calibrate(
         )
     };
 
+    // Compute calibration statistics snapshot for drift detection (Gate 6)
+    let calibration_snapshot = compute_calibration_snapshot(&baseline_ns, &sample_ns);
+
     Ok(Calibration {
         sigma_rate,
         block_length,
@@ -337,6 +354,7 @@ pub fn calibrate(
         mde_shift_ns: mde.shift_ns,
         mde_tail_ns: mde.tail_ns,
         preflight_result,
+        calibration_snapshot,
     })
 }
 
@@ -348,6 +366,25 @@ fn count_unique(values: &[f64]) -> usize {
     // Use 0.001ns buckets (well below any meaningful timing difference)
     let buckets: HashSet<i64> = values.iter().map(|&v| (v * 1000.0) as i64).collect();
     buckets.len()
+}
+
+/// Compute calibration statistics snapshot for drift detection.
+///
+/// Uses OnlineStats to compute mean, variance, and lag-1 autocorrelation
+/// for both baseline and sample classes. This snapshot will be compared
+/// against post-test statistics to detect condition drift (Gate 6).
+fn compute_calibration_snapshot(baseline_ns: &[f64], sample_ns: &[f64]) -> CalibrationSnapshot {
+    let mut baseline_stats = OnlineStats::new();
+    let mut sample_stats = OnlineStats::new();
+
+    for &t in baseline_ns {
+        baseline_stats.update(t);
+    }
+    for &t in sample_ns {
+        sample_stats.update(t);
+    }
+
+    CalibrationSnapshot::new(baseline_stats.finalize(), sample_stats.finalize())
 }
 
 /// Estimate calibration samples needed for desired MDE.

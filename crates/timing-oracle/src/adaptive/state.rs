@@ -1,208 +1,170 @@
-//! State management for adaptive sampling loop.
+//! State management for adaptive sampling loop (std wrapper).
 //!
-//! This module defines the state maintained during the adaptive sampling process,
-//! including sample storage, posterior tracking, and KL divergence history.
+//! This module provides a wrapper around `timing_oracle_core::adaptive::AdaptiveState`
+//! that adds time tracking using `std::time::Instant`.
 
-use std::collections::VecDeque;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use crate::types::{Matrix2, Vector2};
-
-/// Posterior distribution parameters for the effect vector beta = (mu, tau).
-///
-/// The posterior is Gaussian: beta | Delta ~ N(beta_mean, beta_cov)
-/// where:
-/// - mu is the uniform shift component
-/// - tau is the tail effect component
-///
-/// See spec Section 2.5 for the Bayesian model details.
-#[derive(Clone, Debug)]
-pub struct Posterior {
-    /// Posterior mean of beta = (mu, tau).
-    pub beta_mean: Vector2,
-
-    /// Posterior covariance of beta.
-    pub beta_cov: Matrix2,
-
-    /// Leak probability: P(max_k |(X*beta)_k| > theta | Delta).
-    /// Computed via Monte Carlo integration over the posterior.
-    pub leak_probability: f64,
-
-    /// Number of samples used in this posterior computation.
-    pub n: usize,
-}
-
-impl Posterior {
-    /// Create a new posterior with given parameters.
-    pub fn new(beta_mean: Vector2, beta_cov: Matrix2, leak_probability: f64, n: usize) -> Self {
-        Self {
-            beta_mean,
-            beta_cov,
-            leak_probability,
-            n,
-        }
-    }
-
-    /// Get the shift component (mu) from the posterior mean.
-    pub fn shift_ns(&self) -> f64 {
-        self.beta_mean[0]
-    }
-
-    /// Get the tail component (tau) from the posterior mean.
-    pub fn tail_ns(&self) -> f64 {
-        self.beta_mean[1]
-    }
-
-    /// Get the standard error of the shift component.
-    pub fn shift_se(&self) -> f64 {
-        self.beta_cov[(0, 0)].sqrt()
-    }
-
-    /// Get the standard error of the tail component.
-    pub fn tail_se(&self) -> f64 {
-        self.beta_cov[(1, 1)].sqrt()
-    }
-}
+use timing_oracle_core::adaptive::AdaptiveState as CoreAdaptiveState;
+use timing_oracle_core::adaptive::{CalibrationSnapshot, Posterior};
+use timing_oracle_core::statistics::StatsSnapshot;
 
 /// State maintained during adaptive sampling loop.
 ///
-/// This struct accumulates timing samples and tracks the evolution of the
-/// posterior distribution across batches, enabling quality gate checks like
-/// KL divergence monitoring.
+/// This is a wrapper around the no_std `AdaptiveState` from `timing-oracle-core`
+/// that adds time tracking using `std::time::Instant`.
 pub struct AdaptiveState {
-    /// Baseline class timing samples (in cycles/ticks/native units).
-    pub baseline_samples: Vec<u64>,
-
-    /// Sample class timing samples (in cycles/ticks/native units).
-    pub sample_samples: Vec<u64>,
-
-    /// Previous posterior for KL divergence tracking.
-    /// None until we have at least one posterior computed.
-    pub previous_posterior: Option<Posterior>,
-
-    /// Recent KL divergences (last 5 batches) for learning rate monitoring.
-    /// If sum of recent KL < 0.001, learning has stalled.
-    pub recent_kl_divergences: VecDeque<f64>,
+    /// The core state (no_std compatible).
+    core: CoreAdaptiveState,
 
     /// Start time of adaptive phase for timeout tracking.
-    pub start_time: Instant,
-
-    /// Number of batches collected so far.
-    pub batch_count: usize,
+    start_time: Instant,
 }
 
 impl AdaptiveState {
     /// Create a new empty adaptive state.
     pub fn new() -> Self {
         Self {
-            baseline_samples: Vec::new(),
-            sample_samples: Vec::new(),
-            previous_posterior: None,
-            recent_kl_divergences: VecDeque::with_capacity(5),
+            core: CoreAdaptiveState::new(),
             start_time: Instant::now(),
-            batch_count: 0,
         }
     }
 
     /// Create a new adaptive state with pre-allocated capacity.
     pub fn with_capacity(expected_samples: usize) -> Self {
         Self {
-            baseline_samples: Vec::with_capacity(expected_samples),
-            sample_samples: Vec::with_capacity(expected_samples),
-            previous_posterior: None,
-            recent_kl_divergences: VecDeque::with_capacity(5),
+            core: CoreAdaptiveState::with_capacity(expected_samples),
             start_time: Instant::now(),
-            batch_count: 0,
         }
+    }
+
+    /// Get a reference to the core state.
+    pub fn core(&self) -> &CoreAdaptiveState {
+        &self.core
+    }
+
+    /// Get a mutable reference to the core state.
+    pub fn core_mut(&mut self) -> &mut CoreAdaptiveState {
+        &mut self.core
     }
 
     /// Get the total number of samples per class.
     pub fn n_total(&self) -> usize {
-        self.baseline_samples.len()
+        self.core.n_total()
     }
 
     /// Get elapsed time since adaptive phase started.
-    pub fn elapsed(&self) -> std::time::Duration {
+    pub fn elapsed(&self) -> Duration {
         self.start_time.elapsed()
+    }
+
+    /// Reset the start time (useful when restarting the adaptive phase).
+    pub fn reset_start_time(&mut self) {
+        self.start_time = Instant::now();
+    }
+
+    /// Get the batch count.
+    pub fn batch_count(&self) -> usize {
+        self.core.batch_count
+    }
+
+    /// Access baseline samples directly.
+    pub fn baseline_samples(&self) -> &[u64] {
+        &self.core.baseline_samples
+    }
+
+    /// Access sample samples directly.
+    pub fn sample_samples(&self) -> &[u64] {
+        &self.core.sample_samples
     }
 
     /// Add a batch of samples to the state.
     ///
     /// Both baseline and sample vectors should have the same length.
+    /// Note: This method does not track online statistics since ns_per_tick is not known.
+    /// Use `add_batch_with_conversion` if you need drift detection.
     pub fn add_batch(&mut self, baseline: Vec<u64>, sample: Vec<u64>) {
-        debug_assert_eq!(
-            baseline.len(),
-            sample.len(),
-            "Baseline and sample batch sizes must match"
-        );
-        self.baseline_samples.extend(baseline);
-        self.sample_samples.extend(sample);
-        self.batch_count += 1;
+        self.core.add_batch(baseline, sample);
+    }
+
+    /// Add a batch of samples and track online statistics for drift detection.
+    ///
+    /// Both baseline and sample vectors should have the same length.
+    ///
+    /// # Arguments
+    ///
+    /// * `baseline` - Baseline class timing samples (in native units)
+    /// * `sample` - Sample class timing samples (in native units)
+    /// * `ns_per_tick` - Conversion factor from native units to nanoseconds
+    pub fn add_batch_with_conversion(
+        &mut self,
+        baseline: Vec<u64>,
+        sample: Vec<u64>,
+        ns_per_tick: f64,
+    ) {
+        self.core
+            .add_batch_with_conversion(baseline, sample, ns_per_tick);
     }
 
     /// Update KL divergence history with a new value.
-    ///
-    /// Maintains a sliding window of the last 5 KL divergences for
-    /// learning rate monitoring.
     pub fn update_kl(&mut self, kl: f64) {
-        self.recent_kl_divergences.push_back(kl);
-        if self.recent_kl_divergences.len() > 5 {
-            self.recent_kl_divergences.pop_front();
-        }
+        self.core.update_kl(kl);
     }
 
     /// Get the sum of recent KL divergences.
-    ///
-    /// Used to detect learning stall (sum < 0.001 indicates posterior
-    /// has stopped updating despite new data).
     pub fn recent_kl_sum(&self) -> f64 {
-        self.recent_kl_divergences.iter().sum()
+        self.core.recent_kl_sum()
     }
 
     /// Check if we have enough KL history for learning rate assessment.
     pub fn has_kl_history(&self) -> bool {
-        self.recent_kl_divergences.len() >= 5
+        self.core.has_kl_history()
     }
 
     /// Update the posterior and track KL divergence.
-    ///
-    /// Returns the KL divergence from the previous posterior, or 0.0 if
-    /// this is the first posterior.
     pub fn update_posterior(&mut self, new_posterior: Posterior) -> f64 {
-        let kl = if let Some(ref prev) = self.previous_posterior {
-            crate::adaptive::kl_divergence_gaussian(&new_posterior, prev)
-        } else {
-            0.0
-        };
-
-        self.previous_posterior = Some(new_posterior);
-
-        if kl.is_finite() {
-            self.update_kl(kl);
-        }
-
-        kl
+        self.core.update_posterior(new_posterior)
     }
 
     /// Get the current posterior, if computed.
     pub fn current_posterior(&self) -> Option<&Posterior> {
-        self.previous_posterior.as_ref()
+        self.core.current_posterior()
     }
 
     /// Convert baseline samples to f64 nanoseconds.
     pub fn baseline_ns(&self, ns_per_tick: f64) -> Vec<f64> {
-        self.baseline_samples
-            .iter()
-            .map(|&t| t as f64 * ns_per_tick)
-            .collect()
+        self.core.baseline_ns(ns_per_tick)
     }
 
     /// Convert sample samples to f64 nanoseconds.
     pub fn sample_ns(&self, ns_per_tick: f64) -> Vec<f64> {
-        self.sample_samples
-            .iter()
-            .map(|&t| t as f64 * ns_per_tick)
-            .collect()
+        self.core.sample_ns(ns_per_tick)
+    }
+
+    /// Get the current online statistics for the baseline class.
+    pub fn baseline_stats(&self) -> Option<StatsSnapshot> {
+        self.core.baseline_stats()
+    }
+
+    /// Get the current online statistics for the sample class.
+    pub fn sample_stats(&self) -> Option<StatsSnapshot> {
+        self.core.sample_stats()
+    }
+
+    /// Get a CalibrationSnapshot from the current online statistics.
+    pub fn get_stats_snapshot(&self) -> Option<CalibrationSnapshot> {
+        self.core.get_stats_snapshot()
+    }
+
+    /// Check if online statistics are being tracked.
+    pub fn has_stats_tracking(&self) -> bool {
+        self.core.has_stats_tracking()
+    }
+
+    /// Reset the state for a new test run.
+    pub fn reset(&mut self) {
+        self.core.reset();
+        self.start_time = Instant::now();
     }
 }
 
@@ -215,13 +177,14 @@ impl Default for AdaptiveState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{Matrix2, Vector2};
 
     #[test]
     fn test_adaptive_state_new() {
         let state = AdaptiveState::new();
         assert_eq!(state.n_total(), 0);
-        assert_eq!(state.batch_count, 0);
-        assert!(state.previous_posterior.is_none());
+        assert_eq!(state.batch_count(), 0);
+        assert!(state.current_posterior().is_none());
         assert!(!state.has_kl_history());
     }
 
@@ -231,9 +194,17 @@ mod tests {
         state.add_batch(vec![100, 101, 102], vec![200, 201, 202]);
 
         assert_eq!(state.n_total(), 3);
-        assert_eq!(state.batch_count, 1);
-        assert_eq!(state.baseline_samples, vec![100, 101, 102]);
-        assert_eq!(state.sample_samples, vec![200, 201, 202]);
+        assert_eq!(state.batch_count(), 1);
+        assert_eq!(state.baseline_samples(), &[100, 101, 102]);
+        assert_eq!(state.sample_samples(), &[200, 201, 202]);
+    }
+
+    #[test]
+    fn test_elapsed() {
+        let state = AdaptiveState::new();
+        std::thread::sleep(Duration::from_millis(10));
+        let elapsed = state.elapsed();
+        assert!(elapsed >= Duration::from_millis(10));
     }
 
     #[test]
@@ -245,15 +216,16 @@ mod tests {
         }
 
         assert!(state.has_kl_history());
-        assert!((state.recent_kl_sum() - 1.5).abs() < 1e-10); // 0.1 + 0.2 + 0.3 + 0.4 + 0.5
+        assert!((state.recent_kl_sum() - 1.5).abs() < 1e-10);
 
-        // Adding one more should evict the oldest
         state.update_kl(1.0);
-        assert!((state.recent_kl_sum() - 2.4).abs() < 1e-10); // 0.2 + 0.3 + 0.4 + 0.5 + 1.0
+        assert!((state.recent_kl_sum() - 2.4).abs() < 1e-10);
     }
 
     #[test]
-    fn test_posterior_accessors() {
+    fn test_posterior_update() {
+        let mut state = AdaptiveState::new();
+
         let posterior = Posterior::new(
             Vector2::new(10.0, 5.0),
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
@@ -261,9 +233,81 @@ mod tests {
             1000,
         );
 
-        assert_eq!(posterior.shift_ns(), 10.0);
-        assert_eq!(posterior.tail_ns(), 5.0);
-        assert_eq!(posterior.shift_se(), 2.0); // sqrt(4.0)
-        assert_eq!(posterior.tail_se(), 1.0); // sqrt(1.0)
+        let kl = state.update_posterior(posterior.clone());
+        assert_eq!(kl, 0.0); // First posterior has no previous
+
+        assert!(state.current_posterior().is_some());
+    }
+
+    #[test]
+    fn test_add_batch_with_conversion() {
+        let mut state = AdaptiveState::new();
+
+        state.add_batch_with_conversion(vec![100, 110, 120], vec![200, 210, 220], 2.0);
+
+        assert_eq!(state.n_total(), 3);
+        assert_eq!(state.batch_count(), 1);
+        assert!(state.has_stats_tracking());
+    }
+
+    #[test]
+    fn test_online_stats_tracking() {
+        let mut state = AdaptiveState::new();
+
+        let baseline: Vec<u64> = (0..100).map(|i| 1000 + (i % 10)).collect();
+        let sample: Vec<u64> = (0..100).map(|i| 1100 + (i % 10)).collect();
+        state.add_batch_with_conversion(baseline, sample, 1.0);
+
+        let baseline_stats = state.baseline_stats().expect("Should have baseline stats");
+        assert_eq!(baseline_stats.count, 100);
+        assert!(
+            (baseline_stats.mean - 1004.5).abs() < 1.0,
+            "Baseline mean {} should be near 1004.5",
+            baseline_stats.mean
+        );
+
+        let sample_stats = state.sample_stats().expect("Should have sample stats");
+        assert_eq!(sample_stats.count, 100);
+        assert!(
+            (sample_stats.mean - 1104.5).abs() < 1.0,
+            "Sample mean {} should be near 1104.5",
+            sample_stats.mean
+        );
+    }
+
+    #[test]
+    fn test_reset() {
+        let mut state = AdaptiveState::new();
+        state.add_batch_with_conversion(vec![100, 110], vec![200, 210], 1.0);
+        state.update_kl(0.5);
+
+        let posterior = Posterior::new(
+            Vector2::new(10.0, 5.0),
+            Matrix2::new(4.0, 0.0, 0.0, 1.0),
+            0.75,
+            100,
+        );
+        state.update_posterior(posterior);
+
+        assert!(state.n_total() > 0);
+
+        state.reset();
+
+        assert_eq!(state.n_total(), 0);
+        assert_eq!(state.batch_count(), 0);
+        assert!(state.current_posterior().is_none());
+        assert!(!state.has_kl_history());
+        assert!(!state.has_stats_tracking());
+    }
+
+    #[test]
+    fn test_stats_not_tracked_without_conversion() {
+        let mut state = AdaptiveState::new();
+
+        state.add_batch(vec![100, 110, 120], vec![200, 210, 220]);
+
+        assert!(!state.has_stats_tracking());
+        assert!(state.baseline_stats().is_none());
+        assert!(state.sample_stats().is_none());
     }
 }

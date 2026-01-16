@@ -6,11 +6,13 @@
 //! - Covariance estimation via bootstrap
 //! - Autocorrelation function computation
 //! - Optimal block length estimation using Politis-White algorithm
+//! - Online statistics for condition drift detection
 
 mod autocorrelation;
 mod block_length;
 mod bootstrap;
 mod covariance;
+mod online_stats;
 mod quantile;
 
 pub use autocorrelation::{estimate_dependence_length, lag1_autocorrelation, lag2_autocorrelation};
@@ -24,6 +26,7 @@ pub use covariance::{
     bootstrap_difference_covariance_discrete, compute_covariance_rate,
     scale_covariance_for_inference, scale_covariance_rate, CovarianceEstimate,
 };
+pub use online_stats::{OnlineStats, StatsSnapshot};
 pub use quantile::{
     compute_deciles, compute_deciles_fast, compute_deciles_inplace, compute_deciles_sorted,
     compute_deciles_with_buffer, compute_midquantile, compute_midquantile_deciles,

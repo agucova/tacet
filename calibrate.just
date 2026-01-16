@@ -7,22 +7,34 @@ data_dir := env("CALIBRATION_DATA_DIR", justfile_directory() + "/calibration_dat
 plot_dir := env("CALIBRATION_PLOT_DIR", justfile_directory() + "/plots")
 oracle_crate := "crates/timing-oracle"
 
-# Run quick calibration tests (~1-2 min, no sudo)
+# All calibration test files
+calibration_tests := "--test calibration_fpr --test calibration_power --test calibration_bayesian --test calibration_estimation --test calibration_coverage"
+
+# Run iteration calibration tests with PMU (~5-10 min, requires sudo) - for quick development feedback
+[group('calibrate')]
+iteration:
+    mkdir -p {{data_dir}}
+    sudo -E CALIBRATION_TIER=iteration CALIBRATION_DATA_DIR={{data_dir}} \
+        cargo test --release -p timing-oracle \
+        {{calibration_tests}} \
+        -- --nocapture
+
+# Run quick calibration tests (~1-2 hours, no sudo)
 [group('calibrate')]
 quick:
     mkdir -p {{data_dir}}
     CALIBRATION_TIER=quick CALIBRATION_DATA_DIR={{data_dir}} \
         cargo test --release -p timing-oracle \
-        --test calibration_power --test calibration_fpr --test calibration_coverage \
+        {{calibration_tests}} \
         -- --nocapture
 
-# Run full calibration tests (~5-10 min, no sudo)
+# Run full calibration tests (~2-3 hours, no sudo)
 [group('calibrate')]
 full:
     mkdir -p {{data_dir}}
     CALIBRATION_TIER=full CALIBRATION_DATA_DIR={{data_dir}} \
         cargo test --release -p timing-oracle \
-        --test calibration_power --test calibration_fpr --test calibration_coverage \
+        {{calibration_tests}} \
         -- --nocapture
 
 # Run full calibration tests with PMU timer (requires sudo)
@@ -31,18 +43,16 @@ full-pmu:
     mkdir -p {{data_dir}}
     sudo -E CALIBRATION_TIER=full CALIBRATION_DATA_DIR={{data_dir}} \
         cargo test --release -p timing-oracle \
-        --test calibration_power --test calibration_fpr --test calibration_coverage \
+        {{calibration_tests}} \
         -- --nocapture
 
-# Run validation curve tests (~20-30 min, requires sudo)
+# Run validation curve tests (~4+ hours, requires sudo)
 [group('calibrate')]
 validation:
     mkdir -p {{data_dir}}
     sudo -E CALIBRATION_TIER=validation CALIBRATION_DATA_DIR={{data_dir}} \
         cargo test --release -p timing-oracle \
-        --test calibration_power \
-        --test calibration_fpr \
-        --test calibration_coverage \
+        {{calibration_tests}} \
         -- --ignored --nocapture
 
 # Run stress tests (requires CALIBRATION_ENABLE_STRESS=1)

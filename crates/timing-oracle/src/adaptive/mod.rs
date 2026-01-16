@@ -26,17 +26,19 @@
 //!   - Extrapolated time exceeds 10x budget
 //!   - Time budget exceeded
 //!   - Sample budget exceeded
+//!   - Condition drift detected (calibration assumptions violated)
 
 mod calibration;
-mod kl_divergence;
 mod loop_runner;
-mod quality_gates;
 mod state;
 
-pub use calibration::{calibrate, Calibration, CalibrationConfig, CalibrationError};
-pub use kl_divergence::kl_divergence_gaussian;
-pub use loop_runner::{run_adaptive, AdaptiveConfig, AdaptiveOutcome};
-pub use quality_gates::{
-    check_quality_gates, InconclusiveReason, QualityGateConfig, QualityGateResult,
+// Re-export from timing-oracle-core
+pub use timing_oracle_core::adaptive::{
+    kl_divergence_gaussian, CalibrationSnapshot, ConditionDrift, DriftThresholds,
+    InconclusiveReason, Posterior, QualityGateCheckInputs, QualityGateConfig, QualityGateResult,
 };
-pub use state::{AdaptiveState, Posterior};
+
+// Local exports
+pub use calibration::{calibrate, Calibration, CalibrationConfig, CalibrationError};
+pub use loop_runner::{run_adaptive, AdaptiveConfig, AdaptiveOutcome};
+pub use state::AdaptiveState;

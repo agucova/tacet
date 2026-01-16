@@ -23,6 +23,8 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+use crate::math;
+
 /// Result of optimal block length estimation.
 #[derive(Debug, Clone, Copy)]
 pub struct OptimalBlockLength {
@@ -84,19 +86,19 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
 
     // Maximum allowed block length: min(3√n, n/3)
     // Prevents blocks from being too large relative to sample size
-    let max_block_length = (3.0 * (n as f64).sqrt()).min(n as f64 / 3.0).ceil();
+    let max_block_length = math::ceil((3.0 * math::sqrt(n as f64)).min(n as f64 / 3.0));
 
     // k_n: number of consecutive insignificant autocorrelations needed
     // Scales slowly with n: max(5, log₁₀(n))
-    let consecutive_insignificant_needed = 5.max((n as f64).log10() as usize);
+    let consecutive_insignificant_needed = 5.max(math::log10(n as f64) as usize);
 
     // m_max: maximum lag to consider for autocorrelation truncation
     // Roughly √n + k_n to ensure we explore enough lags
-    let max_lag = (n as f64).sqrt().ceil() as usize + consecutive_insignificant_needed;
+    let max_lag = math::ceil(math::sqrt(n as f64)) as usize + consecutive_insignificant_needed;
 
     // Critical value for insignificance test: ±2√(log₁₀(n)/n)
     // Conservative bound that scales appropriately with sample size
-    let insignificance_threshold = 2.0 * ((n as f64).log10() / n as f64).sqrt();
+    let insignificance_threshold = 2.0 * math::sqrt(math::log10(n as f64) / n as f64);
 
     // =========================================================================
     // Step 3: Compute autocovariances and find truncation lag
@@ -134,7 +136,7 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
         autocovariances[lag] = cross_product / n as f64;
 
         // Store absolute autocorrelation: |ρ(lag)| = |cross_product| / √(var_lead * var_trail)
-        let denominator = (variance_leading * variance_trailing).sqrt();
+        let denominator = math::sqrt(variance_leading * variance_trailing);
         abs_autocorrelations[lag] = if denominator > 0.0 {
             cross_product.abs() / denominator
         } else {
@@ -210,26 +212,26 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
     //   - Stationary bootstrap: d = 2 * σ⁴
     //   - Circular block bootstrap: d = (4/3) * σ⁴
 
-    let variance_squared = long_run_variance.powi(2);
+    let variance_squared = math::sq(long_run_variance);
 
     // Constants for each bootstrap type
     let d_stationary = 2.0 * variance_squared;
     let d_circular = (4.0 / 3.0) * variance_squared;
 
     // Compute block lengths, handling degenerate cases
-    let n_cuberoot = (n as f64).powf(1.0 / 3.0);
+    let n_cuberoot = math::cbrt(n as f64);
 
     let block_stationary = if d_stationary > 0.0 {
-        let ratio = (2.0 * g.powi(2)) / d_stationary;
-        ratio.powf(1.0 / 3.0) * n_cuberoot
+        let ratio = (2.0 * math::sq(g)) / d_stationary;
+        math::cbrt(ratio) * n_cuberoot
     } else {
         // Degenerate case: no dependence or zero variance
         1.0
     };
 
     let block_circular = if d_circular > 0.0 {
-        let ratio = (2.0 * g.powi(2)) / d_circular;
-        ratio.powf(1.0 / 3.0) * n_cuberoot
+        let ratio = (2.0 * math::sq(g)) / d_circular;
+        math::cbrt(ratio) * n_cuberoot
     } else {
         1.0
     };
@@ -267,7 +269,7 @@ pub fn paired_optimal_block_length(baseline: &[f64], sample: &[f64]) -> usize {
     let max_circular = opt_baseline.circular.max(opt_sample.circular);
 
     // Return ceiling, with minimum of 1
-    max_circular.ceil().max(1.0) as usize
+    math::ceil(max_circular).max(1.0) as usize
 }
 
 #[cfg(test)]

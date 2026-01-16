@@ -1831,6 +1831,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "timing-oracle-c"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "libc",
+ "timing-oracle-core",
+]
+
+[[package]]
 name = "timing-oracle-core"
 version = "0.1.5"
 dependencies = [

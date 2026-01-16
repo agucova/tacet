@@ -89,11 +89,17 @@ features:
 # Show environment variables
 env:
     @echo "Calibration environment variables:"
-    @echo "  CALIBRATION_TIER=quick|full|validation"
+    @echo "  CALIBRATION_TIER=iteration|quick|full|validation"
     @echo "  CALIBRATION_DATA_DIR=<path>           # Enable CSV export"
     @echo "  CALIBRATION_SEED=<u64>                # Fixed RNG seed"
     @echo "  CALIBRATION_DISABLED=1                # Skip calibration tests"
     @echo "  CALIBRATION_ENABLE_STRESS=1           # Enable stress tests"
+    @echo ""
+    @echo "Calibration tiers:"
+    @echo "  iteration  - ~30 min, quick feedback during development"
+    @echo "  quick      - ~1-2 hours, PR checks"
+    @echo "  full       - ~2-3 hours, weekly validation"
+    @echo "  validation - ~4+ hours, pre-release (includes ignored tests)"
     @echo ""
     @echo "Oracle environment variables:"
     @echo "  TO_SAMPLES=<n>                        # Override sample count"

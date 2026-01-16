@@ -3,17 +3,15 @@
 //! These tests verify that the timing oracle's FPR is bounded under the null hypothesis
 //! (no timing difference between classes).
 //!
-//! NOTE: Quick/Full tier tests use AdjacentNetwork (100ns threshold) because Research mode's
-//! threshold (~42ns when clamped to timer resolution) is too close to system noise levels
-//! on coarse timers. Validation tier tests with PMU timers can use Research mode.
+//! Uses a 10ns threshold (similar to dudect's approach) which is:
+//! - Stricter than AdjacentNetwork (100ns) for rigorous testing
+//! - Tolerant of minor RNG timing variance in random_vs_random tests
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
 mod calibration_utils;
 
-use calibration_utils::{
-    rand_bytes, select_attacker_model, CalibrationConfig, Decision, TrialRunner,
-};
+use calibration_utils::{rand_bytes, CalibrationConfig, Decision, TrialRunner};
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, TimingOracle};
 
@@ -57,9 +55,9 @@ fn fpr_quick_random_vs_random() {
             move || rand_bytes(&mut rng2)
         });
 
-        // Select attacker model based on timer availability
-        let attacker_model = select_attacker_model(test_name);
-        let outcome = TimingOracle::for_attacker(attacker_model)
+        // Use 10ns threshold for rigorous FPR testing
+        // Stricter than AdjacentNetwork (100ns), allows for minor RNG timing variance
+        let outcome = TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 10.0 })
             .max_samples(config.samples_per_trial)
             .time_budget(config.time_budget_per_trial)
             .test(inputs, |data| {
@@ -139,9 +137,9 @@ fn fpr_quick_fixed_vs_fixed() {
         // Both classes use identical fixed data
         let inputs = InputPair::new(|| [0u8; 32], || [0u8; 32]);
 
-        // Select attacker model based on timer availability
-        let attacker_model = select_attacker_model(test_name);
-        let outcome = TimingOracle::for_attacker(attacker_model)
+        // Use 10ns threshold for rigorous FPR testing
+        // Stricter than AdjacentNetwork (100ns), allows for minor RNG timing variance
+        let outcome = TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 10.0 })
             .max_samples(config.samples_per_trial)
             .time_budget(config.time_budget_per_trial)
             .test(inputs, |data| {

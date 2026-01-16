@@ -23,6 +23,7 @@ use rand_distr::{Distribution, StandardNormal};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::constants::{B_TAIL, ONES};
+use crate::math;
 use crate::result::MinDetectableEffect;
 use crate::types::{Matrix9, Vector9};
 
@@ -91,8 +92,8 @@ pub fn analytical_mde(covariance: &Matrix9, alpha: f64) -> (f64, f64) {
 
     // MDE with 50% power: z_{1-α/2} × SE (spec §2.7)
     let z = probit(1.0 - alpha / 2.0);
-    let mde_shift = z * var_shift.sqrt();
-    let mde_tail = z * var_tail.sqrt();
+    let mde_shift = z * math::sqrt(var_shift);
+    let mde_tail = z * math::sqrt(var_tail);
 
     (mde_shift, mde_tail)
 }
@@ -120,7 +121,7 @@ fn probit(p: f64) -> f64 {
     const D2: f64 = 0.189269;
     const D3: f64 = 0.001308;
 
-    let t = (-2.0 * (1.0 - q).ln()).sqrt();
+    let t = math::sqrt(-2.0 * math::ln(1.0 - q));
     let z = t - (C0 + C1 * t + C2 * t * t) / (1.0 + D1 * t + D2 * t * t + D3 * t * t * t);
 
     sign * z
@@ -207,7 +208,7 @@ fn percentile(values: &mut [f64], p: f64) -> f64 {
 
     values.sort_by(|a, b| a.total_cmp(b));
 
-    let idx = (p * (values.len() - 1) as f64).round() as usize;
+    let idx = math::round(p * (values.len() - 1) as f64) as usize;
     let idx = idx.min(values.len() - 1);
 
     values[idx]

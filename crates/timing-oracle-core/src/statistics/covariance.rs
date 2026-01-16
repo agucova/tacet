@@ -13,6 +13,7 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+use crate::math;
 use crate::types::{Class, Matrix9, TimingSample, Vector9};
 
 use super::block_length::{optimal_block_length, paired_optimal_block_length};
@@ -215,10 +216,10 @@ pub fn bootstrap_covariance_matrix(
     let n = data.len();
     // Use Politis-White algorithm for optimal block length selection (spec §2.6)
     let block_size = if n >= 10 {
-        optimal_block_length(data).circular.ceil() as usize
+        math::ceil(optimal_block_length(data).circular) as usize
     } else {
         // Fall back to simple formula for very small samples
-        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
+        math::ceil(1.3 * math::cbrt(n as f64)) as usize
     }
     .max(1);
 
@@ -362,7 +363,7 @@ pub fn bootstrap_difference_covariance(
         paired_optimal_block_length(&baseline_data, &sample_data)
     } else {
         // Fall back to simple formula for very small samples
-        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
+        math::ceil(1.3 * math::cbrt(n as f64)) as usize
     }
     .max(1);
 
@@ -497,16 +498,16 @@ pub fn bootstrap_difference_covariance_discrete(
     let sample = &sample[..n];
 
     let m = if n < 2000 {
-        let half = (0.5 * n as f64).floor() as usize;
+        let half = math::floor(0.5 * n as f64) as usize;
         half.max(200).min(n)
     } else {
-        let m = (n as f64).powf(2.0 / 3.0).floor() as usize;
+        let m = math::floor(math::pow(n as f64, 2.0 / 3.0)) as usize;
         m.max(400).min(n)
     };
     let mut block_size = if n >= 10 {
         paired_optimal_block_length(baseline, sample)
     } else {
-        (1.3 * (n as f64).powf(1.0 / 3.0)).ceil().max(1.0) as usize
+        math::ceil(1.3 * math::cbrt(n as f64)).max(1.0) as usize
     };
     let max_block = (m / 5).max(1);
     block_size = block_size.min(max_block).max(1);
@@ -661,7 +662,7 @@ fn add_diagonal_jitter(mut matrix: Matrix9) -> (Matrix9, f64) {
 ///
 /// The matrix with variance floor applied to diagonal elements.
 pub fn apply_variance_floor(mut matrix: Matrix9, timer_resolution_ns: f64) -> Matrix9 {
-    let floor = timer_resolution_ns.powi(2) / 12.0;
+    let floor = math::sq(timer_resolution_ns) / 12.0;
     for i in 0..9 {
         matrix[(i, i)] += floor;
     }
