@@ -5,6 +5,9 @@ members = [
     "crates/timing-oracle-core",
     "crates/timing-oracle-macros",
 ]
+exclude = [
+    "crates/timing-oracle/target/dudect-benchmarks",
+]
 
 # Shared settings for all workspace members
 [workspace.package]

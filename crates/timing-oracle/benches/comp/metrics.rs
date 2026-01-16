@@ -3,10 +3,14 @@
 #![allow(dead_code)]
 
 use super::adapters::dudect_adapter::DudectDetector;
+use super::adapters::timing_oracle_adapter::TimingOracleDetector;
 use super::adapters::Detector;
 use super::test_cases::TestCase;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+#[cfg(feature = "progress-bars")]
+use indicatif::{ProgressBar, ProgressStyle};
 
 /// Results of detection rate measurement
 #[derive(Debug, Clone)]
@@ -51,18 +55,33 @@ pub fn measure_detection_rate(
     let mut total_duration = Duration::ZERO;
     let mut total_samples = 0;
 
-    for trial in 0..trials {
-        eprintln!(
-            "[{}] Detection rate trial {}/{} for {}",
-            detector.name(),
-            trial + 1,
-            trials,
-            test_case.name()
-        );
+    #[cfg(feature = "progress-bars")]
+    let progress = ProgressBar::new(trials as u64)
+        .with_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        )
+        .with_message(format!("{} - {}", detector.name(), test_case.name()));
 
-        // For DudectDetector, prepare the test case before calling detect()
+    for _trial in 0..trials {
+        #[cfg(feature = "progress-bars")]
+        progress.set_message(format!(
+            "{} - {} - trial {}",
+            detector.name(),
+            test_case.name(),
+            trial + 1
+        ));
+
+        // Prepare the test case before calling detect()
         if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
             dudect.prepare_test_case(test_case);
+        }
+        if let Some(timing_oracle) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
+            timing_oracle.prepare_test_case(test_case);
         }
 
         let fixed_op = test_case.fixed_operation();
@@ -76,12 +95,25 @@ pub fn measure_detection_rate(
         total_confidence += result.confidence_metric;
         total_duration += result.duration;
         total_samples += result.samples_used;
+
+        #[cfg(feature = "progress-bars")]
+        progress.inc(1);
     }
+
+    #[cfg(feature = "progress-bars")]
+    progress.finish_with_message(format!(
+        "{} - {} complete",
+        detector.name(),
+        test_case.name()
+    ));
 
     let avg_samples_used = total_samples / trials;
     let avg_duration = total_duration / trials as u32;
-    let avg_time_per_sample =
-        Duration::from_secs_f64(avg_duration.as_secs_f64() / avg_samples_used as f64);
+    let avg_time_per_sample = if avg_samples_used > 0 {
+        Duration::from_secs_f64(avg_duration.as_secs_f64() / avg_samples_used as f64)
+    } else {
+        Duration::ZERO
+    };
 
     DetectionRateResult {
         detections,
@@ -122,9 +154,12 @@ pub fn measure_sample_efficiency(
             test_case.name()
         );
 
-        // For DudectDetector, prepare the test case before calling detect()
+        // Prepare the test case before calling detect()
         if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
             dudect.prepare_test_case(test_case);
+        }
+        if let Some(timing_oracle) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
+            timing_oracle.prepare_test_case(test_case);
         }
 
         let fixed_op = test_case.fixed_operation();
@@ -185,6 +220,9 @@ pub fn measure_sample_efficiency_stats(
             if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
                 dudect.prepare_test_case(test_case);
             }
+            if let Some(timing_oracle) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
+                timing_oracle.prepare_test_case(test_case);
+            }
 
             let fixed_op = test_case.fixed_operation();
             let random_op = test_case.random_operation();
@@ -212,6 +250,13 @@ pub fn measure_sample_efficiency_stats(
                     trial + 1,
                     trials_per_size
                 );
+
+                // Prepare the test case before calling detect()
+                if let Some(timing_oracle) =
+                    detector.as_any().downcast_ref::<TimingOracleDetector>()
+                {
+                    timing_oracle.prepare_test_case(test_case);
+                }
 
                 let fixed_op = test_case.fixed_operation();
                 let random_op = test_case.random_operation();
@@ -321,9 +366,14 @@ pub fn generate_roc_curve(
 
         for test_case in leaky_cases {
             for _ in 0..trials_per_case {
-                // For DudectDetector, prepare the test case before calling detect()
+                // Prepare the test case before calling detect()
                 if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
                     dudect.prepare_test_case(*test_case);
+                }
+                if let Some(timing_oracle) =
+                    detector.as_any().downcast_ref::<TimingOracleDetector>()
+                {
+                    timing_oracle.prepare_test_case(*test_case);
                 }
 
                 let fixed_op = test_case.fixed_operation();
@@ -357,9 +407,14 @@ pub fn generate_roc_curve(
 
         for test_case in safe_cases {
             for _ in 0..trials_per_case {
-                // For DudectDetector, prepare the test case before calling detect()
+                // Prepare the test case before calling detect()
                 if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
                     dudect.prepare_test_case(*test_case);
+                }
+                if let Some(timing_oracle) =
+                    detector.as_any().downcast_ref::<TimingOracleDetector>()
+                {
+                    timing_oracle.prepare_test_case(*test_case);
                 }
 
                 let fixed_op = test_case.fixed_operation();

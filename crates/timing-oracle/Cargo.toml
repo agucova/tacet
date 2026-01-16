@@ -1,6 +1,6 @@
 [package]
 name = "timing-oracle"
-version = "0.1.0"
+version = "0.1.4"
 edition = "2021"
 rust-version = "1.80"
 license = "MPL-2.0"
@@ -12,8 +12,8 @@ documentation = "https://docs.rs/timing-oracle"
 homepage = "https://github.com/agucova/timing-oracle"
 
 [dependencies]
-timing-oracle-core = { path = "../timing-oracle-core" }
-timing-oracle-macros = { path = "../timing-oracle-macros", optional = true }
+timing-oracle-core = { version = "0.1.4", path = "../timing-oracle-core" }
+timing-oracle-macros = { version = "0.1.4", path = "../timing-oracle-macros", optional = true }
 colored = "3.0.0"
 nalgebra = { version = "0.34.1", default-features = false, features = ["std"] }
 rand = "0.9.2"
@@ -23,6 +23,8 @@ statrs = "0.18"
 rayon = { version = "1.11.0", optional = true }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
+tracing = "0.1"
+indicatif = { version = "0.17", optional = true }
 
 # Platform-specific cycle counters
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -64,6 +66,7 @@ sha2 = "0.10.9"
 pqcrypto-traits = "0.3.5"
 # For macro compile-time error tests
 trybuild = "1.0"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 
 [[bench]]
 name = "comparison"
@@ -88,6 +91,9 @@ perf-default = ["perf"]
 
 # Proc macro API (timing_test! macro)
 macros = ["dep:timing-oracle-macros"]
+
+# Progress bars for benchmarks
+progress-bars = ["dep:indicatif"]
 
 # Internal features - use default features instead
 kperf = ["dep:kperf-rs", "dep:libc"]

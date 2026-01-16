@@ -150,6 +150,37 @@ pub enum TimerSpec {
 }
 
 impl TimerSpec {
+    /// Check if running with elevated privileges.
+    ///
+    /// Returns true if we have elevated privileges that would make PMU fallback unexpected.
+    fn has_elevated_privileges() -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            // On macOS, check if running as root
+            std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .map(|o| o.stdout == b"0\n")
+                .unwrap_or(false)
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            // On Linux, check if running as root or have CAP_PERFMON
+            // Simple check for running as root first
+            std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .map(|o| o.stdout == b"0\n")
+                .unwrap_or(false)
+        }
+
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        {
+            false
+        }
+    }
+
     /// Create a timer based on this specification.
     ///
     /// # PMU Auto-Detection
@@ -163,23 +194,29 @@ impl TimerSpec {
             TimerSpec::Standard => BoxedTimer::Standard(Timer::new()),
 
             TimerSpec::Auto => {
-                // Try PMU first on supported platforms, fall back silently
+                let has_elevated = Self::has_elevated_privileges();
+
+                // Try PMU first on supported platforms
                 #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
                 {
                     use super::kperf::PmuError;
                     match PmuTimer::new() {
                         Ok(pmu) => return BoxedTimer::Kperf(pmu),
                         Err(PmuError::ConcurrentAccess) => {
-                            // Another process holds the PMU lock - provide clear guidance
-                            eprintln!(
-                                "[timing-oracle] kperf: another process holds PMU lock. \
-                                 Falling back to standard timer. \
-                                 For exclusive kperf access, use: --test-threads=1"
+                            tracing::warn!(
+                                "PMU (kperf) locked by another process. \
+                                 Use --test-threads=1 for exclusive PMU access. \
+                                 Falling back to standard timer."
                             );
                         }
-                        Err(e) => {
-                            // Log other PMU failures
-                            eprintln!("[timing-oracle] kperf init failed: {:?}", e);
+                        Err(_) if has_elevated => {
+                            tracing::warn!(
+                                "Running with elevated privileges but PMU (kperf) unavailable. \
+                                 Falling back to standard timer. Check system configuration."
+                            );
+                        }
+                        Err(_) => {
+                            // Normal fallback without elevated privileges
                         }
                     }
                 }
@@ -188,9 +225,14 @@ impl TimerSpec {
                 {
                     match LinuxPerfTimer::new() {
                         Ok(perf) => return BoxedTimer::Perf(perf),
-                        Err(e) => {
-                            // Always log PMU failures - silent fallback hides bugs
-                            eprintln!("[timing-oracle] perf init failed: {:?}", e);
+                        Err(_) if has_elevated => {
+                            tracing::warn!(
+                                "Running with elevated privileges but PMU (perf_event) unavailable. \
+                                 Falling back to standard timer. This may indicate missing CAP_PERFMON."
+                            );
+                        }
+                        Err(_) => {
+                            // Normal fallback without elevated privileges
                         }
                     }
                 }

@@ -92,8 +92,7 @@ impl SanityWarning {
         match self {
             SanityWarning::BrokenHarness { variance_ratio } => {
                 format!(
-                    "Fixed-vs-Fixed internal consistency check triggered. \
-                     The baseline samples showed {:.1}x expected variation between \
+                    "The baseline samples showed {:.1}x the expected variation between \
                      random subsets. This may indicate mutable state captured in \
                      your test closure, or severe environmental interference. \
                      (If you're intentionally testing with identical inputs for \

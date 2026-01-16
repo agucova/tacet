@@ -147,16 +147,16 @@ Both classes cycle through the SAME pool of 200 ciphertexts.
 ```
 Leak probability: 11.3%
 Effect: 0.8 ns shift
-Status: PASS
+Outcome: Pass
 ```
 
 ### Experiment B-D: Pool Size Variation (Both Classes Different Pools)
 
-| Pool Size | Leak Probability | Shift | Status |
-|-----------|------------------|-------|--------|
-| 10 | 99.1% | +97.6 ns | FAIL |
-| 100 | 10.5% | -16.2 ns | PASS |
-| 1000 | 4.6% | +34.9 ns | PASS |
+| Pool Size | Leak Probability | Shift | Outcome |
+|-----------|------------------|-------|---------|
+| 10 | 99.1% | +97.6 ns | Fail |
+| 100 | 10.5% | -16.2 ns | Pass |
+| 1000 | 4.6% | +34.9 ns | Pass |
 
 **Observation:** Small pool sizes (10) show significant effect even when both classes use different pools.
 
@@ -167,7 +167,7 @@ Same pattern as original experiment but with RSA-2048.
 ```
 Leak probability: 100.0%
 Effect: -324.3 ns shift (baseline faster)
-Status: FAIL
+Outcome: Fail
 ```
 
 **Observation:** Effect is LARGER for RSA-2048 (~324ns) than RSA-1024 (~250ns).
@@ -179,7 +179,7 @@ Fixed message vs random messages, measuring encryption time.
 ```
 Leak probability: 0.0%
 Effect: -5.3 ns shift
-Status: PASS
+Outcome: Pass
 ```
 
 **Observation:** No significant effect for encryption. Effect appears specific to decryption.
@@ -192,7 +192,7 @@ Fixed zeros vs random bytes, XOR with secret.
 Leak probability: 0.0%
 Effect: -0.6 ns shift
 Quality: Excellent
-Status: PASS
+Outcome: Pass
 ```
 
 **Observation:** Truly constant-time operation shows essentially zero effect.
@@ -206,7 +206,7 @@ Each class has exactly ONE ciphertext, repeated for all measurements.
 ```
 Leak probability: 100.0%
 Effect: +211.0 ns shift (sample faster)
-Status: FAIL
+Outcome: Fail
 ```
 
 **Observation:** Even when BOTH classes repeat a single value, there's a ~211ns timing difference between the two different ciphertext values.
@@ -310,7 +310,7 @@ Two randomly selected ciphertexts, each repeated for all measurements:
 ```
 Leak probability: 99.8%
 Effect: 526.6 ns
-Status: FAIL
+Outcome: Fail
 ```
 
 ### Test 2b: Same-MSB 1-vs-1 Comparison (CRITICAL)
@@ -319,7 +319,7 @@ Two ciphertexts with **identical MSB (0x8C)**, each repeated:
 ```
 Leak probability: 99.7%
 Effect: 626.1 ns
-Status: FAIL
+Outcome: Fail
 ```
 
 **This is the key finding**: Even when ciphertexts have the same MSB (and therefore same magnitude/limb count), there's still a ~626ns timing difference. This definitively rules out the magnitude hypothesis.
@@ -330,7 +330,7 @@ Each class cycles through 100 different ciphertexts:
 ```
 Leak probability: varies
 Effect: 63.5 ns
-Status: Inconclusive
+Outcome: Inconclusive
 ```
 
 Large pools average out individual ciphertext variation.
@@ -341,7 +341,7 @@ Re-running Experiment H (1-vs-1 different ciphertexts) with PMU timer:
 ```
 Leak probability: 100%
 Effect: 457.8 ns
-Status: FAIL
+Outcome: Fail
 ```
 
 Consistent with earlier findings (~211-500ns range for 1-vs-1 tests).

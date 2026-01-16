@@ -2,8 +2,11 @@
 
 #![allow(dead_code)]
 
+use super::super::test_cases::TestCase;
 use super::{DetectionResult, Detector, RawData};
 use std::any::Any;
+use std::cell::RefCell;
+use std::sync::Arc;
 use std::time::Instant;
 use timing_oracle::{helpers::InputPair, AttackerModel, Outcome, TimingOracle};
 
@@ -11,18 +14,41 @@ use timing_oracle::{helpers::InputPair, AttackerModel, Outcome, TimingOracle};
 pub struct TimingOracleDetector {
     /// Attacker model to use
     attacker_model: AttackerModel,
+    /// Current test case operations (set via prepare_test_case)
+    current_ops: RefCell<Option<PreparedOps>>,
+}
+
+/// Prepared operations from a test case
+struct PreparedOps {
+    fixed: Arc<dyn Fn() + Send + Sync>,
+    random: Arc<dyn Fn() + Send + Sync>,
 }
 
 impl TimingOracleDetector {
     pub fn new() -> Self {
         Self {
-            attacker_model: AttackerModel::AdjacentNetwork,
+            // Use SharedHardware for cycle-level sensitivity comparable to dudect
+            // This sets threshold to ~0.6ns (~2 cycles at 3GHz)
+            attacker_model: AttackerModel::SharedHardware,
+            current_ops: RefCell::new(None),
         }
     }
 
     pub fn with_attacker_model(mut self, model: AttackerModel) -> Self {
         self.attacker_model = model;
         self
+    }
+
+    /// Set the current test case before calling detect()
+    ///
+    /// Must be called before detect().
+    pub fn prepare_test_case(&self, test_case: &dyn TestCase) {
+        let fixed = test_case.fixed_operation();
+        let random = test_case.random_operation();
+        *self.current_ops.borrow_mut() = Some(PreparedOps {
+            fixed: Arc::from(fixed),
+            random: Arc::from(random),
+        });
     }
 }
 
@@ -37,21 +63,29 @@ impl Detector for TimingOracleDetector {
         "timing-oracle"
     }
 
-    fn detect(&self, fixed: &dyn Fn(), random: &dyn Fn(), samples: usize) -> DetectionResult {
+    fn detect(&self, _fixed: &dyn Fn(), _random: &dyn Fn(), samples: usize) -> DetectionResult {
         let start = Instant::now();
+
+        // Get the prepared operations
+        let ops = self
+            .current_ops
+            .borrow()
+            .as_ref()
+            .map(|o| (Arc::clone(&o.fixed), Arc::clone(&o.random)));
+
+        let (fixed_op, random_op) = ops.expect("Must call prepare_test_case() before detect()");
 
         let oracle = TimingOracle::for_attacker(self.attacker_model);
 
-        // Create an InputPair that wraps the closures
-        // Note: We use () as the input type since the original closures don't take inputs
-        let inputs = InputPair::new(|| (), || ());
+        // Use a boolean to indicate which class: false = baseline (fixed), true = sample (random)
+        let inputs = InputPair::new(|| false, || true);
 
-        let outcome = oracle.max_samples(samples).test(inputs, |_: &()| {
-            // We alternate between fixed and random based on the internal scheduling
-            // This is a simplification - the original API allowed separate closures
-            // For the comparison benchmark, we just run both
-            fixed();
-            random();
+        let outcome = oracle.max_samples(samples).test(inputs, move |is_sample| {
+            if *is_sample {
+                random_op();
+            } else {
+                fixed_op();
+            }
         });
 
         let duration = start.elapsed();

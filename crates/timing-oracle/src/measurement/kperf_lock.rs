@@ -178,11 +178,11 @@ mod tests {
         let guard1 = match try_acquire_default() {
             LockResult::Acquired(g) => g,
             LockResult::IoError(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                eprintln!("Skipping: permission denied");
+                tracing::debug!("Skipping: permission denied");
                 return;
             }
             LockResult::Timeout => {
-                eprintln!("Skipping: lock held by another process");
+                tracing::debug!("Skipping: lock held by another process");
                 return;
             }
             other => panic!("Unexpected result: {:?}", other),

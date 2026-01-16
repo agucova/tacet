@@ -649,7 +649,15 @@ fn sphincs_sha2_128f_verify_constant_time() {
         .map(|msg| sphincssha2128fsimple::detached_sign(msg, &sk))
         .collect();
 
-    let idx = std::cell::Cell::new(0usize);
+    // DudeCT compliant: Create parallel arrays for symmetric code paths
+    // Baseline: repeat fixed message/sig SAMPLES times (conceptually)
+    // Sample: random messages/sigs
+    // Both classes use the same index management pattern
+    let baseline_msgs: Vec<[u8; 32]> = vec![fixed_message; SAMPLES];
+    let baseline_sigs: Vec<_> = vec![fixed_sig.clone(); SAMPLES];
+
+    let idx0 = std::cell::Cell::new(0usize);
+    let idx1 = std::cell::Cell::new(0usize);
 
     // Use index-based approach since pqcrypto types don't implement Hash
     // Using new_unchecked because we're using indices as class identifiers (intentional)
@@ -660,14 +668,15 @@ fn sphincs_sha2_128f_verify_constant_time() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(120))
         .test(inputs, |which| {
-            let (msg, sig) = if *which == 0 {
-                (&fixed_message[..], &fixed_sig)
+            // Symmetric code paths: both classes do identical operations
+            let (msgs, sigs, idx) = if *which == 0 {
+                (&baseline_msgs, &baseline_sigs, &idx0)
             } else {
-                let i = idx.get();
-                idx.set((i + 1) % SAMPLES);
-                (&random_msgs[i][..], &random_sigs[i])
+                (&random_msgs, &random_sigs, &idx1)
             };
-            let result = sphincssha2128fsimple::verify_detached_signature(sig, msg, &pk);
+            let i = idx.get();
+            idx.set((i + 1) % SAMPLES);
+            let result = sphincssha2128fsimple::verify_detached_signature(&sigs[i], &msgs[i], &pk);
             std::hint::black_box(result.is_ok());
         });
 
@@ -739,17 +748,17 @@ fn kyber768_ciphertext_independence() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
         .test(inputs, |which| {
-            if *which == 0 {
-                let i = idx1.get();
-                idx1.set((i + 1) % SAMPLES);
-                let ss = kyber768::decapsulate(&batch1[i], &sk);
-                std::hint::black_box(ss.as_bytes()[0]);
+            // DudeCT compliant: extract-then-use pattern for uniform code path
+            let (batch, idx) = if *which == 0 {
+                (&batch1, &idx1)
             } else {
-                let i = idx2.get();
-                idx2.set((i + 1) % SAMPLES);
-                let ss = kyber768::decapsulate(&batch2[i], &sk);
-                std::hint::black_box(ss.as_bytes()[0]);
-            }
+                (&batch2, &idx2)
+            };
+            // Uniform code after extraction
+            let i = idx.get();
+            idx.set((i + 1) % SAMPLES);
+            let ss = kyber768::decapsulate(&batch[i], &sk);
+            std::hint::black_box(ss.as_bytes()[0]);
         });
 
     eprintln!("\n[kyber768_ciphertext_independence]");

@@ -192,7 +192,6 @@ impl LinuxPerfTimer {
         }
 
         if ratios.is_empty() {
-            eprintln!("Warning: perf calibration failed, using fallback (3.0 cycles/ns)");
             return 3.0;
         }
 
@@ -296,13 +295,13 @@ mod tests {
     fn test_perf_timer_permissions() {
         match LinuxPerfTimer::new() {
             Ok(_) => {
-                eprintln!("perf timer initialized (sufficient permissions)");
+                // perf timer initialized successfully
             }
             Err(PerfError::PermissionDenied) => {
-                eprintln!("perf timer requires elevated permissions (expected on some systems)");
+                // perf timer requires elevated permissions (expected on some systems)
             }
-            Err(e) => {
-                eprintln!("perf timer error: {}", e);
+            Err(_) => {
+                // perf timer initialization failed
             }
         }
     }

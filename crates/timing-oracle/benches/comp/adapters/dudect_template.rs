@@ -111,6 +111,8 @@ path = "src/main.rs"
 [dependencies]
 dudect-bencher = "0.6"
 rand = "0.9"
+
+[workspace]
 "#,
         binary_name, binary_name
     )

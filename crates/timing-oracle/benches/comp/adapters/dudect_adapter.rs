@@ -163,16 +163,14 @@ impl Detector for DudectDetector {
     }
 
     fn default_threshold(&self) -> f64 {
-        // Original DudeCT threshold for "definitely not constant time"
-        // Source: https://github.com/oreparaz/dudect
+        // DudeCT t-statistic thresholds:
         // - |t| < 5: "For the moment, maybe constant time"
         // - 5 < |t| < 10: "Probably not constant time"
         // - |t| > 10: "Definitely not constant time"
         //
-        // Note: dudect-bencher Rust crate uses 5.0, but the original DudeCT
-        // methodology uses 10.0 as the definitive threshold. We use 10.0 to
-        // avoid false positives from microarchitectural noise (typically |t| ~ 8-9).
-        10.0
+        // Using 5.0 (dudect-bencher default) for sensitivity comparable to
+        // timing-oracle's SharedHardware mode.
+        5.0
     }
 
     fn exceeds_threshold(&self, confidence_metric: f64, threshold: f64) -> bool {

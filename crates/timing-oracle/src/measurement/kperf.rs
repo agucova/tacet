@@ -232,7 +232,6 @@ impl PmuTimer {
         }
 
         if ratios.is_empty() {
-            eprintln!("Warning: PMU calibration failed, using fallback (3.0 cycles/ns)");
             return 3.0;
         }
 
@@ -333,13 +332,13 @@ mod tests {
     fn test_pmu_timer_requires_root() {
         match PmuTimer::new() {
             Ok(_) => {
-                eprintln!("PMU timer initialized (running as root)");
+                // PMU timer initialized successfully
             }
             Err(PmuError::PermissionDenied) => {
-                eprintln!("PMU timer requires root (expected)");
+                // PMU timer requires root (expected)
             }
-            Err(e) => {
-                eprintln!("PMU timer error: {}", e);
+            Err(_) => {
+                // PMU timer initialization failed
             }
         }
     }

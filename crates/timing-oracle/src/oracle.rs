@@ -510,19 +510,6 @@ impl TimingOracle {
         // (Research mode returns 0, which causes zero prior covariance and Cholesky failure)
         let theta_ns = raw_theta_ns.max(timer.resolution_ns());
 
-        let debug_pipeline = env::var("TO_DEBUG_PIPELINE")
-            .map(|v| v != "0")
-            .unwrap_or(false);
-        if debug_pipeline {
-            eprintln!(
-                "[DEBUG] timer={} resolution_ns={:.2} cycles_per_ns={:.3} theta_ns={:.2}",
-                timer.name(),
-                timer.resolution_ns(),
-                timer.cycles_per_ns(),
-                theta_ns
-            );
-        }
-
         // Step 2: Pre-generate ALL inputs before measurement (critical for accuracy)
         // We need enough for calibration + max adaptive samples
         let total_samples_needed = self.config.calibration_samples + self.config.max_samples;
@@ -597,7 +584,7 @@ impl TimingOracle {
         }
 
         // Determine batching K value
-        let (k, batching): (u32, BatchingInfo) = match self.config.iterations_per_sample {
+        let (k, _batching): (u32, BatchingInfo) = match self.config.iterations_per_sample {
             crate::config::IterationsPerSample::Fixed(k) => {
                 let k = k.max(1) as u32;
                 (
@@ -673,25 +660,13 @@ impl TimingOracle {
             }
         };
 
-        if debug_pipeline {
-            eprintln!(
-                "[DEBUG] batching: enabled={} k={} ticks_per_batch={:.2}",
-                batching.enabled, batching.k, batching.ticks_per_batch
-            );
-        }
-
         // Step 5: CALIBRATION PHASE - Collect calibration samples
         // Cap calibration samples to at most 50% of max_samples to ensure room for inference
         let n_cal = self
             .config
             .calibration_samples
             .min(self.config.max_samples / 2);
-        if debug_pipeline && n_cal < self.config.calibration_samples {
-            eprintln!(
-                "[DEBUG] calibration_samples capped: {} -> {} (max_samples={})",
-                self.config.calibration_samples, n_cal, self.config.max_samples
-            );
-        }
+
         let mut calibration_baseline_cycles = Vec::with_capacity(n_cal);
         let mut calibration_sample_cycles = Vec::with_capacity(n_cal);
 
@@ -773,14 +748,6 @@ impl TimingOracle {
             }
         };
 
-        if debug_pipeline {
-            eprintln!(
-                "[DEBUG] calibration: discrete_mode={} block_length={} mde_shift={:.2}ns mde_tail={:.2}ns",
-                calibration.discrete_mode, calibration.block_length,
-                calibration.mde_shift_ns, calibration.mde_tail_ns
-            );
-        }
-
         // Step 6: ADAPTIVE PHASE - Collect samples until decision
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
@@ -800,15 +767,6 @@ impl TimingOracle {
             calibration_baseline_cycles.clone(),
             calibration_sample_cycles.clone(),
         );
-
-        if debug_pipeline {
-            eprintln!(
-                "[DEBUG] after calibration: n_cal={} n_total={} max_samples={}",
-                n_cal,
-                adaptive_state.n_total(),
-                self.config.max_samples
-            );
-        }
 
         // Adaptive loop
         let mut input_idx = n_cal; // Start after calibration samples
@@ -834,13 +792,7 @@ impl TimingOracle {
             // Check sample budget
             if adaptive_state.n_total() >= self.config.max_samples {
                 let posterior = adaptive_state.current_posterior();
-                if debug_pipeline {
-                    eprintln!(
-                        "[DEBUG] sample budget reached: n_total={} posterior={:?}",
-                        adaptive_state.n_total(),
-                        posterior.map(|p| (p.leak_probability, p.beta_mean[0], p.beta_mean[1]))
-                    );
-                }
+
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
 
                 return self.build_inconclusive_outcome(
@@ -921,21 +873,6 @@ impl TimingOracle {
                 1.0 / timer.cycles_per_ns(),
                 &adaptive_config,
             );
-
-            if debug_pipeline {
-                let posterior = adaptive_state.current_posterior();
-                eprintln!(
-                    "[DEBUG] after run_adaptive: n_total={} outcome_type={} posterior={:?}",
-                    adaptive_state.n_total(),
-                    match &outcome {
-                        AdaptiveOutcome::LeakDetected { .. } => "Leak",
-                        AdaptiveOutcome::NoLeakDetected { .. } => "NoLeak",
-                        AdaptiveOutcome::Continue { .. } => "Continue",
-                        AdaptiveOutcome::Inconclusive { .. } => "Stop",
-                    },
-                    posterior.map(|p| (p.leak_probability, p.beta_mean[0], p.beta_mean[1]))
-                );
-            }
 
             match outcome {
                 AdaptiveOutcome::LeakDetected {

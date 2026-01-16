@@ -152,8 +152,8 @@ fn main() {
         || [0xFFu8; 64],  // Sample: all ones
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(30_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
         .test(inputs, |data| {
             let result = data.iter().fold(0u8, |acc, &b| acc ^ b);
             std::hint::black_box(result);  // Prevent compiler optimizations
@@ -162,11 +162,11 @@ fn main() {
     let result = outcome.unwrap_completed();
 
     println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-    println!("CI gate passed: {}", result.ci_gate.passed);
+    println!("CI gate passed: {}", outcome.passed());
     println!("Exploitability: {:?}", result.exploitability);
 
     // Assert the operation is constant-time
-    assert!(result.ci_gate.passed, "XOR should be constant-time");
+    assert!(outcome.passed(), "XOR should be constant-time");
     assert!(result.leak_probability < 0.3, "False positive: leak probability too high");
 }
 ```
@@ -198,8 +198,8 @@ fn main() {
         || rand::random::<[u8; 32]>(),  // Sample: random data
     );
 
-    let outcome = TimingOracle::balanced()
-        .alpha(0.01)  // 1% false positive rate
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.01)  // 1% false positive rate
         .test(inputs, |data| {
             // Both closures execute IDENTICAL code
             compare_bytes(&secret, data);
@@ -208,12 +208,12 @@ fn main() {
     match outcome {
         Outcome::Completed(result) => {
             println!("Leak probability: {:.1}%", result.leak_probability * 100.0);
-            println!("CI gate: {}", if result.ci_gate.passed { "PASS" } else { "FAIL" });
+            println!("CI gate: {}", if outcome.passed() { "PASS" } else { "FAIL" });
 
             // For constant-time code, expect:
             // - CI gate passes
             // - Low leak probability (<30%)
-            assert!(result.ci_gate.passed);
+            assert!(outcome.passed());
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Could not measure: {}", recommendation);
@@ -269,13 +269,16 @@ let inputs = InputPair::new(
 **❌ WRONG - Measures RNG overhead:**
 ```rust
 // This measures rand::random() overhead!
-let outcome = TimingOracle::balanced().test_with_baseline(
-    [0u8; 32],
-    |_input| {
-        let data = rand::random::<[u8; 32]>();  // ❌ RNG measured!
-        crypto_function(&data);
-    },
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || [0u8; 32],  // Not actually random!
 );
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |_input| {
+        let data = rand::random::<[u8; 32]>();  // ❌ RNG measured inside closure!
+        crypto_function(&data);
+    });
 ```
 
 **✓ CORRECT - Pre-generate inputs:**
@@ -288,7 +291,7 @@ let inputs = InputPair::new(
     || rand::random::<[u8; 32]>(),  // Sample generator (closure)
 );
 
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     crypto_function(data);  // Only this is measured
 });
 ```
@@ -319,67 +322,58 @@ let inputs = InputPair::new(
 
 ---
 
-### 2.4 Pattern: The Assertion Pyramid
+### 2.4 Pattern: Handling Outcomes
 
-**Use case:** Comprehensive validation of test results using multiple confidence layers.
+**Use case:** Comprehensive validation of test results using the `Outcome` enum.
 
 **Complete example:**
 ```rust
-use timing_oracle::{TimingOracle, helpers::InputPair, Exploitability, MeasurementQuality};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair, Exploitability, MeasurementQuality};
 
 fn test_crypto_operation() {
     let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
 
-    let outcome = TimingOracle::balanced()
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .test(inputs, |data| {
             my_crypto_function(data);
         });
 
-    let result = outcome.unwrap_completed();
+    // Handle all four outcome variants
+    match outcome {
+        Outcome::Pass { leak_probability, quality, effect, .. } => {
+            // Verify good measurement quality
+            assert!(
+                matches!(quality, MeasurementQuality::Excellent | MeasurementQuality::Good),
+                "Poor measurement quality: {:?}",
+                quality
+            );
+            println!("No leak detected: P(leak)={:.1}%, effect={:.1}ns",
+                     leak_probability * 100.0, effect.total_effect_ns());
+        }
 
-    // Layer 1: CI Gate (Frequentist Test)
-    // - Most conservative layer
-    // - Controls false positive rate at `alpha` level
-    assert!(
-        result.ci_gate.passed,
-        "CI gate failed: timing leak detected (max_stat={:.2} > threshold={:.2})",
-        result.ci_gate.max_stat,
-        result.ci_gate.threshold
-    );
+        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+            // This is a timing leak - decide based on exploitability
+            panic!(
+                "Timing leak detected: P(leak)={:.1}%, effect={:.1}ns, {:?}",
+                leak_probability * 100.0,
+                effect.total_effect_ns(),
+                exploitability
+            );
+        }
 
-    // Layer 2: Leak Probability (Bayesian Confidence)
-    // - Posterior probability of timing leak
-    // - More nuanced than binary CI gate
-    assert!(
-        result.leak_probability < 0.3,
-        "High leak probability: {:.1}% suggests timing dependence",
-        result.leak_probability * 100.0
-    );
+        Outcome::Inconclusive { reason, leak_probability, .. } => {
+            // Could not reach a decision - may need investigation
+            eprintln!(
+                "Inconclusive result: {:?}, P(leak)={:.1}%",
+                reason, leak_probability * 100.0
+            );
+            // Decide whether to fail or skip based on your requirements
+        }
 
-    // Layer 3: Exploitability Assessment
-    // - Practical impact classification
-    // - Considers effect size in nanoseconds
-    assert!(
-        matches!(result.exploitability, Exploitability::Negligible),
-        "Effect size too large: {:?}",
-        result.exploitability
-    );
-
-    // Layer 4: Measurement Quality
-    // - Validates test had sufficient statistical power
-    // - Ensures results are trustworthy
-    assert!(
-        matches!(result.quality, MeasurementQuality::Excellent | MeasurementQuality::Good),
-        "Poor measurement quality: {:?}. Consider increasing samples or checking system noise.",
-        result.quality
-    );
-
-    // Optional: Effect size inspection
-    if let Some(effect) = &result.effect {
-        println!("Effect detected: {:.1}ns {:?}",
-                 effect.shift_ns.abs() + effect.tail_ns.abs(),
-                 effect.pattern);
+        Outcome::Unmeasurable { recommendation, .. } => {
+            // Operation too fast to measure reliably
+            eprintln!("Skipped: {}", recommendation);
+        }
     }
 }
 
@@ -388,39 +382,22 @@ fn my_crypto_function(_data: &[u8]) {
 }
 ```
 
-**The pyramid (bottom to top):**
+**Outcome variants:**
 
-```
-                 ▲
-                / \
-               /   \
-              /  4  \    Layer 4: Measurement Quality
-             /-------\   (Did we have sufficient power?)
-            /    3   \   Layer 3: Exploitability
-           /---------\   (Is the effect practically significant?)
-          /     2    \   Layer 2: Leak Probability (Bayesian)
-         /-----------\   (How confident are we there's a leak?)
-        /      1     \   Layer 1: CI Gate (Frequentist)
-       /-------------\   (Did we reject null hypothesis?)
-      /_______________\
-```
-
-**When to use each layer:**
-
-| **Layer** | **Use For** | **Typical Threshold** |
-|-----------|-------------|---------------------|
-| CI Gate | Binary pass/fail decision | `.passed == true` |
-| Leak Probability | Confidence assessment | `< 0.3` (baseline), `> 0.7` (leak detection) |
-| Exploitability | Security risk evaluation | `Negligible` for constant-time code |
-| Quality | Test reliability check | `Excellent` or `Good` |
+| **Variant** | **Meaning** | **Action** |
+|-------------|-------------|------------|
+| `Pass` | No timing leak detected (P < 5%) | Assert on quality, proceed |
+| `Fail` | Timing leak confirmed (P > 95%) | Fail test, investigate effect size |
+| `Inconclusive` | Cannot reach decision | Check reason, decide policy |
+| `Unmeasurable` | Operation too fast | Skip or use different timer |
 
 **Key points:**
-- CI gate is the **strictest** layer (use for production tests)
-- Leak probability provides **nuance** (useful for debugging)
+- Use `outcome.passed()` for simple pass/fail checks
+- Use pattern matching for detailed analysis
 - Exploitability translates to **real-world impact**
 - Quality ensures the test itself was **reliable**
 
-**Reference:** See `tests/crypto_attacks.rs:63-110` for comprehensive examples
+**Reference:** See `tests/crypto_attacks.rs` for comprehensive examples
 
 ---
 
@@ -439,7 +416,7 @@ use timing_oracle::{TimingOracle, helpers::InputPair, skip_if_unreliable};
 fn test_very_fast_operation() {
     let inputs = InputPair::new(|| 42u64, || rand::random::<u64>());
 
-    let outcome = TimingOracle::balanced().test(inputs, |&x| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |&x| {
         // Very fast operation - might be unmeasurable
         let result = x.wrapping_add(1);
         std::hint::black_box(result);
@@ -450,7 +427,7 @@ fn test_very_fast_operation() {
     let result = skip_if_unreliable!(outcome, "test_very_fast_operation");
 
     // If we get here, measurement was reliable
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 ```
 
@@ -463,7 +440,7 @@ use timing_oracle::{TimingOracle, helpers::InputPair, require_reliable};
 fn test_critical_crypto_operation() {
     let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
 
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
         critical_crypto_operation(data);
     });
 
@@ -471,7 +448,7 @@ fn test_critical_crypto_operation() {
     // Use for critical security tests that MUST be measured
     let result = require_reliable!(outcome, "test_critical_crypto_operation");
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn critical_crypto_operation(_data: &[u8]) {}
@@ -486,14 +463,14 @@ use timing_oracle::{Outcome, TimingOracle, helpers::InputPair};
 fn test_with_custom_handling() {
     let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
 
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
         my_operation(data);
     });
 
     match outcome {
         Outcome::Completed(result) => {
             // Normal assertion path
-            assert!(result.ci_gate.passed);
+            assert!(outcome.passed());
             assert!(result.leak_probability < 0.3);
         }
         Outcome::Unmeasurable { reason, recommendation } => {
@@ -571,12 +548,12 @@ fn test_hash_function() {
     // Sample: rand::random::<[u8; 32]>()
     let inputs = byte_arrays_32();
 
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
         sha3_256(data);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn sha3_256(_input: &[u8; 32]) {
@@ -637,12 +614,12 @@ fn test_variable_length_encryption() {
     // Convenience helper for Vec<u8> of specific length
     let inputs = byte_vecs(1024);  // 1KB vectors
 
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
         encrypt_message(data);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn encrypt_message(_data: &[u8]) {
@@ -670,12 +647,12 @@ let inputs = InputPair::new(
 for len in [64, 256, 1024, 4096] {
     let inputs = byte_vecs(len);
 
-    let outcome = TimingOracle::balanced().test(inputs, |data| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
         process(data);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed, "Failed at length {}", len);
+    assert!(outcome.passed(), "Failed at length {}", len);
 }
 
 fn process(_data: &[u8]) {}
@@ -719,12 +696,12 @@ fn test_with_sequential_nonces() {
         },
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |nonce| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |nonce| {
         encrypt_with_nonce(nonce);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn encrypt_with_nonce(_nonce: &[u8; 12]) {
@@ -840,14 +817,14 @@ fn test_with_expensive_inputs() {
         },
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(20_000)  // More samples than pool size - will cycle
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(20_000)  // More samples than pool size - will cycle
         .test(inputs, |data| {
             expensive_operation(data);
         });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn expensive_operation(_data: &[u8; 128]) {
@@ -917,7 +894,7 @@ let inputs = InputPair::new(
 
 ```rust
 // ❌ WRONG: Measures rand::random() overhead
-let outcome = TimingOracle::balanced().test(
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(
     InputPair::new(|| (), || ()),
     |_| {
         let data = rand::random::<[u8; 32]>();  // ❌ Measured!
@@ -934,7 +911,7 @@ let inputs = InputPair::new(
     || rand::random::<[u8; 32]>(),  // Generated BEFORE timing
 );
 
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     crypto_function(data);  // ✓ Only this is measured
 });
 
@@ -954,7 +931,7 @@ let inputs = InputPair::new(
     || false,  // Sample takes slow path
 );
 
-let outcome = TimingOracle::balanced().test(inputs, |&secret| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |&secret| {
     if secret {
         fast_operation();    // Different code!
     } else {
@@ -974,7 +951,7 @@ let inputs = InputPair::new(
     || rand::random::<[u8; 32]>(),  // Sample data
 );
 
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     crypto_operation(data);  // ✓ Same operation for both
 });
 
@@ -1034,12 +1011,12 @@ fn test_ecc_scalar_multiplication() {
         || Scalar::random(&mut thread_rng()),
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |scalar| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |scalar| {
         scalar_multiply(scalar);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 // Placeholder types for example
@@ -1110,12 +1087,12 @@ fn test_nonce_independence() {
         || [0xFFu8; 12],  // Fixed nonce B
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |nonce| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |nonce| {
         encrypt_with_fixed_key(nonce);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn encrypt_with_fixed_key(_nonce: &[u8; 12]) {
@@ -1182,7 +1159,7 @@ let nonce = [0u8; 12];  // ❌ SAME nonce for all encryptions!
 
 let inputs = InputPair::new(|| plaintext_a, || plaintext_b);
 
-let outcome = TimingOracle::balanced().test(inputs, |plaintext| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |plaintext| {
     // ❌ Encrypts 20,000+ messages with SAME nonce!
     // Violates AEAD security + creates measurement artifacts
     let ciphertext = cipher.encrypt(&nonce.into(), plaintext).unwrap();
@@ -1231,9 +1208,9 @@ fn test_chacha20poly1305_encryption() {
         || rand::random::<[u8; 64]>(),
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(30_000)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
+        .pass_threshold(0.01)
         .test(inputs, |plaintext| {
             // Generate UNIQUE nonce for each encryption
             let nonce_value = nonce_counter.fetch_add(1, Ordering::Relaxed);
@@ -1248,7 +1225,7 @@ fn test_chacha20poly1305_encryption() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1322,9 +1299,9 @@ fn test_chacha20poly1305_decryption() {
         },
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(SAMPLES)
-        .alpha(0.01)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(SAMPLES)
+        .pass_threshold(0.01)
         .test(inputs, |ciphertext| {
             let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).unwrap();
             std::hint::black_box(plaintext[0]);
@@ -1332,7 +1309,7 @@ fn test_chacha20poly1305_decryption() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1377,8 +1354,8 @@ fn test_nonce_independence() {
         || [0xFFu8; 12],  // Nonce B (all ones)
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(30_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
         .test(nonces, |nonce_bytes| {
             let nonce = Nonce::from_slice(nonce_bytes);
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
@@ -1390,7 +1367,7 @@ fn test_nonce_independence() {
     // For nonce independence:
     // - CI gate should pass (no statistically significant difference)
     // - Exploitability should be Negligible (any difference is tiny)
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(matches!(
         result.exploitability,
         timing_oracle::Exploitability::Negligible
@@ -1462,8 +1439,8 @@ fn test_aes128_encryption() {
         || rand::random::<[u8; 16]>(),  // Random blocks
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(30_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
         .test(inputs, |plaintext| {
             let mut block = (*plaintext).into();
             cipher.encrypt_block(&mut block);
@@ -1472,7 +1449,7 @@ fn test_aes128_encryption() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1500,8 +1477,8 @@ use timing_oracle::{TimingOracle, helpers::byte_arrays_32};
 fn test_sha3_256_constant_time() {
     let inputs = byte_arrays_32();  // Fixed vs random 32-byte inputs
 
-    let outcome = TimingOracle::balanced()
-        .samples(30_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(30_000)
         .test(inputs, |data| {
             let mut hasher = Sha3_256::new();
             hasher.update(data);
@@ -1511,7 +1488,7 @@ fn test_sha3_256_constant_time() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1527,7 +1504,7 @@ fn test_sha3_256_constant_time() {
 use timing_oracle::helpers::byte_vecs;
 
 let inputs = byte_vecs(1024);  // 1KB messages
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     let hash = sha3::Sha3_256::digest(data);
     std::hint::black_box(hash[0]);
 });
@@ -1563,8 +1540,8 @@ fn test_x25519_scalar_mult() {
         || rand::random::<[u8; 32]>(),
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(50_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(50_000)
         .test(inputs, |scalar| {
             let result = x25519(*scalar, basepoint);
             std::hint::black_box(result);
@@ -1572,7 +1549,7 @@ fn test_x25519_scalar_mult() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1595,13 +1572,13 @@ fn test_ecdh_key_exchange() {
         || rand::random::<[u8; 32]>(),  // Different Alice secrets
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |secret| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |secret| {
         let shared = x25519(*secret, bob_public);
         std::hint::black_box(shared[0]);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 ```
 
@@ -1632,7 +1609,7 @@ fn test_rsa_encryption() {
 
     // Use .quick() preset - RSA is slow (1-10ms per operation)
     let outcome = TimingOracle::quick()
-        .samples(5_000)  // Fewer samples for slow operations
+        .max_samples(5_000)  // Fewer samples for slow operations
         .test(inputs, |plaintext| {
             let ciphertext = public_key
                 .encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, plaintext)
@@ -1642,7 +1619,7 @@ fn test_rsa_encryption() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1678,8 +1655,8 @@ fn test_mlkem_encapsulation() {
         || rand::random::<[u8; 32]>(),
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(20_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(20_000)
         .test(inputs, |seed| {
             // Encapsulate with deterministic RNG from seed
             let (ciphertext, _shared_secret) = encapsulate(&public_key);
@@ -1688,7 +1665,7 @@ fn test_mlkem_encapsulation() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1743,8 +1720,8 @@ fn test_async_constant_time_operation() {
         || rand::random::<[u8; 32]>(),
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(inputs, |data| {
             // Use block_on() to bridge async → sync
             rt.block_on(async {
@@ -1755,7 +1732,7 @@ fn test_async_constant_time_operation() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -1796,8 +1773,8 @@ fn test_async_with_background_tasks() {
         || rand::random::<[u8; 32]>(),
     );
 
-    let outcome = TimingOracle::balanced()
-        .samples(10_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(10_000)
         .test(inputs, |data| {
             rt.block_on(async {
                 // Spawn background tasks to simulate load
@@ -1813,7 +1790,7 @@ fn test_async_with_background_tasks() {
     let result = outcome.unwrap_completed();
 
     // Background tasks may increase noise
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 ```
 
@@ -1849,8 +1826,8 @@ fn detects_conditional_await_timing() {
     // Secret-dependent logic: true vs false
     let inputs = InputPair::new(|| true, || false);
 
-    let outcome = TimingOracle::balanced()
-        .samples(50_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(50_000)
         .test(inputs, |secret| {
             rt.block_on(async {
                 if *secret {
@@ -1865,7 +1842,7 @@ fn detects_conditional_await_timing() {
     let result = outcome.unwrap_completed();
 
     // Should detect the leak
-    assert!(!result.ci_gate.passed, "Should detect conditional await");
+    assert!(!outcome.passed(), "Should detect conditional await");
     assert!(result.leak_probability > 0.7);
 }
 ```
@@ -1907,12 +1884,12 @@ fn test_with_struct() {
         },
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |ctx| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |ctx| {
         encrypt_with_context(ctx);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn encrypt_with_context(_ctx: &CryptoContext) {
@@ -1928,7 +1905,7 @@ let inputs = InputPair::new(
     || (rand::random::<[u8; 32]>(), rand::random::<[u8; 64]>()),
 );
 
-let outcome = TimingOracle::balanced().test(inputs, |(key, plaintext)| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |(key, plaintext)| {
     encrypt(key, plaintext);
 });
 
@@ -1965,8 +1942,8 @@ fn test_stateful_cache() {
     // Pre-warm cache with fixed key
     cache.insert([0x00u8; 32], vec![0xAB; 64]);
 
-    let outcome = TimingOracle::balanced()
-        .samples(20_000)
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .max_samples(20_000)
         .test_with_state(&mut cache, inputs, |cache, key| {
             // Access cache (may hit or miss)
             let value = cache.entry(*key).or_insert_with(|| vec![0xCD; 64]);
@@ -2014,7 +1991,7 @@ fn test_multiple_aes_blocks() {
         || [rand::random::<[u8; 16]>(); 4],
     );
 
-    let outcome = TimingOracle::balanced().test(inputs, |blocks| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |blocks| {
         for block_data in blocks {
             let mut block = (*block_data).into();
             cipher.encrypt_block(&mut block);
@@ -2024,7 +2001,7 @@ fn test_multiple_aes_blocks() {
 
     let result = outcome.unwrap_completed();
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
     assert!(result.leak_probability < 0.3);
 }
 ```
@@ -2060,14 +2037,14 @@ fn test_crypto_operation_ci() {
     let inputs = byte_arrays_32();
 
     // Use .from_env() to allow CI to override settings via environment variables
-    let outcome = TimingOracle::balanced()
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .from_env()  // Reads TO_SAMPLES, TO_ALPHA, TO_MIN_EFFECT_NS
         .test(inputs, |data| {
             crypto_operation(data);
         });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn crypto_operation(_data: &[u8; 32]) {}
@@ -2111,17 +2088,18 @@ cargo test
 
 ```rust
 // tests/common/mod.rs
-use timing_oracle::TimingOracle;
+use timing_oracle::{TimingOracle, AttackerModel};
+use std::time::Duration;
 
 pub fn ci_oracle() -> TimingOracle {
     TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .from_env()
+        .time_budget(Duration::from_secs(30))
 }
 
 pub fn thorough_oracle() -> TimingOracle {
-    TimingOracle::new()
-        .samples(100_000)
-        .alpha(0.001)
+    TimingOracle::for_attacker(AttackerModel::SharedHardware)
+        .max_samples(100_000)
+        .time_budget(Duration::from_secs(60))
 }
 
 // tests/aes_timing.rs
@@ -2133,8 +2111,7 @@ fn test_aes_encryption() {
     let outcome = common::ci_oracle().test(inputs, |data| {
         aes_encrypt(data);
     });
-    let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed(), "AES should be constant-time");
 }
 
 fn byte_arrays_32() -> timing_oracle::helpers::InputPair<[u8; 32], impl FnMut() -> [u8; 32], impl FnMut() -> [u8; 32]> {
@@ -2150,7 +2127,10 @@ fn aes_encrypt(_data: &[u8; 32]) {}
 // Fast tests (run by default)
 #[test]
 fn quick_aes_test() {
-    let outcome = TimingOracle::quick().test(/* ... */);
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(10))
+        .test(inputs, |data| encrypt(data));
     // ...
 }
 
@@ -2158,9 +2138,11 @@ fn quick_aes_test() {
 #[test]
 #[ignore = "slow test - run with --ignored"]
 fn thorough_aes_test() {
-    let outcome = TimingOracle::new()
-        .samples(200_000)
-        .test(/* ... */);
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::SharedHardware)
+        .max_samples(200_000)
+        .time_budget(Duration::from_secs(120))
+        .test(inputs, |data| encrypt(data));
     // ...
 }
 
@@ -2191,7 +2173,7 @@ fn test_with_best_timer() {
     let oracle = {
         // Use PMU timer on macOS ARM64 (requires sudo)
         use timing_oracle::measurement::PmuTimer;
-        TimingOracle::balanced()
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .timer(PmuTimer::new().expect("failed to initialize PMU timer"))
     };
 
@@ -2199,7 +2181,7 @@ fn test_with_best_timer() {
     let oracle = {
         // Use perf_event timer on Linux (requires sudo or CAP_PERFMON)
         use timing_oracle::measurement::LinuxPerfTimer;
-        TimingOracle::balanced()
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .timer(LinuxPerfTimer::new().expect("failed to initialize perf timer"))
     };
 
@@ -2207,14 +2189,14 @@ fn test_with_best_timer() {
         all(target_os = "macos", target_arch = "aarch64"),
         target_os = "linux"
     )))]
-    let oracle = TimingOracle::balanced();
+    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork);
 
     let outcome = oracle.test(inputs, |data| {
         crypto_operation(data);
     });
 
     let result = outcome.unwrap_completed();
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 
 fn byte_arrays_32() -> timing_oracle::helpers::InputPair<[u8; 32], impl FnMut() -> [u8; 32], impl FnMut() -> [u8; 32]> {
@@ -2262,7 +2244,7 @@ use timing_oracle::{TimingOracle, helpers::InputPair, skip_if_unreliable};
 fn test_very_fast_operation() {
     let inputs = InputPair::new(|| 42u64, || rand::random::<u64>());
 
-    let outcome = TimingOracle::balanced().test(inputs, |&x| {
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |&x| {
         let result = x.wrapping_add(1);  // Very fast (~1ns)
         std::hint::black_box(result);
     });
@@ -2270,7 +2252,7 @@ fn test_very_fast_operation() {
     // Skip test if unmeasurable (returns early)
     let result = skip_if_unreliable!(outcome, "test_very_fast_operation");
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 ```
 
@@ -2281,12 +2263,12 @@ use timing_oracle::require_reliable;
 
 #[test]
 fn test_critical_operation() {
-    let outcome = TimingOracle::balanced().test(/* ... */);
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(/* ... */);
 
     // PANIC if unmeasurable (strict mode)
     let result = require_reliable!(outcome, "test_critical_operation");
 
-    assert!(result.ci_gate.passed);
+    assert!(outcome.passed());
 }
 ```
 
@@ -2301,11 +2283,13 @@ fn test_critical_operation() {
 
 **Problem:** `MeasurementQuality::TooNoisy` or very high MDE.
 
-**Solution 1: Increase Sample Count**
+**Solution 1: Increase Sample Count and Time Budget**
 
 ```rust
-let outcome = TimingOracle::new()
-    .samples(200_000)  // 10x more samples
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .max_samples(200_000)  // 10x more samples
+    .time_budget(Duration::from_secs(120))  // More time
     .test(inputs, |data| {
         crypto_operation(data);
     });
@@ -2337,7 +2321,7 @@ echo 1 | sudo tee /sys/devices/system/cpu/intel_pmu/turbo_boost
 // macOS ARM64 with sudo
 use timing_oracle::measurement::PmuTimer;
 
-let outcome = TimingOracle::balanced()
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .timer(PmuTimer::new()?)
     .test(inputs, |data| {
         crypto_operation(data);
@@ -2361,7 +2345,7 @@ fn crypto_operation(_data: &[u8; 32]) {}
 **Diagnosis:**
 
 ```rust
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     constant_time_operation(data);
 });
 
@@ -2417,10 +2401,12 @@ fn constant_time_operation(_data: &[u8; 32]) {}
 
 **Diagnosis:**
 
-1. **Increase sample count**
+1. **Increase sample count and time budget**
    ```rust
-   let outcome = TimingOracle::new()
-       .samples(200_000)  // More power
+   let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+   let outcome = TimingOracle::for_attacker(AttackerModel::SharedHardware)  // Stricter threshold
+       .max_samples(200_000)  // More power
+       .time_budget(Duration::from_secs(120))
        .test(inputs, |data| {
            potentially_leaky_operation(data);
        });
@@ -2470,7 +2456,7 @@ Solution: timing-oracle automatically enables adaptive batching (K=2-10 iteratio
 
 ```rust
 // No code changes needed - automatic batching
-let outcome = TimingOracle::balanced().test(inputs, |data| {
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).test(inputs, |data| {
     crypto_operation(data);  // Measured in batches if needed
 });
 
@@ -2518,7 +2504,7 @@ Solution:
 | **Simplest test** | Verify XOR/array copy constant-time | `InputPair::new(\|\| [0x00; 64], \|\| [0xFF; 64])` | [§2.1](#21-pattern-simplest-constant-time-test) |
 | **DudeCT two-class** | Standard fixed vs random | `InputPair::new(\|\| fixed, \|\| rand::random())` | [§2.2](#22-pattern-dudect-two-class-pattern-fixed-vs-random) |
 | **Avoiding RNG overhead** | Pre-generate inputs | Use `InputPair::new()`, NOT inside measured closure | [§2.3](#23-pattern-inputpair---avoiding-rng-overhead) |
-| **Assertion pyramid** | 4-layer validation | ci_gate + leak_probability + exploitability + quality | [§2.4](#24-pattern-the-assertion-pyramid) |
+| **Handling outcomes** | Pattern matching on Outcome | Pass/Fail/Inconclusive/Unmeasurable variants | [§2.4](#24-pattern-handling-outcomes) |
 | **Unreliable handling** | Graceful failure | `skip_if_unreliable!(outcome, "test_name")` | [§2.5](#25-pattern-handling-unreliable-measurements) |
 
 ### 8.2 Input Generation Catalog

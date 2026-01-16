@@ -6,26 +6,25 @@ Complete API documentation for timing-oracle. For conceptual overview, see [guid
 
 - [Quick Reference](#quick-reference)
 - [TimingOracle Builder](#timingoracle-builder)
-  - [Presets](#presets)
+  - [Attacker Model Presets](#attacker-model-presets)
   - [Configuration Methods](#configuration-methods)
   - [Test Methods](#test-methods)
-- [CI Test Builder](#ci-test-builder)
-- [Outcome and TestResult](#outcome-and-testresult)
-  - [Outcome Enum](#outcome-enum)
-  - [TestResult Struct](#testresult-struct)
-  - [Effect Struct](#effect-struct)
-  - [CiGate Struct](#cigate-struct)
-- [Enums](#enums)
+- [Outcome Enum](#outcome-enum)
+  - [Pass](#pass)
+  - [Fail](#fail)
+  - [Inconclusive](#inconclusive)
+  - [Unmeasurable](#unmeasurable)
+- [Supporting Types](#supporting-types)
+  - [EffectEstimate](#effectestimate)
   - [Exploitability](#exploitability)
   - [MeasurementQuality](#measurementquality)
   - [EffectPattern](#effectpattern)
-  - [Mode](#mode)
-  - [FailCriterion](#failcriterion)
-  - [UnreliablePolicy](#unreliablepolicy)
+  - [InconclusiveReason](#inclusivereason)
+  - [Diagnostics](#diagnostics)
 - [Helper Types](#helper-types)
   - [InputPair](#inputpair)
   - [Timer](#timer)
-- [Macros](#macros)
+- [Assertion Macros](#assertion-macros)
 - [Configuration Table](#configuration-table)
 
 ---
@@ -33,245 +32,252 @@ Complete API documentation for timing-oracle. For conceptual overview, see [guid
 ## Quick Reference
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
-// Recommended: Use attacker model to define threat scenario
-let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .test(fixed_closure, random_closure);
+// Create inputs using closures
+let inputs = InputPair::new(
+    || [0u8; 32],          // baseline: returns constant value
+    || rand::random(),     // sample: generates varied values
+);
 
-// Builder API with sample count tuning
-let result = TimingOracle::for_attacker(AttackerModel::WANConservative)
-    .samples(20_000)
-    .test(fixed_closure, random_closure);
+// Run test with attacker model
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_function(data));
 
-// CI-focused API
-TimingOracle::ci_test()
-    .attacker_model(AttackerModel::LANConservative)
-    .fail_on(FailCriterion::CiGate)
-    .run(fixed_closure, random_closure)
-    .unwrap_or_report();
+// Handle all four possible outcomes
+match outcome {
+    Outcome::Pass { leak_probability, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { leak_probability, exploitability, .. } => {
+        panic!("Timing leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+    }
+    Outcome::Inconclusive { reason, .. } => {
+        println!("Inconclusive: {:?}", reason);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipped: {}", recommendation);
+    }
+}
 ```
 
 ---
 
 ## TimingOracle Builder
 
-### Attacker Model Presets (Recommended)
+### Attacker Model Presets
 
-Choose your threat model to define what effect size is considered significant:
+Choose your threat model to define the minimum effect size worth detecting:
 
 ```rust
 use timing_oracle::{TimingOracle, AttackerModel};
 
-// Internet-facing API: attacker measures over general internet
-TimingOracle::for_attacker(AttackerModel::WANConservative)  // θ = 50μs
+// Shared hardware: SGX, cross-VM, containers, hyperthreading (~0.6ns / ~2 cycles)
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
 
-// Internal microservice: attacker on local network (Crosby-style)
-TimingOracle::for_attacker(AttackerModel::LANConservative)  // θ = 100ns
+// Post-quantum sentinel: Catch KyberSlash-class leaks (~3.3ns / ~10 cycles)
+TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
 
-// High-security LAN: strict interpretation (Kario-style)
-TimingOracle::for_attacker(AttackerModel::LANStrict)        // θ = 2 cycles
+// Adjacent network: LAN or HTTP/2 endpoints (100ns) - DEFAULT
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
-// SGX enclave or shared hosting: co-resident attacker
-TimingOracle::for_attacker(AttackerModel::LocalCycles)      // θ = 2 cycles
+// Remote network: Public APIs, general internet (50us)
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
 
-// Post-quantum crypto (catch KyberSlash-class bugs)
-TimingOracle::for_attacker(AttackerModel::KyberSlashSentinel) // θ = 10 cycles
-
-// Research/debugging: detect any statistical difference
-TimingOracle::for_attacker(AttackerModel::Research)         // θ → 0
+// Research: Detect any difference (not for CI)
+TimingOracle::for_attacker(AttackerModel::Research)
 
 // Custom threshold in nanoseconds
-TimingOracle::for_attacker(AttackerModel::CustomNs { threshold_ns: 500.0 })
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 ```
 
-### Sample Count Presets
+| Preset | Threshold | Use case |
+|--------|-----------|----------|
+| `SharedHardware` | ~0.6 ns (~2 cycles) | SGX enclaves, cross-VM, containers, hyperthreading |
+| `PostQuantumSentinel` | ~3.3 ns (~10 cycles) | Post-quantum crypto (ML-KEM, ML-DSA) |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 endpoints (Timeless Timing Attacks) |
+| `RemoteNetwork` | 50 us | Public APIs, general internet |
+| `Research` | 0 (clamped to timer resolution) | Academic analysis, profiling |
+| `Custom { threshold_ns }` | user-defined | Custom threshold |
 
-Combine with attacker models to tune speed vs accuracy:
-
-```rust
-use timing_oracle::{TimingOracle, AttackerModel};
-
-// Default - Most accurate (~5-10 seconds per test)
-// 100k samples, 100 CI bootstrap, 50 covariance bootstrap
-TimingOracle::for_attacker(AttackerModel::LANConservative)
-
-// Balanced - Recommended for production (~1-2 seconds per test)
-TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .samples(20_000)
-
-// Quick - Fast iteration during development (~0.2-0.5 seconds per test)
-TimingOracle::quick()
-    .attacker_model(AttackerModel::LANConservative)
-
-// Calibration - For running many trials (100+) (~0.1-0.2 seconds per test)
-TimingOracle::calibration()
-    .attacker_model(AttackerModel::Research)
-```
+**Sources:**
+- Crosby et al. (2009): ~100ns LAN accuracy, 15-100us internet
+- Van Goethem et al. (2020): "Timeless Timing Attacks" - 100ns over internet via HTTP/2
+- Flush+Reload, Prime+Probe literature: cycle-level attacks on shared hardware
 
 ### Configuration Methods
 
+All configuration is optional. The defaults work well for most use cases.
+
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+use std::time::Duration;
 
-let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    // Sample configuration
-    .samples(100_000)                    // Samples per class
-    .warmup(1_000)                       // Warmup iterations (not measured)
+let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    // Decision thresholds
+    .pass_threshold(0.05)                    // Below this = Pass (default: 0.05)
+    .fail_threshold(0.95)                    // Above this = Fail (default: 0.95)
 
-    // Attacker model defines the timing threshold (θ)
-    .attacker_model(AttackerModel::LANConservative)  // Set/override threat model
+    // Resource limits (for CI or constrained environments)
+    .time_budget(Duration::from_secs(30))    // Max time for analysis (default: 60s)
+    .max_samples(100_000)                    // Hard cap on samples (default: 1M)
 
-    // Statistical parameters
-    .pass_threshold(0.05)                // Below this = pass (no leak)
-    .fail_threshold(0.95)                // Above this = fail (leak detected)
-    .prior_no_leak(0.75)                 // Prior probability of no leak
-    .outlier_percentile(0.999)           // Percentile for outlier filtering
+    // Advanced tuning (rarely needed)
+    .batch_size(1_000)                       // Samples per batch (default: 1,000)
+    .calibration_samples(5_000)              // Calibration samples (default: 5,000)
+    .prior_no_leak(0.75)                     // Prior P(no leak) (default: 0.75)
+    .cov_bootstrap_iterations(2_000)         // Bootstrap iterations (default: 2,000)
+    .warmup(1_000)                           // Warmup iterations (default: 1,000)
+    .outlier_percentile(0.9999)              // Outlier threshold (default: 0.9999)
 
-    // Bootstrap configuration
-    .ci_bootstrap_iterations(10_000)     // Bootstrap iterations for CI gate
-    .cov_bootstrap_iterations(2_000)     // Bootstrap iterations for covariance
-
-    // Resource limits
-    .calibration_fraction(0.3)           // Fraction for calibration vs inference
-    .max_duration_ms(60_000)             // Optional timeout
+    // Timer configuration
+    .timer_spec(TimerSpec::Auto)             // Auto-detect best timer (default)
+    .standard_timer()                        // Force standard timer (no PMU)
+    .prefer_pmu()                            // Prefer PMU with fallback
 
     // Reproducibility
-    .measurement_seed(42);               // Deterministic seed
+    .seed(42);                               // Deterministic seed
 ```
 
 ### Test Methods
 
 ```rust
-// Basic test - returns TestResult directly
-let result: TestResult = oracle.test(
-    || fixed_operation(),
-    || random_operation(),
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+
+let inputs = InputPair::new(
+    || [0u8; 32],          // baseline closure
+    || rand::random(),     // sample closure
 );
 
-// Test with state - for complex setup
-let result = oracle.test_with_state(
-    || setup_state(),           // State initializer
-    |state| prepare_fixed(state),  // Fixed input generator
-    |state, rng| prepare_random(state, rng),  // Random input generator
-    |state, input| execute(state, input),     // Operation to time
-);
+// Main test method
+let outcome: Outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        my_crypto_function(data);
+    });
 ```
 
 ---
 
-## CI Test Builder
+## Outcome Enum
 
-For CI integration with environment variable support:
-
-```rust
-use timing_oracle::{Mode, FailCriterion, TimingOracle};
-
-TimingOracle::ci_test()
-    .from_env()                          // Load TO_* environment variables
-    .mode(Mode::Smoke)                   // Smoke, Quick, or Full
-    .fail_on(FailCriterion::CiGate)      // When to fail
-    .async_workload(true)                // Adjust for async noise
-    .run(fixed_fn, random_fn)
-    .unwrap_or_report();                 // Print report on failure
-```
-
-**Environment Variables:**
-- `TO_MODE` - `smoke`, `quick`, or `full`
-- `TO_SAMPLES` - Override sample count
-- `TO_ALPHA` - Override CI alpha
-- `TO_REPORT` - `always`, `on_fail`, or `never`
-- `TO_SEED` - Deterministic seed
-- `TO_ASYNC_WORKLOAD` - `1` to enable async mode
-
----
-
-## Outcome and TestResult
-
-### Outcome Enum
-
-Top-level result type for handling unmeasurable operations:
+The `Outcome` enum represents all possible results from a timing test:
 
 ```rust
 pub enum Outcome {
-    /// Analysis completed successfully
-    Completed(TestResult),
-
-    /// Operation too fast to measure reliably on this platform
-    Unmeasurable {
-        /// Estimated operation duration in nanoseconds
-        operation_ns: f64,
-        /// Minimum measurable duration on this platform
-        threshold_ns: f64,
-        /// Platform description (e.g., "Apple Silicon (cntvct_el0)")
-        platform: String,
-        /// Suggested actions to resolve
-        recommendation: String,
-    },
-}
-
-impl Outcome {
-    /// Check if the measurement is reliable
-    pub fn is_reliable(&self) -> bool;
-
-    /// Handle unreliable measurements with a policy
-    pub fn handle_unreliable(&self, name: &str, policy: UnreliablePolicy) -> Option<&TestResult>;
-
-    /// Get the completed result, panicking if unmeasurable
-    pub fn unwrap_completed(self) -> TestResult;
-
-    /// Get the completed result as an Option
-    pub fn completed(&self) -> Option<&TestResult>;
+    Pass { leak_probability, effect, samples_used, quality, diagnostics },
+    Fail { leak_probability, effect, exploitability, samples_used, quality, diagnostics },
+    Inconclusive { reason, leak_probability, effect, samples_used, quality, diagnostics },
+    Unmeasurable { operation_ns, threshold_ns, platform, recommendation },
 }
 ```
 
-### TestResult Struct
+### Pass
+
+No timing leak detected. The posterior probability is below the pass threshold (default 5%).
 
 ```rust
-pub struct TestResult {
-    /// Bayesian posterior probability of timing leak (0.0 to 1.0)
-    pub leak_probability: f64,
-
-    /// Effect size decomposition (present if leak_probability > 0.5)
-    pub effect: Option<Effect>,
-
-    /// Exploitability assessment based on effect magnitude
-    pub exploitability: Exploitability,
-
-    /// Minimum detectable effect given measurement noise
-    pub min_detectable_effect: MinDetectableEffect,
-
-    /// CI gate result for pass/fail decisions
-    pub ci_gate: CiGate,
-
-    /// Measurement quality assessment
-    pub quality: MeasurementQuality,
-
-    /// Fraction of samples identified as outliers
-    pub outlier_fraction: f64,
-
-    /// Measurement metadata (samples, timer, runtime)
-    pub metadata: Metadata,
-}
-
-impl TestResult {
-    /// Check if this measurement can detect an effect of the given size
-    pub fn can_detect(&self, effect_ns: f64) -> bool;
+Outcome::Pass {
+    leak_probability: f64,      // P(leak) < 0.05
+    effect: EffectEstimate,     // Effect size (likely small)
+    samples_used: usize,        // Total samples collected
+    quality: MeasurementQuality,
+    diagnostics: Diagnostics,
 }
 ```
 
-### Effect Struct
+### Fail
+
+Timing leak confirmed. The posterior probability exceeds the fail threshold (default 95%).
+
+```rust
+Outcome::Fail {
+    leak_probability: f64,        // P(leak) > 0.95
+    effect: EffectEstimate,       // Effect size decomposition
+    exploitability: Exploitability, // Risk assessment
+    samples_used: usize,
+    quality: MeasurementQuality,
+    diagnostics: Diagnostics,
+}
+```
+
+### Inconclusive
+
+Cannot reach a definitive conclusion within the given constraints.
+
+```rust
+Outcome::Inconclusive {
+    reason: InconclusiveReason,   // Why inconclusive
+    leak_probability: f64,        // Current posterior (between thresholds)
+    effect: EffectEstimate,
+    samples_used: usize,
+    quality: MeasurementQuality,
+    diagnostics: Diagnostics,
+}
+```
+
+### Unmeasurable
+
+Operation too fast to measure reliably on this platform.
+
+```rust
+Outcome::Unmeasurable {
+    operation_ns: f64,      // Estimated operation time
+    threshold_ns: f64,      // Minimum measurable
+    platform: String,       // Platform description
+    recommendation: String, // How to resolve
+}
+```
+
+### Outcome Methods
+
+```rust
+impl Outcome {
+    /// Check if test passed
+    fn passed(&self) -> bool;
+
+    /// Check if test failed
+    fn failed(&self) -> bool;
+
+    /// Check if result is conclusive (Pass or Fail)
+    fn is_conclusive(&self) -> bool;
+
+    /// Check if operation was measurable
+    fn is_measurable(&self) -> bool;
+
+    /// Check if measurement is reliable enough for assertions
+    fn is_reliable(&self) -> bool;
+
+    /// Get leak probability if available
+    fn leak_probability(&self) -> Option<f64>;
+
+    /// Get effect estimate if available
+    fn effect(&self) -> Option<&EffectEstimate>;
+
+    /// Get measurement quality if available
+    fn quality(&self) -> Option<MeasurementQuality>;
+
+    /// Get diagnostics if available
+    fn diagnostics(&self) -> Option<&Diagnostics>;
+
+    /// Handle unreliable results according to policy
+    fn handle_unreliable(self, test_name: &str, policy: UnreliablePolicy) -> Option<Self>;
+}
+```
+
+---
+
+## Supporting Types
+
+### EffectEstimate
 
 Decomposition of timing difference into interpretable components:
 
 ```rust
-pub struct Effect {
-    /// Uniform shift in nanoseconds (positive = fixed is slower)
-    /// Indicates a consistent timing difference across all quantiles
+pub struct EffectEstimate {
+    /// Uniform shift in nanoseconds (positive = baseline is slower)
     pub shift_ns: f64,
 
-    /// Tail effect in nanoseconds (positive = fixed has heavier tail)
-    /// Indicates timing differences concentrated in upper quantiles (e.g., cache misses)
+    /// Tail effect in nanoseconds (positive = baseline has heavier tail)
     pub tail_ns: f64,
 
     /// 95% credible interval for total effect magnitude
@@ -280,79 +286,19 @@ pub struct Effect {
     /// Dominant effect pattern
     pub pattern: EffectPattern,
 }
-```
 
-### CiGate Struct
+impl EffectEstimate {
+    /// Compute total effect magnitude (L2 norm)
+    fn total_effect_ns(&self) -> f64;
 
-CI gate result for reliable pass/fail decisions:
-
-```rust
-pub struct CiGate {
-    /// Significance level used
-    pub alpha: f64,
-
-    /// Whether the gate passed (no leak detected at alpha level)
-    pub passed: bool,
-
-    /// Bootstrap thresholds for each of 9 quantiles
-    pub thresholds: [f64; 9],
-
-    /// Observed quantile differences
-    pub observed: [f64; 9],
+    /// Check if effect is negligible
+    fn is_negligible(&self, threshold_ns: f64) -> bool;
 }
 ```
-
----
-
-## Enums
-
-### AttackerModel
-
-Threat model presets for defining what timing difference is considered significant:
-
-```rust
-pub enum AttackerModel {
-    // Local attacker presets
-    LocalCycles,        // θ = 2 cycles (SGX, shared hosting)
-    LocalCoarseTimer,   // θ = 1 tick (sandboxed environments)
-
-    // LAN attacker presets
-    LANStrict,          // θ = 2 cycles (Kario-style, strict)
-    LANConservative,    // θ = 100 ns (Crosby-style)
-
-    // WAN attacker presets
-    WANOptimistic,      // θ = 15 μs (low-jitter paths)
-    WANConservative,    // θ = 50 μs (general internet)
-
-    // Special-purpose
-    KyberSlashSentinel, // θ = 10 cycles (post-quantum crypto)
-    Research,           // θ → 0 (detect any difference)
-
-    // Custom thresholds
-    CustomNs { threshold_ns: f64 },
-    CustomCycles { threshold_cycles: u32 },
-    CustomTicks { threshold_ticks: u32 },
-}
-```
-
-| Preset | Threshold | Use case |
-|--------|-----------|----------|
-| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
-| `LocalCoarseTimer` | 1 tick | Sandboxed with coarse timers |
-| `LANStrict` | 2 cycles | High-security LAN (Kario-style) |
-| `LANConservative` | 100 ns | Internal services (Crosby-style) |
-| `WANOptimistic` | 15 μs | Low-jitter cloud paths |
-| `WANConservative` | 50 μs | Public APIs, general internet |
-| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto |
-| `Research` | 0 | Academic analysis (not for CI) |
-
-**Sources:**
-- Crosby et al. (2009): ~100ns LAN accuracy, 15–100μs internet
-- Kario: argues even ~1 cycle is detectable over LAN
 
 ### Exploitability
 
-Based on [Crosby et al. (2009)](https://dl.acm.org/doi/10.1145/1455770.1455794):
+Risk assessment based on effect magnitude (Crosby et al. 2009):
 
 ```rust
 pub enum Exploitability {
@@ -362,40 +308,44 @@ pub enum Exploitability {
     /// 100-500 ns - Exploitable on LAN with ~100k queries
     PossibleLAN,
 
-    /// 500 ns - 20 μs - Likely exploitable on LAN
+    /// 500 ns - 20 us - Likely exploitable on LAN
     LikelyLAN,
 
-    /// > 20 μs - Possibly exploitable over internet
+    /// > 20 us - Possibly exploitable over internet
     PossibleRemote,
 }
 ```
 
 | Effect Size | Assessment | Implications |
 |------------|------------|--------------|
-| < 100 ns | `Negligible` | Requires impractical measurement count |
-| 100-500 ns | `PossibleLAN` | Exploitable on LAN with ~100k queries |
-| 500 ns - 20 μs | `LikelyLAN` | Likely exploitable on LAN |
-| > 20 μs | `PossibleRemote` | Possibly exploitable over internet |
+| < 100 ns | `Negligible` | Requires millions of measurements |
+| 100-500 ns | `PossibleLAN` | Exploitable on LAN (~100k queries) |
+| 500 ns - 20 us | `LikelyLAN` | Readily exploitable on LAN |
+| > 20 us | `PossibleRemote` | Possibly exploitable over internet |
 
 ### MeasurementQuality
 
+Assessment based on minimum detectable effect (MDE):
+
 ```rust
 pub enum MeasurementQuality {
-    /// Excellent signal-to-noise ratio
+    /// MDE < 5 ns - Excellent signal-to-noise
     Excellent,
 
-    /// Good quality, reliable results
+    /// MDE 5-20 ns - Good quality
     Good,
 
-    /// Noisy but usable
+    /// MDE 20-100 ns - Noisy but usable
     Poor,
 
-    /// Very noisy, results may be unreliable
+    /// MDE > 100 ns - Results may be unreliable
     TooNoisy,
 }
 ```
 
 ### EffectPattern
+
+Classification of timing difference type:
 
 ```rust
 pub enum EffectPattern {
@@ -407,56 +357,64 @@ pub enum EffectPattern {
 
     /// Both shift and tail components present
     Mixed,
+
+    /// Effect too small to classify
+    Indeterminate,
 }
 ```
 
-### Mode
+### InconclusiveReason
+
+Why a test couldn't reach a conclusion:
 
 ```rust
-pub enum Mode {
-    /// Minimal samples for quick validation (~1k samples)
-    Smoke,
+pub enum InconclusiveReason {
+    /// Measurement noise too high
+    DataTooNoisy { message: String, guidance: String },
 
-    /// Reduced samples for development (~5k samples)
-    Quick,
+    /// Posterior not converging
+    NotLearning { message: String, guidance: String },
 
-    /// Full analysis (~100k samples)
-    Full,
+    /// Would exceed time budget to reach conclusion
+    WouldTakeTooLong { estimated_time_secs: f64, samples_needed: usize, guidance: String },
+
+    /// Time budget exhausted
+    TimeBudgetExceeded { current_probability: f64, samples_collected: usize },
+
+    /// Sample budget exhausted
+    SampleBudgetExceeded { current_probability: f64, samples_collected: usize },
 }
 ```
 
-### FailCriterion
+### Diagnostics
+
+Detailed diagnostic information for debugging:
 
 ```rust
-pub enum FailCriterion {
-    /// Fail if CI gate fails
-    CiGate,
-
-    /// Fail if leak probability exceeds threshold
-    Probability(f64),
-
-    /// Fail if either criterion fails
-    Either { probability: f64 },
-
-    /// Fail only if both criteria fail
-    Both { probability: f64 },
-}
-```
-
-### UnreliablePolicy
-
-```rust
-pub enum UnreliablePolicy {
-    /// Skip unreliable tests (return None)
-    FailOpen,
-
-    /// Panic on unreliable tests
-    FailClosed,
-}
-
-impl UnreliablePolicy {
-    /// Load from TIMING_ORACLE_UNRELIABLE_POLICY env var
-    pub fn from_env_or(default: Self) -> Self;
+pub struct Diagnostics {
+    pub dependence_length: usize,        // Block bootstrap length
+    pub effective_sample_size: usize,    // ESS after accounting for autocorrelation
+    pub stationarity_ratio: f64,         // Variance ratio (0.5-2.0 normal)
+    pub stationarity_ok: bool,
+    pub model_fit_chi2: f64,             // Chi-squared for residuals
+    pub model_fit_ok: bool,
+    pub outlier_rate_baseline: f64,
+    pub outlier_rate_sample: f64,
+    pub outlier_asymmetry_ok: bool,
+    pub discrete_mode: bool,             // Low timer resolution mode
+    pub timer_resolution_ns: f64,
+    pub duplicate_fraction: f64,
+    pub preflight_ok: bool,
+    pub calibration_samples: usize,
+    pub total_time_secs: f64,
+    pub warnings: Vec<String>,
+    pub quality_issues: Vec<QualityIssue>,
+    pub preflight_warnings: Vec<PreflightWarningInfo>,
+    pub seed: Option<u64>,
+    pub attacker_model: Option<String>,
+    pub threshold_ns: f64,
+    pub timer_name: String,
+    pub platform: String,
 }
 ```
 
@@ -466,29 +424,25 @@ impl UnreliablePolicy {
 
 ### InputPair
 
-Pre-generate inputs for both classes to ensure identical code paths:
+Pre-generates inputs for both classes to ensure identical code paths:
 
 ```rust
 use timing_oracle::helpers::InputPair;
 
-// From a fixed value and random generator
+// Create with closures (recommended)
 let inputs = InputPair::new(
-    [0u8; 32],                    // Fixed value
-    || rand::random::<[u8; 32]>() // Random generator
+    || [0u8; 32],                    // Baseline closure
+    || rand::random::<[u8; 32]>(),   // Sample closure
 );
 
-// With explicit sample count
-let inputs = InputPair::with_samples(100_000, [0u8; 32], rand_generator);
+// Access values (calls closures)
+let baseline_val = inputs.baseline();
+let sample_val = inputs.sample();
 
-// From two generator functions
-let inputs = InputPair::from_fn(
-    || fixed_value(),
-    || random_value(),
-);
-
-// Access inputs
-let fixed: &[u8; 32] = inputs.fixed();
-let random: &[u8; 32] = inputs.random();
+// Check for common mistakes after measurement
+if let Some(warning) = inputs.check_anomaly() {
+    eprintln!("[timing-oracle] {}", warning);
+}
 ```
 
 **Convenience functions:**
@@ -496,11 +450,27 @@ let random: &[u8; 32] = inputs.random();
 ```rust
 use timing_oracle::helpers;
 
-// 32-byte arrays
+// 32-byte arrays (zeros vs random)
 let inputs = helpers::byte_arrays_32();
 
 // Byte vectors of specific length
 let inputs = helpers::byte_vecs(1024);
+```
+
+**Variants:**
+
+```rust
+// Without anomaly detection (for intentionally deterministic inputs)
+let inputs = InputPair::new_unchecked(
+    || [0x00u8; 12],  // Fixed nonce A
+    || [0xFFu8; 12],  // Fixed nonce B
+);
+
+// For non-Hash types
+let inputs = InputPair::new_untracked(
+    || Scalar::zero(),
+    || Scalar::random(&mut rng),
+);
 ```
 
 ### Timer
@@ -513,28 +483,75 @@ let timer = Timer::new();
 
 // Measure cycles for an operation
 let cycles = timer.measure_cycles(|| my_operation());
+
+// Timer info
+let resolution_ns = timer.resolution_ns();
+let cycles_per_ns = timer.cycles_per_ns();
+let name = timer.name();
 ```
 
 ---
 
-## Macros
+## Assertion Macros
+
+### assert_constant_time!
+
+Assert that code is constant-time (panics on Fail or Inconclusive):
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_constant_time};
+
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_crypto_function(data));
+
+assert_constant_time!(outcome);  // Panics with diagnostics if not constant-time
+```
+
+### assert_no_timing_leak!
+
+Lenient assertion (only panics on Fail, allows Inconclusive):
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_no_timing_leak};
+
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_function(data));
+
+assert_no_timing_leak!(outcome);  // Only panics if leak detected
+```
+
+### assert_leak_detected!
+
+Assert that a leak WAS detected (for testing known-leaky code):
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, assert_leak_detected};
+
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| leaky_function(data));
+
+assert_leak_detected!(outcome);  // Panics if no leak found
+```
 
 ### skip_if_unreliable!
 
-Skip assertions if measurement is unreliable (fail-open policy):
+Skip test if measurement is unreliable (fail-open policy):
 
 ```rust
-use timing_oracle::{Outcome, skip_if_unreliable};
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, skip_if_unreliable};
 
 #[test]
-fn test_cache_timing() {
-    let result = TimingOracle::new().test(fixed, random);
-    let outcome = Outcome::Completed(result);
+fn test_crypto() {
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |data| encrypt(data));
 
-    // Prints "[SKIPPED] test_cache_timing: ..." and returns early if unreliable
-    let result = skip_if_unreliable!(outcome, "test_cache_timing");
-
-    assert!(result.leak_probability > 0.5);
+    let outcome = skip_if_unreliable!(outcome, "test_crypto");
+    // Only reaches here if reliable
+    assert!(outcome.passed());
 }
 ```
 
@@ -543,17 +560,16 @@ fn test_cache_timing() {
 Panic if measurement is unreliable (fail-closed policy):
 
 ```rust
-use timing_oracle::{Outcome, require_reliable};
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair, require_reliable};
 
 #[test]
 fn test_critical_crypto() {
-    let result = TimingOracle::new().test(fixed, random);
-    let outcome = Outcome::Completed(result);
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |data| encrypt(data));
 
-    // Panics with "[UNRELIABLE] test_critical_crypto: ..." if unreliable
-    let result = require_reliable!(outcome, "test_critical_crypto");
-
-    assert!(result.leak_probability < 0.1);
+    let outcome = require_reliable!(outcome, "test_critical_crypto");
+    assert!(outcome.passed());
 }
 ```
 
@@ -563,15 +579,36 @@ fn test_critical_crypto() {
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `samples` | 100,000 | Samples per class |
-| `warmup` | 1,000 | Warmup iterations (not measured) |
-| `ci_alpha` | 0.01 | CI gate false positive rate |
-| `effect_prior_ns` | 10.0 | Prior scale for effects (σ_μ), not a pass/fail threshold |
-| `effect_threshold_ns` | _unset_ | Optional hard threshold for reporting/panic |
-| `outlier_percentile` | 0.999 | Percentile for outlier filtering (1.0 = disabled) |
+| `time_budget` | 60 seconds | Maximum time for analysis |
+| `max_samples` | 1,000,000 | Maximum samples per class |
+| `batch_size` | 1,000 | Samples collected per batch |
+| `calibration_samples` | 5,000 | Samples for calibration phase |
+| `pass_threshold` | 0.05 | P(leak) below this = Pass |
+| `fail_threshold` | 0.95 | P(leak) above this = Fail |
 | `prior_no_leak` | 0.75 | Prior probability of no leak |
-| `calibration_fraction` | 0.3 | Fraction of samples used for calibration/preflight |
-| `ci_bootstrap_iterations` | 10,000 | Bootstrap iterations for CI gate thresholds |
-| `cov_bootstrap_iterations` | 2,000 | Bootstrap iterations for covariance estimation |
-| `max_duration_ms` | _unset_ | Optional guardrail to abort long runs |
-| `measurement_seed` | _unset_ | Deterministic seed for measurement randomness |
+| `cov_bootstrap_iterations` | 2,000 | Bootstrap iterations for covariance |
+| `warmup` | 1,000 | Warmup iterations before measurement |
+| `outlier_percentile` | 0.9999 | Percentile for outlier winsorization |
+
+### Environment Variables
+
+Override settings via environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `TO_TIME_BUDGET_SECS` | Time budget in seconds |
+| `TO_MAX_SAMPLES` | Maximum samples per class |
+| `TO_BATCH_SIZE` | Batch size |
+| `TO_CALIBRATION_SAMPLES` | Calibration samples |
+| `TO_PASS_THRESHOLD` | Pass threshold (e.g., "0.05") |
+| `TO_FAIL_THRESHOLD` | Fail threshold (e.g., "0.95") |
+| `TO_MIN_EFFECT_NS` | Minimum effect threshold in ns |
+| `TO_SEED` | Deterministic seed |
+| `TIMING_ORACLE_UNRELIABLE_POLICY` | "fail_open" or "fail_closed" |
+| `TIMING_ORACLE_SKIP_PREFLIGHT` | Set to skip preflight checks |
+
+```rust
+// Load configuration from environment
+let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .from_env();
+```

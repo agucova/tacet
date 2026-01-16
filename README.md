@@ -5,13 +5,20 @@
 ```
 $ cargo test --test aes_timing
 
-timing-oracle · aes_encrypt (16 bytes)
-────────────────────────────────────────
-  Leak probability:  2.3%
-  Effect size:       < 1 ns (Negligible)
-  Decision:          PASS
+timing-oracle
+──────────────────────────────────────────────────────────────
 
-  ✓ No significant timing leak detected
+  Samples: 5000 per class
+  Quality: Excellent
+
+  ✓ No timing leak detected
+
+    Probability of leak: 2.3%
+    Effect: 0.8 ns
+      Shift: 0.5 ns
+      Tail:  0.3 ns
+
+──────────────────────────────────────────────────────────────
 ```
 
 ## Installation
@@ -24,15 +31,13 @@ cargo add timing-oracle --dev
 
 ```rust
 use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-use std::time::Duration;
 
 #[test]
 fn constant_time_compare() {
     let secret = [0u8; 32];
 
     let outcome = timing_test_checked! {
-        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-            .time_budget(Duration::from_secs(30)),
+        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
         baseline: || [0u8; 32],
         sample: || rand::random::<[u8; 32]>(),
         measure: |input| {
@@ -67,6 +72,10 @@ fn ct_compare(a: &[u8], b: &[u8]) -> bool {
 }
 ```
 
+## Real-World Validation
+
+While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate — a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See [the full investigation](docs/investigation-rsa-timing-anomaly.md).
+
 ## Why Another Tool?
 
 Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
@@ -76,7 +85,7 @@ Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are har
 | | DudeCT | timing-oracle |
 |---|--------|---------------|
 | **Output** | t-statistic + p-value | Probability of leak (0–100%) |
-| **False positives** | Unbounded (more samples → more FPs) | Controlled at ≤1% |
+| **False positives** | Unbounded (more samples → more FPs) | Converges to correct answer |
 | **Effect size** | Not provided | Estimated in nanoseconds |
 | **Exploitability** | Manual interpretation | Automatic classification |
 | **CI-friendly** | Flaky without tuning | Works out of the box |
@@ -91,15 +100,13 @@ Configure via the `oracle:` field with an **attacker model** that defines your t
 
 ```rust
 use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-use std::time::Duration;
 
 let outcome = timing_test_checked! {
     // Choose your threat model:
     // - RemoteNetwork (50μs): Public APIs, internet-facing
     // - AdjacentNetwork (100ns): Internal services, HTTP/2 APIs
     // - SharedHardware (~2 cycles): SGX, containers, shared hosting
-    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .time_budget(Duration::from_secs(30)),
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
     baseline: || my_fixed_input,
     sample: || generate_random(),
     measure: |input| operation(&input),
@@ -116,15 +123,13 @@ let outcome = timing_test_checked! {
 | `Research` | 0 | Detect any difference (not for CI) |
 | `Custom { threshold_ns }` | user-defined | Custom threshold |
 
-For tuning, combine presets with configuration:
+For stricter testing, adjust decision thresholds:
 
 ```rust
 timing_test_checked! {
     oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .time_budget(Duration::from_secs(60))  // Longer for thorough check
-        .max_samples(100_000)                   // Limit samples
-        .pass_threshold(0.01)                   // More confident pass
-        .fail_threshold(0.99),                  // More confident fail
+        .pass_threshold(0.01)   // More confident pass (default 0.05)
+        .fail_threshold(0.99),  // More confident fail (default 0.95)
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| operation(&input),
@@ -169,11 +174,9 @@ timing_test! {
 
 ```rust
 use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-use std::time::Duration;
 
 let outcome = timing_test_checked! {
-    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .time_budget(Duration::from_secs(30)),
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
     baseline: || [0u8; 32],
     sample: || rand::random(),
     measure: |input| very_fast_operation(&input),
@@ -201,13 +204,11 @@ For programmatic access without macros:
 
 ```rust
 use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
-use std::time::Duration;
 
 let inputs = InputPair::new(|| [0u8; 32], || rand::random());
 
 // Use attacker model to define threat scenario
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-    .time_budget(Duration::from_secs(30))
     .test(inputs, |data| constant_time_eq(&secret, data));
 
 match outcome {
@@ -294,13 +295,13 @@ The oracle adaptively collects samples until it can reach a conclusion:
 3. **Early Stopping**: Stops when posterior probability crosses pass/fail thresholds (default 0.05/0.95)
 4. **Inconclusive Handling**: Reports when conclusion cannot be reached within budget
 
-### Sample Splitting
+### Adaptive Sampling
 
-To avoid double-dipping (using data to both set priors and test), samples are split temporally:
-- **First 30%**: Calibration (covariance estimation, prior setting)
-- **Last 70%**: Inference (actual hypothesis test)
+The oracle uses a two-phase approach:
+1. **Calibration phase** (5,000 samples by default): Estimates covariance matrix and sets Bayesian priors
+2. **Adaptive phase**: Collects samples in batches until decision thresholds are reached
 
-Temporal split preserves autocorrelation structure and prevents overfitting.
+This adaptive approach stops early when confident, saving time on clear pass/fail cases while gathering more evidence when needed.
 
 For full methodology: [docs/spec.md](docs/spec.md)
 

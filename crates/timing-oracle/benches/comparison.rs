@@ -16,6 +16,11 @@ use comp::report::print_sample_efficiency;
 use comp::{run_detection_comparison, run_efficiency_analysis, run_roc_analysis, BenchmarkConfig};
 
 fn main() {
+    // Initialize tracing subscriber for debug output (optional, no-op without subscriber)
+    tracing_subscriber::fmt()
+        .with_env_filter("timing_oracle=debug")
+        .init();
+
     // Parse command-line arguments (simple version)
     let args: Vec<String> = std::env::args().collect();
 

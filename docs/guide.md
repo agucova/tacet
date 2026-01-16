@@ -10,21 +10,20 @@ For quick usage examples, see the [README](../README.md). For complete API docum
 - [DudeCT Two-Class Pattern](#dudect-two-class-pattern)
 - [How It Works](#how-it-works)
   - [Measurement Protocol](#measurement-protocol)
-  - [Two-Layer Analysis](#two-layer-analysis)
+  - [Adaptive Bayesian Analysis](#adaptive-bayesian-analysis)
   - [Quantile-Based Statistics](#quantile-based-statistics)
 - [Timer Selection and Adaptive Batching](#timer-selection-and-adaptive-batching)
   - [Platform Timers](#platform-timers)
   - [Adaptive Batching](#adaptive-batching)
 - [Advanced Examples](#advanced-examples)
-  - [Testing with State](#testing-with-state)
-  - [Quick Smoke Tests](#quick-smoke-tests)
-  - [Reusing Calibrated Timer](#reusing-calibrated-timer)
+  - [Choosing an Attacker Model](#choosing-an-attacker-model)
+  - [Configuration Presets](#configuration-presets)
   - [Interpreting Results](#interpreting-results)
   - [Testing Async/Await Code](#testing-asyncawait-code)
 - [Statistical Details](#statistical-details)
   - [Covariance Estimation](#covariance-estimation)
-  - [Sample Splitting](#sample-splitting)
-  - [Bayes Factor Computation](#bayes-factor-computation)
+  - [Adaptive Sampling](#adaptive-sampling)
+  - [Bayesian Posterior Computation](#bayesian-posterior-computation)
 - [Limitations](#limitations)
 - [References](#references)
 
@@ -56,7 +55,7 @@ Similar issues affect:
 
 Existing tools like [dudect](https://github.com/oreparaz/dudect) detect such leaks but have limitations:
 - Output t-statistics instead of interpretable probabilities
-- No bounded false positive rate for CI integration
+- Results depend on sample count (more samples → more false positives)
 - Miss non-uniform timing effects (e.g., cache-related tail behavior)
 - 3.6-8x slower per-sample measurement overhead (52 ns/sample vs 14-18 ns/sample for timing-oracle)
 
@@ -66,33 +65,38 @@ Existing tools like [dudect](https://github.com/oreparaz/dudect) detect such lea
 
 This library follows **DudeCT's two-class testing pattern** for detecting data-dependent timing:
 
-- **Class 0**: All-zero data (0x00 repeated)
-- **Class 1**: Random data
+- **Class 0 (Baseline)**: All-zero data (0x00 repeated)
+- **Class 1 (Sample)**: Random data
 
 This pattern tests whether operations have **data-dependent timing** rather than comparing specific fixed values:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
-// Choose your threat model - this determines what effect size is considered "significant"
-let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .samples(50_000)
-    .test(
-        || {
-            // Class 0: All zeros
-            let data = [0u8; 32];
-            my_crypto_operation(&data)
-        },
-        || {
-            // Class 1: Random
-            let data = rand_bytes();
-            my_crypto_operation(&data)
-        },
-    );
+// Create inputs with the two-class pattern
+let inputs = InputPair::new(
+    || [0u8; 32],          // Baseline: all zeros
+    || rand::random(),     // Sample: random data
+);
 
-// Modern crypto should have Negligible exploitability even if timing differences detected
-if !result.ci_gate.passed {
-    assert!(matches!(result.exploitability, Exploitability::Negligible));
+// Choose your threat model - this determines the minimum effect size to care about
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        my_crypto_operation(data);
+    });
+
+// Handle result
+match outcome {
+    Outcome::Pass { .. } => println!("No leak detected"),
+    Outcome::Fail { exploitability, .. } => {
+        panic!("Timing leak: {:?}", exploitability);
+    }
+    Outcome::Inconclusive { reason, .. } => {
+        println!("Inconclusive: {:?}", reason);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipped: {}", recommendation);
+    }
 }
 ```
 
@@ -100,11 +104,10 @@ if !result.ci_gate.passed {
 
 | Preset | Threshold | When to use |
 |--------|-----------|-------------|
-| `WANConservative` | 50 μs | Public APIs, internet-facing services |
-| `LANConservative` | 100 ns | Internal microservices (Crosby-style) |
-| `LANStrict` | 2 cycles | High-security internal services (Kario-style) |
-| `LocalCycles` | 2 cycles | SGX enclaves, shared hosting |
-| `KyberSlashSentinel` | 10 cycles | Post-quantum crypto libraries |
+| `SharedHardware` | ~0.6 ns (~2 cycles) | SGX enclaves, cross-VM, containers |
+| `PostQuantumSentinel` | ~3.3 ns (~10 cycles) | Post-quantum crypto (ML-KEM, ML-DSA) |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs (default) |
+| `RemoteNetwork` | 50 us | Public APIs, general internet |
 | `Research` | 0 | Academic analysis, detect any difference |
 
 **Why this pattern works:**
@@ -120,13 +123,13 @@ if !result.ci_gate.passed {
 ### Measurement Protocol
 
 1. **Warmup**: Run both operations to stabilize CPU state
-2. **Interleaved sampling**: Alternate fixed/random in randomized order to prevent drift bias
+2. **Interleaved sampling**: Alternate baseline/sample in randomized order to prevent drift bias
 3. **High-precision timing**: Use `rdtsc` (x86) or `cntvct_el0` (ARM) with serialization barriers
-4. **Outlier filtering**: Apply symmetric percentile threshold to both classes
+4. **Outlier winsorization**: Cap extreme outliers at percentile threshold
 
-### Two-Layer Analysis
+### Adaptive Bayesian Analysis
 
-The key insight is that CI gates and interpretable statistics need different methodologies:
+The oracle uses a two-phase adaptive approach:
 
 ```
                     Timing Samples
@@ -134,35 +137,44 @@ The key insight is that CI gates and interpretable statistics need different met
            ┌──────────────┴──────────────┐
            ▼                             ▼
    ┌───────────────┐           ┌──────────────────┐
-   │  Layer 1:     │           │  Layer 2:        │
-   │  CI Gate      │           │  Bayesian        │
+   │  Phase 1:     │           │  Phase 2:        │
+   │  Calibration  │           │  Adaptive Loop   │
    ├───────────────┤           ├──────────────────┤
-   │ RTLF-style    │           │ Closed-form      │
-   │ bootstrap     │           │ conjugate Bayes  │
+   │ 5,000 samples │           │ Batch collection │
+   │ Covariance    │           │ Posterior update │
+   │ estimation    │           │ Decision check   │
+   │ Prior setup   │   ────>   │ Quality gates    │
    │               │           │                  │
-   │ Bounded FPR   │           │ Probability +    │
-   │ Pass/Fail     │           │ Effect size      │
+   │ Fixed cost    │           │ Stops when       │
+   │               │           │ P < 0.05 or      │
+   │               │           │ P > 0.95         │
    └───────────────┘           └──────────────────┘
 ```
 
-**Layer 1 (CI Gate)** answers: "Should this block my build?"
-- Uses RTLF-style bootstrap thresholds ([Dunsche et al., 2024](https://www.usenix.org/conference/usenixsecurity24/presentation/dunsche))
-- Conservative max-based per-quantile bounds
-- Guarantees false positive rate ≤ α (default 1%)
+**Phase 1 (Calibration)** establishes statistical parameters:
+- Estimates noise covariance matrix via block bootstrap
+- Computes minimum detectable effect (MDE)
+- Sets Bayesian priors from calibration data
 
-**Layer 2 (Bayesian)** answers: "What's the probability and magnitude?"
-- Computes Bayes factor between H₀ (no leak) and H₁ (leak)
-- Decomposes effect into uniform shift and tail components
-- Provides 95% credible intervals
+**Phase 2 (Adaptive Loop)** collects samples until a decision:
+- Collects samples in batches (default 1,000)
+- Updates posterior probability after each batch
+- Stops when P(leak) < 0.05 (Pass) or P(leak) > 0.95 (Fail)
+- Applies quality gates to detect when more data won't help
+
+This adaptive approach:
+- **Stops early** on clear pass/fail cases (saves time)
+- **Gathers more evidence** when the signal is near the threshold
+- **Returns Inconclusive** when hitting resource limits or quality gates
 
 ### Quantile-Based Statistics
 
 Rather than comparing means (which miss distributional differences), we compare nine deciles:
 
 ```
-Fixed class:   [q₁₀, q₂₀, q₃₀, q₄₀, q₅₀, q₆₀, q₇₀, q₈₀, q₉₀]
-Random class:  [q₁₀, q₂₀, q₃₀, q₄₀, q₅₀, q₆₀, q₇₀, q₈₀, q₉₀]
-Difference:    Δ ∈ ℝ⁹
+Baseline class:  [q₁₀, q₂₀, q₃₀, q₄₀, q₅₀, q₆₀, q₇₀, q₈₀, q₉₀]
+Sample class:    [q₁₀, q₂₀, q₃₀, q₄₀, q₅₀, q₆₀, q₇₀, q₈₀, q₉₀]
+Difference:      Δ ∈ ℝ⁹
 ```
 
 This captures:
@@ -190,7 +202,7 @@ The library automatically selects the best available timer for your platform:
 
 **macOS ARM64 (Apple Silicon):**
 - **Standard Timer** (default): `cntvct_el0` virtual timer (~42ns resolution for M1/M2/M3 at 24 MHz)
-- **PmuTimer** (opt-in, requires `sudo`): PMU-based cycle counting (~1ns resolution) - see "Advanced: Cycle-Accurate Timing" in the README
+- **PmuTimer** (opt-in, requires `sudo`): PMU-based cycle counting (~1ns resolution)
 
 **Linux:**
 - **x86_64**: `rdtsc` instruction (~1ns, no privileges needed)
@@ -198,7 +210,7 @@ The library automatically selects the best available timer for your platform:
   - ARMv8.6+ (Graviton4): ~1ns (1 GHz)
   - Ampere Altra: ~40ns (25 MHz)
   - Raspberry Pi 4: ~18ns (54 MHz)
-- **LinuxPerfTimer** (opt-in, requires `sudo`/`CAP_PERFMON`): perf_event cycle counting (~1ns) - see "Advanced: Cycle-Accurate Timing" in the README
+- **LinuxPerfTimer** (opt-in, requires `sudo`/`CAP_PERFMON`): perf_event cycle counting (~1ns)
 
 ### Adaptive Batching
 
@@ -206,7 +218,7 @@ On platforms with coarse timer resolution (>5 ticks per operation), the library 
 
 1. **Pilot phase**: Measures ~100 warmup iterations to determine median operation time
 2. **K selection**: Chooses batch size K to achieve 50+ timer ticks per batch
-3. **Batch measurement**: Measures K iterations together and analyzes batch totals (reported with K)
+3. **Batch measurement**: Measures K iterations together and analyzes batch totals
 4. **Bounded batching**: Never exceeds K=20 to prevent microarchitectural artifacts
 
 **Example:** On Apple Silicon (42ns resolution) measuring a 100ns operation:
@@ -219,114 +231,80 @@ Batching is **automatically disabled** when:
 - Operation is slow enough (>210ns on Apple Silicon with standard timer)
 - Running on x86_64 (rdtsc provides cycle-accurate timing)
 
-Batching is automatic in the public API; to avoid it entirely, use `PmuTimer` (macOS) or `LinuxPerfTimer` (Linux) for cycle-accurate timing.
-
 ---
 
 ## Advanced Examples
 
-### Testing with State
-
-For tests that need shared state or complex setup:
-
-```rust
-use timing_oracle::TimingOracle;
-
-// Example: Testing database query timing
-fn test_db_query_timing() {
-    let result = TimingOracle::new()
-        .samples(10_000)
-        .test_with_state(
-            || {
-                // Setup: Initialize database connection
-                let db = Database::connect("test.db");
-                db.create_table();
-                db
-            },
-            |db| {
-                // Fixed input: Known user ID (might trigger caching)
-                db.prepare_query("SELECT * FROM users WHERE id = ?", 1)
-            },
-            |db, rng| {
-                // Random input: Random user ID
-                let user_id = rng.gen_range(1..1000);
-                db.prepare_query("SELECT * FROM users WHERE id = ?", user_id)
-            },
-            |db, query| {
-                // Execute the query
-                db.execute(query);
-            },
-        );
-
-    assert!(result.ci_gate.passed,
-            "Database query should not leak user ID through timing");
-}
-```
-
-### Quick Smoke Tests
-
-For faster iteration during development:
+### Choosing an Attacker Model
 
 ```rust
 use timing_oracle::{TimingOracle, AttackerModel};
 
-// Fast test with reduced samples (completes in ~0.5s)
-let result = TimingOracle::quick()
-    .attacker_model(AttackerModel::LANConservative)
-    .test(|| my_function(&FIXED), || my_function(&random_input()));
+// Internet-facing API: attacker measures over general internet
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)  // θ = 50μs
 
-println!("Quick smoke test: {:.0}% probability",
-         result.leak_probability * 100.0);
+// Internal microservice or HTTP/2 API: attacker on LAN or using request multiplexing
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)  // θ = 100ns
+
+// SGX enclave, containers, or shared hosting: co-resident attacker
+TimingOracle::for_attacker(AttackerModel::SharedHardware)  // θ = 0.6ns (~2 cycles)
+
+// Post-quantum crypto (catch KyberSlash-class bugs)
+TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)  // θ = 10 cycles
+
+// Research/debugging: detect any statistical difference
+TimingOracle::for_attacker(AttackerModel::Research)  // θ → 0
+
+// Custom threshold in nanoseconds
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 ```
 
 ### Interpreting Results
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, Exploitability};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, Exploitability, helpers::InputPair};
 
-let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .test(fixed_fn, random_fn);
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_function(data));
 
-// 1. Check CI gate for pass/fail decision
-if !result.ci_gate.passed {
-    println!("❌ CI gate failed - timing leak detected");
+match outcome {
+    Outcome::Pass { leak_probability, quality, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+        println!("Measurement quality: {:?}", quality);
+    }
+
+    Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+        println!("Leak detected: P(leak)={:.1}%", leak_probability * 100.0);
+        println!("Effect breakdown:");
+        println!("  Shift: {:.1} ns ({:?})", effect.shift_ns, effect.pattern);
+        println!("  Tail:  {:.1} ns", effect.tail_ns);
+        println!("  Total: {:.1}-{:.1} ns (95% CI)",
+                 effect.credible_interval_ns.0,
+                 effect.credible_interval_ns.1);
+
+        // Check exploitability
+        match exploitability {
+            Exploitability::Negligible =>
+                println!("Not practically exploitable"),
+            Exploitability::PossibleLAN =>
+                println!("Might be exploitable on LAN (~100k queries)"),
+            Exploitability::LikelyLAN =>
+                println!("Likely exploitable on LAN (~10k queries)"),
+            Exploitability::PossibleRemote =>
+                println!("Possibly exploitable remotely"),
+        }
+    }
+
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        println!("Inconclusive: {:?}", reason);
+        println!("Current P(leak): {:.1}%", leak_probability * 100.0);
+    }
+
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Operation too fast: {}", recommendation);
+    }
 }
-
-// 2. Examine leak probability
-match result.leak_probability {
-    p if p > 0.99 => println!("🔴 Virtually certain leak (>99%)"),
-    p if p > 0.9  => println!("🟠 Very likely leak (>90%)"),
-    p if p > 0.5  => println!("🟡 Probable leak (>50%)"),
-    _             => println!("🟢 No significant leak detected"),
-}
-
-// 3. If leak detected, examine effect decomposition
-if let Some(effect) = result.effect {
-    println!("Effect breakdown:");
-    println!("  Shift: {:.1} ns ({:?})", effect.shift_ns, effect.pattern);
-    println!("  Tail:  {:.1} ns", effect.tail_ns);
-    println!("  Total magnitude: {:.1}-{:.1} ns (95% CI)",
-             effect.credible_interval_ns.0,
-             effect.credible_interval_ns.1);
-}
-
-// 4. Check exploitability
-match result.exploitability {
-    Exploitability::Negligible =>
-        println!("Not practically exploitable"),
-    Exploitability::PossibleLAN =>
-        println!("⚠️  Might be exploitable on LAN (~100k queries)"),
-    Exploitability::LikelyLAN =>
-        println!("⚠️  Likely exploitable on LAN (~10k queries)"),
-    Exploitability::PossibleRemote =>
-        println!("⚠️  Possibly exploitable remotely"),
-}
-
-// 5. Assess measurement quality
-println!("Measurement quality: {:?}", result.quality);
-println!("Min detectable effect: {:.1} ns (shift), {:.1} ns (tail)",
-         result.min_detectable_effect.shift_ns,
-         result.min_detectable_effect.tail_ns);
 ```
 
 ### Testing Async/Await Code
@@ -334,9 +312,8 @@ println!("Min detectable effect: {:.1} ns (shift), {:.1} ns (tail)",
 For async functions, use `Runtime::block_on()` to bridge async → sync for measurement:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 use tokio::runtime::Runtime;
-use tokio::time::{sleep, Duration};
 
 // Create a runtime once per test
 let rt = tokio::runtime::Builder::new_current_thread()
@@ -344,34 +321,32 @@ let rt = tokio::runtime::Builder::new_current_thread()
     .build()
     .unwrap();
 
-let result = TimingOracle::for_attacker(AttackerModel::LANConservative)
-    .samples(10_000)
-    .test(
-        || {
-            rt.block_on(async {
-                // Fixed async operation
-                sleep(Duration::from_micros(10)).await;
-                std::hint::black_box(42)
-            })
-        },
-        || {
-            rt.block_on(async {
-                // Random async operation
-                sleep(Duration::from_micros(10)).await;
-                std::hint::black_box(43)
-            })
-        },
-    );
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        rt.block_on(async {
+            // Your async operation
+            my_async_crypto_function(data).await;
+        })
+    });
 
 // Verify no timing leak from async executor overhead
-assert!(result.ci_gate.passed, "Async executor overhead should be symmetric");
+match outcome {
+    Outcome::Pass { .. } => println!("Async code is constant-time"),
+    Outcome::Fail { .. } => panic!("Timing leak in async code"),
+    _ => {}
+}
 ```
 
 **Key considerations for async testing:**
 - Use **single-threaded** runtime for lower noise (`new_current_thread()`)
 - Create the runtime **once** outside the measured closures
 - Use `block_on()` to execute async code synchronously
-- Both closures should perform **identical async operations** for baseline tests
+- Both inputs should perform **identical async operations** for baseline tests
 - See `tests/async_timing.rs` for comprehensive async examples
 
 ---
@@ -380,28 +355,40 @@ assert!(result.ci_gate.passed, "Async executor overhead should be symmetric");
 
 ### Covariance Estimation
 
-Quantile differences are correlated (neighboring quantiles tend to move together). We estimate the 9x9 covariance matrix Σ₀ via block bootstrap, then use it in both the CI gate thresholds and Bayesian inference.
+Quantile differences are correlated (neighboring quantiles tend to move together). We estimate the 9x9 covariance matrix Σ₀ via block bootstrap during calibration, accounting for autocorrelation in the timing samples.
 
-### Sample Splitting
+### Adaptive Sampling
 
-To avoid "double-dipping" (using data to both set priors and compute posteriors), we split samples:
-- **Calibration set (30%)**: Estimate Σ₀, compute minimum detectable effect, set prior hyperparameters
-- **Inference set (70%)**: Compute Δ and Bayes factor with fixed parameters
+The adaptive loop uses Bayesian inference to decide when to stop:
 
-### Bayes Factor Computation
+1. **Posterior Update**: After each batch, compute P(effect > θ | data)
+2. **Decision Check**: Pass if P < 0.05, Fail if P > 0.95
+3. **Quality Gates**: Stop early if:
+   - Data too noisy (posterior ≈ prior after calibration)
+   - Not learning (KL divergence collapsed for 5+ batches)
+   - Would take too long (projected time exceeds budget)
+
+### Bayesian Posterior Computation
+
+The posterior probability of a timing leak is computed using conjugate Bayesian inference:
 
 Under both hypotheses, Δ follows a multivariate normal:
-- H₀: Δ ~ N(0, Σ₀)
-- H₁: Δ ~ N(0, Σ₀ + X·Λ₀·Xᵀ)
+- H₀: Δ ~ N(0, Σ₀/n) — no effect, just measurement noise
+- H₁: Δ ~ N(β, Σ₀/n + Σ_prior) — effect plus noise
 
-The log Bayes factor is computed in closed form via Cholesky decomposition.
+The posterior is:
+```
+P(leak | data) = P(data | leak) × P(leak) / P(data)
+```
+
+Where P(leak) is the prior (default 0.25) and the likelihood ratio is computed via the multivariate normal densities.
 
 ---
 
 ## Limitations
 
 - **Not a formal proof**: Statistical evidence, not cryptographic verification
-- **Noise sensitivity**: High-noise environments may produce unreliable results
+- **Noise sensitivity**: High-noise environments may produce unreliable results (check `MeasurementQuality`)
 - **JIT and optimization**: Ensure test conditions match production
 - **Platform-dependent**: Timing characteristics vary across CPUs
 - **Exploitability is heuristic**: Actual exploitability depends on network conditions and attacker capabilities
@@ -413,5 +400,7 @@ For mission-critical code, combine with formal verification tools like [ct-verif
 ## References
 
 1. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — Original dudect methodology
-2. Dunsche, M., et al. (2024). "With Great Power Come Great Side Channels: Statistical Timing Side-Channel Analyses with Bounded Type-1 Errors." USENIX Security. — RTLF methodology for bounded FPR
-3. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and limits of remote timing attacks." ACM TISSEC. — Exploitability thresholds
+2. Dunsche, M., et al. (2025). "SILENT: Practical significance testing for timing side channels." arXiv. — Practical significance testing methodology
+3. Dunsche, M., et al. (2024). "With Great Power Come Great Side Channels: Statistical Timing Side-Channel Analyses with Bounded Type-1 Errors." USENIX Security. — RTLF methodology for bounded FPR
+4. Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. — HTTP/2 timing attacks over internet
+5. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and limits of remote timing attacks." ACM TISSEC. — Exploitability thresholds

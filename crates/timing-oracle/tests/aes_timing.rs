@@ -120,9 +120,12 @@ fn aes128_different_keys_constant_time() {
     let cipher1 = Aes128::new(&key1.into());
     let cipher2 = Aes128::new(&key2.into());
 
+    // Put ciphers in array for uniform access (no branching)
+    let ciphers = [&cipher1, &cipher2];
     let plaintext = [0x01u8; 16]; // Fixed plaintext
 
-    let inputs = InputPair::new(|| 0, || 1);
+    // DudeCT pattern: pass the key index directly, both classes get identical code path
+    let inputs = InputPair::new(|| 0usize, || 1usize);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
@@ -130,11 +133,8 @@ fn aes128_different_keys_constant_time() {
         .time_budget(Duration::from_secs(30))
         .test(inputs, |key_idx| {
             let mut block = plaintext.into();
-            if *key_idx == 0 {
-                cipher1.encrypt_block(&mut block);
-            } else {
-                cipher2.encrypt_block(&mut block);
-            }
+            // Uniform code path: array indexing instead of if/else
+            ciphers[*key_idx].encrypt_block(&mut block);
             std::hint::black_box(block[0]);
         });
 
@@ -427,26 +427,20 @@ fn aes128_byte_pattern_independence() {
     let key = rand_bytes_16();
     let cipher = Aes128::new(&key.into());
 
-    let inputs = InputPair::new(|| 0u8, || 1u8);
+    // Pre-generate patterns OUTSIDE the closure (DudeCT compliant)
+    let sequential_pattern: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+    let reverse_pattern: [u8; 16] = [15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0];
+
+    // Pass pre-generated patterns directly - no branching in measurement closure
+    let inputs = InputPair::new(move || sequential_pattern, move || reverse_pattern);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
-        .test(inputs, |pattern_type| {
-            let mut block = [0u8; 16];
-            if *pattern_type == 0 {
-                // Sequential pattern
-                for (i, byte) in block.iter_mut().enumerate() {
-                    *byte = i as u8;
-                }
-            } else {
-                // Scattered pattern (reverse)
-                for (i, byte) in block.iter_mut().enumerate() {
-                    *byte = (15 - i) as u8;
-                }
-            }
-            let mut block = block.into();
+        .test(inputs, |pattern| {
+            // Uniform code path: same operations for both classes
+            let mut block = (*pattern).into();
             cipher.encrypt_block(&mut block);
             std::hint::black_box(block[0]);
         });
