@@ -247,9 +247,9 @@ passed = all(|delta[i]| ≤ threshold[i])
 Σ_R = bootstrap_cov(calib_random)
 Σ₀ = Σ_F + Σ_R
 
-// Compute MDE, set prior
-MDE = estimate_mde(Σ₀)
-prior_σ = max(2 * MDE, min_effect_of_concern)
+// Set prior scale proportional to threshold for calibrated priors
+// Using 2*theta ensures P(|β| > θ | prior) ≈ 62%
+prior_σ = 2 * theta
 
 // Compute Δ from inference set
 delta_infer = quantiles(infer_fixed) - quantiles(infer_random)

@@ -71,10 +71,10 @@ A zero-centered Gaussian prior on $\beta$:
 
 $$\beta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \text{diag}(\sigma_\mu^2, \sigma_\tau^2)$$
 
-The prior scale is set adaptively:
-$$\sigma_\mu = \sigma_\tau = \max(2 \cdot \text{MDE}, \theta)$$
+The prior scale is set proportional to the threshold:
+$$\sigma_\mu = \sigma_\tau = 2\theta$$
 
-where MDE is the minimum detectable effect and θ is `min_effect_of_concern`. This provides mild shrinkage toward zero without strongly biasing estimates.
+where θ is the minimum effect of concern (from the attacker model). This ensures **calibrated priors**: $P(|\beta| > \theta \mid \text{prior}) \approx 62\%$, representing genuine uncertainty rather than bias toward detection.
 
 ## Posterior Computation
 

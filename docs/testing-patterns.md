@@ -332,7 +332,6 @@ fn test_crypto_operation() {
 
     let outcome = TimingOracle::balanced()
         .alpha(0.01)
-        .min_effect_ns(50.0)  // Practical significance threshold
         .test(inputs, |data| {
             my_crypto_function(data);
         });
@@ -1235,7 +1234,6 @@ fn test_chacha20poly1305_encryption() {
     let outcome = TimingOracle::balanced()
         .samples(30_000)
         .alpha(0.01)
-        .min_effect_ns(50.0)  // Noise floor
         .test(inputs, |plaintext| {
             // Generate UNIQUE nonce for each encryption
             let nonce_value = nonce_counter.fetch_add(1, Ordering::Relaxed);
@@ -1327,7 +1325,6 @@ fn test_chacha20poly1305_decryption() {
     let outcome = TimingOracle::balanced()
         .samples(SAMPLES)
         .alpha(0.01)
-        .min_effect_ns(50.0)
         .test(inputs, |ciphertext| {
             let plaintext = cipher.decrypt(nonce, ciphertext.as_ref()).unwrap();
             std::hint::black_box(plaintext[0]);
@@ -1382,7 +1379,6 @@ fn test_nonce_independence() {
 
     let outcome = TimingOracle::balanced()
         .samples(30_000)
-        .min_effect_ns(50.0)
         .test(nonces, |nonce_bytes| {
             let nonce = Nonce::from_slice(nonce_bytes);
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
@@ -2103,10 +2099,9 @@ cargo test
 ```
 
 **Key points:**
-- `.from_env()` reads `TO_SAMPLES`, `TO_ALPHA`, `TO_MIN_EFFECT_NS`
+- `.from_env()` reads environment variables to configure the oracle
 - Use fewer samples in CI (faster, but less power)
-- Increase `alpha` in noisy CI environments (tolerate more false positives)
-- Increase `min_effect_ns` to ignore CI-specific noise
+- Use appropriate `AttackerModel` for your threat scenario
 
 ---
 
@@ -2119,10 +2114,8 @@ cargo test
 use timing_oracle::TimingOracle;
 
 pub fn ci_oracle() -> TimingOracle {
-    TimingOracle::balanced()
+    TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .from_env()
-        .alpha(0.01)
-        .min_effect_ns(50.0)
 }
 
 pub fn thorough_oracle() -> TimingOracle {
@@ -2488,11 +2481,10 @@ fn crypto_operation(_data: &[u8; 32]) {}
 
 Problem: Hypervisor adds jitter.
 
-Solution: Use bare metal for production timing tests, or increase `min_effect_ns`:
+Solution: Use bare metal for production timing tests, or use a more lenient attacker model:
 
 ```rust
-let outcome = TimingOracle::balanced()
-    .min_effect_ns(200.0)  // Ignore effects <200ns
+let outcome = TimingOracle::for_attacker(AttackerModel::RemoteNetwork)  // 50μs threshold
     .test(inputs, |data| {
         crypto_operation(data);
     });

@@ -119,13 +119,12 @@ let oracle = TimingOracle::for_attacker(AttackerModel::LANConservative)
     .samples(100_000)                    // Samples per class
     .warmup(1_000)                       // Warmup iterations (not measured)
 
-    // Attacker model (recommended over min_effect_ns)
+    // Attacker model defines the timing threshold (θ)
     .attacker_model(AttackerModel::LANConservative)  // Set/override threat model
 
     // Statistical parameters
-    .alpha(0.01)                         // CI gate false positive rate
-    .min_effect_ns(10.0)                 // Legacy: manual threshold (prefer attacker_model)
-    .effect_threshold_ns(100.0)          // Optional hard threshold
+    .pass_threshold(0.05)                // Below this = pass (no leak)
+    .fail_threshold(0.95)                // Above this = fail (leak detected)
     .prior_no_leak(0.75)                 // Prior probability of no leak
     .outlier_percentile(0.999)           // Percentile for outlier filtering
 

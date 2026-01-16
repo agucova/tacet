@@ -1,99 +1,17 @@
-[package]
-name = "timing-oracle"
-version = "0.1.0"
+[workspace]
+resolver = "2"
+members = [
+    "crates/timing-oracle",
+    "crates/timing-oracle-core",
+    "crates/timing-oracle-macros",
+]
+
+# Shared settings for all workspace members
+[workspace.package]
 edition = "2021"
 rust-version = "1.80"
 license = "MPL-2.0"
-description = "Detect timing side channels in cryptographic code"
-keywords = ["security", "cryptography", "timing", "side-channel"]
-categories = ["cryptography", "development-tools::testing"]
 repository = "https://github.com/agucova/timing-oracle"
-documentation = "https://docs.rs/timing-oracle"
-homepage = "https://github.com/agucova/timing-oracle"
-
-[workspace]
-members = [".", "timing-oracle-macros"]
-
-[dependencies]
-timing-oracle-macros = { path = "timing-oracle-macros", optional = true }
-colored = "3.0.0"
-nalgebra = { version = "0.34.1", default-features = false, features = ["std"] }
-rand = "0.9.2"
-rand_distr = "0.5.1"
-rand_xoshiro = "0.7"
-statrs = "0.18"
-rayon = { version = "1.11.0", optional = true }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.148"
-
-# Platform-specific cycle counters
-[target.'cfg(target_os = "macos")'.dependencies]
-kperf-rs = { version = "0.1.1", optional = true }
-libc = { version = "0.2", optional = true }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-perf_event2 = { package = "perf-event2", version = "0.7", optional = true }
-
-[dev-dependencies]
-aes-gcm = "0.10.3"
-subtle = "2.6.1"
-criterion = "0.8"
-num-bigint = "0.4"
-num-traits = "0.2"
-tokio = { version = "1", features = ["rt", "time", "macros", "rt-multi-thread"] }
-# For AES timing tests
-aes = "0.8"
-cipher = { version = "0.4", features = ["block-padding"] }
-# For ECC timing tests
-x25519-dalek = "2.0"
-curve25519-dalek = "4.1"
-# For comparison benchmarks
-dudect-bencher = "0.6"
-regex = "1.10"
-tempfile = "3.8"
-# For expanded crypto test suite
-sha3 = "0.10"
-blake2 = "0.10"
-chacha20poly1305 = "0.10"
-rsa = "0.9"
-ring = "0.17"
-# Post-quantum crypto (C bindings via PQClean)
-pqcrypto-kyber = "0.8"
-pqcrypto-dilithium = "0.5"
-pqcrypto-falcon = "0.3"
-pqcrypto-sphincsplus = "0.7"
-sha2 = "0.10.9"
-pqcrypto-traits = "0.3.5"
-# For macro compile-time error tests
-trybuild = "1.0"
 
 [profile.release]
 debug = true
-
-[[bench]]
-name = "comparison"
-harness = false
-
-[features]
-# By default, enable parallel bootstrap, platform-specific cycle counters, and macros
-default = [
-    "parallel",
-    "kperf-default",
-    "perf-default",
-    "macros",
-]
-
-# Rayon-based parallel bootstrap (4-8x speedup on multi-core systems)
-parallel = ["dep:rayon"]
-
-# Platform-specific cycle counters (enabled by default on appropriate platforms)
-# These require elevated privileges (sudo or CAP_PERFMON) for cycle-accurate timing
-kperf-default = ["kperf"]
-perf-default = ["perf"]
-
-# Proc macro API (timing_test! macro)
-macros = ["dep:timing-oracle-macros"]
-
-# Internal features - use default features instead
-kperf = ["dep:kperf-rs", "dep:libc"]
-perf = []

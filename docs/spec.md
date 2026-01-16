@@ -443,13 +443,17 @@ $$
 \beta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \text{diag}(\sigma_\mu^2, \sigma_\tau^2)
 $$
 
-The prior scale determines regularization strength. We set it adaptively:
+The prior scale determines regularization strength. We set it proportional to the threshold:
 
 $$
-\sigma_\mu = \sigma_\tau = \max(2 \cdot \text{MDE}, \text{min\_effect\_of\_concern})
+\sigma_\mu = \sigma_\tau = 2\theta
 $$
 
-where MDE is the minimum detectable effect (§2.7). This provides mild shrinkage toward zero without strongly biasing the estimates.
+where θ is the minimum effect of concern (from the attacker model). This ensures **calibrated priors**: $P(|\beta| > \theta \mid \text{prior}) \approx 62\%$, representing genuine uncertainty.
+
+> **Rationale**: The previous formula $\max(2 \cdot \text{MDE}, \theta)$ caused poor calibration when MDE >> θ (noisy data with strict threshold). The prior became too diffuse, giving $P(|\beta| > \theta \mid \text{prior}) \approx 99\%$ before seeing any data—biasing toward "leak detected." By tying the prior scale directly to θ, we ensure the prior reflects genuine uncertainty about whether effects exceed the threshold.
+
+The variance ratio quality gate (§3.4) catches cases where posterior ≈ prior, indicating the data wasn't informative enough to update our beliefs.
 
 #### Posterior Distribution
 
