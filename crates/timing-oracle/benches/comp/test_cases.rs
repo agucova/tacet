@@ -62,7 +62,8 @@ impl TestCase for EarlyExitCompare {
             let secret = [0u8; 512];
             let input = [0u8; 512];
             std::hint::black_box(early_exit_compare(&secret, &input));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn random_code(&self) -> String {
@@ -70,7 +71,8 @@ impl TestCase for EarlyExitCompare {
             let secret = [0u8; 512];
             let input = rand_bytes_512();
             std::hint::black_box(early_exit_compare(&secret, &input));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn helper_code(&self) -> String {
@@ -90,7 +92,8 @@ fn rand_bytes_512() -> [u8; 512] {
     thread_rng().fill(&mut arr[..]);
     arr
 }
-        "#.to_string()
+        "#
+        .to_string()
     }
 }
 
@@ -124,7 +127,8 @@ impl TestCase for BranchOnZero {
         r#"
             let x = 0u8;
             std::hint::black_box(helper_branch_on_zero(x));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn random_code(&self) -> String {
@@ -132,7 +136,8 @@ impl TestCase for BranchOnZero {
             use dudect_bencher::rand::thread_rng;
             let x = thread_rng().gen::<u8>() | 1; // Never zero
             std::hint::black_box(helper_branch_on_zero(x));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn helper_code(&self) -> String {
@@ -149,7 +154,8 @@ fn helper_branch_on_zero(x: u8) -> u8 {
         x
     }
 }
-        "#.to_string()
+        "#
+        .to_string()
     }
 }
 
@@ -167,7 +173,7 @@ impl TestCase for XorCompare {
 
     fn fixed_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         let secret = [0xABu8; 32];
-        let input = [0x00u8; 32];  // Class 0: all zeros (both return false)
+        let input = [0x00u8; 32]; // Class 0: all zeros (both return false)
         Box::new(move || {
             std::hint::black_box(constant_time_compare(&secret, &input));
         })
@@ -176,7 +182,7 @@ impl TestCase for XorCompare {
     fn random_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         let secret = [0xABu8; 32];
         Box::new(move || {
-            let input = rand_bytes_32();  // Class 1: random (both return false)
+            let input = rand_bytes_32(); // Class 1: random (both return false)
             std::hint::black_box(constant_time_compare(&secret, &input));
         })
     }
@@ -186,7 +192,8 @@ impl TestCase for XorCompare {
             let secret = [0xABu8; 32];
             let input = [0x00u8; 32];  // Class 0: all zeros (both return false)
             std::hint::black_box(constant_time_compare(&secret, &input));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn random_code(&self) -> String {
@@ -194,7 +201,8 @@ impl TestCase for XorCompare {
             let secret = [0xABu8; 32];
             let input = rand_bytes_32();  // Class 1: random (both return false)
             std::hint::black_box(constant_time_compare(&secret, &input));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn helper_code(&self) -> String {
@@ -213,7 +221,8 @@ fn rand_bytes_32() -> [u8; 32] {
     thread_rng().fill(&mut arr[..]);
     arr
 }
-        "#.to_string()
+        "#
+        .to_string()
     }
 }
 
@@ -231,7 +240,7 @@ impl TestCase for XorOperation {
 
     fn fixed_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         let a = [0xABu8; 32];
-        let b = [0x00u8; 32];  // Class 0: XOR with all zeros
+        let b = [0x00u8; 32]; // Class 0: XOR with all zeros
         Box::new(move || {
             std::hint::black_box(xor_bytes(&a, &b));
         })
@@ -240,7 +249,7 @@ impl TestCase for XorOperation {
     fn random_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         let a = [0xABu8; 32];
         Box::new(move || {
-            let b = rand_bytes_32();  // Class 1: XOR with random
+            let b = rand_bytes_32(); // Class 1: XOR with random
             std::hint::black_box(xor_bytes(&a, &b));
         })
     }
@@ -250,7 +259,8 @@ impl TestCase for XorOperation {
             let a = [0xABu8; 32];
             let b = [0x00u8; 32];  // Class 0: XOR with all zeros
             std::hint::black_box(xor_bytes(&a, &b));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn random_code(&self) -> String {
@@ -258,7 +268,8 @@ impl TestCase for XorOperation {
             let a = [0xABu8; 32];
             let b = rand_bytes_32();  // Class 1: XOR with random
             std::hint::black_box(xor_bytes(&a, &b));
-        "#.to_string()
+        "#
+        .to_string()
     }
 
     fn helper_code(&self) -> String {
@@ -277,7 +288,8 @@ fn rand_bytes_32() -> [u8; 32] {
     thread_rng().fill(&mut arr[..]);
     arr
 }
-        "#.to_string()
+        "#
+        .to_string()
     }
 }
 

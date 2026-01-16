@@ -14,16 +14,16 @@ pub mod metrics;
 pub mod report;
 pub mod test_cases;
 
-use adapters::timing_oracle_adapter::TimingOracleDetector;
 use adapters::dudect_adapter::DudectDetector;
+use adapters::timing_oracle_adapter::TimingOracleDetector;
 use adapters::Detector;
 use metrics::{
     generate_roc_curve, measure_detection_rate, measure_false_positive_rate,
     measure_sample_efficiency, measure_sample_efficiency_stats, SampleEfficiencyStats,
 };
 use report::{create_tool_result, BenchmarkResults, TestCaseComparison};
-use test_cases::{all_test_cases, leaky_test_cases, safe_test_cases, TestCase};
 use std::collections::HashMap;
+use test_cases::{all_test_cases, leaky_test_cases, safe_test_cases, TestCase};
 
 /// Configuration for benchmark run
 pub struct BenchmarkConfig {
@@ -79,18 +79,20 @@ pub fn run_comparison_benchmark(config: BenchmarkConfig) {
     let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
-    let detectors: Vec<Box<dyn Detector>> = vec![
-        Box::new(timing_oracle),
-        Box::new(dudect),
-    ];
+    let detectors: Vec<Box<dyn Detector>> = vec![Box::new(timing_oracle), Box::new(dudect)];
 
     // Run tests on all test cases
     let test_cases = all_test_cases();
 
     for test_case in &test_cases {
-        println!("\n📝 Testing: {} (expected: {})",
+        println!(
+            "\n📝 Testing: {} (expected: {})",
             test_case.name(),
-            if test_case.expected_leaky() { "LEAKY" } else { "SAFE" }
+            if test_case.expected_leaky() {
+                "LEAKY"
+            } else {
+                "SAFE"
+            }
         );
         println!("─────────────────────────────────────────");
 
@@ -116,16 +118,19 @@ pub fn run_comparison_benchmark(config: BenchmarkConfig) {
                 )
             };
 
-            println!("    Detection rate: {:.1}%", detection_result.detection_rate * 100.0);
+            println!(
+                "    Detection rate: {:.1}%",
+                detection_result.detection_rate * 100.0
+            );
             println!("    Avg confidence: {:.3}", detection_result.avg_confidence);
-            println!("    Avg time: {:.2}s", detection_result.avg_duration.as_secs_f64());
+            println!(
+                "    Avg time: {:.2}s",
+                detection_result.avg_duration.as_secs_f64()
+            );
 
             // Measure sample efficiency (only on leaky cases)
             let efficiency_result = if test_case.expected_leaky() {
-                let eff = measure_sample_efficiency(
-                    detector.as_ref(),
-                    test_case.as_ref(),
-                );
+                let eff = measure_sample_efficiency(detector.as_ref(), test_case.as_ref());
                 if let Some(min_samples) = eff.min_samples_to_detect {
                     println!("    Min samples to detect: {}", min_samples);
                 } else {
@@ -222,18 +227,20 @@ pub fn run_detection_comparison(config: &BenchmarkConfig) -> BenchmarkResults {
     let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
-    let detectors: Vec<Box<dyn Detector>> = vec![
-        Box::new(timing_oracle),
-        Box::new(dudect),
-    ];
+    let detectors: Vec<Box<dyn Detector>> = vec![Box::new(timing_oracle), Box::new(dudect)];
 
     // Run tests on all test cases
     let test_cases = all_test_cases();
 
     for test_case in &test_cases {
-        eprintln!("\n📝 Testing: {} (expected: {})",
+        eprintln!(
+            "\n📝 Testing: {} (expected: {})",
             test_case.name(),
-            if test_case.expected_leaky() { "LEAKY" } else { "SAFE" }
+            if test_case.expected_leaky() {
+                "LEAKY"
+            } else {
+                "SAFE"
+            }
         );
 
         let mut tool_results = Vec::new();
@@ -258,16 +265,19 @@ pub fn run_detection_comparison(config: &BenchmarkConfig) -> BenchmarkResults {
                 )
             };
 
-            eprintln!("    Detection rate: {:.1}%", detection_result.detection_rate * 100.0);
+            eprintln!(
+                "    Detection rate: {:.1}%",
+                detection_result.detection_rate * 100.0
+            );
             eprintln!("    Avg samples: {}", detection_result.avg_samples_used);
-            eprintln!("    Time/sample: {:.1}ns", detection_result.avg_time_per_sample.as_nanos());
+            eprintln!(
+                "    Time/sample: {:.1}ns",
+                detection_result.avg_time_per_sample.as_nanos()
+            );
 
             // Measure sample efficiency (only on leaky cases, for min_samples_to_detect field)
             let efficiency_result = if test_case.expected_leaky() {
-                measure_sample_efficiency(
-                    detector.as_ref(),
-                    test_case.as_ref(),
-                )
+                measure_sample_efficiency(detector.as_ref(), test_case.as_ref())
             } else {
                 metrics::SampleEfficiencyResult {
                     min_samples_to_detect: None,
@@ -301,10 +311,7 @@ pub fn run_roc_analysis(config: &BenchmarkConfig) -> Vec<metrics::RocCurveResult
     let timing_oracle = TimingOracleDetector::new();
     let dudect = DudectDetector::new();
 
-    let detectors: Vec<Box<dyn Detector>> = vec![
-        Box::new(timing_oracle),
-        Box::new(dudect),
-    ];
+    let detectors: Vec<Box<dyn Detector>> = vec![Box::new(timing_oracle), Box::new(dudect)];
 
     let leaky_cases = leaky_test_cases();
     let safe_cases = safe_test_cases();
@@ -338,7 +345,9 @@ pub fn run_roc_analysis(config: &BenchmarkConfig) -> Vec<metrics::RocCurveResult
 }
 
 /// Run sample efficiency analysis (Section 3)
-pub fn run_efficiency_analysis(config: &BenchmarkConfig) -> HashMap<String, HashMap<String, SampleEfficiencyStats>> {
+pub fn run_efficiency_analysis(
+    config: &BenchmarkConfig,
+) -> HashMap<String, HashMap<String, SampleEfficiencyStats>> {
     let mut results: HashMap<String, HashMap<String, SampleEfficiencyStats>> = HashMap::new();
 
     // Initialize detectors

@@ -32,16 +32,16 @@ fn mde_calibrated_power_curve() {
     const TRIALS_PER_MULTIPLE: usize = 80;
     const SAMPLES: usize = 5_000;
 
-    eprintln!("\n[mde_power_curve] Phase 1: Estimating MDE from {} null trials", MDE_ESTIMATION_TRIALS);
+    eprintln!(
+        "\n[mde_power_curve] Phase 1: Estimating MDE from {} null trials",
+        MDE_ESTIMATION_TRIALS
+    );
 
     // Phase 1: Estimate MDE from null distribution
     let mut mde_estimates = Vec::with_capacity(MDE_ESTIMATION_TRIALS);
 
     for trial in 0..MDE_ESTIMATION_TRIALS {
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || rand::random::<[u8; 32]>(),
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
 
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .time_budget(Duration::from_secs(10))
@@ -51,22 +51,27 @@ fn mde_calibrated_power_curve() {
             });
 
         match outcome {
-            Outcome::Pass { effect, .. } |
-            Outcome::Fail { effect, .. } |
-            Outcome::Inconclusive { effect, .. } => {
+            Outcome::Pass { effect, .. }
+            | Outcome::Fail { effect, .. }
+            | Outcome::Inconclusive { effect, .. } => {
                 // Use credible interval width as proxy for MDE
                 let ci_width = effect.credible_interval_ns.1 - effect.credible_interval_ns.0;
                 mde_estimates.push(ci_width / 2.0); // Half-width is approximate MDE
             }
             Outcome::Unmeasurable { recommendation, .. } => {
-                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
+                panic!(
+                    "Trial {} returned Unmeasurable: {}",
+                    trial + 1,
+                    recommendation
+                );
             }
         }
 
         if (trial + 1) % 25 == 0 {
             eprintln!(
                 "  MDE estimation: {}/{} trials complete",
-                trial + 1, MDE_ESTIMATION_TRIALS
+                trial + 1,
+                MDE_ESTIMATION_TRIALS
             );
         }
     }
@@ -86,8 +91,11 @@ fn mde_calibrated_power_curve() {
     let mde_multiples = [0.5, 1.0, 2.0, 3.0, 5.0];
     let mut power_results = Vec::new();
 
-    eprintln!("\n[mde_power_curve] Phase 2: Testing power at {} MDE multiples, {} trials each",
-              mde_multiples.len(), TRIALS_PER_MULTIPLE);
+    eprintln!(
+        "\n[mde_power_curve] Phase 2: Testing power at {} MDE multiples, {} trials each",
+        mde_multiples.len(),
+        TRIALS_PER_MULTIPLE
+    );
 
     for &multiple in &mde_multiples {
         let effect_ns = median_mde_ns * multiple;
@@ -99,7 +107,7 @@ fn mde_calibrated_power_curve() {
             let inputs = InputPair::new(|| false, || true);
 
             let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-            .time_budget(Duration::from_secs(10))
+                .time_budget(Duration::from_secs(10))
                 .max_samples(SAMPLES)
                 .test(inputs, |should_delay| {
                     if *should_delay && effect_ns > 0.0 {
@@ -115,14 +123,21 @@ fn mde_calibrated_power_curve() {
                 Outcome::Fail { .. } => {
                     detections += 1;
                 }
-                Outcome::Inconclusive { leak_probability, .. } => {
+                Outcome::Inconclusive {
+                    leak_probability, ..
+                } => {
                     // Count as detection if leak_probability > 50%
                     if leak_probability > 0.5 {
                         detections += 1;
                     }
                 }
                 Outcome::Unmeasurable { recommendation, .. } => {
-                    panic!("Trial {} at {:.1}×MDE returned Unmeasurable: {}", trial + 1, multiple, recommendation);
+                    panic!(
+                        "Trial {} at {:.1}×MDE returned Unmeasurable: {}",
+                        trial + 1,
+                        multiple,
+                        recommendation
+                    );
                 }
             }
 
@@ -130,7 +145,11 @@ fn mde_calibrated_power_curve() {
                 let rate = detections as f64 / (trial + 1) as f64;
                 eprintln!(
                     "  {:.1}×MDE ({:.0}ns): {}/{} detected ({:.0}%)",
-                    multiple, effect_ns, detections, trial + 1, rate * 100.0
+                    multiple,
+                    effect_ns,
+                    detections,
+                    trial + 1,
+                    rate * 100.0
                 );
             }
         }
@@ -143,7 +162,11 @@ fn mde_calibrated_power_curve() {
 
         eprintln!(
             "[mde_power_curve] {:.1}×MDE ({:.0}ns): power={:.1}% [95% CI: {:.1}%-{:.1}%]",
-            multiple, effect_ns, power * 100.0, ci_low * 100.0, ci_high * 100.0
+            multiple,
+            effect_ns,
+            power * 100.0,
+            ci_low * 100.0,
+            ci_high * 100.0
         );
     }
 
@@ -156,12 +179,16 @@ fn mde_calibrated_power_curve() {
         assert!(
             power_curr >= power_prev - 0.10,
             "Power decreased: {:.1}×MDE ({:.0}%) < {:.1}×MDE ({:.0}%)",
-            mult_curr, power_curr * 100.0, mult_prev, power_prev * 100.0
+            mult_curr,
+            power_curr * 100.0,
+            mult_prev,
+            power_prev * 100.0
         );
     }
 
     // 2. Power at 2×MDE should be ≥ 80% (standard criterion)
-    let power_at_2x = power_results.iter()
+    let power_at_2x = power_results
+        .iter()
         .find(|(m, _)| (*m - 2.0).abs() < 0.01)
         .map(|(_, p)| *p)
         .unwrap_or(0.0);
@@ -175,7 +202,8 @@ fn mde_calibrated_power_curve() {
     );
 
     // 3. Power at 5×MDE should be very high (≥90%)
-    let power_at_5x = power_results.iter()
+    let power_at_5x = power_results
+        .iter()
         .find(|(m, _)| (*m - 5.0).abs() < 0.01)
         .map(|(_, p)| *p)
         .unwrap_or(0.0);
@@ -187,7 +215,8 @@ fn mde_calibrated_power_curve() {
     );
 
     // 4. Power at 0.5×MDE should be low (≤50%)
-    let power_at_half = power_results.iter()
+    let power_at_half = power_results
+        .iter()
         .find(|(m, _)| (*m - 0.5).abs() < 0.01)
         .map(|(_, p)| *p)
         .unwrap_or(1.0);
@@ -220,42 +249,49 @@ fn mde_scaling_validation() {
     let sample_sizes = [5_000usize, 20_000usize];
     let mut mde_medians = Vec::new();
 
-    eprintln!("\n[mde_scaling] Testing MDE at {} sample sizes, {} trials each",
-              sample_sizes.len(), TRIALS_PER_N);
+    eprintln!(
+        "\n[mde_scaling] Testing MDE at {} sample sizes, {} trials each",
+        sample_sizes.len(),
+        TRIALS_PER_N
+    );
 
     for &samples in &sample_sizes {
         let mut mdes = Vec::with_capacity(TRIALS_PER_N);
 
         for trial in 0..TRIALS_PER_N {
-            let inputs = InputPair::new(
-                || [0u8; 32],
-                || rand::random::<[u8; 32]>(),
-            );
+            let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
 
             let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-            .time_budget(Duration::from_secs(10))
+                .time_budget(Duration::from_secs(10))
                 .max_samples(samples)
                 .test(inputs, |data| {
                     std::hint::black_box(data);
                 });
 
             match outcome {
-                Outcome::Pass { effect, .. } |
-                Outcome::Fail { effect, .. } |
-                Outcome::Inconclusive { effect, .. } => {
+                Outcome::Pass { effect, .. }
+                | Outcome::Fail { effect, .. }
+                | Outcome::Inconclusive { effect, .. } => {
                     // Use credible interval width as proxy for MDE
                     let ci_width = effect.credible_interval_ns.1 - effect.credible_interval_ns.0;
                     mdes.push(ci_width / 2.0); // Half-width is approximate MDE
                 }
                 Outcome::Unmeasurable { recommendation, .. } => {
-                    panic!("Trial {} at n={} returned Unmeasurable: {}", trial + 1, samples, recommendation);
+                    panic!(
+                        "Trial {} at n={} returned Unmeasurable: {}",
+                        trial + 1,
+                        samples,
+                        recommendation
+                    );
                 }
             }
 
             if (trial + 1) % 10 == 0 {
                 eprintln!(
                     "  n={}: {}/{} trials complete",
-                    samples, trial + 1, TRIALS_PER_N
+                    samples,
+                    trial + 1,
+                    TRIALS_PER_N
                 );
             }
         }
@@ -289,14 +325,18 @@ fn mde_scaling_validation() {
     assert!(
         (1.5..=2.5).contains(&observed_ratio),
         "MDE ratio {:.2} outside acceptable range [1.5, 2.5] (expected ~{:.1})",
-        observed_ratio, expected_ratio
+        observed_ratio,
+        expected_ratio
     );
 
     // Additional check: larger sample size should have smaller MDE
     assert!(
         mde_large < mde_small,
         "MDE did not decrease with more samples: n={}→{:.1}ns, n={}→{:.1}ns",
-        n_small, mde_small, n_large, mde_large
+        n_small,
+        mde_small,
+        n_large,
+        mde_large
     );
 
     eprintln!("[mde_scaling] PASSED: MDE scales correctly with sample size");
@@ -316,7 +356,10 @@ fn large_effect_detection() {
     const SAMPLES: usize = 10_000;
     const EFFECT_US: f64 = 10.0; // 10 microseconds
 
-    eprintln!("\n[large_effect] Testing {:.0}μs effect over {} trials", EFFECT_US, TRIALS);
+    eprintln!(
+        "\n[large_effect] Testing {:.0}μs effect over {} trials",
+        EFFECT_US, TRIALS
+    );
 
     let mut detections = 0;
     let mut leak_probs = Vec::with_capacity(TRIALS);
@@ -335,15 +378,21 @@ fn large_effect_detection() {
             });
 
         match outcome {
-            Outcome::Pass { leak_probability, .. } => {
+            Outcome::Pass {
+                leak_probability, ..
+            } => {
                 leak_probs.push(leak_probability);
                 // Not detected
             }
-            Outcome::Fail { leak_probability, .. } => {
+            Outcome::Fail {
+                leak_probability, ..
+            } => {
                 leak_probs.push(leak_probability);
                 detections += 1;
             }
-            Outcome::Inconclusive { leak_probability, .. } => {
+            Outcome::Inconclusive {
+                leak_probability, ..
+            } => {
                 leak_probs.push(leak_probability);
                 // Count as detection if leak_probability > 50%
                 if leak_probability > 0.5 {
@@ -351,7 +400,11 @@ fn large_effect_detection() {
                 }
             }
             Outcome::Unmeasurable { recommendation, .. } => {
-                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
+                panic!(
+                    "Trial {} returned Unmeasurable: {}",
+                    trial + 1,
+                    recommendation
+                );
             }
         }
 
@@ -359,7 +412,11 @@ fn large_effect_detection() {
             let rate = detections as f64 / (trial + 1) as f64;
             eprintln!(
                 "  Trial {}/{}: {}/{} detected ({:.0}%), avg P(leak)={:.1}%",
-                trial + 1, TRIALS, detections, trial + 1, rate * 100.0,
+                trial + 1,
+                TRIALS,
+                detections,
+                trial + 1,
+                rate * 100.0,
                 leak_probs.iter().sum::<f64>() / leak_probs.len() as f64 * 100.0
             );
         }
@@ -372,15 +429,21 @@ fn large_effect_detection() {
 
     eprintln!(
         "\n[large_effect] Power: {:.0}% [95% CI: {:.0}%-{:.0}%]",
-        power * 100.0, ci_low * 100.0, ci_high * 100.0
+        power * 100.0,
+        ci_low * 100.0,
+        ci_high * 100.0
     );
-    eprintln!("[large_effect] Avg leak probability: {:.1}%", avg_leak_prob * 100.0);
+    eprintln!(
+        "[large_effect] Avg leak probability: {:.1}%",
+        avg_leak_prob * 100.0
+    );
 
     // Large effects should be detected almost always
     assert!(
         power >= 0.90,
         "Large effect ({:.0}μs) detected only {:.0}% of the time (expected ≥90%)",
-        EFFECT_US, power * 100.0
+        EFFECT_US,
+        power * 100.0
     );
 
     // Average leak probability should be very high
@@ -407,7 +470,10 @@ fn negligible_effect_fpr() {
     const SAMPLES: usize = 5_000;
     const EFFECT_NS: u64 = 1; // 1 nanosecond - essentially noise
 
-    eprintln!("\n[negligible_fpr] Testing {}ns effect over {} trials", EFFECT_NS, TRIALS);
+    eprintln!(
+        "\n[negligible_fpr] Testing {}ns effect over {} trials",
+        EFFECT_NS, TRIALS
+    );
 
     let mut detections = 0;
 
@@ -431,14 +497,20 @@ fn negligible_effect_fpr() {
             Outcome::Fail { .. } => {
                 detections += 1;
             }
-            Outcome::Inconclusive { leak_probability, .. } => {
+            Outcome::Inconclusive {
+                leak_probability, ..
+            } => {
                 // Count as detection if leak_probability > 50%
                 if leak_probability > 0.5 {
                     detections += 1;
                 }
             }
             Outcome::Unmeasurable { recommendation, .. } => {
-                panic!("Trial {} returned Unmeasurable: {}", trial + 1, recommendation);
+                panic!(
+                    "Trial {} returned Unmeasurable: {}",
+                    trial + 1,
+                    recommendation
+                );
             }
         }
 
@@ -446,7 +518,11 @@ fn negligible_effect_fpr() {
             let rate = detections as f64 / (trial + 1) as f64;
             eprintln!(
                 "  Trial {}/{}: {}/{} detected ({:.0}%)",
-                trial + 1, TRIALS, detections, trial + 1, rate * 100.0
+                trial + 1,
+                TRIALS,
+                detections,
+                trial + 1,
+                rate * 100.0
             );
         }
     }
@@ -456,7 +532,9 @@ fn negligible_effect_fpr() {
 
     eprintln!(
         "\n[negligible_fpr] FPR: {:.0}% [95% CI: {:.0}%-{:.0}%]",
-        fpr * 100.0, ci_low * 100.0, ci_high * 100.0
+        fpr * 100.0,
+        ci_low * 100.0,
+        ci_high * 100.0
     );
 
     // Negligible effects should have low detection rate
@@ -464,7 +542,8 @@ fn negligible_effect_fpr() {
     assert!(
         fpr <= 0.20,
         "Negligible effect ({}ns) detected {:.0}% of the time (expected ≤20%)",
-        EFFECT_NS, fpr * 100.0
+        EFFECT_NS,
+        fpr * 100.0
     );
 
     eprintln!("[negligible_fpr] PASSED: Negligible effects don't trigger false positives");

@@ -84,7 +84,9 @@ impl ResolutionWarning {
     /// Get the severity of this warning.
     pub fn severity(&self) -> PreflightSeverity {
         match self {
-            ResolutionWarning::InsufficientResolution { .. } => PreflightSeverity::ResultUndermining,
+            ResolutionWarning::InsufficientResolution { .. } => {
+                PreflightSeverity::ResultUndermining
+            }
             ResolutionWarning::NonMonotonic { .. } => PreflightSeverity::ResultUndermining,
             ResolutionWarning::HighQuantization { .. } => PreflightSeverity::Informational,
         }
@@ -118,7 +120,10 @@ impl ResolutionWarning {
                     unique_values, total_samples
                 )
             }
-            ResolutionWarning::NonMonotonic { violations, max_jump_cycles } => {
+            ResolutionWarning::NonMonotonic {
+                violations,
+                max_jump_cycles,
+            } => {
                 format!(
                     "Timer is not monotonic! Detected {} violations (max jump: {} cycles). \
                      Results are completely invalid.",
@@ -135,15 +140,18 @@ impl ResolutionWarning {
                 "Consider: (1) measuring multiple iterations per sample, \
                  (2) using a more complex operation, or \
                  (3) running with `sudo` to enable kperf (macOS) or perf_event (Linux) \
-                 for ~1ns resolution.".to_string(),
+                 for ~1ns resolution."
+                    .to_string(),
             ),
             ResolutionWarning::HighQuantization { .. } => Some(
                 "Consider running with `sudo` to enable PMU-based timing \
-                 for better resolution.".to_string(),
+                 for better resolution."
+                    .to_string(),
             ),
             ResolutionWarning::NonMonotonic { .. } => Some(
                 "This usually indicates a kernel/BIOS bug or CPU frequency scaling \
-                 artifacts. Try disabling frequency scaling or using a different timer.".to_string(),
+                 artifacts. Try disabling frequency scaling or using a different timer."
+                    .to_string(),
             ),
         }
     }
@@ -163,11 +171,7 @@ impl ResolutionWarning {
                 self.description(),
                 guidance,
             ),
-            None => PreflightWarningInfo::new(
-                category,
-                self.severity(),
-                self.description(),
-            ),
+            None => PreflightWarningInfo::new(category, self.severity(), self.description()),
         }
     }
 }
@@ -243,7 +247,8 @@ pub fn resolution_check(samples: &[f64], timer_resolution_ns: f64) -> Option<Res
     let zero_fraction = zero_count as f64 / samples.len() as f64;
 
     // Check for critical issue: very few unique values AND many zeros
-    let expected_unique = (samples.len() as f64 / 1000.0 * MIN_UNIQUE_PER_1000 as f64).max(10.0) as usize;
+    let expected_unique =
+        (samples.len() as f64 / 1000.0 * MIN_UNIQUE_PER_1000 as f64).max(10.0) as usize;
 
     if unique_count < expected_unique && zero_fraction > CRITICAL_ZERO_FRACTION {
         return Some(ResolutionWarning::InsufficientResolution {
@@ -272,7 +277,9 @@ mod tests {
     #[test]
     fn test_good_resolution() {
         // Simulated good data with many unique values
-        let samples: Vec<f64> = (0..1000).map(|x| (x as f64) + rand::random::<f64>()).collect();
+        let samples: Vec<f64> = (0..1000)
+            .map(|x| (x as f64) + rand::random::<f64>())
+            .collect();
         let result = resolution_check(&samples, 1.0);
         assert!(result.is_none(), "Good resolution should not warn");
     }
@@ -286,21 +293,28 @@ mod tests {
 
         let result = resolution_check(&samples, 41.0);
         assert!(result.is_some(), "Should detect insufficient resolution");
-        assert!(result.as_ref().unwrap().is_result_undermining(), "Should be result-undermining");
-        assert_eq!(result.as_ref().unwrap().severity(), PreflightSeverity::ResultUndermining);
+        assert!(
+            result.as_ref().unwrap().is_result_undermining(),
+            "Should be result-undermining"
+        );
+        assert_eq!(
+            result.as_ref().unwrap().severity(),
+            PreflightSeverity::ResultUndermining
+        );
     }
 
     #[test]
     fn test_high_quantization() {
         // Few unique values but not critically few zeros
-        let samples: Vec<f64> = (0..1000)
-            .map(|x| ((x % 5) * 10) as f64 + 100.0)
-            .collect();
+        let samples: Vec<f64> = (0..1000).map(|x| ((x % 5) * 10) as f64 + 100.0).collect();
 
         let result = resolution_check(&samples, 10.0);
         // May or may not trigger depending on thresholds
         if let Some(warning) = result {
-            assert!(!warning.is_result_undermining(), "Quantization warning should not undermine results");
+            assert!(
+                !warning.is_result_undermining(),
+                "Quantization warning should not undermine results"
+            );
             assert_eq!(warning.severity(), PreflightSeverity::Informational);
         }
     }
@@ -313,7 +327,10 @@ mod tests {
             zero_fraction: 0.8,
             timer_resolution_ns: 41.0,
         };
-        assert_eq!(insufficient.severity(), PreflightSeverity::ResultUndermining);
+        assert_eq!(
+            insufficient.severity(),
+            PreflightSeverity::ResultUndermining
+        );
         assert!(insufficient.is_result_undermining());
 
         let high_quant = ResolutionWarning::HighQuantization {

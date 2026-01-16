@@ -134,10 +134,10 @@ fn expand_timing_test(input: TimingTestInput, _checked: bool) -> proc_macro2::To
 
     // Default oracle if not specified - use AdjacentNetwork attacker model with 30s time budget
     let oracle_expr = oracle.unwrap_or_else(|| {
-        syn::parse_quote!(
-            ::timing_oracle::TimingOracle::for_attacker(::timing_oracle::AttackerModel::AdjacentNetwork)
-                .time_budget(::std::time::Duration::from_secs(30))
+        syn::parse_quote!(::timing_oracle::TimingOracle::for_attacker(
+            ::timing_oracle::AttackerModel::AdjacentNetwork
         )
+        .time_budget(::std::time::Duration::from_secs(30)))
     });
 
     // Generate the timing test code - both macros now return Outcome directly

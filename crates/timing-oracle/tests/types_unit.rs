@@ -20,77 +20,158 @@ use timing_oracle::{
 
 #[test]
 fn exploitability_negligible_zero() {
-    assert_eq!(Exploitability::from_effect_ns(0.0), Exploitability::Negligible);
+    assert_eq!(
+        Exploitability::from_effect_ns(0.0),
+        Exploitability::Negligible
+    );
 }
 
 #[test]
 fn exploitability_negligible_small() {
-    assert_eq!(Exploitability::from_effect_ns(50.0), Exploitability::Negligible);
-    assert_eq!(Exploitability::from_effect_ns(99.0), Exploitability::Negligible);
-    assert_eq!(Exploitability::from_effect_ns(99.9), Exploitability::Negligible);
+    assert_eq!(
+        Exploitability::from_effect_ns(50.0),
+        Exploitability::Negligible
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(99.0),
+        Exploitability::Negligible
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(99.9),
+        Exploitability::Negligible
+    );
 }
 
 #[test]
 fn exploitability_boundary_100ns() {
     // < 100 is Negligible, >= 100 is PossibleLAN
-    assert_eq!(Exploitability::from_effect_ns(99.99), Exploitability::Negligible);
-    assert_eq!(Exploitability::from_effect_ns(100.0), Exploitability::PossibleLAN);
-    assert_eq!(Exploitability::from_effect_ns(100.01), Exploitability::PossibleLAN);
+    assert_eq!(
+        Exploitability::from_effect_ns(99.99),
+        Exploitability::Negligible
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(100.0),
+        Exploitability::PossibleLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(100.01),
+        Exploitability::PossibleLAN
+    );
 }
 
 #[test]
 fn exploitability_possible_lan() {
-    assert_eq!(Exploitability::from_effect_ns(200.0), Exploitability::PossibleLAN);
-    assert_eq!(Exploitability::from_effect_ns(499.0), Exploitability::PossibleLAN);
+    assert_eq!(
+        Exploitability::from_effect_ns(200.0),
+        Exploitability::PossibleLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(499.0),
+        Exploitability::PossibleLAN
+    );
 }
 
 #[test]
 fn exploitability_boundary_500ns() {
     // < 500 is PossibleLAN, >= 500 is LikelyLAN
-    assert_eq!(Exploitability::from_effect_ns(499.99), Exploitability::PossibleLAN);
-    assert_eq!(Exploitability::from_effect_ns(500.0), Exploitability::LikelyLAN);
-    assert_eq!(Exploitability::from_effect_ns(500.01), Exploitability::LikelyLAN);
+    assert_eq!(
+        Exploitability::from_effect_ns(499.99),
+        Exploitability::PossibleLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(500.0),
+        Exploitability::LikelyLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(500.01),
+        Exploitability::LikelyLAN
+    );
 }
 
 #[test]
 fn exploitability_likely_lan() {
-    assert_eq!(Exploitability::from_effect_ns(1_000.0), Exploitability::LikelyLAN);
-    assert_eq!(Exploitability::from_effect_ns(10_000.0), Exploitability::LikelyLAN);
-    assert_eq!(Exploitability::from_effect_ns(19_999.0), Exploitability::LikelyLAN);
+    assert_eq!(
+        Exploitability::from_effect_ns(1_000.0),
+        Exploitability::LikelyLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(10_000.0),
+        Exploitability::LikelyLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(19_999.0),
+        Exploitability::LikelyLAN
+    );
 }
 
 #[test]
 fn exploitability_boundary_20us() {
     // < 20000 is LikelyLAN, >= 20000 is PossibleRemote
-    assert_eq!(Exploitability::from_effect_ns(19_999.99), Exploitability::LikelyLAN);
-    assert_eq!(Exploitability::from_effect_ns(20_000.0), Exploitability::PossibleRemote);
-    assert_eq!(Exploitability::from_effect_ns(20_000.01), Exploitability::PossibleRemote);
+    assert_eq!(
+        Exploitability::from_effect_ns(19_999.99),
+        Exploitability::LikelyLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(20_000.0),
+        Exploitability::PossibleRemote
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(20_000.01),
+        Exploitability::PossibleRemote
+    );
 }
 
 #[test]
 fn exploitability_possible_remote() {
-    assert_eq!(Exploitability::from_effect_ns(50_000.0), Exploitability::PossibleRemote);
-    assert_eq!(Exploitability::from_effect_ns(1_000_000.0), Exploitability::PossibleRemote);
+    assert_eq!(
+        Exploitability::from_effect_ns(50_000.0),
+        Exploitability::PossibleRemote
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(1_000_000.0),
+        Exploitability::PossibleRemote
+    );
 }
 
 #[test]
 fn exploitability_negative_uses_abs() {
     // Negative values should use absolute value
-    assert_eq!(Exploitability::from_effect_ns(-50.0), Exploitability::Negligible);
-    assert_eq!(Exploitability::from_effect_ns(-100.0), Exploitability::PossibleLAN);
-    assert_eq!(Exploitability::from_effect_ns(-500.0), Exploitability::LikelyLAN);
-    assert_eq!(Exploitability::from_effect_ns(-20_000.0), Exploitability::PossibleRemote);
+    assert_eq!(
+        Exploitability::from_effect_ns(-50.0),
+        Exploitability::Negligible
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(-100.0),
+        Exploitability::PossibleLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(-500.0),
+        Exploitability::LikelyLAN
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(-20_000.0),
+        Exploitability::PossibleRemote
+    );
 }
 
 #[test]
 fn exploitability_special_values() {
     // NaN abs() is NaN, which is not < 100, not < 500, not < 20000
     // So NaN should fall through to PossibleRemote
-    assert_eq!(Exploitability::from_effect_ns(f64::NAN), Exploitability::PossibleRemote);
+    assert_eq!(
+        Exploitability::from_effect_ns(f64::NAN),
+        Exploitability::PossibleRemote
+    );
 
     // Infinity is > 20000
-    assert_eq!(Exploitability::from_effect_ns(f64::INFINITY), Exploitability::PossibleRemote);
-    assert_eq!(Exploitability::from_effect_ns(f64::NEG_INFINITY), Exploitability::PossibleRemote);
+    assert_eq!(
+        Exploitability::from_effect_ns(f64::INFINITY),
+        Exploitability::PossibleRemote
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(f64::NEG_INFINITY),
+        Exploitability::PossibleRemote
+    );
 }
 
 // ============================================================================
@@ -99,75 +180,156 @@ fn exploitability_special_values() {
 
 #[test]
 fn quality_excellent() {
-    assert_eq!(MeasurementQuality::from_mde_ns(0.5), MeasurementQuality::Excellent);
-    assert_eq!(MeasurementQuality::from_mde_ns(1.0), MeasurementQuality::Excellent);
-    assert_eq!(MeasurementQuality::from_mde_ns(4.9), MeasurementQuality::Excellent);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.5),
+        MeasurementQuality::Excellent
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(1.0),
+        MeasurementQuality::Excellent
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(4.9),
+        MeasurementQuality::Excellent
+    );
 }
 
 #[test]
 fn quality_boundary_5ns() {
     // < 5 is Excellent, >= 5 is Good
-    assert_eq!(MeasurementQuality::from_mde_ns(4.99), MeasurementQuality::Excellent);
-    assert_eq!(MeasurementQuality::from_mde_ns(5.0), MeasurementQuality::Good);
-    assert_eq!(MeasurementQuality::from_mde_ns(5.01), MeasurementQuality::Good);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(4.99),
+        MeasurementQuality::Excellent
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(5.0),
+        MeasurementQuality::Good
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(5.01),
+        MeasurementQuality::Good
+    );
 }
 
 #[test]
 fn quality_good() {
-    assert_eq!(MeasurementQuality::from_mde_ns(10.0), MeasurementQuality::Good);
-    assert_eq!(MeasurementQuality::from_mde_ns(19.9), MeasurementQuality::Good);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(10.0),
+        MeasurementQuality::Good
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(19.9),
+        MeasurementQuality::Good
+    );
 }
 
 #[test]
 fn quality_boundary_20ns() {
     // < 20 is Good, >= 20 is Poor
-    assert_eq!(MeasurementQuality::from_mde_ns(19.99), MeasurementQuality::Good);
-    assert_eq!(MeasurementQuality::from_mde_ns(20.0), MeasurementQuality::Poor);
-    assert_eq!(MeasurementQuality::from_mde_ns(20.01), MeasurementQuality::Poor);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(19.99),
+        MeasurementQuality::Good
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(20.0),
+        MeasurementQuality::Poor
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(20.01),
+        MeasurementQuality::Poor
+    );
 }
 
 #[test]
 fn quality_poor() {
-    assert_eq!(MeasurementQuality::from_mde_ns(50.0), MeasurementQuality::Poor);
-    assert_eq!(MeasurementQuality::from_mde_ns(99.9), MeasurementQuality::Poor);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(50.0),
+        MeasurementQuality::Poor
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(99.9),
+        MeasurementQuality::Poor
+    );
 }
 
 #[test]
 fn quality_boundary_100ns() {
     // < 100 is Poor, >= 100 is TooNoisy
-    assert_eq!(MeasurementQuality::from_mde_ns(99.99), MeasurementQuality::Poor);
-    assert_eq!(MeasurementQuality::from_mde_ns(100.0), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(100.01), MeasurementQuality::TooNoisy);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(99.99),
+        MeasurementQuality::Poor
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(100.0),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(100.01),
+        MeasurementQuality::TooNoisy
+    );
 }
 
 #[test]
 fn quality_too_noisy() {
-    assert_eq!(MeasurementQuality::from_mde_ns(500.0), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(1000.0), MeasurementQuality::TooNoisy);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(500.0),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(1000.0),
+        MeasurementQuality::TooNoisy
+    );
 }
 
 #[test]
 fn quality_near_zero_is_too_noisy() {
     // MDE <= 0.01 indicates timer resolution failure
-    assert_eq!(MeasurementQuality::from_mde_ns(0.01), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(0.009), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(0.0), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(-1.0), MeasurementQuality::TooNoisy);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.01),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.009),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.0),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(-1.0),
+        MeasurementQuality::TooNoisy
+    );
 }
 
 #[test]
 fn quality_just_above_threshold() {
     // Just above 0.01 should work normally
-    assert_eq!(MeasurementQuality::from_mde_ns(0.011), MeasurementQuality::Excellent);
-    assert_eq!(MeasurementQuality::from_mde_ns(0.02), MeasurementQuality::Excellent);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.011),
+        MeasurementQuality::Excellent
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(0.02),
+        MeasurementQuality::Excellent
+    );
 }
 
 #[test]
 fn quality_special_values() {
     // Non-finite values are TooNoisy
-    assert_eq!(MeasurementQuality::from_mde_ns(f64::NAN), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(f64::INFINITY), MeasurementQuality::TooNoisy);
-    assert_eq!(MeasurementQuality::from_mde_ns(f64::NEG_INFINITY), MeasurementQuality::TooNoisy);
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(f64::NAN),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(f64::INFINITY),
+        MeasurementQuality::TooNoisy
+    );
+    assert_eq!(
+        MeasurementQuality::from_mde_ns(f64::NEG_INFINITY),
+        MeasurementQuality::TooNoisy
+    );
 }
 
 // ============================================================================
@@ -578,7 +740,11 @@ fn outcome_pass_json_roundtrip() {
     let deserialized: Outcome = serde_json::from_str(&json).unwrap();
 
     match deserialized {
-        Outcome::Pass { leak_probability, quality, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
             assert!((leak_probability - 0.02).abs() < 0.001);
             assert_eq!(quality, MeasurementQuality::Excellent);
         }
@@ -593,7 +759,11 @@ fn outcome_fail_json_roundtrip() {
     let deserialized: Outcome = serde_json::from_str(&json).unwrap();
 
     match deserialized {
-        Outcome::Fail { leak_probability, quality, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            quality,
+            ..
+        } => {
             assert!((leak_probability - 0.98).abs() < 0.001);
             assert_eq!(quality, MeasurementQuality::Good);
         }
@@ -608,7 +778,11 @@ fn outcome_inconclusive_json_roundtrip() {
     let deserialized: Outcome = serde_json::from_str(&json).unwrap();
 
     match deserialized {
-        Outcome::Inconclusive { leak_probability, quality, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            quality,
+            ..
+        } => {
             assert!((leak_probability - 0.5).abs() < 0.001);
             assert_eq!(quality, MeasurementQuality::Poor);
         }
@@ -628,7 +802,11 @@ fn outcome_unmeasurable_json_roundtrip() {
     let deserialized: Outcome = serde_json::from_str(&json).unwrap();
 
     match deserialized {
-        Outcome::Unmeasurable { operation_ns, platform, .. } => {
+        Outcome::Unmeasurable {
+            operation_ns,
+            platform,
+            ..
+        } => {
             assert_eq!(operation_ns, 5.5);
             assert_eq!(platform, "test platform");
         }
@@ -664,21 +842,31 @@ fn attacker_model_to_threshold_ns_presets() {
 
 #[test]
 fn attacker_model_custom() {
-    let model = AttackerModel::Custom { threshold_ns: 250.0 };
+    let model = AttackerModel::Custom {
+        threshold_ns: 250.0,
+    };
     assert_eq!(model.to_threshold_ns(), 250.0);
 }
 
 #[test]
 fn attacker_model_description() {
     // Just verify descriptions are non-empty and descriptive
-    assert!(AttackerModel::SharedHardware.description().contains("hardware"));
+    assert!(AttackerModel::SharedHardware
+        .description()
+        .contains("hardware"));
     assert!(
-        AttackerModel::AdjacentNetwork.description().contains("network")
+        AttackerModel::AdjacentNetwork
+            .description()
+            .contains("network")
             || AttackerModel::AdjacentNetwork.description().contains("LAN")
     );
     assert!(
-        AttackerModel::RemoteNetwork.description().contains("remote")
-            || AttackerModel::RemoteNetwork.description().contains("internet")
+        AttackerModel::RemoteNetwork
+            .description()
+            .contains("remote")
+            || AttackerModel::RemoteNetwork
+                .description()
+                .contains("internet")
     );
     assert!(
         AttackerModel::Research.description().contains("research")

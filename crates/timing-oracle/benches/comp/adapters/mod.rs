@@ -3,10 +3,10 @@
 //! Each adapter wraps a tool and provides a uniform interface for
 //! running timing analysis and extracting results.
 
-pub mod timing_oracle_adapter;
 pub mod dudect_adapter;
-pub mod dudect_template;
 pub mod dudect_parser;
+pub mod dudect_template;
+pub mod timing_oracle_adapter;
 
 use std::time::Duration;
 

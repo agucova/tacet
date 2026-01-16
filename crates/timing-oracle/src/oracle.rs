@@ -503,15 +503,16 @@ impl TimingOracle {
         let mut timer = self.timer_spec.create_timer();
 
         // Resolve the theta threshold based on attacker model and timer
-        let raw_theta_ns = self.config.resolve_min_effect_ns(
-            Some(timer.cycles_per_ns()),
-            Some(timer.resolution_ns()),
-        );
+        let raw_theta_ns = self
+            .config
+            .resolve_min_effect_ns(Some(timer.cycles_per_ns()), Some(timer.resolution_ns()));
         // Clamp theta to at least timer resolution to avoid degenerate priors
         // (Research mode returns 0, which causes zero prior covariance and Cholesky failure)
         let theta_ns = raw_theta_ns.max(timer.resolution_ns());
 
-        let debug_pipeline = env::var("TO_DEBUG_PIPELINE").map(|v| v != "0").unwrap_or(false);
+        let debug_pipeline = env::var("TO_DEBUG_PIPELINE")
+            .map(|v| v != "0")
+            .unwrap_or(false);
         if debug_pipeline {
             eprintln!(
                 "[DEBUG] timer={} resolution_ns={:.2} cycles_per_ns={:.3} theta_ns={:.2}",
@@ -530,7 +531,8 @@ impl TimingOracle {
         let baseline_inputs: Vec<T> = (0..total_samples_needed)
             .map(|_| inputs.baseline())
             .collect();
-        let baseline_gen_time_ns = baseline_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
+        let baseline_gen_time_ns =
+            baseline_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
 
         let sample_gen_start = Instant::now();
         let sample_inputs: Vec<T> = (0..total_samples_needed)
@@ -540,7 +542,8 @@ impl TimingOracle {
                 value
             })
             .collect();
-        let sample_gen_time_ns = sample_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
+        let sample_gen_time_ns =
+            sample_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
 
         // Step 3: Warmup
         for i in 0..self.config.warmup.min(total_samples_needed) {
@@ -587,7 +590,9 @@ impl TimingOracle {
                 operation_ns: median_ns,
                 threshold_ns,
                 platform,
-                recommendation: "Timer returned non-finite measurements; retry on a more stable system.".to_string(),
+                recommendation:
+                    "Timer returned non-finite measurements; retry on a more stable system."
+                        .to_string(),
             };
         }
 
@@ -595,25 +600,35 @@ impl TimingOracle {
         let (k, batching): (u32, BatchingInfo) = match self.config.iterations_per_sample {
             crate::config::IterationsPerSample::Fixed(k) => {
                 let k = k.max(1) as u32;
-                (k, BatchingInfo {
-                    enabled: k > 1,
+                (
                     k,
-                    ticks_per_batch: ticks_per_call * k as f64,
-                    rationale: format!("fixed batching K={}", k),
-                    unmeasurable: None,
-                })
+                    BatchingInfo {
+                        enabled: k > 1,
+                        k,
+                        ticks_per_batch: ticks_per_call * k as f64,
+                        rationale: format!("fixed batching K={}", k),
+                        unmeasurable: None,
+                    },
+                )
             }
             crate::config::IterationsPerSample::Auto => {
                 if ticks_per_call >= crate::measurement::TARGET_TICKS_PER_BATCH {
-                    (1, BatchingInfo {
-                        enabled: false,
-                        k: 1,
-                        ticks_per_batch: ticks_per_call,
-                        rationale: format!("no batching needed ({:.1} ticks/call)", ticks_per_call),
-                        unmeasurable: None,
-                    })
+                    (
+                        1,
+                        BatchingInfo {
+                            enabled: false,
+                            k: 1,
+                            ticks_per_batch: ticks_per_call,
+                            rationale: format!(
+                                "no batching needed ({:.1} ticks/call)",
+                                ticks_per_call
+                            ),
+                            unmeasurable: None,
+                        },
+                    )
                 } else {
-                    let k_raw = (crate::measurement::TARGET_TICKS_PER_BATCH / ticks_per_call).ceil() as u32;
+                    let k_raw =
+                        (crate::measurement::TARGET_TICKS_PER_BATCH / ticks_per_call).ceil() as u32;
                     let k = k_raw.clamp(1, crate::measurement::MAX_BATCH_SIZE);
                     let ticks_per_batch = ticks_per_call * k as f64;
                     let partial = ticks_per_batch < crate::measurement::TARGET_TICKS_PER_BATCH;
@@ -636,19 +651,24 @@ impl TimingOracle {
 
                         return Outcome::Unmeasurable {
                             operation_ns: median_ns,
-                            threshold_ns: resolution_ns * crate::measurement::TARGET_TICKS_PER_BATCH / k as f64,
+                            threshold_ns: resolution_ns
+                                * crate::measurement::TARGET_TICKS_PER_BATCH
+                                / k as f64,
                             platform,
                             recommendation: suggestion.to_string(),
                         };
                     }
 
-                    (k, BatchingInfo {
-                        enabled: k > 1,
+                    (
                         k,
-                        ticks_per_batch,
-                        rationale: format!("K={} ({:.1} ticks/batch)", k, ticks_per_batch),
-                        unmeasurable: None,
-                    })
+                        BatchingInfo {
+                            enabled: k > 1,
+                            k,
+                            ticks_per_batch,
+                            rationale: format!("K={} ({:.1} ticks/batch)", k, ticks_per_batch),
+                            unmeasurable: None,
+                        },
+                    )
                 }
             }
         };
@@ -662,7 +682,10 @@ impl TimingOracle {
 
         // Step 5: CALIBRATION PHASE - Collect calibration samples
         // Cap calibration samples to at most 50% of max_samples to ensure room for inference
-        let n_cal = self.config.calibration_samples.min(self.config.max_samples / 2);
+        let n_cal = self
+            .config
+            .calibration_samples
+            .min(self.config.max_samples / 2);
         if debug_pipeline && n_cal < self.config.calibration_samples {
             eprintln!(
                 "[DEBUG] calibration_samples capped: {} -> {} (max_samples={})",
@@ -738,7 +761,8 @@ impl TimingOracle {
                 return Outcome::Inconclusive {
                     reason: InconclusiveReason::DataTooNoisy {
                         message: format!("Calibration failed: {}", e),
-                        guidance: "Try increasing calibration_samples or reducing system noise".to_string(),
+                        guidance: "Try increasing calibration_samples or reducing system noise"
+                            .to_string(),
                     },
                     leak_probability: 0.5,
                     effect: EffectEstimate::default(),
@@ -780,7 +804,9 @@ impl TimingOracle {
         if debug_pipeline {
             eprintln!(
                 "[DEBUG] after calibration: n_cal={} n_total={} max_samples={}",
-                n_cal, adaptive_state.n_total(), self.config.max_samples
+                n_cal,
+                adaptive_state.n_total(),
+                self.config.max_samples
             );
         }
 
@@ -912,7 +938,11 @@ impl TimingOracle {
             }
 
             match outcome {
-                AdaptiveOutcome::LeakDetected { posterior, samples_per_class, elapsed: _ } => {
+                AdaptiveOutcome::LeakDetected {
+                    posterior,
+                    samples_per_class,
+                    elapsed: _,
+                } => {
                     return self.build_fail_outcome(
                         &posterior,
                         samples_per_class,
@@ -922,7 +952,11 @@ impl TimingOracle {
                         theta_ns,
                     );
                 }
-                AdaptiveOutcome::NoLeakDetected { posterior, samples_per_class, elapsed: _ } => {
+                AdaptiveOutcome::NoLeakDetected {
+                    posterior,
+                    samples_per_class,
+                    elapsed: _,
+                } => {
                     return self.build_pass_outcome(
                         &posterior,
                         samples_per_class,
@@ -1090,11 +1124,7 @@ fn build_diagnostics(
     let attacker_model = config.attacker_model.as_ref().map(|m| format!("{:?}", m));
 
     // Build platform string
-    let platform = format!(
-        "{}-{}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    );
+    let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
 
     Diagnostics {
         dependence_length: calibration.block_length,
@@ -1126,37 +1156,42 @@ fn build_diagnostics(
 /// Convert adaptive module's InconclusiveReason to result module's InconclusiveReason.
 fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveReason {
     match reason {
-        AdaptiveInconclusiveReason::DataTooNoisy { message, guidance, .. } => {
-            InconclusiveReason::DataTooNoisy {
-                message: message.clone(),
-                guidance: guidance.clone(),
-            }
-        }
-        AdaptiveInconclusiveReason::NotLearning { message, guidance, .. } => {
-            InconclusiveReason::NotLearning {
-                message: message.clone(),
-                guidance: guidance.clone(),
-            }
-        }
-        AdaptiveInconclusiveReason::WouldTakeTooLong { estimated_time_secs, samples_needed, guidance } => {
-            InconclusiveReason::WouldTakeTooLong {
-                estimated_time_secs: *estimated_time_secs,
-                samples_needed: *samples_needed,
-                guidance: guidance.clone(),
-            }
-        }
-        AdaptiveInconclusiveReason::TimeBudgetExceeded { current_probability, samples_collected, .. } => {
-            InconclusiveReason::TimeBudgetExceeded {
-                current_probability: *current_probability,
-                samples_collected: *samples_collected,
-            }
-        }
-        AdaptiveInconclusiveReason::SampleBudgetExceeded { current_probability, samples_collected } => {
-            InconclusiveReason::SampleBudgetExceeded {
-                current_probability: *current_probability,
-                samples_collected: *samples_collected,
-            }
-        }
+        AdaptiveInconclusiveReason::DataTooNoisy {
+            message, guidance, ..
+        } => InconclusiveReason::DataTooNoisy {
+            message: message.clone(),
+            guidance: guidance.clone(),
+        },
+        AdaptiveInconclusiveReason::NotLearning {
+            message, guidance, ..
+        } => InconclusiveReason::NotLearning {
+            message: message.clone(),
+            guidance: guidance.clone(),
+        },
+        AdaptiveInconclusiveReason::WouldTakeTooLong {
+            estimated_time_secs,
+            samples_needed,
+            guidance,
+        } => InconclusiveReason::WouldTakeTooLong {
+            estimated_time_secs: *estimated_time_secs,
+            samples_needed: *samples_needed,
+            guidance: guidance.clone(),
+        },
+        AdaptiveInconclusiveReason::TimeBudgetExceeded {
+            current_probability,
+            samples_collected,
+            ..
+        } => InconclusiveReason::TimeBudgetExceeded {
+            current_probability: *current_probability,
+            samples_collected: *samples_collected,
+        },
+        AdaptiveInconclusiveReason::SampleBudgetExceeded {
+            current_probability,
+            samples_collected,
+        } => InconclusiveReason::SampleBudgetExceeded {
+            current_probability: *current_probability,
+            samples_collected: *samples_collected,
+        },
     }
 }
 

@@ -6,7 +6,9 @@
 //! - Only the input data differs between fixed and random classes
 
 use std::time::Duration;
-use timing_oracle::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
+use timing_oracle::{
+    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
+};
 
 fn main() {
     println!("Comparing constant-time vs variable-time implementations\n");
@@ -26,7 +28,9 @@ fn main() {
     };
 
     match outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             println!("  Result: PASS (unexpected!)");
             println!("  Leak probability: {:.1}%\n", leak_probability * 100.0);
         }
@@ -39,7 +43,9 @@ fn main() {
             println!("  Leak probability: {:.1}%", leak_probability * 100.0);
             println!("  Exploitability: {:?}\n", exploitability);
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             println!("  Result: INCONCLUSIVE");
             println!("  Leak probability: {:.1}%\n", leak_probability * 100.0);
         }
@@ -59,7 +65,9 @@ fn main() {
         });
 
     match outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             println!("  Result: PASS (expected)");
             println!("  Leak probability: {:.1}%", leak_probability * 100.0);
         }
@@ -72,7 +80,9 @@ fn main() {
             println!("  Leak probability: {:.1}%", leak_probability * 100.0);
             println!("  Exploitability: {:?}", exploitability);
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             println!("  Result: INCONCLUSIVE");
             println!("  Leak probability: {:.1}%", leak_probability * 100.0);
         }

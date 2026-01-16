@@ -58,10 +58,9 @@ fn async_executor_overhead_no_false_positive() {
 
     // Use non-pathological fixed input (not all-zeros)
     let fixed_input: [u8; 32] = [
-        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-        0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-        0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-        0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e,
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
     ];
 
     // Pre-generate inputs using InputPair helper
@@ -73,14 +72,18 @@ fn async_executor_overhead_no_false_positive() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
-            rt.block_on(async { std::hint::black_box(data); })
+            rt.block_on(async {
+                std::hint::black_box(data);
+            })
         });
 
     eprintln!("\n[async_executor_overhead_no_false_positive]");
     eprintln!("{}", outcome);
 
     match outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             // Baseline test: leak probability should be low
             assert!(
                 leak_probability < 0.3,
@@ -88,13 +91,17 @@ fn async_executor_overhead_no_false_positive() {
                 leak_probability * 100.0
             );
         }
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "Unexpected failure for async executor overhead: P={:.1}%",
                 leak_probability * 100.0
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             // Acceptable - inconclusive is not a false positive
             assert!(
                 leak_probability < 0.5,
@@ -134,20 +141,26 @@ fn async_block_on_overhead_symmetric() {
     eprintln!("{}", outcome);
 
     match outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             assert!(
                 leak_probability < 0.3,
                 "Leak probability too high: {:.1}%",
                 leak_probability * 100.0
             );
         }
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "Unexpected failure for symmetric block_on: P={:.1}%",
                 leak_probability * 100.0
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             assert!(
                 leak_probability < 0.5,
                 "Leak probability too high for inconclusive: {:.1}%",
@@ -194,20 +207,26 @@ fn detects_conditional_await_timing() {
     eprintln!("{}", outcome);
 
     match outcome {
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             assert!(
                 leak_probability > 0.7,
                 "Expected high leak probability, got {:.1}%",
                 leak_probability * 100.0
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected to detect conditional await leak, but passed: P={:.1}%",
                 leak_probability * 100.0
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             // Accept inconclusive with high leak probability
             assert!(
                 leak_probability > 0.5,
@@ -307,10 +326,9 @@ fn concurrent_tasks_no_crosstalk() {
 
     // Use non-pathological fixed input (not all-zeros)
     let fixed_input: [u8; 32] = [
-        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-        0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-        0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-        0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e,
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
     ];
 
     // Pre-generate inputs using InputPair helper
@@ -340,16 +358,27 @@ fn concurrent_tasks_no_crosstalk() {
     // Some variation is expected in concurrent environments - we just want to ensure
     // the noise isn't catastrophic. Don't panic on Fail since async is inherently noisy.
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
-            eprintln!("Good: no significant timing difference (P={:.1}%)", leak_probability * 100.0);
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Good: no significant timing difference (P={:.1}%)",
+                leak_probability * 100.0
+            );
         }
-        Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            exploitability,
+            ..
+        } => {
             // Only panic if the effect is catastrophically large (>10μs)
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             if total_effect > 10_000.0 {
                 panic!(
                     "Catastrophic timing difference with background tasks: {:.1}μs ({:?})",
-                    total_effect / 1000.0, exploitability
+                    total_effect / 1000.0,
+                    exploitability
                 );
             }
             eprintln!(
@@ -357,7 +386,9 @@ fn concurrent_tasks_no_crosstalk() {
                 leak_probability * 100.0, total_effect
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!(
                 "Note: Inconclusive result ({:.1}%) - expected in concurrent tests",
                 leak_probability * 100.0
@@ -427,7 +458,9 @@ fn tokio_single_vs_multi_thread_stability() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs_single, |data| {
-            rt_single.block_on(async { std::hint::black_box(data); })
+            rt_single.block_on(async {
+                std::hint::black_box(data);
+            })
         });
 
     // Test with multi-threaded runtime
@@ -438,7 +471,9 @@ fn tokio_single_vs_multi_thread_stability() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs_multi, |data| {
-            rt_multi.block_on(async { std::hint::black_box(data); })
+            rt_multi.block_on(async {
+                std::hint::black_box(data);
+            })
         });
 
     eprintln!("\n[tokio_single_vs_multi_thread_stability]");
@@ -450,8 +485,11 @@ fn tokio_single_vs_multi_thread_stability() {
     // Compare leak probabilities (informational)
     let single_prob = outcome_single.leak_probability().unwrap_or(0.0);
     let multi_prob = outcome_multi.leak_probability().unwrap_or(0.0);
-    eprintln!("Leak probability comparison: single={:.1}%, multi={:.1}%",
-              single_prob * 100.0, multi_prob * 100.0);
+    eprintln!(
+        "Leak probability comparison: single={:.1}%, multi={:.1}%",
+        single_prob * 100.0,
+        multi_prob * 100.0
+    );
 }
 
 /// 4.2 Async Workload Flag Effectiveness

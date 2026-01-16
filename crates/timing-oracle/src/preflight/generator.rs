@@ -170,7 +170,10 @@ const HIGH_COST_THRESHOLD_NS: f64 = 1000.0;
 /// # Returns
 ///
 /// `Some(GeneratorWarning)` if an issue is detected, `None` otherwise.
-pub fn generator_cost_check(fixed_gen_time_ns: f64, random_gen_time_ns: f64) -> Option<GeneratorWarning> {
+pub fn generator_cost_check(
+    fixed_gen_time_ns: f64,
+    random_gen_time_ns: f64,
+) -> Option<GeneratorWarning> {
     // Avoid division by zero
     let max_time = fixed_gen_time_ns.max(random_gen_time_ns);
     if max_time < 1e-10 {

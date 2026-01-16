@@ -104,7 +104,9 @@ pub fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
 /// The estimated dependence length m_c.
 pub fn estimate_dependence_length(data: &[f64], max_lag: usize) -> usize {
     let n = data.len();
-    if n == 0 { return 1; }
+    if n == 0 {
+        return 1;
+    }
     let threshold = 2.0 / (n as f64).sqrt();
 
     for h in 1..=max_lag.min(n - 1) {
@@ -205,7 +207,9 @@ mod tests {
         let data: Vec<f64> = (0..1000)
             .map(|i| {
                 let mut x = i as u64;
-                x = x.wrapping_mul(0x5851F42D4C957F2D).wrapping_add(0x14057B7EF767814F);
+                x = x
+                    .wrapping_mul(0x5851F42D4C957F2D)
+                    .wrapping_add(0x14057B7EF767814F);
                 x ^= x >> 33;
                 x = x.wrapping_mul(0xC4CEB9FE1A85EC53);
                 (x as f64) / (u64::MAX as f64)
@@ -214,11 +218,7 @@ mod tests {
 
         let acf = lag1_autocorrelation(&data);
         // For a well-mixed sequence, autocorrelation should be relatively low
-        assert!(
-            acf.abs() < 0.3,
-            "Expected low autocorrelation, got {}",
-            acf
-        );
+        assert!(acf.abs() < 0.3, "Expected low autocorrelation, got {}", acf);
     }
 
     #[test]
@@ -230,11 +230,7 @@ mod tests {
         }
 
         let acf = lag1_autocorrelation(&data);
-        assert!(
-            acf > 0.9,
-            "Expected high autocorrelation, got {}",
-            acf
-        );
+        assert!(acf > 0.9, "Expected high autocorrelation, got {}", acf);
     }
 
     #[test]
@@ -247,7 +243,9 @@ mod tests {
     #[test]
     fn test_alternating_data() {
         // Alternating data should have negative lag-1 autocorrelation
-        let data: Vec<f64> = (0..100).map(|i| if i % 2 == 0 { 1.0 } else { -1.0 }).collect();
+        let data: Vec<f64> = (0..100)
+            .map(|i| if i % 2 == 0 { 1.0 } else { -1.0 })
+            .collect();
 
         let acf = lag1_autocorrelation(&data);
         assert!(acf < -0.9, "Expected negative autocorrelation, got {}", acf);
@@ -284,7 +282,11 @@ mod tests {
         let acf = interleaved_autocorrelation(&fixed, &random, 2);
         // At lag-2, we compare fixed[i] with fixed[i+1] and random[i] with random[i+1]
         // Both are increasing sequences, so lag-2 autocorrelation should be high
-        assert!(acf > 0.5, "Expected high lag-2 autocorrelation, got {}", acf);
+        assert!(
+            acf > 0.5,
+            "Expected high lag-2 autocorrelation, got {}",
+            acf
+        );
     }
 
     #[test]

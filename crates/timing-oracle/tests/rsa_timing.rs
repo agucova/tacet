@@ -63,7 +63,9 @@ fn rsa_1024_encrypt_constant_time() {
         .test(inputs, |msg| {
             // Note: PKCS#1 v1.5 encryption is randomized, but we're testing
             // whether the message content affects timing
-            let ciphertext = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, msg).unwrap();
+            let ciphertext = public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, msg)
+                .unwrap();
             std::hint::black_box(ciphertext[0]);
         });
 
@@ -74,13 +76,26 @@ fn rsa_1024_encrypt_constant_time() {
 
     // RSA encryption should be constant-time with respect to message content
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Test passed: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "RSA-1024 encryption should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -90,7 +105,6 @@ fn rsa_1024_encrypt_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// RSA decryption should be constant-time
@@ -112,14 +126,18 @@ fn rsa_1024_decrypt_constant_time() {
     let pool_baseline: Vec<Vec<u8>> = (0..SAMPLES)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
     let pool_sample: Vec<Vec<u8>> = (0..SAMPLES)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
@@ -154,13 +172,26 @@ fn rsa_1024_decrypt_constant_time() {
 
     // Modern RSA implementations use blinding
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Test passed: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "RSA-1024 decryption should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -170,7 +201,6 @@ fn rsa_1024_decrypt_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 // ============================================================================
@@ -205,13 +235,26 @@ fn rsa_2048_sign_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "rsa_2048_sign_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Test passed: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "RSA-2048 signing should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -221,7 +264,6 @@ fn rsa_2048_sign_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// RSA signature verification should be constant-time
@@ -293,13 +335,26 @@ fn rsa_1024_verify_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "rsa_1024_verify_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Test passed: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "RSA-1024 verification should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -309,7 +364,6 @@ fn rsa_1024_verify_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 // ============================================================================
@@ -329,7 +383,9 @@ fn rsa_1024_hamming_weight_independence() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(60))
         .test(inputs, |msg| {
-            let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, msg).unwrap();
+            let ct = public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, msg)
+                .unwrap();
             std::hint::black_box(ct[0]);
         });
 
@@ -339,13 +395,26 @@ fn rsa_1024_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "rsa_1024_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Test passed: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Test passed: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "RSA Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -355,7 +424,6 @@ fn rsa_1024_hamming_weight_independence() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// RSA key size comparison - 2048 vs 4096 (informational)
@@ -401,13 +469,28 @@ fn rsa_key_size_timing_difference() {
     eprintln!("Note: Timing difference expected (4096-bit is ~4x slower than 2048-bit)");
 
     match &outcome {
-        Outcome::Pass { leak_probability, quality, .. } => {
-            eprintln!("Unexpected pass: P(leak)={:.1}%, quality={:?}", leak_probability * 100.0, quality);
+        Outcome::Pass {
+            leak_probability,
+            quality,
+            ..
+        } => {
+            eprintln!(
+                "Unexpected pass: P(leak)={:.1}%, quality={:?}",
+                leak_probability * 100.0,
+                quality
+            );
         }
-        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
             eprintln!(
                 "Expected timing difference detected: P(leak)={:.1}%, {:?}, effect={:?}",
-                leak_probability * 100.0, exploitability, effect
+                leak_probability * 100.0,
+                exploitability,
+                effect
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -419,7 +502,6 @@ fn rsa_key_size_timing_difference() {
     }
 }
 
-
 /// Control test: both classes use different ciphertexts
 /// If this passes but rsa_1024_decrypt fails, the difference is microarchitectural caching
 #[test]
@@ -430,32 +512,36 @@ fn rsa_1024_decrypt_control_both_random() {
     let public_key = RsaPublicKey::from(&private_key);
 
     // Pre-generate TWO pools of ciphertexts
-    let pool_a: Vec<Vec<u8>> = (0..SAMPLES/2)
+    let pool_a: Vec<Vec<u8>> = (0..SAMPLES / 2)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
-    
-    let pool_b: Vec<Vec<u8>> = (0..SAMPLES/2)
+
+    let pool_b: Vec<Vec<u8>> = (0..SAMPLES / 2)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
     let idx_a = std::cell::Cell::new(0usize);
     let idx_b = std::cell::Cell::new(0usize);
-    
+
     let inputs = InputPair::new(
         move || {
             let i = idx_a.get();
-            idx_a.set((i + 1) % (SAMPLES/2));
+            idx_a.set((i + 1) % (SAMPLES / 2));
             pool_a[i].clone()
         },
         move || {
             let i = idx_b.get();
-            idx_b.set((i + 1) % (SAMPLES/2));
+            idx_b.set((i + 1) % (SAMPLES / 2));
             pool_b[i].clone()
         },
     );
@@ -471,14 +557,18 @@ fn rsa_1024_decrypt_control_both_random() {
 
     eprintln!("\n[rsa_1024_decrypt_control_both_random]");
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
-    
+
     // This is informational - we want to see if the effect disappears
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Control passed: P(leak)={:.1}%", leak_probability * 100.0);
             eprintln!("This suggests the original failure was microarchitectural caching, not an RSA timing leak");
         }
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             eprintln!("Control failed: P(leak)={:.1}%", leak_probability * 100.0);
             eprintln!("This suggests a real timing leak in RSA decryption");
         }

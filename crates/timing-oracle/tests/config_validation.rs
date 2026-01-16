@@ -148,19 +148,22 @@ fn outlier_percentile_one_valid() {
 
 #[test]
 fn outlier_percentile_default_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.999);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.999);
     assert_eq!(oracle.config().outlier_percentile, 0.999);
 }
 
 #[test]
 fn outlier_percentile_aggressive_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.95);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.95);
     assert_eq!(oracle.config().outlier_percentile, 0.95);
 }
 
 #[test]
 fn outlier_percentile_tiny_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.001);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).outlier_percentile(0.001);
     assert_eq!(oracle.config().outlier_percentile, 0.001);
 }
 
@@ -234,13 +237,15 @@ fn calibration_samples_one_valid() {
 
 #[test]
 fn calibration_samples_reasonable_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).calibration_samples(5000);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).calibration_samples(5000);
     assert_eq!(oracle.config().calibration_samples, 5000);
 }
 
 #[test]
 fn calibration_samples_large_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).calibration_samples(50_000);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).calibration_samples(50_000);
     assert_eq!(oracle.config().calibration_samples, 50_000);
 }
 
@@ -256,19 +261,22 @@ fn cov_bootstrap_zero_panics() {
 
 #[test]
 fn cov_bootstrap_one_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(1);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(1);
     assert_eq!(oracle.config().cov_bootstrap_iterations, 1);
 }
 
 #[test]
 fn cov_bootstrap_reasonable_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(50);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(50);
     assert_eq!(oracle.config().cov_bootstrap_iterations, 50);
 }
 
 #[test]
 fn cov_bootstrap_large_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(2_000);
+    let oracle =
+        TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).cov_bootstrap_iterations(2_000);
     assert_eq!(oracle.config().cov_bootstrap_iterations, 2_000);
 }
 
@@ -309,8 +317,7 @@ fn time_budget_long_valid() {
 
 #[test]
 fn time_budget_secs_valid() {
-    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .time_budget_secs(60);
+    let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork).time_budget_secs(60);
     assert_eq!(oracle.config().time_budget, Duration::from_secs(60));
 }
 

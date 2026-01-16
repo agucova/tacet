@@ -89,10 +89,16 @@ fn chacha20poly1305_encrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_encrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 encryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -109,7 +115,10 @@ fn chacha20poly1305_encrypt_constant_time() {
     // Check exploitability and quality if conclusive
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
         );
@@ -163,10 +172,16 @@ fn chacha20poly1305_decrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_decrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 decryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -182,7 +197,10 @@ fn chacha20poly1305_decrypt_constant_time() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "ChaCha20-Poly1305 decryption should have low exploitability (got {:?})",
             exp
         );
@@ -217,10 +235,17 @@ fn chacha20poly1305_nonce_independence() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_nonce_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 nonce should not affect timing (got leak_probability={:.1}%, {:?}, effect={:?})",
                 leak_probability * 100.0, exploitability, effect
@@ -236,7 +261,10 @@ fn chacha20poly1305_nonce_independence() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "ChaCha20-Poly1305 nonce independence should have low exploitability (got {:?})",
             exp
         );
@@ -287,10 +315,16 @@ fn aes_256_gcm_encrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes_256_gcm_encrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-256-GCM encryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -306,7 +340,10 @@ fn aes_256_gcm_encrypt_constant_time() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "AES-256-GCM encryption should have low exploitability (got {:?})",
             exp
         );
@@ -372,10 +409,16 @@ fn aes_256_gcm_decrypt_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "aes_256_gcm_decrypt_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-256-GCM decryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -391,7 +434,10 @@ fn aes_256_gcm_decrypt_constant_time() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "AES-256-GCM decryption should have low exploitability (got {:?})",
             exp
         );
@@ -433,10 +479,16 @@ fn ring_chacha20poly1305_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "ring_chacha20poly1305_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ring ChaCha20-Poly1305 should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -452,7 +504,10 @@ fn ring_chacha20poly1305_constant_time() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "ring ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
         );
@@ -495,10 +550,16 @@ fn chacha20poly1305_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "chacha20poly1305_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -514,7 +575,10 @@ fn chacha20poly1305_hamming_weight_independence() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "ChaCha20-Poly1305 Hamming weight should not affect timing (got {:?})",
             exp
         );
@@ -557,10 +621,16 @@ fn aes_gcm_hamming_weight_independence() {
     let outcome = skip_if_unreliable!(outcome, "aes_gcm_hamming_weight_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-GCM Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -576,7 +646,10 @@ fn aes_gcm_hamming_weight_independence() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::Negligible | Exploitability::PossibleLAN),
+            matches!(
+                exp,
+                Exploitability::Negligible | Exploitability::PossibleLAN
+            ),
             "AES-GCM Hamming weight should not affect timing (got {:?})",
             exp
         );

@@ -34,8 +34,8 @@
 //! trigger on genuine non-temporal inconsistency (like mutable state bugs).
 
 use rand::seq::SliceRandom;
-use rand_xoshiro::Xoshiro256PlusPlus;
 use rand::SeedableRng;
+use rand_xoshiro::Xoshiro256PlusPlus;
 use serde::{Deserialize, Serialize};
 
 use crate::statistics::compute_deciles;
@@ -101,7 +101,10 @@ impl SanityWarning {
                     variance_ratio
                 )
             }
-            SanityWarning::InsufficientSamples { available, required } => {
+            SanityWarning::InsufficientSamples {
+                available,
+                required,
+            } => {
                 format!(
                     "Insufficient samples for sanity check: {} available, {} required. \
                      Skipping Fixed-vs-Fixed validation.",
@@ -187,14 +190,8 @@ pub fn sanity_check(
 
     // Split shuffled indices in half
     let mid = indices.len() / 2;
-    let first_half: Vec<f64> = indices[..mid]
-        .iter()
-        .map(|&i| fixed_samples[i])
-        .collect();
-    let second_half: Vec<f64> = indices[mid..]
-        .iter()
-        .map(|&i| fixed_samples[i])
-        .collect();
+    let first_half: Vec<f64> = indices[..mid].iter().map(|&i| fixed_samples[i]).collect();
+    let second_half: Vec<f64> = indices[mid..].iter().map(|&i| fixed_samples[i]).collect();
 
     // Compute quantile differences
     let q_first = compute_deciles(&first_half);
@@ -343,9 +340,14 @@ mod tests {
         // Same seed should produce same result
         match (&result1, &result2) {
             (None, None) => {}
-            (Some(SanityWarning::BrokenHarness { variance_ratio: v1 }),
-             Some(SanityWarning::BrokenHarness { variance_ratio: v2 })) => {
-                assert!((v1 - v2).abs() < 1e-10, "Same seed should give same variance_ratio");
+            (
+                Some(SanityWarning::BrokenHarness { variance_ratio: v1 }),
+                Some(SanityWarning::BrokenHarness { variance_ratio: v2 }),
+            ) => {
+                assert!(
+                    (v1 - v2).abs() < 1e-10,
+                    "Same seed should give same variance_ratio"
+                );
             }
             _ => panic!("Results should match with same seed"),
         }

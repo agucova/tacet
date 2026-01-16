@@ -45,18 +45,11 @@ pub fn format_outcome(outcome: &Outcome) -> String {
                 magnitude,
                 format_pattern(effect.pattern),
             ));
-            output.push_str(&format!(
-                "      Shift: {:.1} ns\n",
-                effect.shift_ns,
-            ));
-            output.push_str(&format!(
-                "      Tail:  {:.1} ns\n",
-                effect.tail_ns,
-            ));
+            output.push_str(&format!("      Shift: {:.1} ns\n", effect.shift_ns,));
+            output.push_str(&format!("      Tail:  {:.1} ns\n", effect.tail_ns,));
             output.push_str(&format!(
                 "      95% CI: {:.1}–{:.1} ns\n",
-                effect.credible_interval_ns.0,
-                effect.credible_interval_ns.1,
+                effect.credible_interval_ns.0, effect.credible_interval_ns.1,
             ));
 
             // Show preflight warnings (Measurement Notes)
@@ -106,18 +99,11 @@ pub fn format_outcome(outcome: &Outcome) -> String {
                 magnitude,
                 format_pattern(effect.pattern),
             ));
-            output.push_str(&format!(
-                "      Shift: {:.1} ns\n",
-                effect.shift_ns,
-            ));
-            output.push_str(&format!(
-                "      Tail:  {:.1} ns\n",
-                effect.tail_ns,
-            ));
+            output.push_str(&format!("      Shift: {:.1} ns\n", effect.shift_ns,));
+            output.push_str(&format!("      Tail:  {:.1} ns\n", effect.tail_ns,));
             output.push_str(&format!(
                 "      95% CI: {:.1}–{:.1} ns\n",
-                effect.credible_interval_ns.0,
-                effect.credible_interval_ns.1,
+                effect.credible_interval_ns.0, effect.credible_interval_ns.1,
             ));
 
             output.push('\n');
@@ -231,9 +217,8 @@ pub fn format_outcome(outcome: &Outcome) -> String {
     output.push('\n');
 
     if matches!(outcome, Outcome::Fail { .. }) {
-        output.push_str(
-            "Note: Exploitability is a heuristic estimate based on effect magnitude.\n",
-        );
+        output
+            .push_str("Note: Exploitability is a heuristic estimate based on effect magnitude.\n");
     }
 
     output
@@ -325,10 +310,7 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
             // Warnings section (if any)
             if !diagnostics.warnings.is_empty() || !diagnostics.quality_issues.is_empty() {
                 out.push_str("\u{2502}\n");
-                out.push_str(&format!(
-                    "\u{2502} {} Warnings:\n",
-                    "\u{26A0}".yellow()
-                ));
+                out.push_str(&format!("\u{2502} {} Warnings:\n", "\u{26A0}".yellow()));
 
                 for warning in &diagnostics.warnings {
                     out.push_str(&format!("\u{2502}   \u{2022} {}\n", warning));
@@ -404,14 +386,8 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
                 "\u{2502} {} Operation unmeasurable\n",
                 "\u{26A0}".yellow()
             ));
-            out.push_str(&format!(
-                "\u{2502}   Operation: ~{:.1}ns\n",
-                operation_ns
-            ));
-            out.push_str(&format!(
-                "\u{2502}   Threshold: ~{:.1}ns\n",
-                threshold_ns
-            ));
+            out.push_str(&format!("\u{2502}   Operation: ~{:.1}ns\n", operation_ns));
+            out.push_str(&format!("\u{2502}   Threshold: ~{:.1}ns\n", threshold_ns));
             out.push_str(&format!("\u{2502}   Platform: {}\n", platform));
             out.push_str(&format!("\u{2502}   Tip: {}\n", recommendation));
         }
@@ -481,10 +457,7 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
 
     // Warnings
     if !diagnostics.warnings.is_empty() {
-        out.push_str(&format!(
-            "\n  {} Warnings\n",
-            "\u{26A0}".yellow()
-        ));
+        out.push_str(&format!("\n  {} Warnings\n", "\u{26A0}".yellow()));
         for warning in &diagnostics.warnings {
             out.push_str(&format!("    \u{2022} {}\n", warning));
         }
@@ -492,20 +465,14 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
 
     // Quality issues with guidance
     if !diagnostics.quality_issues.is_empty() {
-        out.push_str(&format!(
-            "\n  {} Quality Issues\n",
-            "\u{26A0}".yellow()
-        ));
+        out.push_str(&format!("\n  {} Quality Issues\n", "\u{26A0}".yellow()));
         for issue in &diagnostics.quality_issues {
             out.push_str(&format!(
                 "    \u{2022} {}: {}\n",
                 format_issue_code(issue.code).bold(),
                 issue.message
             ));
-            out.push_str(&format!(
-                "      \u{2192} {}\n",
-                issue.guidance.dimmed()
-            ));
+            out.push_str(&format!("      \u{2192} {}\n", issue.guidance.dimmed()));
         }
     }
 
@@ -589,7 +556,10 @@ fn format_debug_environment(diagnostics: &Diagnostics) -> String {
         out.push_str(&format!("      Seed:           {}\n", seed));
     }
     if !diagnostics.timer_name.is_empty() {
-        out.push_str(&format!("      Timer:          {}\n", diagnostics.timer_name));
+        out.push_str(&format!(
+            "      Timer:          {}\n",
+            diagnostics.timer_name
+        ));
     }
     out.push_str(&format!(
         "      Resolution:     {:.1} ns\n",
@@ -616,17 +586,29 @@ fn format_debug_environment(diagnostics: &Diagnostics) -> String {
     out.push_str(&format!(
         "      Stationarity:   {:.2}x {}\n",
         diagnostics.stationarity_ratio,
-        if diagnostics.stationarity_ok { "OK" } else { "Suspect" }
+        if diagnostics.stationarity_ok {
+            "OK"
+        } else {
+            "Suspect"
+        }
     ));
     out.push_str(&format!(
         "      Model fit:      \u{03C7}\u{00B2}={:.1} {}\n",
         diagnostics.model_fit_chi2,
-        if diagnostics.model_fit_ok { "OK" } else { "Fail" }
+        if diagnostics.model_fit_ok {
+            "OK"
+        } else {
+            "Fail"
+        }
     ));
 
     // Bug report hint
     out.push_str("\n    ");
-    out.push_str(&"For bug reports, include this output with TIMING_ORACLE_DEBUG=1".dimmed().to_string());
+    out.push_str(
+        &"For bug reports, include this output with TIMING_ORACLE_DEBUG=1"
+            .dimmed()
+            .to_string(),
+    );
     out.push('\n');
 
     out
@@ -705,10 +687,7 @@ fn format_measurement_notes(warnings: &[PreflightWarningInfo]) -> String {
         .any(|w| w.severity == PreflightSeverity::ResultUndermining);
 
     if has_critical {
-        out.push_str(&format!(
-            "\n  {} Measurement Notes:\n",
-            "\u{26A0}".yellow()
-        ));
+        out.push_str(&format!("\n  {} Measurement Notes:\n", "\u{26A0}".yellow()));
     } else {
         out.push_str("\n  Measurement Notes:\n");
     }
@@ -858,7 +837,11 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
     let stationarity_status = if diagnostics.stationarity_ok {
         format!("{:.2}x {}", diagnostics.stationarity_ratio, "OK".green())
     } else {
-        format!("{:.2}x {}", diagnostics.stationarity_ratio, "Suspect".yellow())
+        format!(
+            "{:.2}x {}",
+            diagnostics.stationarity_ratio,
+            "Suspect".yellow()
+        )
     };
     out.push_str(&format!(
         "      Stationarity:       {}\n",
@@ -925,11 +908,7 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
         out.push_str(&format!("      Configuration:      {}\n", "OK".green()));
     } else {
         for w in &system {
-            out.push_str(&format!(
-                "      {} {}\n",
-                "\u{26A0}".yellow(),
-                w.message
-            ));
+            out.push_str(&format!("      {} {}\n", "\u{26A0}".yellow(), w.message));
             if let Some(guidance) = &w.guidance {
                 out.push_str(&format!("        {}\n", guidance.dimmed()));
             }

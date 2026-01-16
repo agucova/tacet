@@ -459,7 +459,6 @@ pub struct Diagnostics {
     // =========================================================================
     // Reproduction info (for verbose/debug output)
     // =========================================================================
-
     /// Measurement seed used for reproducibility.
     pub seed: Option<u64>,
 
@@ -888,9 +887,15 @@ impl Outcome {
     /// Get the leak probability if available.
     pub fn leak_probability(&self) -> Option<f64> {
         match self {
-            Outcome::Pass { leak_probability, .. } => Some(*leak_probability),
-            Outcome::Fail { leak_probability, .. } => Some(*leak_probability),
-            Outcome::Inconclusive { leak_probability, .. } => Some(*leak_probability),
+            Outcome::Pass {
+                leak_probability, ..
+            } => Some(*leak_probability),
+            Outcome::Fail {
+                leak_probability, ..
+            } => Some(*leak_probability),
+            Outcome::Inconclusive {
+                leak_probability, ..
+            } => Some(*leak_probability),
             Outcome::Unmeasurable { .. } => None,
         }
     }
@@ -947,31 +952,58 @@ impl Outcome {
         match self {
             Outcome::Unmeasurable { .. } => false,
             Outcome::Inconclusive { .. } => false,
-            Outcome::Pass { quality, leak_probability, .. } => {
-                *quality != MeasurementQuality::TooNoisy || *leak_probability < 0.01
-            }
-            Outcome::Fail { quality, leak_probability, .. } => {
-                *quality != MeasurementQuality::TooNoisy || *leak_probability > 0.99
-            }
+            Outcome::Pass {
+                quality,
+                leak_probability,
+                ..
+            } => *quality != MeasurementQuality::TooNoisy || *leak_probability < 0.01,
+            Outcome::Fail {
+                quality,
+                leak_probability,
+                ..
+            } => *quality != MeasurementQuality::TooNoisy || *leak_probability > 0.99,
         }
     }
 
     /// Unwrap a Pass result, panicking otherwise.
     pub fn unwrap_pass(self) -> (f64, EffectEstimate, MeasurementQuality, Diagnostics) {
         match self {
-            Outcome::Pass { leak_probability, effect, quality, diagnostics, .. } => {
-                (leak_probability, effect, quality, diagnostics)
-            }
+            Outcome::Pass {
+                leak_probability,
+                effect,
+                quality,
+                diagnostics,
+                ..
+            } => (leak_probability, effect, quality, diagnostics),
             _ => panic!("Expected Pass outcome, got {:?}", self),
         }
     }
 
     /// Unwrap a Fail result, panicking otherwise.
-    pub fn unwrap_fail(self) -> (f64, EffectEstimate, Exploitability, MeasurementQuality, Diagnostics) {
+    pub fn unwrap_fail(
+        self,
+    ) -> (
+        f64,
+        EffectEstimate,
+        Exploitability,
+        MeasurementQuality,
+        Diagnostics,
+    ) {
         match self {
-            Outcome::Fail { leak_probability, effect, exploitability, quality, diagnostics, .. } => {
-                (leak_probability, effect, exploitability, quality, diagnostics)
-            }
+            Outcome::Fail {
+                leak_probability,
+                effect,
+                exploitability,
+                quality,
+                diagnostics,
+                ..
+            } => (
+                leak_probability,
+                effect,
+                exploitability,
+                quality,
+                diagnostics,
+            ),
             _ => panic!("Expected Fail outcome, got {:?}", self),
         }
     }
@@ -1015,10 +1047,7 @@ impl Outcome {
                 None
             }
             UnreliablePolicy::FailClosed => {
-                panic!(
-                    "[FAILED] {}: {} (fail-closed policy)",
-                    test_name, reason
-                );
+                panic!("[FAILED] {}: {} (fail-closed policy)", test_name, reason);
             }
         }
     }
@@ -1049,7 +1078,12 @@ impl Outcome {
 impl fmt::Display for Outcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Outcome::Pass { leak_probability, effect, samples_used, .. } => {
+            Outcome::Pass {
+                leak_probability,
+                effect,
+                samples_used,
+                ..
+            } => {
                 write!(
                     f,
                     "PASS: P(leak)={:.1}%, effect={:.1}ns shift/{:.1}ns tail, {} samples",
@@ -1059,7 +1093,13 @@ impl fmt::Display for Outcome {
                     samples_used
                 )
             }
-            Outcome::Fail { leak_probability, effect, exploitability, samples_used, .. } => {
+            Outcome::Fail {
+                leak_probability,
+                effect,
+                exploitability,
+                samples_used,
+                ..
+            } => {
                 write!(
                     f,
                     "FAIL: P(leak)={:.1}%, effect={:.1}ns shift/{:.1}ns tail, {:?}, {} samples",
@@ -1070,7 +1110,12 @@ impl fmt::Display for Outcome {
                     samples_used
                 )
             }
-            Outcome::Inconclusive { reason, leak_probability, samples_used, .. } => {
+            Outcome::Inconclusive {
+                reason,
+                leak_probability,
+                samples_used,
+                ..
+            } => {
                 let reason_str = match reason {
                     InconclusiveReason::DataTooNoisy { .. } => "data too noisy",
                     InconclusiveReason::NotLearning { .. } => "not learning",
@@ -1086,7 +1131,12 @@ impl fmt::Display for Outcome {
                     samples_used
                 )
             }
-            Outcome::Unmeasurable { operation_ns, threshold_ns, platform, .. } => {
+            Outcome::Unmeasurable {
+                operation_ns,
+                threshold_ns,
+                platform,
+                ..
+            } => {
                 write!(
                     f,
                     "UNMEASURABLE: {:.1}ns operation < {:.1}ns threshold ({})",

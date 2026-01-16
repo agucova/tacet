@@ -178,17 +178,15 @@ impl CompiledBinary {
         Ok(CompiledBinary {
             path: binary_path,
             test_case: test_case_name.to_string(),
-            _temp_dir: if persist {
-                None
-            } else {
-                Some(TempDir::new()?)
-            },
+            _temp_dir: if persist { None } else { Some(TempDir::new()?) },
         })
     }
 
     /// Run the compiled binary and capture output
     pub fn run(&self, timeout_secs: u64) -> Result<String, RunError> {
-        let mut child = Command::new(&self.path).stdout(std::process::Stdio::piped()).spawn()?;
+        let mut child = Command::new(&self.path)
+            .stdout(std::process::Stdio::piped())
+            .spawn()?;
 
         // Wait with timeout
         let timeout = Duration::from_secs(timeout_secs);

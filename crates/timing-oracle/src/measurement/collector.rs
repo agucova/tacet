@@ -84,7 +84,11 @@ impl Collector {
     }
 
     /// Create a collector with explicit max batch size (set to 1 to disable batching).
-    pub fn with_max_batch_size(timer: Timer, warmup_iterations: usize, max_batch_size: u32) -> Self {
+    pub fn with_max_batch_size(
+        timer: Timer,
+        warmup_iterations: usize,
+        max_batch_size: u32,
+    ) -> Self {
         Self {
             timer,
             warmup_iterations,
@@ -106,11 +110,7 @@ impl Collector {
     /// # Returns
     ///
     /// BatchingInfo including K, ticks_per_batch, rationale, and unmeasurable status.
-    fn pilot_and_warmup<F, R, T>(
-        &self,
-        mut fixed: F,
-        mut random: R,
-    ) -> BatchingInfo
+    fn pilot_and_warmup<F, R, T>(&self, mut fixed: F, mut random: R) -> BatchingInfo
     where
         F: FnMut() -> T,
         R: FnMut() -> T,
@@ -150,7 +150,8 @@ impl Collector {
         let _threshold_ns = resolution_ns * TARGET_TICKS_PER_BATCH / MAX_BATCH_SIZE as f64;
 
         // Select K to achieve target tick density
-        let (k, enabled, unmeasurable, rationale) = if ticks_per_call >= self.target_ticks_per_batch {
+        let (k, enabled, unmeasurable, rationale) = if ticks_per_call >= self.target_ticks_per_batch
+        {
             // No batching needed - individual measurements have enough resolution
             (
                 1,
@@ -171,7 +172,8 @@ impl Collector {
             // Spec §8.2.4: If K*Top < 50*Tres even at K=20, it's Unmeasurable.
             if actual_ticks < self.target_ticks_per_batch {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-                let suggestion = ". On macOS, run with sudo to enable kperf cycle counting (~1ns resolution)";
+                let suggestion =
+                    ". On macOS, run with sudo to enable kperf cycle counting (~1ns resolution)";
                 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
                 let suggestion = ". Run with sudo and --features perf for cycle-accurate timing";
                 #[cfg(not(target_arch = "aarch64"))]
@@ -192,7 +194,8 @@ impl Collector {
                     false,
                     Some(UnmeasurableInfo {
                         operation_ns: median_ns,
-                        threshold_ns: resolution_ns * self.target_ticks_per_batch / k_attempt as f64,
+                        threshold_ns: resolution_ns * self.target_ticks_per_batch
+                            / k_attempt as f64,
                         ticks_per_call,
                     }),
                     rationale,
@@ -306,12 +309,7 @@ impl Collector {
     /// Collect timing samples (convenience method without batching info).
     ///
     /// For backward compatibility. Use `collect_with_info` to get batching details.
-    pub fn collect<F, R, T>(
-        &self,
-        samples_per_class: usize,
-        fixed: F,
-        random: R,
-    ) -> Vec<Sample>
+    pub fn collect<F, R, T>(&self, samples_per_class: usize, fixed: F, random: R) -> Vec<Sample>
     where
         F: FnMut() -> T,
         R: FnMut() -> T,
@@ -435,7 +433,7 @@ mod tests {
         // A trivial operation that completes in near-zero time
         let (_, batching) = collector.collect_with_info(
             100,
-            || 42u8,  // Trivial constant return
+            || 42u8, // Trivial constant return
             || 42u8,
         );
 
@@ -520,11 +518,8 @@ mod tests {
         let timer = Timer::new();
         let collector = Collector::with_max_batch_size(timer, 10, 5);
 
-        let (_, batching) = collector.collect_with_info(
-            100,
-            || black_box(42u8),
-            || black_box(42u8),
-        );
+        let (_, batching) =
+            collector.collect_with_info(100, || black_box(42u8), || black_box(42u8));
 
         // K should never exceed the configured max_batch_size
         assert!(
@@ -576,7 +571,7 @@ mod tests {
 
         let (_, batching) = collector.collect_with_info(
             100,
-            || 42u8,  // Trivial op
+            || 42u8, // Trivial op
             || 42u8,
         );
 
@@ -598,7 +593,7 @@ mod tests {
 
         let (_, batching) = collector.collect_with_info(
             100,
-            || 42u8,  // Trivial op
+            || 42u8, // Trivial op
             || 42u8,
         );
 
@@ -645,7 +640,10 @@ mod tests {
         );
 
         // rationale should not be empty
-        assert!(!batching.rationale.is_empty(), "rationale should not be empty");
+        assert!(
+            !batching.rationale.is_empty(),
+            "rationale should not be empty"
+        );
 
         // If unmeasurable, k should be 1 and enabled should be false
         if batching.unmeasurable.is_some() {

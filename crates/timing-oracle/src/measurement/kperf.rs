@@ -212,10 +212,9 @@ impl PmuTimer {
 
                 // Check wall clock time periodically
                 // (checking every iteration would dominate measurement)
-                if dummy & 0xFFFF == 0
-                    && start_time.elapsed().as_micros() >= 1000 {
-                        break;
-                    }
+                if dummy & 0xFFFF == 0 && start_time.elapsed().as_micros() >= 1000 {
+                    break;
+                }
             }
 
             // Read cycles after busy work and compute delta
@@ -348,6 +347,9 @@ mod tests {
     #[test]
     #[cfg(not(all(target_os = "macos", target_arch = "aarch64")))]
     fn test_pmu_unsupported_platform() {
-        assert!(matches!(PmuTimer::new(), Err(PmuError::UnsupportedPlatform)));
+        assert!(matches!(
+            PmuTimer::new(),
+            Err(PmuError::UnsupportedPlatform)
+        ));
     }
 }

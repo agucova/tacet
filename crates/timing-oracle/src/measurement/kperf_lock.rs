@@ -63,9 +63,7 @@ impl Drop for LockGuard {
 // Implement Debug manually to avoid exposing file internals
 impl std::fmt::Debug for LockGuard {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LockGuard")
-            .field("locked", &true)
-            .finish()
+        f.debug_struct("LockGuard").field("locked", &true).finish()
     }
 }
 
@@ -140,7 +138,9 @@ mod tests {
         match try_acquire_default() {
             LockResult::Acquired(_) => true,
             LockResult::IoError(e) if e.kind() == io::ErrorKind::PermissionDenied => {
-                eprintln!("Skipping kperf lock test: permission denied (lock file may be owned by root)");
+                eprintln!(
+                    "Skipping kperf lock test: permission denied (lock file may be owned by root)"
+                );
                 false
             }
             LockResult::Timeout => {

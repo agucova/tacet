@@ -11,7 +11,9 @@
 
 mod calibration_utils;
 
-use calibration_utils::{CalibrationConfig, Decision, TrialRunner, rand_bytes, select_attacker_model};
+use calibration_utils::{
+    rand_bytes, select_attacker_model, CalibrationConfig, Decision, TrialRunner,
+};
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, TimingOracle};
 
@@ -37,7 +39,10 @@ fn fpr_quick_random_vs_random() {
     let trials = config.tier.fpr_trials();
     let mut runner = TrialRunner::new(test_name, config.clone(), trials);
 
-    eprintln!("[{}] Starting {} trials (tier: {})", test_name, trials, config.tier);
+    eprintln!(
+        "[{}] Starting {} trials (tier: {})",
+        test_name, trials, config.tier
+    );
 
     for trial in 0..trials {
         if runner.should_stop() {
@@ -47,13 +52,10 @@ fn fpr_quick_random_vs_random() {
 
         // Both classes use random data - true null hypothesis
         let mut rng_clone = rng.clone();
-        let inputs = InputPair::new(
-            move || rand_bytes(&mut rng_clone),
-            {
-                let mut rng2 = rng.clone();
-                move || rand_bytes(&mut rng2)
-            },
-        );
+        let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
+            let mut rng2 = rng.clone();
+            move || rand_bytes(&mut rng2)
+        });
 
         // Select attacker model based on timer availability
         let attacker_model = select_attacker_model(test_name);
@@ -123,7 +125,10 @@ fn fpr_quick_fixed_vs_fixed() {
     let trials = config.tier.fpr_trials();
     let mut runner = TrialRunner::new(test_name, config.clone(), trials);
 
-    eprintln!("[{}] Starting {} trials (tier: {})", test_name, trials, config.tier);
+    eprintln!(
+        "[{}] Starting {} trials (tier: {})",
+        test_name, trials, config.tier
+    );
 
     for trial in 0..trials {
         if runner.should_stop() {
@@ -132,10 +137,7 @@ fn fpr_quick_fixed_vs_fixed() {
         }
 
         // Both classes use identical fixed data
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0u8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0u8; 32]);
 
         // Select attacker model based on timer availability
         let attacker_model = select_attacker_model(test_name);
@@ -211,7 +213,10 @@ fn fpr_validation_rigorous() {
     let trials = config.tier.fpr_trials();
     let mut runner = TrialRunner::new(test_name, config.clone(), trials);
 
-    eprintln!("[{}] Starting {} trials (tier: {})", test_name, trials, config.tier);
+    eprintln!(
+        "[{}] Starting {} trials (tier: {})",
+        test_name, trials, config.tier
+    );
 
     for trial in 0..trials {
         if runner.should_stop() {
@@ -220,13 +225,10 @@ fn fpr_validation_rigorous() {
         }
 
         let mut rng_clone = rng.clone();
-        let inputs = InputPair::new(
-            move || rand_bytes(&mut rng_clone),
-            {
-                let mut rng2 = rng.clone();
-                move || rand_bytes(&mut rng2)
-            },
-        );
+        let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
+            let mut rng2 = rng.clone();
+            move || rand_bytes(&mut rng2)
+        });
 
         let outcome = TimingOracle::for_attacker(AttackerModel::Research)
             .max_samples(config.samples_per_trial)
@@ -303,7 +305,10 @@ fn fpr_validation_per_attacker_model() {
         let sub_test_name = format!("{}_{}", test_name, model_name);
         let mut runner = TrialRunner::new(&sub_test_name, config.clone(), trials_per_model);
 
-        eprintln!("[{}] Testing {} ({} trials)", test_name, model_name, trials_per_model);
+        eprintln!(
+            "[{}] Testing {} ({} trials)",
+            test_name, model_name, trials_per_model
+        );
 
         for trial in 0..trials_per_model {
             if runner.should_stop() {
@@ -311,13 +316,10 @@ fn fpr_validation_per_attacker_model() {
             }
 
             let mut rng_clone = rng.clone();
-            let inputs = InputPair::new(
-                move || rand_bytes(&mut rng_clone),
-                {
-                    let mut rng2 = rng.clone();
-                    move || rand_bytes(&mut rng2)
-                },
-            );
+            let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
+                let mut rng2 = rng.clone();
+                move || rand_bytes(&mut rng2)
+            });
 
             let outcome = TimingOracle::for_attacker(attacker_model)
                 .max_samples(config.samples_per_trial)
@@ -350,8 +352,11 @@ fn fpr_validation_per_attacker_model() {
         }
     }
 
-    eprintln!("[{}] PASSED: All attacker models have bounded FPR", test_name);
+    eprintln!(
+        "[{}] PASSED: All attacker models have bounded FPR",
+        test_name
+    );
 }
 
 // Need to import these for the rng operations
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{rngs::StdRng, Rng, SeedableRng};

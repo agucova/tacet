@@ -26,7 +26,9 @@ fn exp_a_same_pool_both_classes() {
     let shared_pool: Vec<Vec<u8>> = (0..POOL_SIZE)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
@@ -86,14 +88,18 @@ fn run_with_pool_size(pool_size: usize, label: &str) {
     let pool_a: Vec<Vec<u8>> = (0..pool_size)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
     let pool_b: Vec<Vec<u8>> = (0..pool_size)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
@@ -122,7 +128,10 @@ fn run_with_pool_size(pool_size: usize, label: &str) {
             std::hint::black_box(plaintext[0]);
         });
 
-    eprintln!("\n=== Experiment {}: Pool size {} (both classes different pools) ===", label, pool_size);
+    eprintln!(
+        "\n=== Experiment {}: Pool size {} (both classes different pools) ===",
+        label, pool_size
+    );
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 }
 
@@ -139,7 +148,9 @@ fn exp_e_rsa2048_same_repeated() {
     let random_cts: Vec<Vec<u8>> = (0..200)
         .map(|_| {
             let msg = rand_bytes_32();
-            public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap()
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+                .unwrap()
         })
         .collect();
 
@@ -176,17 +187,16 @@ fn exp_f_encrypt_same_repeated() {
 
     let fixed_msg = [0x42u8; 32];
 
-    let inputs = InputPair::new(
-        || fixed_msg,
-        rand_bytes_32,
-    );
+    let inputs = InputPair::new(|| fixed_msg, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |msg| {
-            let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, msg).unwrap();
+            let ct = public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, msg)
+                .unwrap();
             std::hint::black_box(ct[0]);
         });
 
@@ -200,8 +210,8 @@ fn exp_g_xor_same_repeated() {
     let secret = [0xABu8; 32];
 
     let inputs = InputPair::new(
-        || [0x00u8; 32],  // Fixed: all zeros
-        rand_bytes_32,    // Random
+        || [0x00u8; 32], // Fixed: all zeros
+        rand_bytes_32,   // Random
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -234,10 +244,7 @@ fn exp_h_pool_size_1_both() {
         .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
         .unwrap();
 
-    let inputs = InputPair::new(
-        move || ct_a.clone(),
-        move || ct_b.clone(),
-    );
+    let inputs = InputPair::new(move || ct_a.clone(), move || ct_b.clone());
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
@@ -287,14 +294,19 @@ fn exp_i1_shape_correlation() {
     let public_key = RsaPublicKey::from(&private_key);
 
     eprintln!("\n=== Experiment I1: Shape Correlation Analysis ===");
-    eprintln!("Generating {} ciphertexts, {} repetitions each...", NUM_CIPHERTEXTS, REPS_PER_CT);
+    eprintln!(
+        "Generating {} ciphertexts, {} repetitions each...",
+        NUM_CIPHERTEXTS, REPS_PER_CT
+    );
 
     // Generate ciphertexts and collect shape properties
     let mut data: Vec<(Vec<u8>, usize, u8, u32, f64)> = Vec::with_capacity(NUM_CIPHERTEXTS);
 
     for i in 0..NUM_CIPHERTEXTS {
         let msg = rand_bytes_32();
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+            .unwrap();
 
         let leading_zeros = count_leading_zeros(&ct);
         let msb = msb_value(&ct);
@@ -339,9 +351,18 @@ fn exp_i1_shape_correlation() {
     let r_hw = pearson_correlation(&timings, &hamming_weights);
 
     eprintln!("\n--- Correlation Analysis ---");
-    eprintln!("Pearson correlation (timing vs leading_zeros): r = {:.4}", r_lz);
-    eprintln!("Pearson correlation (timing vs msb_value):     r = {:.4}", r_msb);
-    eprintln!("Pearson correlation (timing vs hamming_weight): r = {:.4}", r_hw);
+    eprintln!(
+        "Pearson correlation (timing vs leading_zeros): r = {:.4}",
+        r_lz
+    );
+    eprintln!(
+        "Pearson correlation (timing vs msb_value):     r = {:.4}",
+        r_msb
+    );
+    eprintln!(
+        "Pearson correlation (timing vs hamming_weight): r = {:.4}",
+        r_hw
+    );
 
     // Summary statistics
     let mean_timing: f64 = timings.iter().sum::<f64>() / timings.len() as f64;
@@ -356,16 +377,34 @@ fn exp_i1_shape_correlation() {
     eprintln!("Range: {:.1} ns", range);
 
     // Find fastest and slowest ciphertexts
-    let (fastest_idx, _) = data.iter().enumerate()
-        .min_by(|a, b| a.1.4.partial_cmp(&b.1.4).unwrap()).unwrap();
-    let (slowest_idx, _) = data.iter().enumerate()
-        .max_by(|a, b| a.1.4.partial_cmp(&b.1.4).unwrap()).unwrap();
+    let (fastest_idx, _) = data
+        .iter()
+        .enumerate()
+        .min_by(|a, b| a.1 .4.partial_cmp(&b.1 .4).unwrap())
+        .unwrap();
+    let (slowest_idx, _) = data
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1 .4.partial_cmp(&b.1 .4).unwrap())
+        .unwrap();
 
     eprintln!("\n--- Extreme Cases ---");
-    eprintln!("Fastest (idx {}): lz={}, msb=0x{:02X}, hw={}, timing={:.1}ns",
-        fastest_idx, data[fastest_idx].1, data[fastest_idx].2, data[fastest_idx].3, data[fastest_idx].4);
-    eprintln!("Slowest (idx {}): lz={}, msb=0x{:02X}, hw={}, timing={:.1}ns",
-        slowest_idx, data[slowest_idx].1, data[slowest_idx].2, data[slowest_idx].3, data[slowest_idx].4);
+    eprintln!(
+        "Fastest (idx {}): lz={}, msb=0x{:02X}, hw={}, timing={:.1}ns",
+        fastest_idx,
+        data[fastest_idx].1,
+        data[fastest_idx].2,
+        data[fastest_idx].3,
+        data[fastest_idx].4
+    );
+    eprintln!(
+        "Slowest (idx {}): lz={}, msb=0x{:02X}, hw={}, timing={:.1}ns",
+        slowest_idx,
+        data[slowest_idx].1,
+        data[slowest_idx].2,
+        data[slowest_idx].3,
+        data[slowest_idx].4
+    );
 
     eprintln!("\n--- Interpretation ---");
     if r_lz.abs() > 0.5 || r_msb.abs() > 0.5 || r_hw.abs() > 0.5 {
@@ -426,7 +465,9 @@ fn exp_i2_fixed_magnitude() {
 
     while ct_b.is_none() && attempts < 10000 {
         let msg = rand_bytes_32();
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+            .unwrap();
         let msb = msb_value(&ct);
         let lz = count_leading_zeros(&ct);
 
@@ -448,16 +489,21 @@ fn exp_i2_fixed_magnitude() {
     let ct_b = ct_b.expect("Could not find matching ciphertext");
 
     eprintln!("Found matching pair after {} attempts", attempts);
-    eprintln!("CT_A: lz={}, msb=0x{:02X}, hw={}",
-        count_leading_zeros(&ct_a), msb_value(&ct_a), hamming_weight(&ct_a));
-    eprintln!("CT_B: lz={}, msb=0x{:02X}, hw={}",
-        count_leading_zeros(&ct_b), msb_value(&ct_b), hamming_weight(&ct_b));
+    eprintln!(
+        "CT_A: lz={}, msb=0x{:02X}, hw={}",
+        count_leading_zeros(&ct_a),
+        msb_value(&ct_a),
+        hamming_weight(&ct_a)
+    );
+    eprintln!(
+        "CT_B: lz={}, msb=0x{:02X}, hw={}",
+        count_leading_zeros(&ct_b),
+        msb_value(&ct_b),
+        hamming_weight(&ct_b)
+    );
 
     // Run the 1-vs-1 test (same pattern as Exp H)
-    let inputs = InputPair::new(
-        move || ct_a.clone(),
-        move || ct_b.clone(),
-    );
+    let inputs = InputPair::new(move || ct_a.clone(), move || ct_b.clone());
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
@@ -490,37 +536,55 @@ fn exp_i3_msb_stratified() {
     const POOL_SIZE: usize = 50;
 
     eprintln!("\n=== Experiment I3: MSB-Stratified Comparison ===");
-    eprintln!("Building pool of {} 'low MSB' (0x01-0x3F) ciphertexts...", POOL_SIZE);
+    eprintln!(
+        "Building pool of {} 'low MSB' (0x01-0x3F) ciphertexts...",
+        POOL_SIZE
+    );
 
     // Build pool of low-MSB ciphertexts
     let mut low_msb_pool: Vec<Vec<u8>> = Vec::with_capacity(POOL_SIZE);
     let mut attempts = 0;
     while low_msb_pool.len() < POOL_SIZE && attempts < 100000 {
         let msg = rand_bytes_32();
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+            .unwrap();
         let msb = msb_value(&ct);
         if msb > 0 && msb <= 0x3F {
             low_msb_pool.push(ct);
         }
         attempts += 1;
     }
-    eprintln!("  Found {} low-MSB ciphertexts in {} attempts", low_msb_pool.len(), attempts);
+    eprintln!(
+        "  Found {} low-MSB ciphertexts in {} attempts",
+        low_msb_pool.len(),
+        attempts
+    );
 
-    eprintln!("Building pool of {} 'high MSB' (0xC0-0xFF) ciphertexts...", POOL_SIZE);
+    eprintln!(
+        "Building pool of {} 'high MSB' (0xC0-0xFF) ciphertexts...",
+        POOL_SIZE
+    );
 
     // Build pool of high-MSB ciphertexts
     let mut high_msb_pool: Vec<Vec<u8>> = Vec::with_capacity(POOL_SIZE);
     attempts = 0;
     while high_msb_pool.len() < POOL_SIZE && attempts < 100000 {
         let msg = rand_bytes_32();
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+            .unwrap();
         let msb = msb_value(&ct);
         if msb >= 0xC0 {
             high_msb_pool.push(ct);
         }
         attempts += 1;
     }
-    eprintln!("  Found {} high-MSB ciphertexts in {} attempts", high_msb_pool.len(), attempts);
+    eprintln!(
+        "  Found {} high-MSB ciphertexts in {} attempts",
+        high_msb_pool.len(),
+        attempts
+    );
 
     if low_msb_pool.len() < POOL_SIZE || high_msb_pool.len() < POOL_SIZE {
         eprintln!("WARNING: Could not build full pools. Results may be unreliable.");
@@ -593,13 +657,18 @@ fn exp_comprehensive_shape_analysis() {
     const NUM_CTS: usize = 50;
     const REPS: usize = 200;
 
-    eprintln!("Generating {} ciphertexts, {} measurements each...", NUM_CTS, REPS);
+    eprintln!(
+        "Generating {} ciphertexts, {} measurements each...",
+        NUM_CTS, REPS
+    );
 
     let mut ct_data: Vec<(Vec<u8>, u8, u32, f64)> = Vec::with_capacity(NUM_CTS);
 
     for i in 0..NUM_CTS {
         let msg = rand_bytes_32();
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &msg)
+            .unwrap();
         let msb = msb_value(&ct);
         let hw = hamming_weight(&ct);
 
@@ -636,8 +705,13 @@ fn exp_comprehensive_shape_analysis() {
     let max_t = timings.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
     eprintln!();
-    eprintln!("  Timing: mean={:.0}ns, min={:.0}ns, max={:.0}ns, range={:.0}ns",
-        mean_t, min_t, max_t, max_t - min_t);
+    eprintln!(
+        "  Timing: mean={:.0}ns, min={:.0}ns, max={:.0}ns, range={:.0}ns",
+        mean_t,
+        min_t,
+        max_t,
+        max_t - min_t
+    );
     eprintln!("  Correlation with MSB:     r = {:.4}", r_msb);
     eprintln!("  Correlation with Hamming: r = {:.4}", r_hw);
 
@@ -650,18 +724,27 @@ fn exp_comprehensive_shape_analysis() {
     eprintln!("└──────────────────────────────────────────────────────────────┘");
 
     // Test 2a: Two random ciphertexts (baseline, like Exp H)
-    let ct_rand_a = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap();
-    let ct_rand_b = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap();
+    let ct_rand_a = public_key
+        .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+        .unwrap();
+    let ct_rand_b = public_key
+        .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+        .unwrap();
 
     eprintln!();
     eprintln!("Test 2a: Two random ciphertexts (1 vs 1)");
-    eprintln!("  CT_A: msb=0x{:02X}, hw={}", msb_value(&ct_rand_a), hamming_weight(&ct_rand_a));
-    eprintln!("  CT_B: msb=0x{:02X}, hw={}", msb_value(&ct_rand_b), hamming_weight(&ct_rand_b));
-
-    let inputs = InputPair::new(
-        move || ct_rand_a.clone(),
-        move || ct_rand_b.clone(),
+    eprintln!(
+        "  CT_A: msb=0x{:02X}, hw={}",
+        msb_value(&ct_rand_a),
+        hamming_weight(&ct_rand_a)
     );
+    eprintln!(
+        "  CT_B: msb=0x{:02X}, hw={}",
+        msb_value(&ct_rand_b),
+        hamming_weight(&ct_rand_b)
+    );
+
+    let inputs = InputPair::new(move || ct_rand_a.clone(), move || ct_rand_b.clone());
 
     let outcome_2a = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
@@ -683,7 +766,9 @@ fn exp_comprehensive_shape_analysis() {
     let mut target_msb: Option<u8> = None;
 
     for _ in 0..5000 {
-        let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap();
+        let ct = public_key
+            .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+            .unwrap();
         let msb = msb_value(&ct);
         if msb >= 0x80 {
             if ct_same_a.is_none() {
@@ -697,13 +782,18 @@ fn exp_comprehensive_shape_analysis() {
     }
 
     if let (Some(cta), Some(ctb)) = (ct_same_a, ct_same_b) {
-        eprintln!("  CT_A: msb=0x{:02X}, hw={}", msb_value(&cta), hamming_weight(&cta));
-        eprintln!("  CT_B: msb=0x{:02X}, hw={}", msb_value(&ctb), hamming_weight(&ctb));
-
-        let inputs = InputPair::new(
-            move || cta.clone(),
-            move || ctb.clone(),
+        eprintln!(
+            "  CT_A: msb=0x{:02X}, hw={}",
+            msb_value(&cta),
+            hamming_weight(&cta)
         );
+        eprintln!(
+            "  CT_B: msb=0x{:02X}, hw={}",
+            msb_value(&ctb),
+            hamming_weight(&ctb)
+        );
+
+        let inputs = InputPair::new(move || cta.clone(), move || ctb.clone());
 
         let outcome_2b = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .pass_threshold(0.15)
@@ -724,10 +814,18 @@ fn exp_comprehensive_shape_analysis() {
     eprintln!("Test 2c: Two pools of 100 ciphertexts (100 vs 100)");
 
     let pool_a: Vec<Vec<u8>> = (0..100)
-        .map(|_| public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap())
+        .map(|_| {
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+                .unwrap()
+        })
         .collect();
     let pool_b: Vec<Vec<u8>> = (0..100)
-        .map(|_| public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap())
+        .map(|_| {
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+                .unwrap()
+        })
         .collect();
 
     let idx_a = std::cell::Cell::new(0usize);
@@ -766,10 +864,28 @@ fn exp_comprehensive_shape_analysis() {
     eprintln!("╚══════════════════════════════════════════════════════════════╝");
     eprintln!();
     eprintln!("Shape Correlation Analysis:");
-    eprintln!("  - MSB correlation:     r = {:.4} ({})", r_msb,
-        if r_msb.abs() > 0.5 { "STRONG" } else if r_msb.abs() > 0.3 { "MODERATE" } else { "WEAK" });
-    eprintln!("  - Hamming correlation: r = {:.4} ({})", r_hw,
-        if r_hw.abs() > 0.5 { "STRONG" } else if r_hw.abs() > 0.3 { "MODERATE" } else { "WEAK" });
+    eprintln!(
+        "  - MSB correlation:     r = {:.4} ({})",
+        r_msb,
+        if r_msb.abs() > 0.5 {
+            "STRONG"
+        } else if r_msb.abs() > 0.3 {
+            "MODERATE"
+        } else {
+            "WEAK"
+        }
+    );
+    eprintln!(
+        "  - Hamming correlation: r = {:.4} ({})",
+        r_hw,
+        if r_hw.abs() > 0.5 {
+            "STRONG"
+        } else if r_hw.abs() > 0.3 {
+            "MODERATE"
+        } else {
+            "WEAK"
+        }
+    );
     eprintln!();
     eprintln!("If correlations are weak and 1-vs-1 tests show large effects,");
     eprintln!("the timing variation is NOT due to simple shape properties.");
@@ -806,7 +922,9 @@ fn exp_b1_blinding_variance() {
     let public_key = RsaPublicKey::from(&private_key);
 
     // Single ciphertext
-    let ct = public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap();
+    let ct = public_key
+        .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+        .unwrap();
 
     // Warmup
     for _ in 0..100 {
@@ -827,7 +945,8 @@ fn exp_b1_blinding_variance() {
 
     // Compute statistics
     let mean: f64 = timings.iter().sum::<f64>() / timings.len() as f64;
-    let variance: f64 = timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / (timings.len() - 1) as f64;
+    let variance: f64 =
+        timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / (timings.len() - 1) as f64;
     let std_dev = variance.sqrt();
     let cv = std_dev / mean * 100.0; // Coefficient of variation
 
@@ -868,7 +987,10 @@ fn exp_b1_blinding_variance() {
     // Compare to expected effect size
     eprintln!();
     eprintln!("For context: Experiment H showed ~450-600ns timing DIFFERENCE");
-    eprintln!("between different ciphertexts. If blinding variance ({:.0}ns StdDev)", std_dev);
+    eprintln!(
+        "between different ciphertexts. If blinding variance ({:.0}ns StdDev)",
+        std_dev
+    );
     eprintln!("is smaller than the inter-ciphertext difference, the per-ciphertext");
     eprintln!("timing variation is a real, persistent property of each ciphertext.");
 }
@@ -894,12 +1016,19 @@ fn exp_b2_persistence_test() {
     const NUM_CTS: usize = 10;
     const REPS_PER_CT: usize = 500;
 
-    eprintln!("Measuring {} ciphertexts, {} decryptions each...", NUM_CTS, REPS_PER_CT);
+    eprintln!(
+        "Measuring {} ciphertexts, {} decryptions each...",
+        NUM_CTS, REPS_PER_CT
+    );
     eprintln!();
 
     // Generate ciphertexts
     let ciphertexts: Vec<Vec<u8>> = (0..NUM_CTS)
-        .map(|_| public_key.encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32()).unwrap())
+        .map(|_| {
+            public_key
+                .encrypt(&mut OsRng, Pkcs1v15Encrypt, &rand_bytes_32())
+                .unwrap()
+        })
         .collect();
 
     // Warmup all ciphertexts
@@ -924,21 +1053,28 @@ fn exp_b2_persistence_test() {
         }
 
         let mean: f64 = timings.iter().sum::<f64>() / timings.len() as f64;
-        let variance: f64 = timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / (timings.len() - 1) as f64;
+        let variance: f64 =
+            timings.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / (timings.len() - 1) as f64;
         let std_dev = variance.sqrt();
         let min = timings.iter().cloned().fold(f64::INFINITY, f64::min);
         let max = timings.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
 
         ct_stats.push((mean, std_dev, min, max));
 
-        eprintln!("  CT[{}]: mean={:.0}ns, std={:.0}ns, range=[{:.0}, {:.0}]",
-            i, mean, std_dev, min, max);
+        eprintln!(
+            "  CT[{}]: mean={:.0}ns, std={:.0}ns, range=[{:.0}, {:.0}]",
+            i, mean, std_dev, min, max
+        );
     }
 
     // Analyze inter-ciphertext variation
     let means: Vec<f64> = ct_stats.iter().map(|(m, _, _, _)| *m).collect();
     let overall_mean: f64 = means.iter().sum::<f64>() / means.len() as f64;
-    let inter_ct_variance: f64 = means.iter().map(|m| (m - overall_mean).powi(2)).sum::<f64>() / (means.len() - 1) as f64;
+    let inter_ct_variance: f64 = means
+        .iter()
+        .map(|m| (m - overall_mean).powi(2))
+        .sum::<f64>()
+        / (means.len() - 1) as f64;
     let inter_ct_std = inter_ct_variance.sqrt();
 
     let min_mean = means.iter().cloned().fold(f64::INFINITY, f64::min);
@@ -946,7 +1082,8 @@ fn exp_b2_persistence_test() {
     let mean_range = max_mean - min_mean;
 
     // Average within-ciphertext std
-    let avg_within_std: f64 = ct_stats.iter().map(|(_, s, _, _)| *s).sum::<f64>() / ct_stats.len() as f64;
+    let avg_within_std: f64 =
+        ct_stats.iter().map(|(_, s, _, _)| *s).sum::<f64>() / ct_stats.len() as f64;
 
     eprintln!();
     eprintln!("┌──────────────────────────────────────────────────────────────┐");
@@ -954,8 +1091,14 @@ fn exp_b2_persistence_test() {
     eprintln!("└──────────────────────────────────────────────────────────────┘");
     eprintln!();
     eprintln!("  Overall mean:           {:.0} ns", overall_mean);
-    eprintln!("  Inter-ciphertext StdDev: {:.0} ns (variation BETWEEN ciphertexts)", inter_ct_std);
-    eprintln!("  Avg within-CT StdDev:    {:.0} ns (blinding noise)", avg_within_std);
+    eprintln!(
+        "  Inter-ciphertext StdDev: {:.0} ns (variation BETWEEN ciphertexts)",
+        inter_ct_std
+    );
+    eprintln!(
+        "  Avg within-CT StdDev:    {:.0} ns (blinding noise)",
+        avg_within_std
+    );
     eprintln!("  Mean range (max-min):    {:.0} ns", mean_range);
     eprintln!();
     eprintln!("  Fastest CT mean: {:.0} ns", min_mean);
@@ -975,7 +1118,10 @@ fn exp_b2_persistence_test() {
 
     if signal_to_noise > 3.0 {
         eprintln!("  ✓ STRONG PERSISTENCE: Ciphertexts have reliably different mean times.");
-        eprintln!("    The ~{:.0}ns inter-CT variation is NOT just noise.", inter_ct_std);
+        eprintln!(
+            "    The ~{:.0}ns inter-CT variation is NOT just noise.",
+            inter_ct_std
+        );
         eprintln!("    Each ciphertext has an intrinsic 'speed' property.");
     } else if signal_to_noise > 1.5 {
         eprintln!("  ~ MODERATE PERSISTENCE: Some real variation between ciphertexts.");
@@ -987,8 +1133,18 @@ fn exp_b2_persistence_test() {
 
     eprintln!();
     eprintln!("  For context:");
-    eprintln!("    - Blinding adds ~{:.0}ns StdDev per-measurement", avg_within_std);
-    eprintln!("    - With {} measurements, SE of mean = {:.0}ns", REPS_PER_CT, avg_within_std / (REPS_PER_CT as f64).sqrt());
+    eprintln!(
+        "    - Blinding adds ~{:.0}ns StdDev per-measurement",
+        avg_within_std
+    );
+    eprintln!(
+        "    - With {} measurements, SE of mean = {:.0}ns",
+        REPS_PER_CT,
+        avg_within_std / (REPS_PER_CT as f64).sqrt()
+    );
     eprintln!("    - Inter-CT spread = {:.0}ns", mean_range);
-    eprintln!("    - This spread is {:.1}x the standard error", mean_range / (avg_within_std / (REPS_PER_CT as f64).sqrt()));
+    eprintln!(
+        "    - This spread is {:.1}x the standard error",
+        mean_range / (avg_within_std / (REPS_PER_CT as f64).sqrt())
+    );
 }

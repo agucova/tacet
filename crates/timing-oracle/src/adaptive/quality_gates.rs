@@ -477,7 +477,10 @@ mod tests {
         std::thread::sleep(Duration::from_micros(10));
 
         let result = check_time_budget(&state, &posterior, &config);
-        assert!(matches!(result, Some(InconclusiveReason::TimeBudgetExceeded { .. })));
+        assert!(matches!(
+            result,
+            Some(InconclusiveReason::TimeBudgetExceeded { .. })
+        ));
     }
 
     #[test]

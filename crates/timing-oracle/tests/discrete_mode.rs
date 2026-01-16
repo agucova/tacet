@@ -8,7 +8,9 @@
 //! Run with: cargo test --test discrete_mode
 
 use std::time::Duration;
-use timing_oracle::{compute_min_uniqueness_ratio, helpers::InputPair, AttackerModel, Outcome, TimingOracle};
+use timing_oracle::{
+    compute_min_uniqueness_ratio, helpers::InputPair, AttackerModel, Outcome, TimingOracle,
+};
 
 // =============================================================================
 // UNIT TESTS: Uniqueness Ratio
@@ -299,9 +301,9 @@ fn force_discrete_mode_activates() {
         });
 
     match outcome {
-        Outcome::Pass { diagnostics, .. } |
-        Outcome::Fail { diagnostics, .. } |
-        Outcome::Inconclusive { diagnostics, .. } => {
+        Outcome::Pass { diagnostics, .. }
+        | Outcome::Fail { diagnostics, .. }
+        | Outcome::Inconclusive { diagnostics, .. } => {
             assert!(
                 diagnostics.discrete_mode,
                 "force_discrete_mode(true) should activate discrete mode"

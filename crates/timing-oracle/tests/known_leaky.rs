@@ -34,7 +34,10 @@ fn detects_early_exit_comparison() {
     // Skip ONLY if unmeasurable (operation too fast for this platform)
     // Inconclusive should NOT be skipped - if we can't detect a known leak, that's a test failure
     if let Outcome::Unmeasurable { recommendation, .. } = &outcome {
-        eprintln!("[SKIPPED] detects_early_exit_comparison: {}", recommendation);
+        eprintln!(
+            "[SKIPPED] detects_early_exit_comparison: {}",
+            recommendation
+        );
         return;
     }
 

@@ -1,7 +1,9 @@
 //! End-to-end integration tests.
 
 use std::time::Duration;
-use timing_oracle::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
+use timing_oracle::{
+    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
+};
 
 /// Basic smoke test that the API works.
 #[test]
@@ -17,16 +19,28 @@ fn smoke_test() {
 
     // Just verify we get a result without panicking
     match outcome {
-        Outcome::Pass { leak_probability, samples_used, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
-        Outcome::Fail { leak_probability, samples_used, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             // Unexpected but valid
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
-        Outcome::Inconclusive { leak_probability, samples_used, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
@@ -60,15 +74,28 @@ fn convenience_function() {
         });
 
     match outcome {
-        Outcome::Pass { leak_probability, samples_used, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             // Constant-time operation should not fail, but handle gracefully
-            panic!("Unexpected fail for constant-time operation: P={:.1}%", leak_probability * 100.0);
+            panic!(
+                "Unexpected fail for constant-time operation: P={:.1}%",
+                leak_probability * 100.0
+            );
         }
-        Outcome::Inconclusive { leak_probability, samples_used, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
@@ -89,16 +116,28 @@ fn macro_api() {
     };
 
     match outcome {
-        Outcome::Pass { leak_probability, samples_used, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
-        Outcome::Fail { leak_probability, samples_used, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             // Shouldn't happen for constant-time operation
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }
-        Outcome::Inconclusive { leak_probability, samples_used, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
             assert!(leak_probability >= 0.0 && leak_probability <= 1.0);
             assert!(samples_used > 0);
         }

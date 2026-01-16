@@ -28,12 +28,12 @@ fn library_is_thread_safe() {
                 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
                     .time_budget(Duration::from_secs(10))
                     .test(inputs, |arr| {
-                    let mut acc = 0u32;
-                    for byte in arr {
-                        acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
-                    }
-                    std::hint::black_box(acc);
-                });
+                        let mut acc = 0u32;
+                        for byte in arr {
+                            acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
+                        }
+                        std::hint::black_box(acc);
+                    });
 
                 // Verify we got a result
                 matches!(
@@ -76,12 +76,12 @@ fn library_works_with_many_sequential_calls() {
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
             .time_budget(Duration::from_secs(5))
             .test(inputs, |arr| {
-            let mut acc = 0u32;
-            for byte in arr {
-                acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
-            }
-            std::hint::black_box(acc);
-        });
+                let mut acc = 0u32;
+                for byte in arr {
+                    acc = acc.wrapping_mul(31).wrapping_add(*byte as u32);
+                }
+                std::hint::black_box(acc);
+            });
 
         assert!(matches!(
             outcome,

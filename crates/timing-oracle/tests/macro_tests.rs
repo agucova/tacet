@@ -356,9 +356,21 @@ fn macro_result_access() {
     };
 
     match outcome {
-        Outcome::Pass { leak_probability, effect, .. } |
-        Outcome::Fail { leak_probability, effect, .. } |
-        Outcome::Inconclusive { leak_probability, effect, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        }
+        | Outcome::Fail {
+            leak_probability,
+            effect,
+            ..
+        }
+        | Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => {
             // Verify fields are accessible
             let _leak_prob = leak_probability;
             let _effect = &effect;
@@ -577,9 +589,15 @@ fn timing_test_checked_returns_outcome() {
 
     // Must pattern match or use helper methods on Outcome
     match outcome {
-        Outcome::Pass { leak_probability, .. } |
-        Outcome::Fail { leak_probability, .. } |
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        }
+        | Outcome::Fail {
+            leak_probability, ..
+        }
+        | Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             assert!(leak_probability >= 0.0);
         }
         Outcome::Unmeasurable { .. } => {
@@ -602,9 +620,15 @@ fn timing_test_checked_explicit_unmeasurable_handling() {
 
     // This pattern is useful when you want to handle unmeasurable gracefully
     match outcome {
-        Outcome::Pass { leak_probability, .. } |
-        Outcome::Fail { leak_probability, .. } |
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        }
+        | Outcome::Fail {
+            leak_probability, ..
+        }
+        | Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             println!("Measurable: {:.3}", leak_probability);
         }
         Outcome::Unmeasurable { recommendation, .. } => {

@@ -73,7 +73,9 @@ fn sha3_256_constant_time() {
 
     // SHA-3 should be constant-time - check that it passed
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -127,7 +129,9 @@ fn sha3_384_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "sha3_384_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -180,7 +184,9 @@ fn sha3_512_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "sha3_512_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -237,7 +243,9 @@ fn sha3_256_data_independence() {
     let outcome = skip_if_unreliable!(outcome, "sha3_256_data_independence");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -296,7 +304,9 @@ fn blake2b_512_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "blake2b_512_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -351,7 +361,9 @@ fn blake2s_256_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "blake2s_256_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -410,7 +422,9 @@ fn sha3_256_hamming_weight_independence() {
 
     // Primary check: Should pass (no timing leak based on hamming weight)
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -464,7 +478,9 @@ fn blake2b_hamming_weight_independence() {
 
     // Primary check: Should pass
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -531,7 +547,9 @@ fn sha3_256_incremental_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "sha3_256_incremental_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {
@@ -590,7 +608,9 @@ fn blake2b_incremental_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "blake2b_incremental_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Fail {

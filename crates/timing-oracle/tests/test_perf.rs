@@ -107,20 +107,22 @@ fn test_perf_timer_consistency() {
 
     // Calculate mean and std dev
     let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-    let variance = samples.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / samples.len() as f64;
+    let variance = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
     let std_dev = variance.sqrt();
     let cv = std_dev / mean;
 
-    eprintln!("Measurement stats: mean={:.0} cycles, std={:.0}, CV={:.2}",
-        mean, std_dev, cv);
+    eprintln!(
+        "Measurement stats: mean={:.0} cycles, std={:.0}, CV={:.2}",
+        mean, std_dev, cv
+    );
 
     // Coefficient of variation should be < 50% for stable measurements
     assert!(
         cv < 0.5,
         "CV {} should be < 0.5 for consistent measurements (mean={:.0}, std={:.0})",
-        cv, mean, std_dev
+        cv,
+        mean,
+        std_dev
     );
 }
 
@@ -149,9 +151,7 @@ fn test_perf_timer_zero_work() {
     };
 
     // Measure essentially no work
-    let cycles = timer.measure_cycles(|| {
-        std::hint::black_box(42)
-    });
+    let cycles = timer.measure_cycles(|| std::hint::black_box(42));
 
     eprintln!("Measured {} cycles for minimal work", cycles);
     // Should be a small number (may be 0 or very small on some systems)
@@ -185,11 +185,15 @@ fn test_perf_cycles_to_ns_conversion() {
     assert!(
         (ns - expected_ns).abs() < 0.001,
         "cycles_to_ns({}) = {} ns, expected {} ns",
-        test_cycles, ns, expected_ns
+        test_cycles,
+        ns,
+        expected_ns
     );
 
-    eprintln!("{} cycles = {:.2} ns (at {:.2} cycles/ns)",
-        test_cycles, ns, cycles_per_ns);
+    eprintln!(
+        "{} cycles = {:.2} ns (at {:.2} cycles/ns)",
+        test_cycles, ns, cycles_per_ns
+    );
 }
 
 #[test]
@@ -218,18 +222,16 @@ fn test_perf_vs_standard_timer() {
             // Perf measurements
             let mut perf_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
-                let cycles = perf_timer.measure_cycles(|| {
-                    std::hint::black_box(42u64.wrapping_mul(17))
-                });
+                let cycles =
+                    perf_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
                 perf_samples.push(cycles);
             }
 
             // Standard timer measurements
             let mut std_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
-                let cycles = std_timer.measure_cycles(|| {
-                    std::hint::black_box(42u64.wrapping_mul(17))
-                });
+                let cycles =
+                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
                 std_samples.push(cycles);
             }
 
@@ -249,15 +251,39 @@ fn test_perf_vs_standard_timer() {
 
             eprintln!("\nMeasurement comparison ({} samples):", iterations);
             eprintln!("\n  Perf timer:");
-            eprintln!("    Min: {} cycles ({:.2} ns)", perf_min, perf_timer.cycles_to_ns(perf_min));
-            eprintln!("    Median: {} cycles ({:.2} ns)", perf_median, perf_timer.cycles_to_ns(perf_median));
-            eprintln!("    Max: {} cycles ({:.2} ns)", perf_max, perf_timer.cycles_to_ns(perf_max));
+            eprintln!(
+                "    Min: {} cycles ({:.2} ns)",
+                perf_min,
+                perf_timer.cycles_to_ns(perf_min)
+            );
+            eprintln!(
+                "    Median: {} cycles ({:.2} ns)",
+                perf_median,
+                perf_timer.cycles_to_ns(perf_median)
+            );
+            eprintln!(
+                "    Max: {} cycles ({:.2} ns)",
+                perf_max,
+                perf_timer.cycles_to_ns(perf_max)
+            );
             eprintln!("    Unique values: {}", perf_unique.len());
 
             eprintln!("\n  Standard timer:");
-            eprintln!("    Min: {} cycles ({:.2} ns)", std_min, std_timer.cycles_to_ns(std_min));
-            eprintln!("    Median: {} cycles ({:.2} ns)", std_median, std_timer.cycles_to_ns(std_median));
-            eprintln!("    Max: {} cycles ({:.2} ns)", std_max, std_timer.cycles_to_ns(std_max));
+            eprintln!(
+                "    Min: {} cycles ({:.2} ns)",
+                std_min,
+                std_timer.cycles_to_ns(std_min)
+            );
+            eprintln!(
+                "    Median: {} cycles ({:.2} ns)",
+                std_median,
+                std_timer.cycles_to_ns(std_median)
+            );
+            eprintln!(
+                "    Max: {} cycles ({:.2} ns)",
+                std_max,
+                std_timer.cycles_to_ns(std_max)
+            );
             eprintln!("    Unique values: {}", std_unique.len());
 
             // Check if perf has better granularity
@@ -265,7 +291,9 @@ fn test_perf_vs_standard_timer() {
                 let improvement = std_timer.resolution_ns() / perf_timer.resolution_ns();
                 eprintln!("\n  Resolution improvement: {:.1}x", improvement);
             } else {
-                eprintln!("\n  Note: Standard timer has similar or better resolution on this system");
+                eprintln!(
+                    "\n  Note: Standard timer has similar or better resolution on this system"
+                );
             }
 
             eprintln!("\n===========================================\n");

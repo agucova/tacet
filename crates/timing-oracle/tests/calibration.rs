@@ -9,9 +9,9 @@
 //! Run with: cargo nextest run --profile calibration
 //! Expected runtime: ~5-7 minutes
 
+use std::time::Duration;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, Outcome, TimingOracle};
-use std::time::Duration;
 
 const MAX_SAMPLES: usize = 5_000;
 
@@ -48,12 +48,15 @@ fn fpr_calibration() {
             Outcome::Pass { .. } => {
                 completed_trials += 1;
             }
-            Outcome::Fail { leak_probability, .. } => {
+            Outcome::Fail {
+                leak_probability, ..
+            } => {
                 completed_trials += 1;
                 failures += 1;
                 eprintln!(
                     "[fpr] Trial {}: FALSE POSITIVE (P={:.1}%)",
-                    trial + 1, leak_probability * 100.0
+                    trial + 1,
+                    leak_probability * 100.0
                 );
             }
             Outcome::Inconclusive { .. } => {
@@ -69,7 +72,10 @@ fn fpr_calibration() {
             let rate = failures as f64 / completed_trials as f64;
             eprintln!(
                 "[fpr] Trial {}/{}: {} failures (rate={:.1}%)",
-                trial + 1, TRIALS, failures, rate * 100.0
+                trial + 1,
+                TRIALS,
+                failures,
+                rate * 100.0
             );
         }
     }
@@ -85,7 +91,11 @@ fn fpr_calibration() {
 
     eprintln!(
         "[fpr] Complete: {} failures out of {} trials, rate={:.1}% [95% CI: {:.1}%-{:.1}%]",
-        failures, completed_trials, failure_rate * 100.0, ci_low * 100.0, ci_high * 100.0
+        failures,
+        completed_trials,
+        failure_rate * 100.0,
+        ci_low * 100.0,
+        ci_high * 100.0
     );
 
     // With default thresholds (pass < 0.05, fail > 0.95), we expect very few
@@ -119,9 +129,15 @@ fn bayesian_calibration() {
             });
 
         match &outcome {
-            Outcome::Pass { leak_probability, .. }
-            | Outcome::Fail { leak_probability, .. }
-            | Outcome::Inconclusive { leak_probability, .. } => {
+            Outcome::Pass {
+                leak_probability, ..
+            }
+            | Outcome::Fail {
+                leak_probability, ..
+            }
+            | Outcome::Inconclusive {
+                leak_probability, ..
+            } => {
                 completed_trials += 1;
                 if *leak_probability > 0.9 {
                     high_prob_count += 1;
@@ -136,7 +152,10 @@ fn bayesian_calibration() {
             let rate = high_prob_count as f64 / completed_trials as f64;
             eprintln!(
                 "[bayesian] Trial {}/{}: {} high-prob (rate={:.1}%)",
-                trial + 1, TRIALS, high_prob_count, rate * 100.0
+                trial + 1,
+                TRIALS,
+                high_prob_count,
+                rate * 100.0
             );
         }
     }
@@ -150,7 +169,9 @@ fn bayesian_calibration() {
     let high_prob_rate = high_prob_count as f64 / completed_trials as f64;
     eprintln!(
         "[bayesian] Complete: {} high-prob out of {} trials, rate={:.1}% (limit=10%)",
-        high_prob_count, completed_trials, high_prob_rate * 100.0
+        high_prob_count,
+        completed_trials,
+        high_prob_rate * 100.0
     );
 
     assert!(
@@ -181,10 +202,7 @@ fn rand_bytes() -> [u8; 32] {
 fn fpr_fixed_vs_fixed() {
     const TRIALS: usize = 100;
 
-    eprintln!(
-        "\n[fpr_fixed_vs_fixed] Starting {} trials",
-        TRIALS
-    );
+    eprintln!("\n[fpr_fixed_vs_fixed] Starting {} trials", TRIALS);
 
     let mut failures = 0;
     let mut completed_trials = 0;
@@ -207,12 +225,15 @@ fn fpr_fixed_vs_fixed() {
             Outcome::Pass { .. } => {
                 completed_trials += 1;
             }
-            Outcome::Fail { leak_probability, .. } => {
+            Outcome::Fail {
+                leak_probability, ..
+            } => {
                 completed_trials += 1;
                 failures += 1;
                 eprintln!(
                     "[fpr_fixed_vs_fixed] Trial {}: FALSE POSITIVE (P={:.1}%)",
-                    trial + 1, leak_probability * 100.0
+                    trial + 1,
+                    leak_probability * 100.0
                 );
             }
             Outcome::Inconclusive { .. } => {
@@ -227,7 +248,10 @@ fn fpr_fixed_vs_fixed() {
             let rate = failures as f64 / completed_trials as f64;
             eprintln!(
                 "[fpr_fixed_vs_fixed] Trial {}/{}: {} failures (rate={:.1}%)",
-                trial + 1, TRIALS, failures, rate * 100.0
+                trial + 1,
+                TRIALS,
+                failures,
+                rate * 100.0
             );
         }
     }
@@ -268,8 +292,11 @@ fn bayesian_prior_sweep() {
 
     let priors = [0.5, 0.75, 0.9];
 
-    eprintln!("\n[prior_sweep] Testing {} prior values, {} trials each",
-              priors.len(), TRIALS_PER_PRIOR);
+    eprintln!(
+        "\n[prior_sweep] Testing {} prior values, {} trials each",
+        priors.len(),
+        TRIALS_PER_PRIOR
+    );
 
     let mut any_completed = false;
 
@@ -289,9 +316,15 @@ fn bayesian_prior_sweep() {
                 });
 
             match &outcome {
-                Outcome::Pass { leak_probability, .. }
-                | Outcome::Fail { leak_probability, .. }
-                | Outcome::Inconclusive { leak_probability, .. } => {
+                Outcome::Pass {
+                    leak_probability, ..
+                }
+                | Outcome::Fail {
+                    leak_probability, ..
+                }
+                | Outcome::Inconclusive {
+                    leak_probability, ..
+                } => {
                     completed_trials += 1;
                     if *leak_probability > 0.9 {
                         high_prob_count += 1;
@@ -306,14 +339,21 @@ fn bayesian_prior_sweep() {
                 let rate = high_prob_count as f64 / completed_trials as f64;
                 eprintln!(
                     "  prior={:.2}: {}/{} trials, {} high-prob ({:.0}%)",
-                    prior, trial + 1, TRIALS_PER_PRIOR, high_prob_count, rate * 100.0
+                    prior,
+                    trial + 1,
+                    TRIALS_PER_PRIOR,
+                    high_prob_count,
+                    rate * 100.0
                 );
             }
         }
 
         // Skip this prior if no trials completed
         if completed_trials == 0 {
-            eprintln!("[prior_sweep] prior={:.2}: skipped (all trials unmeasurable)", prior);
+            eprintln!(
+                "[prior_sweep] prior={:.2}: skipped (all trials unmeasurable)",
+                prior
+            );
             continue;
         }
 
@@ -330,7 +370,8 @@ fn bayesian_prior_sweep() {
         assert!(
             high_prob_rate < 0.15,
             "Prior {} produced too many false high probabilities: {:.1}%",
-            prior, high_prob_rate * 100.0
+            prior,
+            high_prob_rate * 100.0
         );
     }
 
@@ -360,10 +401,7 @@ fn bayesian_prior_sweep() {
 fn fpr_1k_trials() {
     const TRIALS: usize = 1_000;
 
-    eprintln!(
-        "\n[fpr_1k] Starting {} trials",
-        TRIALS
-    );
+    eprintln!("\n[fpr_1k] Starting {} trials", TRIALS);
     eprintln!("[fpr_1k] Expected ~50 failures or fewer (5% + margin)");
 
     let mut failures = 0;

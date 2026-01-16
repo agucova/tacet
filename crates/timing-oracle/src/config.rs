@@ -17,7 +17,6 @@ pub struct Config {
     // =========================================================================
     // Decision thresholds (new for adaptive Bayesian)
     // =========================================================================
-
     /// Threshold for declaring "Pass" (no leak detected).
     ///
     /// If the posterior probability of a timing leak falls below this threshold,
@@ -37,7 +36,6 @@ pub struct Config {
     // =========================================================================
     // Resource limits
     // =========================================================================
-
     /// Maximum time budget for the analysis.
     ///
     /// The oracle will stop collecting samples and return Inconclusive if this
@@ -67,7 +65,6 @@ pub struct Config {
     // =========================================================================
     // Effect thresholds (attacker model)
     // =========================================================================
-
     /// Minimum effect size we care about in nanoseconds.
     ///
     /// Effects smaller than this won't trigger high posterior probabilities
@@ -99,7 +96,6 @@ pub struct Config {
     // =========================================================================
     // Measurement configuration
     // =========================================================================
-
     /// Warmup iterations before measurement.
     ///
     /// These iterations warm CPU caches, stabilize frequency scaling, and
@@ -128,7 +124,6 @@ pub struct Config {
     // =========================================================================
     // Bayesian inference configuration
     // =========================================================================
-
     /// Prior probability of no leak.
     ///
     /// This is the prior belief that the code under test is constant-time.
@@ -149,7 +144,6 @@ pub struct Config {
     // =========================================================================
     // Sample splitting
     // =========================================================================
-
     /// Fraction of samples held out for calibration/preflight.
     ///
     /// In non-adaptive mode, this fraction of samples is used for covariance
@@ -162,7 +156,6 @@ pub struct Config {
     // =========================================================================
     // Optional limits and debugging
     // =========================================================================
-
     /// Optional guardrail for max duration in milliseconds (legacy).
     ///
     /// Prefer using `time_budget` instead. This is kept for backwards
@@ -308,16 +301,28 @@ impl Config {
 
     /// Set the pass threshold.
     pub fn pass_threshold(mut self, threshold: f64) -> Self {
-        assert!(threshold > 0.0 && threshold < 1.0, "pass_threshold must be in (0, 1)");
-        assert!(threshold < self.fail_threshold, "pass_threshold must be < fail_threshold");
+        assert!(
+            threshold > 0.0 && threshold < 1.0,
+            "pass_threshold must be in (0, 1)"
+        );
+        assert!(
+            threshold < self.fail_threshold,
+            "pass_threshold must be < fail_threshold"
+        );
         self.pass_threshold = threshold;
         self
     }
 
     /// Set the fail threshold.
     pub fn fail_threshold(mut self, threshold: f64) -> Self {
-        assert!(threshold > 0.0 && threshold < 1.0, "fail_threshold must be in (0, 1)");
-        assert!(threshold > self.pass_threshold, "fail_threshold must be > pass_threshold");
+        assert!(
+            threshold > 0.0 && threshold < 1.0,
+            "fail_threshold must be in (0, 1)"
+        );
+        assert!(
+            threshold > self.pass_threshold,
+            "fail_threshold must be > pass_threshold"
+        );
         self.fail_threshold = threshold;
         self
     }
@@ -369,7 +374,10 @@ impl Config {
 
     /// Set the outlier percentile.
     pub fn outlier_percentile(mut self, percentile: f64) -> Self {
-        assert!(percentile > 0.0 && percentile <= 1.0, "outlier_percentile must be in (0, 1]");
+        assert!(
+            percentile > 0.0 && percentile <= 1.0,
+            "outlier_percentile must be in (0, 1]"
+        );
         self.outlier_percentile = percentile;
         self
     }
@@ -382,7 +390,10 @@ impl Config {
 
     /// Set the prior probability of no leak.
     pub fn prior_no_leak(mut self, prior: f64) -> Self {
-        assert!(prior > 0.0 && prior < 1.0, "prior_no_leak must be in (0, 1)");
+        assert!(
+            prior > 0.0 && prior < 1.0,
+            "prior_no_leak must be in (0, 1)"
+        );
         self.prior_no_leak = prior;
         self
     }
@@ -396,7 +407,10 @@ impl Config {
 
     /// Set the calibration fraction.
     pub fn calibration_fraction(mut self, fraction: f32) -> Self {
-        assert!(fraction > 0.0 && fraction < 1.0, "calibration_fraction must be in (0, 1)");
+        assert!(
+            fraction > 0.0 && fraction < 1.0,
+            "calibration_fraction must be in (0, 1)"
+        );
         self.calibration_fraction = fraction;
         self
     }

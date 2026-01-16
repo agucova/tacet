@@ -81,7 +81,10 @@ impl AutocorrWarning {
                     lag, acf_value, threshold
                 )
             }
-            AutocorrWarning::InsufficientSamples { available, required } => {
+            AutocorrWarning::InsufficientSamples {
+                available,
+                required,
+            } => {
                 format!(
                     "Insufficient samples for autocorrelation check: {} available, {} required.",
                     available, required
@@ -155,7 +158,11 @@ pub fn autocorrelation_check(fixed: &[f64], random: &[f64]) -> Option<AutocorrWa
     for lag in 1..=MAX_LAG {
         let acf_f = compute_acf(fixed, lag);
         let acf_r = compute_acf(random, lag);
-        let max_acf = if acf_f.abs() > acf_r.abs() { acf_f } else { acf_r };
+        let max_acf = if acf_f.abs() > acf_r.abs() {
+            acf_f
+        } else {
+            acf_r
+        };
 
         if max_acf.abs() > ACF_THRESHOLD {
             return Some(AutocorrWarning::PeriodicInterference {

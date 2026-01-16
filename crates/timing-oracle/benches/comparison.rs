@@ -12,10 +12,8 @@
 
 mod comp;
 
-use comp::{
-    run_detection_comparison, run_efficiency_analysis, run_roc_analysis, BenchmarkConfig,
-};
 use comp::report::print_sample_efficiency;
+use comp::{run_detection_comparison, run_efficiency_analysis, run_roc_analysis, BenchmarkConfig};
 
 fn main() {
     // Parse command-line arguments (simple version)

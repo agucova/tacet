@@ -146,9 +146,21 @@ fn aes_sbox_timing_fast() {
     // On many systems, S-box lookups show cache effects
     // We expect moderate leak probability and/or TailEffect pattern
     let (leak_probability, effect) = match &outcome {
-        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
     };
 
@@ -159,8 +171,7 @@ fn aes_sbox_timing_fast() {
     assert!(
         has_leak_signal,
         "Expected to detect some cache timing effect (got leak_probability={}, has_tail_effect={})",
-        leak_probability,
-        has_tail_effect
+        leak_probability, has_tail_effect
     );
 }
 
@@ -190,20 +201,28 @@ fn aes_sbox_timing_thorough() {
     // With 100k samples, cache effects should be more pronounced
     // Should detect leak with high confidence (Fail outcome)
     match &outcome {
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             assert!(
                 *leak_probability > 0.5,
                 "Expected high leak probability with 100k samples (got {})",
                 leak_probability
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for S-box timing leak, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for S-box timing leak, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability
@@ -249,13 +268,28 @@ fn cache_line_boundary_effects() {
     // Cache line boundary accesses may show timing differences due to cache effects
     // Should detect at least moderate leak probability or tail effects
     let (leak_probability, effect) = match &outcome {
-        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
     };
 
-    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect | EffectPattern::Mixed);
+    let has_tail_effect = matches!(
+        effect.pattern,
+        EffectPattern::TailEffect | EffectPattern::Mixed
+    );
 
     let has_leak_signal = leak_probability > 0.2 || has_tail_effect;
     assert!(
@@ -308,9 +342,21 @@ fn memory_access_pattern_leak() {
     // Memory access patterns with different strides should show timing differences
     // due to cache effects (sequential vs random access)
     let (leak_probability, effect) = match &outcome {
-        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
     };
 
@@ -342,7 +388,7 @@ fn modexp_square_and_multiply_timing() {
 
     // High Hamming weight exponent (many 1 bits = more multiplies)
     let exp_high_hamming = BigUint::from(0xFFFFu32); // 16 ones
-    // Low Hamming weight exponent (few 1 bits = fewer multiplies)
+                                                     // Low Hamming weight exponent (few 1 bits = fewer multiplies)
     let exp_low_hamming = BigUint::from(0x8001u32); // 2 ones
 
     let exponents = InputPair::new(|| exp_high_hamming.clone(), || exp_low_hamming.clone());
@@ -374,7 +420,10 @@ fn modexp_square_and_multiply_timing() {
 
             // Should show UniformShift or Mixed pattern (BigInt ops may have variance)
             assert!(
-                matches!(effect.pattern, EffectPattern::UniformShift | EffectPattern::Mixed),
+                matches!(
+                    effect.pattern,
+                    EffectPattern::UniformShift | EffectPattern::Mixed
+                ),
                 "Expected UniformShift or Mixed pattern for algorithmic timing (got {:?})",
                 effect.pattern
             );
@@ -386,13 +435,19 @@ fn modexp_square_and_multiply_timing() {
                 effect.shift_ns
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for modexp timing leak, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for modexp timing leak, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability
@@ -429,20 +484,28 @@ fn modexp_bit_pattern_timing() {
 
     // Should detect leak (Fail outcome)
     match &outcome {
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             assert!(
                 *leak_probability > 0.8,
                 "Expected high leak probability for bit pattern timing (got {})",
                 leak_probability
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for bit pattern timing, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for bit pattern timing, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability
@@ -468,10 +531,7 @@ fn table_lookup_small_l1() {
     // Pre-generate indices using InputPair
     const SAMPLES: usize = 10_000;
     let table_len = table.len();
-    let indices = InputPair::new(
-        || 0usize,
-        || rand::random::<u32>() as usize % table_len,
-    );
+    let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
     // Use AdjacentNetwork - L1-resident small table should pass
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -517,10 +577,7 @@ fn table_lookup_medium_l2() {
     // Pre-generate indices using InputPair
     const SAMPLES: usize = 10_000;
     let table_len = table.len();
-    let indices = InputPair::new(
-        || 0usize,
-        || rand::random::<u32>() as usize % table_len,
-    );
+    let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
     // Use AdjacentNetwork - medium table should pass or have low exploitability
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -545,7 +602,10 @@ fn table_lookup_medium_l2() {
         }
         Outcome::Fail { exploitability, .. } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "Expected low exploitability for medium table (got {:?})",
                 exploitability
             );
@@ -567,10 +627,7 @@ fn table_lookup_large_cache_thrash() {
     // Pre-generate indices using InputPair
     const SAMPLES: usize = 10_000;
     let table_len = table.len();
-    let indices = InputPair::new(
-        || 0usize,
-        || rand::random::<u32>() as usize % table_len,
-    );
+    let indices = InputPair::new(|| 0usize, || rand::random::<u32>() as usize % table_len);
 
     // Use Research mode (theta=0) to test raw detection capability for cache timing
     let outcome = TimingOracle::for_attacker(AttackerModel::Research)
@@ -590,9 +647,21 @@ fn table_lookup_large_cache_thrash() {
 
     // Large table should show cache timing effects
     let (leak_probability, effect) = match &outcome {
-        Outcome::Pass { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Fail { leak_probability, effect, .. } => (*leak_probability, effect),
-        Outcome::Inconclusive { leak_probability, effect, .. } => (*leak_probability, effect),
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
+        Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
     };
 
@@ -603,8 +672,7 @@ fn table_lookup_large_cache_thrash() {
     assert!(
         has_leak_signal,
         "Expected cache effects for large table (got leak_probability={}, has_tail_effect={})",
-        leak_probability,
-        has_tail_effect
+        leak_probability, has_tail_effect
     );
 }
 
@@ -652,7 +720,10 @@ fn effect_pattern_pure_uniform_shift() {
     // Should classify as UniformShift (or Mixed with dominant shift)
     // On real hardware, constant delays may have small jitter that creates a minor tail
     assert!(
-        matches!(effect.pattern, EffectPattern::UniformShift | EffectPattern::Mixed),
+        matches!(
+            effect.pattern,
+            EffectPattern::UniformShift | EffectPattern::Mixed
+        ),
         "Expected UniformShift or Mixed pattern (got {:?})",
         effect.pattern
     );
@@ -887,7 +958,11 @@ fn exploitability_negligible() {
     // XOR-based comparison is constant-time, so exploitability should always be Negligible
     // Whether it passes or fails (due to noise), the effect should be tiny
     match &outcome {
-        Outcome::Pass { leak_probability, effect, .. } => {
+        Outcome::Pass {
+            leak_probability,
+            effect,
+            ..
+        } => {
             eprintln!(
                 "No timing leak detected (leak_probability = {:.4})",
                 leak_probability
@@ -899,7 +974,12 @@ fn exploitability_negligible() {
                 effect.total_effect_ns()
             );
         }
-        Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            effect,
+            exploitability,
+            ..
+        } => {
             eprintln!(
                 "Small timing detected but should be Negligible (leak_probability = {:.4})",
                 leak_probability
@@ -913,7 +993,11 @@ fn exploitability_negligible() {
                 effect.tail_ns
             );
         }
-        Outcome::Inconclusive { leak_probability, effect, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            effect,
+            ..
+        } => {
             // Inconclusive is acceptable for such a small effect
             eprintln!(
                 "Inconclusive result (leak_probability = {:.4}, effect = {:.1}ns)",
@@ -958,9 +1042,16 @@ fn exploitability_possible_lan() {
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
-        Outcome::Fail { exploitability, effect, .. } => {
+        Outcome::Fail {
+            exploitability,
+            effect,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::PossibleLAN | Exploitability::LikelyLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::PossibleLAN | Exploitability::LikelyLAN
+                ),
                 "Expected PossibleLAN or LikelyLAN exploitability (got {:?})",
                 exploitability
             );
@@ -973,13 +1064,19 @@ fn exploitability_possible_lan() {
                 total_effect
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for medium delay, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for medium delay, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability
@@ -1022,7 +1119,11 @@ fn exploitability_likely_lan() {
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
-        Outcome::Fail { exploitability, effect, .. } => {
+        Outcome::Fail {
+            exploitability,
+            effect,
+            ..
+        } => {
             assert!(
                 matches!(exploitability, Exploitability::LikelyLAN),
                 "Expected LikelyLAN exploitability (got {:?})",
@@ -1038,13 +1139,19 @@ fn exploitability_likely_lan() {
                 total_effect
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for large delay, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for large delay, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability
@@ -1087,7 +1194,11 @@ fn exploitability_possible_remote() {
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
-        Outcome::Fail { exploitability, effect, .. } => {
+        Outcome::Fail {
+            exploitability,
+            effect,
+            ..
+        } => {
             assert!(
                 matches!(exploitability, Exploitability::PossibleRemote),
                 "Expected PossibleRemote exploitability (got {:?})",
@@ -1103,13 +1214,19 @@ fn exploitability_possible_remote() {
                 total_effect
             );
         }
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             panic!(
                 "Expected Fail outcome for huge delay, got Pass with leak_probability={}",
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, reason, .. } => {
+        Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            ..
+        } => {
             panic!(
                 "Expected Fail outcome for huge delay, got Inconclusive: {:?}, leak_probability={}",
                 reason, leak_probability

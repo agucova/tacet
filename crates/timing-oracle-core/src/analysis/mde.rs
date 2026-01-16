@@ -233,8 +233,7 @@ fn safe_cholesky(matrix: &Matrix9) -> nalgebra::Cholesky<f64, nalgebra::Const<9>
         regularized[(i, i)] += jitter;
     }
 
-    nalgebra::Cholesky::new(regularized)
-        .expect("Cholesky failed even after regularization")
+    nalgebra::Cholesky::new(regularized).expect("Cholesky failed even after regularization")
 }
 
 #[cfg(test)]
@@ -268,9 +267,18 @@ mod tests {
     fn test_probit_accuracy() {
         // Test against known values
         assert!((probit(0.5) - 0.0).abs() < 1e-3, "probit(0.5) should be 0");
-        assert!((probit(0.975) - 1.96).abs() < 1e-2, "probit(0.975) should be ~1.96");
-        assert!((probit(0.995) - 2.576).abs() < 1e-2, "probit(0.995) should be ~2.576");
-        assert!((probit(0.025) + 1.96).abs() < 1e-2, "probit(0.025) should be ~-1.96");
+        assert!(
+            (probit(0.975) - 1.96).abs() < 1e-2,
+            "probit(0.975) should be ~1.96"
+        );
+        assert!(
+            (probit(0.995) - 2.576).abs() < 1e-2,
+            "probit(0.995) should be ~2.576"
+        );
+        assert!(
+            (probit(0.025) + 1.96).abs() < 1e-2,
+            "probit(0.025) should be ~-1.96"
+        );
     }
 
     #[test]
@@ -308,8 +316,8 @@ mod tests {
     fn test_analytical_mde_alpha_scaling() {
         // MDE should increase with stricter alpha (smaller α → larger z → larger MDE)
         let cov = Matrix9::identity();
-        let (mde_05, _) = analytical_mde(&cov, 0.05);  // z ≈ 1.96
-        let (mde_01, _) = analytical_mde(&cov, 0.01);  // z ≈ 2.58
+        let (mde_05, _) = analytical_mde(&cov, 0.05); // z ≈ 1.96
+        let (mde_01, _) = analytical_mde(&cov, 0.01); // z ≈ 2.58
 
         assert!(
             mde_01 > mde_05,

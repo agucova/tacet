@@ -37,10 +37,9 @@ fn x25519_scalar_mult_constant_time() {
 
     // Use a valid fixed scalar (not all-zeros which is pathological)
     let fixed_scalar: [u8; 32] = [
-        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-        0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-        0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-        0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e,
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
     ];
 
     // Pre-generate inputs using InputPair helper
@@ -63,16 +62,25 @@ fn x25519_scalar_mult_constant_time() {
 
     // X25519 implementations should be constant-time
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "X25519 should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -114,16 +122,25 @@ fn x25519_different_basepoints_constant_time() {
 
     // Different basepoints shouldn't cause significant timing differences
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -137,18 +154,21 @@ fn x25519_multiple_operations_constant_time() {
 
     // Use valid fixed scalars (not all-zeros)
     let fixed_scalars: [[u8; 32]; 3] = [
-        [0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-         0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-         0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-         0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e],
-        [0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91,
-         0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19,
-         0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91,
-         0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19],
-        [0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-         0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00,
-         0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-         0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00],
+        [
+            0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a,
+            0x33, 0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c,
+            0x8b, 0x3a, 0x6d, 0x5e,
+        ],
+        [
+            0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7,
+            0x08, 0x19, 0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5,
+            0xe6, 0xf7, 0x08, 0x19,
+        ],
+        [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+            0xdd, 0xee, 0xff, 0x00,
+        ],
     ];
 
     // Pre-generate inputs using InputPair - 3 scalars per sample
@@ -178,16 +198,24 @@ fn x25519_multiple_operations_constant_time() {
 
     // Multiple operations should maintain constant-time properties
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "X25519 multiple operations should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -203,10 +231,9 @@ fn x25519_scalar_clamping_constant_time() {
 
     // Use a valid fixed scalar (not all-zeros)
     let base_fixed_scalar: [u8; 32] = [
-        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-        0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-        0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-        0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e,
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
     ];
 
     // Pre-generate inputs using InputPair - both pre-clamped
@@ -246,16 +273,25 @@ fn x25519_scalar_clamping_constant_time() {
 
     // Scalar clamping should be constant-time
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Scalar clamping should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -291,16 +327,25 @@ fn x25519_hamming_weight_independence() {
 
     // Hamming weight should not affect timing significantly
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -342,16 +387,25 @@ fn x25519_byte_pattern_independence() {
 
     // Byte pattern should not affect timing
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
@@ -365,16 +419,14 @@ fn x25519_byte_pattern_independence() {
 fn x25519_ecdh_exchange_constant_time() {
     // Use valid fixed inputs (not all-zeros)
     let fixed_scalar: [u8; 32] = [
-        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82,
-        0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33, 0x9c,
-        0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f,
-        0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a, 0x6d, 0x5e,
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
     ];
     let fixed_pubkey: [u8; 32] = [
-        0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91,
-        0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19,
-        0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91,
-        0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08, 0x19,
+        0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7, 0x08,
+        0x19, 0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7,
+        0x08, 0x19,
     ];
 
     // Pre-generate inputs using InputPair - scalar and public key per sample
@@ -401,16 +453,25 @@ fn x25519_ecdh_exchange_constant_time() {
 
     // Full ECDH exchange should be constant-time
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ECDH exchange should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}

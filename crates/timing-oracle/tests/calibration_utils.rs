@@ -49,8 +49,8 @@ impl Tier {
 
     pub fn max_wall_ms(&self) -> u64 {
         match self {
-            Tier::Quick => 180_000,      // 3 minutes
-            Tier::Full => 480_000,       // 8 minutes
+            Tier::Quick => 180_000,        // 3 minutes
+            Tier::Full => 480_000,         // 8 minutes
             Tier::Validation => 1_500_000, // 25 minutes
         }
     }
@@ -97,8 +97,8 @@ impl Tier {
 
     pub fn max_inject_ns(&self) -> u64 {
         match self {
-            Tier::Quick => 10_000,       // 10μs
-            Tier::Full => 100_000,       // 100μs
+            Tier::Quick => 10_000,         // 10μs
+            Tier::Full => 100_000,         // 100μs
             Tier::Validation => 1_000_000, // 1ms
         }
     }
@@ -179,7 +179,10 @@ impl TimerBackend {
             unsafe { libc::geteuid() == 0 }
         }
 
-        #[cfg(all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64")))]
+        #[cfg(all(
+            target_os = "linux",
+            any(target_arch = "x86_64", target_arch = "aarch64")
+        ))]
         {
             // perf_event_open requires CAP_PERFMON or root
             // Try to check perf_event_paranoid
@@ -194,7 +197,10 @@ impl TimerBackend {
 
         #[cfg(not(any(
             all(target_os = "macos", target_arch = "aarch64"),
-            all(target_os = "linux", any(target_arch = "x86_64", target_arch = "aarch64"))
+            all(
+                target_os = "linux",
+                any(target_arch = "x86_64", target_arch = "aarch64")
+            )
         )))]
         {
             false
@@ -243,7 +249,10 @@ impl CalibrationConfig {
         // Seed determination
         let (seed, seed_source) = if let Ok(seed_str) = std::env::var("CALIBRATION_SEED") {
             let seed = seed_str.parse().unwrap_or_else(|_| {
-                eprintln!("[WARN] Invalid CALIBRATION_SEED '{}', using derived", seed_str);
+                eprintln!(
+                    "[WARN] Invalid CALIBRATION_SEED '{}', using derived",
+                    seed_str
+                );
                 fnv1a_64(format!("timing-oracle:{}", test_name).as_bytes())
             });
             (seed, SeedSource::Fixed)
@@ -605,17 +614,28 @@ impl TrialRunner {
         // Check skip conditions first
         if self.completed_rate() < self.config.min_completed_rate {
             let decision = Decision::Skip("insufficient_completed_trials".into());
-            return (decision.clone(), self.build_report("fpr", self.fpr(), decision, wall_time_ms));
+            return (
+                decision.clone(),
+                self.build_report("fpr", self.fpr(), decision, wall_time_ms),
+            );
         }
 
         if self.unmeasurable_rate() > self.config.max_unmeasurable_rate {
             let decision = Decision::Skip("excessive_unmeasurable_rate".into());
-            return (decision.clone(), self.build_report("fpr", self.fpr(), decision, wall_time_ms));
+            return (
+                decision.clone(),
+                self.build_report("fpr", self.fpr(), decision, wall_time_ms),
+            );
         }
 
-        if wall_time_ms > self.config.max_wall_ms && self.completed_rate() < self.config.min_completed_rate {
+        if wall_time_ms > self.config.max_wall_ms
+            && self.completed_rate() < self.config.min_completed_rate
+        {
             let decision = Decision::Skip("wall_time_exceeded".into());
-            return (decision.clone(), self.build_report("fpr", self.fpr(), decision, wall_time_ms));
+            return (
+                decision.clone(),
+                self.build_report("fpr", self.fpr(), decision, wall_time_ms),
+            );
         }
 
         // Check acceptance criterion
@@ -633,7 +653,10 @@ impl TrialRunner {
             ))
         };
 
-        (decision.clone(), self.build_report("fpr", self.fpr(), decision, wall_time_ms))
+        (
+            decision.clone(),
+            self.build_report("fpr", self.fpr(), decision, wall_time_ms),
+        )
     }
 
     /// Finalize and determine pass/fail/skip decision for power test.
@@ -643,12 +666,18 @@ impl TrialRunner {
         // Check skip conditions first
         if self.completed_rate() < self.config.min_completed_rate {
             let decision = Decision::Skip("insufficient_completed_trials".into());
-            return (decision.clone(), self.build_report("power", self.power(), decision, wall_time_ms));
+            return (
+                decision.clone(),
+                self.build_report("power", self.power(), decision, wall_time_ms),
+            );
         }
 
         if self.unmeasurable_rate() > self.config.max_unmeasurable_rate {
             let decision = Decision::Skip("excessive_unmeasurable_rate".into());
-            return (decision.clone(), self.build_report("power", self.power(), decision, wall_time_ms));
+            return (
+                decision.clone(),
+                self.build_report("power", self.power(), decision, wall_time_ms),
+            );
         }
 
         // Check acceptance criterion based on effect multiplier
@@ -687,10 +716,19 @@ impl TrialRunner {
             Decision::Pass
         };
 
-        (decision.clone(), self.build_report("power", power, decision, wall_time_ms))
+        (
+            decision.clone(),
+            self.build_report("power", power, decision, wall_time_ms),
+        )
     }
 
-    fn build_report(&self, metric_name: &str, metric_value: f64, decision: Decision, wall_time_ms: u64) -> TestReport {
+    fn build_report(
+        &self,
+        metric_name: &str,
+        metric_value: f64,
+        decision: Decision,
+        wall_time_ms: u64,
+    ) -> TestReport {
         TestReport {
             test_name: self.test_name.clone(),
             tier: self.config.tier,
@@ -813,10 +851,10 @@ impl TestReport {
 pub struct TrialRecord {
     pub trial: usize,
     pub test_name: String,
-    pub test_type: String,         // "fpr", "power", "coverage"
+    pub test_type: String, // "fpr", "power", "coverage"
     pub injected_effect_ns: f64,
     pub attacker_model: String,
-    pub decision: String,          // "pass", "fail", "inconclusive", "unmeasurable"
+    pub decision: String, // "pass", "fail", "inconclusive", "unmeasurable"
     pub leak_probability: Option<f64>,
     pub shift_ns: Option<f64>,
     pub tail_ns: Option<f64>,
@@ -838,7 +876,12 @@ impl TrialRecord {
     ) -> Self {
         let (decision, leak_probability, shift_ns, tail_ns, ci_low_ns, ci_high_ns, samples_used) =
             match outcome {
-                Outcome::Pass { leak_probability, effect, samples_used, .. } => (
+                Outcome::Pass {
+                    leak_probability,
+                    effect,
+                    samples_used,
+                    ..
+                } => (
                     "pass",
                     Some(*leak_probability),
                     Some(effect.shift_ns),
@@ -847,7 +890,12 @@ impl TrialRecord {
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
                 ),
-                Outcome::Fail { leak_probability, effect, samples_used, .. } => (
+                Outcome::Fail {
+                    leak_probability,
+                    effect,
+                    samples_used,
+                    ..
+                } => (
                     "fail",
                     Some(*leak_probability),
                     Some(effect.shift_ns),
@@ -856,7 +904,12 @@ impl TrialRecord {
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
                 ),
-                Outcome::Inconclusive { leak_probability, effect, samples_used, .. } => (
+                Outcome::Inconclusive {
+                    leak_probability,
+                    effect,
+                    samples_used,
+                    ..
+                } => (
                     "inconclusive",
                     Some(*leak_probability),
                     Some(effect.shift_ns),
@@ -865,15 +918,9 @@ impl TrialRecord {
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
                 ),
-                Outcome::Unmeasurable { .. } => (
-                    "unmeasurable",
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
+                Outcome::Unmeasurable { .. } => {
+                    ("unmeasurable", None, None, None, None, None, None)
+                }
             };
 
         Self {
@@ -908,12 +955,17 @@ impl TrialRecord {
             self.injected_effect_ns,
             self.attacker_model,
             self.decision,
-            self.leak_probability.map_or("".to_string(), |v| format!("{:.6}", v)),
-            self.shift_ns.map_or("".to_string(), |v| format!("{:.2}", v)),
+            self.leak_probability
+                .map_or("".to_string(), |v| format!("{:.6}", v)),
+            self.shift_ns
+                .map_or("".to_string(), |v| format!("{:.2}", v)),
             self.tail_ns.map_or("".to_string(), |v| format!("{:.2}", v)),
-            self.ci_low_ns.map_or("".to_string(), |v| format!("{:.2}", v)),
-            self.ci_high_ns.map_or("".to_string(), |v| format!("{:.2}", v)),
-            self.samples_per_class.map_or("".to_string(), |v| v.to_string()),
+            self.ci_low_ns
+                .map_or("".to_string(), |v| format!("{:.2}", v)),
+            self.ci_high_ns
+                .map_or("".to_string(), |v| format!("{:.2}", v)),
+            self.samples_per_class
+                .map_or("".to_string(), |v| v.to_string()),
             self.elapsed_ms.map_or("".to_string(), |v| v.to_string()),
         )
     }
@@ -937,7 +989,10 @@ impl DataExporter {
 
         // Create output directory if it doesn't exist
         if let Err(e) = fs::create_dir_all(&output_dir) {
-            eprintln!("[WARN] Failed to create data output dir {:?}: {}", output_dir, e);
+            eprintln!(
+                "[WARN] Failed to create data output dir {:?}: {}",
+                output_dir, e
+            );
             return None;
         }
 

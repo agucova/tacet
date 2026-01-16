@@ -15,9 +15,15 @@ fn bench_oracle_simple(c: &mut Criterion) {
                     black_box(x + 1);
                 });
             match result {
-                Outcome::Pass { leak_probability, .. }
-                | Outcome::Fail { leak_probability, .. }
-                | Outcome::Inconclusive { leak_probability, .. } => black_box(leak_probability),
+                Outcome::Pass {
+                    leak_probability, ..
+                }
+                | Outcome::Fail {
+                    leak_probability, ..
+                }
+                | Outcome::Inconclusive {
+                    leak_probability, ..
+                } => black_box(leak_probability),
                 Outcome::Unmeasurable { .. } => 0.0,
             }
         });

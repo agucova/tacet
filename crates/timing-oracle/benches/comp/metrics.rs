@@ -30,11 +30,11 @@ pub struct SampleEfficiencyResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SampleEfficiencyStats {
     pub median_samples: usize,
-    pub ci_lower: usize,        // 2.5th percentile
-    pub ci_upper: usize,        // 97.5th percentile
+    pub ci_lower: usize, // 2.5th percentile
+    pub ci_upper: usize, // 97.5th percentile
     pub min_samples: usize,
     pub max_samples: usize,
-    pub success_rate: f64,      // Fraction of trials that correctly detected
+    pub success_rate: f64, // Fraction of trials that correctly detected
 }
 
 /// Measure detection rate (true positive rate) on a test case
@@ -66,11 +66,7 @@ pub fn measure_detection_rate(
         let fixed_op = test_case.fixed_operation();
         let random_op = test_case.random_operation();
 
-        let result = detector.detect(
-            &|| fixed_op(),
-            &|| random_op(),
-            samples,
-        );
+        let result = detector.detect(&|| fixed_op(), &|| random_op(), samples);
 
         if result.detected_leak {
             detections += 1;
@@ -82,9 +78,8 @@ pub fn measure_detection_rate(
 
     let avg_samples_used = total_samples / trials;
     let avg_duration = total_duration / trials as u32;
-    let avg_time_per_sample = Duration::from_secs_f64(
-        avg_duration.as_secs_f64() / avg_samples_used as f64
-    );
+    let avg_time_per_sample =
+        Duration::from_secs_f64(avg_duration.as_secs_f64() / avg_samples_used as f64);
 
     DetectionRateResult {
         detections,
@@ -133,11 +128,7 @@ pub fn measure_sample_efficiency(
         let fixed_op = test_case.fixed_operation();
         let random_op = test_case.random_operation();
 
-        let result = detector.detect(
-            &|| fixed_op(),
-            &|| random_op(),
-            samples,
-        );
+        let result = detector.detect(&|| fixed_op(), &|| random_op(), samples);
 
         let detected = result.detected_leak;
         detection_results.push(detected);
@@ -223,11 +214,7 @@ pub fn measure_sample_efficiency_stats(
                 let fixed_op = test_case.fixed_operation();
                 let random_op = test_case.random_operation();
 
-                let result = detector.detect(
-                    &|| fixed_op(),
-                    &|| random_op(),
-                    samples,
-                );
+                let result = detector.detect(&|| fixed_op(), &|| random_op(), samples);
 
                 all_samples_used.push(result.samples_used);
 
@@ -340,11 +327,7 @@ pub fn generate_roc_curve(
                 let fixed_op = test_case.fixed_operation();
                 let random_op = test_case.random_operation();
 
-                let result = detector.detect(
-                    &|| fixed_op(),
-                    &|| random_op(),
-                    samples,
-                );
+                let result = detector.detect(&|| fixed_op(), &|| random_op(), samples);
 
                 total_positives += 1;
                 total_samples_leaky += result.samples_used;
@@ -380,11 +363,7 @@ pub fn generate_roc_curve(
                 let fixed_op = test_case.fixed_operation();
                 let random_op = test_case.random_operation();
 
-                let result = detector.detect(
-                    &|| fixed_op(),
-                    &|| random_op(),
-                    samples,
-                );
+                let result = detector.detect(&|| fixed_op(), &|| random_op(), samples);
 
                 total_negatives += 1;
                 total_samples_safe += result.samples_used;

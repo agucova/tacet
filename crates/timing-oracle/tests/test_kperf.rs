@@ -42,8 +42,10 @@ fn test_pmu_calibration_accuracy() {
                 resolution
             );
 
-            eprintln!("PMU calibration: {:.2} cycles/ns, {:.3} ns resolution",
-                cycles_per_ns, resolution);
+            eprintln!(
+                "PMU calibration: {:.2} cycles/ns, {:.3} ns resolution",
+                cycles_per_ns, resolution
+            );
         }
         Err(PmuError::PermissionDenied) => {
             eprintln!("Skipping test_pmu_calibration_accuracy (requires sudo)");
@@ -66,7 +68,10 @@ fn test_pmu_measure_cycles_nonzero() {
                 std::hint::black_box(x)
             });
 
-            assert!(cycles > 0, "measure_cycles should return > 0 for actual work");
+            assert!(
+                cycles > 0,
+                "measure_cycles should return > 0 for actual work"
+            );
 
             // Should be at least a few hundred cycles for 1000 iterations
             assert!(
@@ -99,7 +104,9 @@ fn test_pmu_cycles_to_ns_conversion() {
             assert!(
                 (ns - expected_ns).abs() < 0.001,
                 "cycles_to_ns({}) = {} ns, expected {} ns",
-                test_cycles, ns, expected_ns
+                test_cycles,
+                ns,
+                expected_ns
             );
 
             eprintln!("{} cycles = {:.2} ns", test_cycles, ns);
@@ -129,8 +136,10 @@ fn test_pmu_resolution_better_than_standard() {
                 pmu_resolution, std_resolution, improvement
             );
 
-            eprintln!("Resolution improvement: {:.1}x ({:.2} ns vs {:.2} ns)",
-                improvement, pmu_resolution, std_resolution);
+            eprintln!(
+                "Resolution improvement: {:.1}x ({:.2} ns vs {:.2} ns)",
+                improvement, pmu_resolution, std_resolution
+            );
         }
         Err(PmuError::PermissionDenied) => {
             eprintln!("Skipping test_pmu_resolution_better_than_standard (requires sudo)");
@@ -160,9 +169,8 @@ fn test_pmu_measurement_consistency() {
 
             // Calculate mean and std dev
             let mean = samples.iter().sum::<f64>() / samples.len() as f64;
-            let variance = samples.iter()
-                .map(|x| (x - mean).powi(2))
-                .sum::<f64>() / samples.len() as f64;
+            let variance =
+                samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / samples.len() as f64;
             let std_dev = variance.sqrt();
             let cv = std_dev / mean;
 
@@ -170,11 +178,15 @@ fn test_pmu_measurement_consistency() {
             assert!(
                 cv < 0.5,
                 "CV {} should be < 0.5 for consistent measurements (mean={:.0}, std={:.0})",
-                cv, mean, std_dev
+                cv,
+                mean,
+                std_dev
             );
 
-            eprintln!("Measurement stats: mean={:.0} cycles, std={:.0}, CV={:.2}",
-                mean, std_dev, cv);
+            eprintln!(
+                "Measurement stats: mean={:.0} cycles, std={:.0}, CV={:.2}",
+                mean, std_dev, cv
+            );
         }
         Err(PmuError::PermissionDenied) => {
             eprintln!("Skipping test_pmu_measurement_consistency (requires sudo)");
@@ -210,7 +222,11 @@ fn test_aaa_warmup_investigation() {
         match PmuTimer::new() {
             Ok(timer) => {
                 let cpns = timer.cycles_per_ns();
-                let status = if (1.5..=5.0).contains(&cpns) { "OK" } else { "BAD" };
+                let status = if (1.5..=5.0).contains(&cpns) {
+                    "OK"
+                } else {
+                    "BAD"
+                };
                 eprintln!("  Timer {}: {:.2} cycles/ns [{}]", i, cpns, status);
             }
             Err(e) => {
@@ -245,18 +261,16 @@ fn test_pmu_vs_standard_timer() {
             // PMU measurements
             let mut pmu_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
-                let cycles = pmu_timer.measure_cycles(|| {
-                    std::hint::black_box(42u64.wrapping_mul(17))
-                });
+                let cycles =
+                    pmu_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
                 pmu_samples.push(cycles);
             }
 
             // Standard timer measurements
             let mut std_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
-                let cycles = std_timer.measure_cycles(|| {
-                    std::hint::black_box(42u64.wrapping_mul(17))
-                });
+                let cycles =
+                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
                 std_samples.push(cycles);
             }
 
@@ -276,19 +290,45 @@ fn test_pmu_vs_standard_timer() {
 
             eprintln!("\nMeasurement comparison ({} samples):", iterations);
             eprintln!("\n  PMU timer:");
-            eprintln!("    Min: {} cycles ({:.2} ns)", pmu_min, pmu_timer.cycles_to_ns(pmu_min));
-            eprintln!("    Median: {} cycles ({:.2} ns)", pmu_median, pmu_timer.cycles_to_ns(pmu_median));
-            eprintln!("    Max: {} cycles ({:.2} ns)", pmu_max, pmu_timer.cycles_to_ns(pmu_max));
+            eprintln!(
+                "    Min: {} cycles ({:.2} ns)",
+                pmu_min,
+                pmu_timer.cycles_to_ns(pmu_min)
+            );
+            eprintln!(
+                "    Median: {} cycles ({:.2} ns)",
+                pmu_median,
+                pmu_timer.cycles_to_ns(pmu_median)
+            );
+            eprintln!(
+                "    Max: {} cycles ({:.2} ns)",
+                pmu_max,
+                pmu_timer.cycles_to_ns(pmu_max)
+            );
             eprintln!("    Unique values: {}", pmu_unique.len());
 
             eprintln!("\n  Standard timer:");
-            eprintln!("    Min: {} cycles ({:.2} ns)", std_min, std_timer.cycles_to_ns(std_min));
-            eprintln!("    Median: {} cycles ({:.2} ns)", std_median, std_timer.cycles_to_ns(std_median));
-            eprintln!("    Max: {} cycles ({:.2} ns)", std_max, std_timer.cycles_to_ns(std_max));
+            eprintln!(
+                "    Min: {} cycles ({:.2} ns)",
+                std_min,
+                std_timer.cycles_to_ns(std_min)
+            );
+            eprintln!(
+                "    Median: {} cycles ({:.2} ns)",
+                std_median,
+                std_timer.cycles_to_ns(std_median)
+            );
+            eprintln!(
+                "    Max: {} cycles ({:.2} ns)",
+                std_max,
+                std_timer.cycles_to_ns(std_max)
+            );
             eprintln!("    Unique values: {}", std_unique.len());
 
-            eprintln!("\n  Resolution improvement: {:.1}x",
-                std_timer.resolution_ns() / pmu_timer.resolution_ns());
+            eprintln!(
+                "\n  Resolution improvement: {:.1}x",
+                std_timer.resolution_ns() / pmu_timer.resolution_ns()
+            );
 
             eprintln!("\n===========================================\n");
         }

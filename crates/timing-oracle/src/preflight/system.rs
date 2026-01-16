@@ -99,10 +99,7 @@ impl SystemWarning {
                 )
             }
             SystemWarning::CpuGovernorUnreadable { reason } => {
-                format!(
-                    "Could not check CPU governor: {}.",
-                    reason
-                )
+                format!("Could not check CPU governor: {}.", reason)
             }
             SystemWarning::TurboBoostEnabled => {
                 "Turbo boost enabled - can cause timing variability.".to_string()
@@ -135,22 +132,22 @@ impl SystemWarning {
     /// Get guidance for addressing this warning.
     pub fn guidance(&self) -> Option<String> {
         match self {
-            SystemWarning::CpuGovernorNotPerformance { .. } => Some(
-                "Set with: sudo cpufreq-set -g performance".to_string(),
-            ),
+            SystemWarning::CpuGovernorNotPerformance { .. } => {
+                Some("Set with: sudo cpufreq-set -g performance".to_string())
+            }
             SystemWarning::CpuGovernorUnreadable { .. } => None,
-            SystemWarning::TurboBoostEnabled => Some(
-                "Consider disabling for more stable measurements.".to_string(),
-            ),
-            SystemWarning::HyperthreadingEnabled => Some(
-                "Pin to physical cores for more stable timing.".to_string(),
-            ),
-            SystemWarning::VirtualMachineDetected { .. } => Some(
-                "Consider running on bare metal for more reliable measurements.".to_string(),
-            ),
-            SystemWarning::HighSystemLoad { .. } => Some(
-                "Reduce background processes for more stable measurements.".to_string(),
-            ),
+            SystemWarning::TurboBoostEnabled => {
+                Some("Consider disabling for more stable measurements.".to_string())
+            }
+            SystemWarning::HyperthreadingEnabled => {
+                Some("Pin to physical cores for more stable timing.".to_string())
+            }
+            SystemWarning::VirtualMachineDetected { .. } => {
+                Some("Consider running on bare metal for more reliable measurements.".to_string())
+            }
+            SystemWarning::HighSystemLoad { .. } => {
+                Some("Reduce background processes for more stable measurements.".to_string())
+            }
         }
     }
 

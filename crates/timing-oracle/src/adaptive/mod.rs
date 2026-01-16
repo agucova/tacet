@@ -36,5 +36,7 @@ mod state;
 pub use calibration::{calibrate, Calibration, CalibrationConfig, CalibrationError};
 pub use kl_divergence::kl_divergence_gaussian;
 pub use loop_runner::{run_adaptive, AdaptiveConfig, AdaptiveOutcome};
-pub use quality_gates::{check_quality_gates, InconclusiveReason, QualityGateConfig, QualityGateResult};
+pub use quality_gates::{
+    check_quality_gates, InconclusiveReason, QualityGateConfig, QualityGateResult,
+};
 pub use state::{AdaptiveState, Posterior};

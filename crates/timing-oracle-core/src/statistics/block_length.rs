@@ -67,7 +67,10 @@ pub struct OptimalBlockLength {
 ///    where d = 2σ⁴ for stationary bootstrap and d = (4/3)σ⁴ for circular.
 pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
     let n = x.len();
-    assert!(n >= 10, "Need at least 10 observations for block length estimation");
+    assert!(
+        n >= 10,
+        "Need at least 10 observations for block length estimation"
+    );
 
     // =========================================================================
     // Step 1: Center the data
@@ -114,8 +117,8 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
 
         // Compute variance of the leading and trailing segments
         // These are used to normalize the cross-product into a correlation
-        let leading_segment = &centered[lag + 1..];  // x_{lag+1}, ..., x_n
-        let trailing_segment = &centered[..n - lag - 1];  // x_1, ..., x_{n-lag-1}
+        let leading_segment = &centered[lag + 1..]; // x_{lag+1}, ..., x_n
+        let trailing_segment = &centered[..n - lag - 1]; // x_1, ..., x_{n-lag-1}
 
         let variance_leading: f64 = leading_segment.iter().map(|e| e * e).sum();
         let variance_trailing: f64 = trailing_segment.iter().map(|e| e * e).sum();
@@ -140,7 +143,8 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
 
         // Check if we've found k_n consecutive insignificant autocorrelations
         if lag >= consecutive_insignificant_needed && first_insignificant_run_start.is_none() {
-            let recent_autocorrelations = &abs_autocorrelations[lag - consecutive_insignificant_needed..lag];
+            let recent_autocorrelations =
+                &abs_autocorrelations[lag - consecutive_insignificant_needed..lag];
             let all_insignificant = recent_autocorrelations
                 .iter()
                 .all(|&r| r < insignificance_threshold);
@@ -170,8 +174,8 @@ pub fn optimal_block_length(x: &[f64]) -> OptimalBlockLength {
     // g: weighted sum of lag * autocovariance (related to derivative of spectrum)
     // long_run_variance: weighted sum of autocovariances (spectrum at frequency 0)
 
-    let mut g = 0.0;  // Σ λ(k/m) * k * γ(k) for k ≠ 0
-    let mut long_run_variance = autocovariances[0];  // Start with γ(0)
+    let mut g = 0.0; // Σ λ(k/m) * k * γ(k) for k ≠ 0
+    let mut long_run_variance = autocovariances[0]; // Start with γ(0)
 
     for (lag, &acv) in autocovariances[1..=truncation_lag].iter().enumerate() {
         let lag = lag + 1; // Adjust since we started from index 1
@@ -424,10 +428,7 @@ mod tests {
         let opt1 = optimal_block_length(&x);
         let opt2 = optimal_block_length(&x);
 
-        assert_eq!(
-            opt1.stationary, opt2.stationary,
-            "Should be deterministic"
-        );
+        assert_eq!(opt1.stationary, opt2.stationary, "Should be deterministic");
         assert_eq!(opt1.circular, opt2.circular, "Should be deterministic");
     }
 }

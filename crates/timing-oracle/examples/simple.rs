@@ -6,7 +6,9 @@
 //! - Only the input data differs
 
 use std::time::Duration;
-use timing_oracle::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
+use timing_oracle::{
+    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
+};
 
 fn main() {
     println!("timing-oracle simple example\n");
@@ -43,10 +45,7 @@ fn main() {
             println!("Result: PASS");
             println!("Leak probability: {:.1}%", leak_probability * 100.0);
             println!("Quality: {:?}", quality);
-            println!(
-                "Timer resolution: {:.1}ns",
-                diagnostics.timer_resolution_ns
-            );
+            println!("Timer resolution: {:.1}ns", diagnostics.timer_resolution_ns);
         }
         Outcome::Fail {
             leak_probability,
@@ -71,9 +70,7 @@ fn main() {
             println!("Leak probability: {:.1}%", leak_probability * 100.0);
             println!("Reason: {:?}", reason);
         }
-        Outcome::Unmeasurable {
-            recommendation, ..
-        } => {
+        Outcome::Unmeasurable { recommendation, .. } => {
             println!("Could not measure: {}", recommendation);
             return;
         }
@@ -96,8 +93,12 @@ fn main() {
         },
     };
 
-    if let Outcome::Pass { leak_probability, .. } | Outcome::Fail { leak_probability, .. } =
-        outcome
+    if let Outcome::Pass {
+        leak_probability, ..
+    }
+    | Outcome::Fail {
+        leak_probability, ..
+    } = outcome
     {
         println!("\nWith custom config:");
         println!("Leak probability: {:.1}%", leak_probability * 100.0);

@@ -119,25 +119,23 @@ impl LinuxPerfTimer {
     /// - Insufficient permissions
     /// - Counter configuration fails
     pub fn new() -> Result<Self, PerfError> {
-        use ::perf_event2::Builder;
         use ::perf_event2::events::Hardware;
+        use ::perf_event2::Builder;
 
         // Build the performance counter for CPU cycles
-        let mut counter = Builder::new(Hardware::CPU_CYCLES)
-            .build()
-            .map_err(|e| {
-                // perf_event2 returns io::Error
-                if e.kind() == std::io::ErrorKind::PermissionDenied {
-                    PerfError::PermissionDenied
-                } else {
-                    PerfError::ConfigurationFailed(format!("{:?}", e))
-                }
-            })?;
+        let mut counter = Builder::new(Hardware::CPU_CYCLES).build().map_err(|e| {
+            // perf_event2 returns io::Error
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                PerfError::PermissionDenied
+            } else {
+                PerfError::ConfigurationFailed(format!("{:?}", e))
+            }
+        })?;
 
         // Enable counting
-        counter.enable().map_err(|e| {
-            PerfError::ConfigurationFailed(format!("Failed to enable: {:?}", e))
-        })?;
+        counter
+            .enable()
+            .map_err(|e| PerfError::ConfigurationFailed(format!("Failed to enable: {:?}", e)))?;
 
         // Calibrate cycles per nanosecond
         let cycles_per_ns = Self::calibrate(&mut counter);

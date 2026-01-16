@@ -68,16 +68,16 @@ mod config;
 mod constants;
 mod oracle;
 mod result;
-mod types;
 mod thread_pool;
+mod types;
 
 // Functional modules
 pub mod analysis;
+pub mod helpers;
 pub mod measurement;
 pub mod output;
 pub mod preflight;
 pub mod statistics;
-pub mod helpers;
 
 // Re-exports for public API
 pub use config::{Config, IterationsPerSample};
@@ -85,9 +85,9 @@ pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};
 pub use measurement::{BoxedTimer, Timer, TimerSpec};
 pub use oracle::{compute_min_uniqueness_ratio, TimingOracle};
 pub use result::{
-    BatchingInfo, Diagnostics, EffectEstimate, EffectPattern, Exploitability,
-    InconclusiveReason, IssueCode, MeasurementQuality, Metadata, MinDetectableEffect,
-    Outcome, QualityIssue, UnmeasurableInfo, UnreliablePolicy,
+    BatchingInfo, Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
+    IssueCode, MeasurementQuality, Metadata, MinDetectableEffect, Outcome, QualityIssue,
+    UnmeasurableInfo, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, TimingSample};
 
@@ -118,12 +118,13 @@ macro_rules! assert_constant_time {
             $crate::Outcome::Pass { .. } => {}
             $crate::Outcome::Fail { .. } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
-                panic!(
-                    "Timing leak detected!\n\n{}",
-                    summary,
-                );
+                panic!("Timing leak detected!\n\n{}", summary,);
             }
-            $crate::Outcome::Inconclusive { reason, leak_probability, .. } => {
+            $crate::Outcome::Inconclusive {
+                reason,
+                leak_probability,
+                ..
+            } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
                     "Could not confirm constant-time (P={:.1}%): {}\n\n{}",
@@ -134,7 +135,10 @@ macro_rules! assert_constant_time {
             }
             $crate::Outcome::Unmeasurable { recommendation, .. } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
-                panic!("Cannot measure operation: {}\n\n{}", recommendation, summary);
+                panic!(
+                    "Cannot measure operation: {}\n\n{}",
+                    recommendation, summary
+                );
             }
         }
     };
@@ -159,10 +163,7 @@ macro_rules! assert_no_timing_leak {
     ($outcome:expr) => {
         if let $crate::Outcome::Fail { .. } = &$outcome {
             let summary = $crate::output::format_debug_summary(&$outcome);
-            panic!(
-                "Timing leak detected!\n\n{}",
-                summary,
-            );
+            panic!("Timing leak detected!\n\n{}", summary,);
         }
     };
 }
@@ -185,7 +186,9 @@ macro_rules! assert_leak_detected {
     ($outcome:expr) => {
         match &$outcome {
             $crate::Outcome::Fail { .. } => {}
-            $crate::Outcome::Pass { leak_probability, .. } => {
+            $crate::Outcome::Pass {
+                leak_probability, ..
+            } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
                     "Expected timing leak but got Pass (P={:.1}%)\n\n{}",
@@ -193,7 +196,11 @@ macro_rules! assert_leak_detected {
                     summary,
                 );
             }
-            $crate::Outcome::Inconclusive { reason, leak_probability, .. } => {
+            $crate::Outcome::Inconclusive {
+                reason,
+                leak_probability,
+                ..
+            } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
                     "Expected timing leak but got Inconclusive (P={:.1}%): {}\n\n{}",
@@ -206,8 +213,7 @@ macro_rules! assert_leak_detected {
                 let summary = $crate::output::format_debug_summary(&$outcome);
                 panic!(
                     "Expected timing leak but operation unmeasurable: {}\n\n{}",
-                    recommendation,
-                    summary,
+                    recommendation, summary,
                 );
             }
         }

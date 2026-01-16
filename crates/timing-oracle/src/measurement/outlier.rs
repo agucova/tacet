@@ -66,22 +66,22 @@ impl OutlierStats {
     }
 }
 
-    /// Winsorize outliers from both sample sets using pooled symmetric thresholding.
-    ///
-    /// This function:
-    /// 1. Combines all samples from both classes
-    /// 2. Computes the threshold at the given percentile
-    /// 3. Caps samples above the threshold in both classes
+/// Winsorize outliers from both sample sets using pooled symmetric thresholding.
+///
+/// This function:
+/// 1. Combines all samples from both classes
+/// 2. Computes the threshold at the given percentile
+/// 3. Caps samples above the threshold in both classes
 ///
 /// # Arguments
 ///
 /// * `fixed` - Samples from the Fixed class (in cycles)
 /// * `random` - Samples from the Random class (in cycles)
-    /// * `percentile` - Percentile for threshold (e.g., 0.9999 for 99.99th percentile)
+/// * `percentile` - Percentile for threshold (e.g., 0.9999 for 99.99th percentile)
 ///
 /// # Returns
 ///
-    /// A tuple of (winsorized_fixed, winsorized_random, stats).
+/// A tuple of (winsorized_fixed, winsorized_random, stats).
 ///
 /// # Note
 ///
@@ -231,7 +231,11 @@ mod tests {
         assert_eq!(compute_percentile(&mut data.clone(), 0.0), 1);
         // 50th percentile with linear interpolation is between 5 and 6
         let median = compute_percentile(&mut data.clone(), 0.5);
-        assert!(median == 5 || median == 6, "Median should be 5 or 6, got {}", median);
+        assert!(
+            median == 5 || median == 6,
+            "Median should be 5 or 6, got {}",
+            median
+        );
         assert_eq!(compute_percentile(&mut data.clone(), 1.0), 10);
     }
 

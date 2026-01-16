@@ -43,8 +43,8 @@ fn aes128_block_encrypt_constant_time() {
 
     // Use a non-pathological fixed plaintext
     let fixed_plaintext: [u8; 16] = [
-        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
-        0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34,
+        0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07,
+        0x34,
     ];
 
     // Pre-generate inputs using InputPair helper
@@ -71,9 +71,16 @@ fn aes128_block_encrypt_constant_time() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "AES-128 should have negligible exploitability (got {:?})",
                 exploitability
             );
@@ -82,7 +89,9 @@ fn aes128_block_encrypt_constant_time() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             eprintln!(
                 "Warning: Inconclusive result (leak_probability={:.3})",
                 leak_probability
@@ -101,12 +110,12 @@ fn aes128_block_encrypt_constant_time() {
 fn aes128_different_keys_constant_time() {
     // Use non-pathological fixed keys (not all-zeros)
     let key1: [u8; 16] = [
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
     ];
     let key2: [u8; 16] = [
-        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-        0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f,
     ];
 
     let cipher1 = Aes128::new(&key1.into());
@@ -140,9 +149,16 @@ fn aes128_different_keys_constant_time() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "AES with different keys should have low exploitability (got {:?})",
                 exploitability
             );
@@ -151,8 +167,13 @@ fn aes128_different_keys_constant_time() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
-            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
+            );
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -161,9 +182,9 @@ fn aes128_different_keys_constant_time() {
 /// AES-128 multiple blocks - tests for cumulative timing effects
 #[test]
 fn aes128_multiple_blocks_constant_time() {
-    use rand::SeedableRng;
     use rand::rngs::StdRng;
     use rand::Rng;
+    use rand::SeedableRng;
 
     // Use deterministic seed for reproducibility
     let mut rng = StdRng::seed_from_u64(0x1234_5678_9ABC_DEF0);
@@ -177,14 +198,22 @@ fn aes128_multiple_blocks_constant_time() {
 
     // Use non-pathological fixed blocks (not all-zeros)
     let fixed_blocks: [[u8; 16]; 4] = [
-        [0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d,
-         0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37, 0x07, 0x34],
-        [0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77,
-         0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff],
-        [0xf0, 0xe1, 0xd2, 0xc3, 0xb4, 0xa5, 0x96, 0x87,
-         0x78, 0x69, 0x5a, 0x4b, 0x3c, 0x2d, 0x1e, 0x0f],
-        [0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96,
-         0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93, 0x17, 0x2a],
+        [
+            0x32, 0x43, 0xf6, 0xa8, 0x88, 0x5a, 0x30, 0x8d, 0x31, 0x31, 0x98, 0xa2, 0xe0, 0x37,
+            0x07, 0x34,
+        ],
+        [
+            0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd,
+            0xee, 0xff,
+        ],
+        [
+            0xf0, 0xe1, 0xd2, 0xc3, 0xb4, 0xa5, 0x96, 0x87, 0x78, 0x69, 0x5a, 0x4b, 0x3c, 0x2d,
+            0x1e, 0x0f,
+        ],
+        [
+            0x6b, 0xc1, 0xbe, 0xe2, 0x2e, 0x40, 0x9f, 0x96, 0xe9, 0x3d, 0x7e, 0x11, 0x73, 0x93,
+            0x17, 0x2a,
+        ],
     ];
 
     // Pre-generate inputs using InputPair - 4 blocks per sample
@@ -236,9 +265,16 @@ fn aes128_multiple_blocks_constant_time() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "AES-128 multiple blocks should have low exploitability (got {:?})",
                 exploitability
             );
@@ -247,8 +283,13 @@ fn aes128_multiple_blocks_constant_time() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
-            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
+            );
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -261,8 +302,8 @@ fn aes128_multiple_blocks_constant_time() {
 fn aes128_key_init_constant_time() {
     // Use non-pathological fixed key (not all-zeros)
     let fixed_key: [u8; 16] = [
-        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6,
-        0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f, 0x3c,
+        0x2b, 0x7e, 0x15, 0x16, 0x28, 0xae, 0xd2, 0xa6, 0xab, 0xf7, 0x15, 0x88, 0x09, 0xcf, 0x4f,
+        0x3c,
     ];
 
     // Pre-generate keys using InputPair helper
@@ -288,9 +329,16 @@ fn aes128_key_init_constant_time() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "AES-128 key init should have low exploitability (got {:?})",
                 exploitability
             );
@@ -299,8 +347,13 @@ fn aes128_key_init_constant_time() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
-            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
+            );
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -340,9 +393,16 @@ fn aes128_hamming_weight_independence() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "Hamming weight should not affect timing (got {:?})",
                 exploitability
             );
@@ -351,8 +411,13 @@ fn aes128_hamming_weight_independence() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
-            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
+            );
         }
         Outcome::Unmeasurable { .. } => {}
     }
@@ -398,9 +463,16 @@ fn aes128_byte_pattern_independence() {
         Outcome::Pass { .. } => {
             // Good - no timing leak detected
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible | Exploitability::PossibleLAN),
+                matches!(
+                    exploitability,
+                    Exploitability::Negligible | Exploitability::PossibleLAN
+                ),
                 "Byte patterns should not affect timing (got {:?})",
                 exploitability
             );
@@ -409,8 +481,13 @@ fn aes128_byte_pattern_independence() {
                 leak_probability
             );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
-            eprintln!("Warning: Inconclusive result (leak_probability={:.3})", leak_probability);
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!(
+                "Warning: Inconclusive result (leak_probability={:.3})",
+                leak_probability
+            );
         }
         Outcome::Unmeasurable { .. } => {}
     }

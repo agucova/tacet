@@ -5,9 +5,9 @@
 //! - Single operation closure executes identical code path for both classes
 //! - Only the input data differs
 
-use std::time::Duration;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
+use std::time::Duration;
 use timing_oracle::{helpers, AttackerModel, Outcome, TimingOracle};
 
 fn main() {
@@ -64,9 +64,7 @@ fn main() {
             println!("Leak probability: {:.2}%", leak_probability * 100.0);
             println!("Reason: {:?}", reason);
         }
-        Outcome::Unmeasurable {
-            recommendation, ..
-        } => {
+        Outcome::Unmeasurable { recommendation, .. } => {
             println!("Could not measure: {}", recommendation);
         }
     }

@@ -9,10 +9,7 @@ use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 
 fn main() {
     // Create InputPair for tuples of two arrays
-    let inputs = InputPair::new(
-        || ([0u8; 32], [0u8; 32]),
-        || (rand_bytes(), rand_bytes()),
-    );
+    let inputs = InputPair::new(|| ([0u8; 32], [0u8; 32]), || (rand_bytes(), rand_bytes()));
 
     println!("Testing XOR operation for timing leaks...");
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -31,10 +28,7 @@ fn main() {
             println!("Result: PASS (expected for XOR)");
             println!("Leak probability: {:.4}%", leak_probability * 100.0);
             println!("Quality: {:?}", quality);
-            println!(
-                "Timer resolution: {:.1}ns",
-                diagnostics.timer_resolution_ns
-            );
+            println!("Timer resolution: {:.1}ns", diagnostics.timer_resolution_ns);
         }
         Outcome::Fail {
             leak_probability,
@@ -54,9 +48,7 @@ fn main() {
             println!("Leak probability: {:.4}%", leak_probability * 100.0);
             println!("Reason: {:?}", reason);
         }
-        Outcome::Unmeasurable {
-            recommendation, ..
-        } => {
+        Outcome::Unmeasurable { recommendation, .. } => {
             println!("Could not measure: {}", recommendation);
         }
     }

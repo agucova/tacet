@@ -35,7 +35,7 @@ pub mod types;
 
 // Re-export commonly used items at crate root
 pub use result::{
-    EffectEstimate, EffectPattern, Exploitability, MeasurementQuality,
-    MinDetectableEffect, Outcome, UnreliablePolicy,
+    EffectEstimate, EffectPattern, Exploitability, MeasurementQuality, MinDetectableEffect,
+    Outcome, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, Matrix9, TimingSample, Vector9};

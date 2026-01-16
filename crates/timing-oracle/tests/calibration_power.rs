@@ -29,36 +29,21 @@ const RESEARCH_EFFECTS: EffectSizes = EffectSizes {
     model_name: "Research",
     attacker_model: AttackerModel::Research,
     theta_ns: 50.0, // Nominal value for Research mode
-    effects: [
-        (0.5, 25),
-        (1.0, 50),
-        (2.0, 100),
-        (5.0, 250),
-    ],
+    effects: [(0.5, 25), (1.0, 50), (2.0, 100), (5.0, 250)],
 };
 
 const ADJACENT_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     model_name: "AdjacentNetwork",
     attacker_model: AttackerModel::AdjacentNetwork,
     theta_ns: 100.0,
-    effects: [
-        (0.5, 50),
-        (1.0, 100),
-        (2.0, 200),
-        (5.0, 500),
-    ],
+    effects: [(0.5, 50), (1.0, 100), (2.0, 200), (5.0, 500)],
 };
 
 const REMOTE_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     model_name: "RemoteNetwork",
     attacker_model: AttackerModel::RemoteNetwork,
     theta_ns: 50_000.0, // 50μs
-    effects: [
-        (0.5, 25_000),
-        (1.0, 50_000),
-        (2.0, 100_000),
-        (5.0, 250_000),
-    ],
+    effects: [(0.5, 25_000), (1.0, 50_000), (2.0, 100_000), (5.0, 250_000)],
 };
 
 // PostQuantumSentinel has θ ≈ 3.3ns which is below Instant precision,
@@ -68,9 +53,9 @@ const PQ_SENTINEL_EFFECTS: EffectSizes = EffectSizes {
     attacker_model: AttackerModel::PostQuantumSentinel,
     theta_ns: 3.3,
     effects: [
-        (3.0, 10),   // ~3×θ ≈ 10ns (minimum measurable)
-        (10.0, 33),  // ~10×θ
-        (30.0, 100), // ~30×θ
+        (3.0, 10),    // ~3×θ ≈ 10ns (minimum measurable)
+        (10.0, 33),   // ~10×θ
+        (30.0, 100),  // ~30×θ
         (100.0, 330), // ~100×θ
     ],
 };
@@ -106,11 +91,7 @@ fn power_quick_5x_theta_adjacent_network() {
 /// Power test at 2×θ for Research model (θ=50ns nominal).
 #[test]
 fn power_quick_2x_theta_research() {
-    run_power_test(
-        "power_quick_2x_theta_research",
-        &RESEARCH_EFFECTS,
-        2,
-    );
+    run_power_test("power_quick_2x_theta_research", &RESEARCH_EFFECTS, 2);
 }
 
 // =============================================================================
@@ -133,10 +114,7 @@ fn power_validation_curve_adjacent_network() {
 #[test]
 #[ignore]
 fn power_validation_curve_research() {
-    run_power_curve(
-        "power_validation_curve_research",
-        &RESEARCH_EFFECTS,
-    );
+    run_power_curve("power_validation_curve_research", &RESEARCH_EFFECTS);
 }
 
 /// Full power curve for RemoteNetwork model.
@@ -157,10 +135,7 @@ fn power_validation_curve_remote_network() {
 #[test]
 #[ignore]
 fn power_validation_curve_pq_sentinel() {
-    run_power_curve(
-        "power_validation_curve_pq_sentinel",
-        &PQ_SENTINEL_EFFECTS,
-    );
+    run_power_curve("power_validation_curve_pq_sentinel", &PQ_SENTINEL_EFFECTS);
 }
 
 // =============================================================================
@@ -312,7 +287,10 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
     }
 
     // Print summary
-    eprintln!("\n[{}] Power Curve Summary for {}:", test_name, effect_sizes.model_name);
+    eprintln!(
+        "\n[{}] Power Curve Summary for {}:",
+        test_name, effect_sizes.model_name
+    );
     eprintln!("  Effect | Power | Decision");
     eprintln!("  -------|-------|----------");
     for (multiplier, power, decision) in &results {
@@ -336,13 +314,19 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
         if power_curr < power_prev - 0.15 {
             eprintln!(
                 "[WARN] Non-monotonic power: {:.1}×θ ({:.0}%) < {:.1}×θ ({:.0}%)",
-                mult_curr, power_curr * 100.0, mult_prev, power_prev * 100.0
+                mult_curr,
+                power_curr * 100.0,
+                mult_prev,
+                power_prev * 100.0
             );
         }
     }
 
     if any_failed {
-        panic!("[{}] FAILED: One or more effect sizes did not meet power requirements", test_name);
+        panic!(
+            "[{}] FAILED: One or more effect sizes did not meet power requirements",
+            test_name
+        );
     }
 
     eprintln!("\n[{}] PASSED", test_name);

@@ -53,7 +53,7 @@ fn kyber768_keypair_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |_| {
+        .test(inputs, |_| {
             let (pk, sk) = kyber768::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
         });
@@ -65,10 +65,16 @@ fn kyber768_keypair_constant_time() {
 
     // Key generation should have consistent timing (both branches do the same thing)
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Kyber-768 keypair generation should have consistent timing (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -81,7 +87,6 @@ fn kyber768_keypair_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Kyber-768 encapsulation should be constant-time with respect to the public key
@@ -109,7 +114,7 @@ fn kyber768_encapsulate_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
             // Both classes iterate through different random keys, eliminating cache bias
             let (pks, idx) = if *which == 0 {
@@ -129,10 +134,16 @@ fn kyber768_encapsulate_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "kyber768_encapsulate_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Kyber-768 encapsulation should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -145,7 +156,6 @@ fn kyber768_encapsulate_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Kyber-768 decapsulation should be constant-time
@@ -182,7 +192,7 @@ fn kyber768_decapsulate_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
             let (cts, idx) = if *which == 0 {
                 (&baseline_cts, &idx0)
@@ -201,10 +211,16 @@ fn kyber768_decapsulate_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "kyber768_decapsulate_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Kyber-768 decapsulation should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -217,7 +233,6 @@ fn kyber768_decapsulate_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 // ============================================================================
@@ -234,7 +249,7 @@ fn dilithium3_keypair_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |_| {
+        .test(inputs, |_| {
             let (pk, sk) = dilithium3::keypair();
             std::hint::black_box(pk.as_bytes()[0] ^ sk.as_bytes()[0]);
         });
@@ -245,10 +260,16 @@ fn dilithium3_keypair_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "dilithium3_keypair_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Dilithium3 keypair should have consistent timing (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -261,7 +282,6 @@ fn dilithium3_keypair_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Dilithium3 signing timing consistency
@@ -289,7 +309,7 @@ fn dilithium3_sign_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |msg| {
+        .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
@@ -303,10 +323,16 @@ fn dilithium3_sign_constant_time() {
     // With identical inputs, any timing difference indicates measurement noise
     // or implementation issues, not message-dependent timing
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Dilithium3 signing should have consistent timing for same message (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -319,7 +345,6 @@ fn dilithium3_sign_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Dilithium3 verification should be constant-time
@@ -355,7 +380,7 @@ fn dilithium3_verify_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
             let (msgs, sigs, idx) = if *which == 0 {
                 (&baseline_msgs, &baseline_sigs, &idx0)
@@ -374,10 +399,16 @@ fn dilithium3_verify_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "dilithium3_verify_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Dilithium3 verification should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -390,7 +421,6 @@ fn dilithium3_verify_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 // ============================================================================
@@ -419,7 +449,7 @@ fn falcon512_sign_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |msg| {
+        .test(inputs, |msg| {
             let sig = falcon512::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
@@ -434,10 +464,16 @@ fn falcon512_sign_constant_time() {
     // With identical inputs, any timing difference indicates measurement noise
     // or implementation issues, not message-dependent timing
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Falcon-512 signing should have consistent timing for same message (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -450,7 +486,6 @@ fn falcon512_sign_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Falcon-512 verification timing (informational)
@@ -493,7 +528,7 @@ fn falcon512_verify_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             // IDENTICAL code paths for both classes - only data differs
             let (msgs, sigs, idx) = if *which == 0 {
                 (&baseline_msgs, &baseline_sigs, &idx0)
@@ -520,10 +555,17 @@ fn falcon512_verify_constant_time() {
     // timing variability in PQClean's hash-to-point implementation.
     // Only log the results for documentation purposes.
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
             eprintln!(
                 "Timing difference detected (expected for Falcon): P(leak)={:.1}%, {:?}, effect={:?}",
                 leak_probability * 100.0, exploitability, effect
@@ -571,13 +613,20 @@ fn sphincs_sha2_128f_sign_constant_time() {
 
     // SPHINCS+ is hash-based and should be constant-time
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "SPHINCS+ signing should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -587,7 +636,6 @@ fn sphincs_sha2_128f_sign_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// SPHINCS+-SHA2-128f verification timing
@@ -635,13 +683,20 @@ fn sphincs_sha2_128f_verify_constant_time() {
     let outcome = skip_if_unreliable!(outcome, "sphincs_sha2_128f_verify_constant_time");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "SPHINCS+ verification should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
+                leak_probability * 100.0,
+                exploitability
             );
         }
         Outcome::Inconclusive { reason, .. } => {
@@ -651,7 +706,6 @@ fn sphincs_sha2_128f_verify_constant_time() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 // ============================================================================
@@ -690,7 +744,7 @@ fn kyber768_ciphertext_independence() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |which| {
+        .test(inputs, |which| {
             if *which == 0 {
                 let i = idx1.get();
                 idx1.set((i + 1) % SAMPLES);
@@ -711,10 +765,16 @@ fn kyber768_ciphertext_independence() {
 
     // Both branches use random ciphertexts, should have consistent timing
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "Kyber decapsulation timing should be independent of ciphertext (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -727,7 +787,6 @@ fn kyber768_ciphertext_independence() {
             eprintln!("Unmeasurable: {}", recommendation);
         }
     }
-
 }
 
 /// Dilithium signing with different message patterns (informational)
@@ -750,7 +809,7 @@ fn dilithium3_message_hamming_weight() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(45))
-                .test(inputs, |msg| {
+        .test(inputs, |msg| {
             let sig = dilithium3::detached_sign(msg, &sk);
             std::hint::black_box(sig.as_bytes()[0]);
         });
@@ -762,9 +821,7 @@ fn dilithium3_message_hamming_weight() {
 
     // Informational: Dilithium timing varies based on message content due to
     // rejection sampling. This is expected behavior, not a vulnerability.
-    eprintln!(
-        "Note: Dilithium uses rejection sampling - message-dependent timing is EXPECTED"
-    );
+    eprintln!("Note: Dilithium uses rejection sampling - message-dependent timing is EXPECTED");
     eprintln!(
         "      This is NOT a vulnerability (message is public, rejection independent of secret)"
     );
@@ -772,10 +829,17 @@ fn dilithium3_message_hamming_weight() {
     // We DON'T panic on Fail because message-dependent timing is expected.
     // Only log the results for documentation purposes.
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
             eprintln!(
                 "Timing difference detected (expected for Dilithium): P(leak)={:.1}%, {:?}, effect={:?}",
                 leak_probability * 100.0, exploitability, effect

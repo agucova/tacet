@@ -56,7 +56,9 @@ impl BenchmarkResults {
     /// Print formatted terminal report
     pub fn print_terminal_report(&self) {
         println!("┌─────────────────────────────────────────────────────────────────────────────┐");
-        println!("│                        DETECTION COMPARISON RESULTS                          │");
+        println!(
+            "│                        DETECTION COMPARISON RESULTS                          │"
+        );
         println!("└─────────────────────────────────────────────────────────────────────────────┘");
         println!();
 
@@ -116,16 +118,15 @@ impl BenchmarkResults {
 
     fn print_roc_summary(&self) {
         println!("┌─────────────────────────────────────────────────────────────────────────────┐");
-        println!("│ ROC CURVE SUMMARY                                                            │");
+        println!(
+            "│ ROC CURVE SUMMARY                                                            │"
+        );
         println!("├─────────────────────────────────────────────────────────────────────────────┤");
         println!(
             "│ {:15} │ {:13} │ {:45} │",
             "Tool", "AUC", "Optimal Threshold"
         );
-        println!(
-            "│ {:─<15} │ {:─<13} │ {:─<45} │",
-            "", "", ""
-        );
+        println!("│ {:─<15} │ {:─<13} │ {:─<45} │", "", "", "");
 
         for roc in &self.roc_curves {
             let auc_str = format!("{:.3}", roc.auc);
@@ -200,7 +201,10 @@ pub fn create_tool_result(
 
 /// Print sample efficiency analysis results
 pub fn print_sample_efficiency(
-    results: &std::collections::HashMap<String, std::collections::HashMap<String, super::metrics::SampleEfficiencyStats>>,
+    results: &std::collections::HashMap<
+        String,
+        std::collections::HashMap<String, super::metrics::SampleEfficiencyStats>,
+    >,
     trials_per_size: usize,
 ) {
     println!("\n╔════════════════════════════════════════════╗");
@@ -217,19 +221,22 @@ pub fn print_sample_efficiency(
         println!("├────────────────────────────────────────────────────────────────────────────┤");
 
         if detector_name == "dudect-bencher" {
-            println!("│ Note: DudeCT uses adaptive sampling and self-optimizes.                   │");
-            println!("│       Values shown are what it naturally converges to.                    │");
-            println!("├────────────────────────────────────────────────────────────────────────────┤");
+            println!(
+                "│ Note: DudeCT uses adaptive sampling and self-optimizes.                   │"
+            );
+            println!(
+                "│       Values shown are what it naturally converges to.                    │"
+            );
+            println!(
+                "├────────────────────────────────────────────────────────────────────────────┤"
+            );
         }
 
         println!(
             "│ {:20} │ {:15} │ {:18} │ {:10} │",
             "Test Case", "Median Samples", "95% CI", "Success"
         );
-        println!(
-            "│ {:─<20} │ {:─<15} │ {:─<18} │ {:─<10} │",
-            "", "", "", ""
-        );
+        println!("│ {:─<20} │ {:─<15} │ {:─<18} │ {:─<10} │", "", "", "", "");
 
         for (test_case_name, stats) in test_case_results {
             let median_str = format!("{}", stats.median_samples);
@@ -252,7 +259,9 @@ pub fn print_sample_efficiency(
             );
         }
 
-        println!("└────────────────────────────────────────────────────────────────────────────┘\n");
+        println!(
+            "└────────────────────────────────────────────────────────────────────────────┘\n"
+        );
     }
 }
 

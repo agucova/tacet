@@ -12,7 +12,7 @@
 
 mod calibration_utils;
 
-use calibration_utils::{CalibrationConfig, Decision, TrialRunner, select_attacker_model};
+use calibration_utils::{select_attacker_model, CalibrationConfig, Decision, TrialRunner};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -180,7 +180,10 @@ impl StressContext {
     /// Get total work done across all threads.
     #[allow(dead_code)]
     fn total_work(&self) -> usize {
-        self.work_counters.iter().map(|c| c.load(Ordering::Relaxed)).sum()
+        self.work_counters
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .sum()
     }
 }
 
@@ -221,7 +224,7 @@ fn stress_fpr_cpu_contention() {
     let mut rng = config.rng();
 
     let cpu_threads = stress_threads();
-    let trials = config.tier.fpr_trials() / 2;  // Fewer trials under stress
+    let trials = config.tier.fpr_trials() / 2; // Fewer trials under stress
 
     // Start CPU stress
     let _stress = StressContext::new(cpu_threads, 0);
@@ -240,10 +243,7 @@ fn stress_fpr_cpu_contention() {
         }
 
         // Both classes use fixed data - true null hypothesis
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0u8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0u8; 32]);
 
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)
@@ -350,10 +350,7 @@ fn stress_fpr_memory_pressure() {
             break;
         }
 
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0u8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0u8; 32]);
 
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)
@@ -460,10 +457,7 @@ fn stress_fpr_combined() {
             break;
         }
 
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0u8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0u8; 32]);
 
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)

@@ -71,7 +71,10 @@ pub fn compute_diagnostics(
     // 1. Stationarity check (spec §3.2.1)
     let (stationarity_ratio, stationarity_ok) = check_stationarity_windowed(interleaved_samples);
     if !stationarity_ok {
-        warnings.push("Timing distribution appears to drift during measurement (stationarity suspect).".to_string());
+        warnings.push(
+            "Timing distribution appears to drift during measurement (stationarity suspect)."
+                .to_string(),
+        );
     }
 
     // 2. Model fit check (spec §4.1)
@@ -155,15 +158,16 @@ fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, 
         let start = i * window_size;
         let end = if i == w - 1 { n } else { (i + 1) * window_size };
         let mut window_data: Vec<f64> = samples[start..end].iter().map(|s| s.time_ns).collect();
-        
+
         window_data.sort_by(|a, b| a.total_cmp(b));
         let median = window_data[window_data.len() / 2];
         let q1 = window_data[window_data.len() / 4];
         let q3 = window_data[window_data.len() * 3 / 4];
         let iqr = q3 - q1;
-        
+
         let mean = window_data.iter().sum::<f64>() / window_data.len() as f64;
-        let variance = window_data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / window_data.len() as f64;
+        let variance =
+            window_data.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / window_data.len() as f64;
 
         window_medians.push(median);
         window_iqrs.push(iqr);
@@ -173,11 +177,14 @@ fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, 
     let mut global_data: Vec<f64> = samples.iter().map(|s| s.time_ns).collect();
     global_data.sort_by(|a, b| a.total_cmp(b));
     let global_median = global_data[global_data.len() / 2];
-    
-    let max_median = window_medians.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+    let max_median = window_medians
+        .iter()
+        .cloned()
+        .fold(f64::NEG_INFINITY, f64::max);
     let min_median = window_medians.iter().cloned().fold(f64::INFINITY, f64::min);
     let avg_iqr = window_iqrs.iter().sum::<f64>() / w as f64;
-    
+
     let drift_floor = 0.05 * global_median;
     let threshold = (2.0 * avg_iqr).max(drift_floor);
     let median_drift_ok = (max_median - min_median) <= threshold;
@@ -185,10 +192,18 @@ fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, 
     // Check for monotonic variance drift (>50% change)
     let first_var = window_variances[0];
     let last_var = window_variances[w - 1];
-    let var_drift_ratio = if first_var > 1e-12 { last_var / first_var } else { 1.0 };
+    let var_drift_ratio = if first_var > 1e-12 {
+        last_var / first_var
+    } else {
+        1.0
+    };
     let var_drift_ok = (0.5..=1.5).contains(&var_drift_ratio);
 
-    let ratio = if min_median > 1e-12 { max_median / min_median } else { 1.0 };
+    let ratio = if min_median > 1e-12 {
+        max_median / min_median
+    } else {
+        1.0
+    };
     (ratio, median_drift_ok && var_drift_ok)
 }
 
@@ -310,12 +325,18 @@ mod tests {
 
     #[test]
     fn test_stationarity_check() {
-        use crate::types::{TimingSample, Class};
-        let samples: Vec<TimingSample> = (0..200).map(|i| TimingSample {
-            time_ns: 100.0,
-            class: if i % 2 == 0 { Class::Baseline } else { Class::Sample },
-        }).collect();
-        
+        use crate::types::{Class, TimingSample};
+        let samples: Vec<TimingSample> = (0..200)
+            .map(|i| TimingSample {
+                time_ns: 100.0,
+                class: if i % 2 == 0 {
+                    Class::Baseline
+                } else {
+                    Class::Sample
+                },
+            })
+            .collect();
+
         let (ratio, ok) = check_stationarity_windowed(&samples);
         assert!((ratio - 1.0).abs() < 1e-10);
         assert!(ok);

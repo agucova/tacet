@@ -118,7 +118,7 @@ impl AttackerModel {
     /// Convert attacker model to threshold in nanoseconds.
     pub fn to_threshold_ns(&self) -> f64 {
         match self {
-            AttackerModel::SharedHardware => 0.6, // ~2 cycles @ 3GHz
+            AttackerModel::SharedHardware => 0.6,      // ~2 cycles @ 3GHz
             AttackerModel::PostQuantumSentinel => 3.3, // ~10 cycles @ 3GHz (catches 20+ cycle leaks)
             AttackerModel::AdjacentNetwork => 100.0,
             AttackerModel::RemoteNetwork => 50_000.0, // 50μs

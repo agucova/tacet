@@ -15,7 +15,7 @@
 
 mod calibration_utils;
 
-use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, select_attacker_model};
+use calibration_utils::{busy_wait_ns, select_attacker_model, CalibrationConfig, Decision};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{Outcome, TimingOracle};
@@ -38,7 +38,12 @@ pub struct CoverageRunner {
 }
 
 impl CoverageRunner {
-    pub fn new(test_name: &str, config: CalibrationConfig, requested: usize, injected_effect_ns: f64) -> Self {
+    pub fn new(
+        test_name: &str,
+        config: CalibrationConfig,
+        requested: usize,
+        injected_effect_ns: f64,
+    ) -> Self {
         calibration_utils::set_max_inject_ns(config.tier.max_inject_ns());
 
         Self {
@@ -57,7 +62,9 @@ impl CoverageRunner {
     /// Record an oracle outcome and check if CI covers the true value.
     pub fn record(&mut self, outcome: &Outcome) {
         match outcome {
-            Outcome::Pass { effect, .. } | Outcome::Fail { effect, .. } | Outcome::Inconclusive { effect, .. } => {
+            Outcome::Pass { effect, .. }
+            | Outcome::Fail { effect, .. }
+            | Outcome::Inconclusive { effect, .. } => {
                 self.completed += 1;
 
                 // Check if credible interval contains the true injected effect
@@ -76,7 +83,9 @@ impl CoverageRunner {
                 // Check if the true injected effect falls within the CI
                 // Note: We use shift_ns directly since we inject pure uniform shifts
                 let detected_shift = effect.shift_ns.abs();
-                if detected_shift.min(true_effect) <= ci_high && detected_shift.max(true_effect) >= ci_low {
+                if detected_shift.min(true_effect) <= ci_high
+                    && detected_shift.max(true_effect) >= ci_low
+                {
                     // Either the detected shift is close to true, or the CI is wide enough
                     self.covered += 1;
                 } else {
@@ -206,10 +215,7 @@ fn coverage_quick_300ns() {
         // Baseline: all zeros
         // Sample: all 0xFF (distinguishable for delay injection)
         let delay = injected_ns;
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0xFFu8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
 
         // Use AdjacentNetwork (100ns threshold) since our effect is 300ns (3× threshold)
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
@@ -304,7 +310,12 @@ fn coverage_quick_multi_effect() {
     for &effect_ns in &effect_sizes {
         let mut rng = StdRng::seed_from_u64(config.seed.wrapping_add(effect_ns));
         let sub_test = format!("{}_{}ns", test_name, effect_ns);
-        let mut runner = CoverageRunner::new(&sub_test, config.clone(), trials_per_effect, effect_ns as f64);
+        let mut runner = CoverageRunner::new(
+            &sub_test,
+            config.clone(),
+            trials_per_effect,
+            effect_ns as f64,
+        );
 
         for trial in 0..trials_per_effect {
             if runner.should_stop() {
@@ -312,10 +323,7 @@ fn coverage_quick_multi_effect() {
             }
 
             let delay = effect_ns;
-            let inputs = InputPair::new(
-                || [0u8; 32],
-                || [0xFFu8; 32],
-            );
+            let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
 
             let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
                 .max_samples(config.samples_per_trial)
@@ -432,10 +440,7 @@ fn coverage_validation_rigorous() {
         }
 
         let delay = injected_ns;
-        let inputs = InputPair::new(
-            || [0u8; 32],
-            || [0xFFu8; 32],
-        );
+        let inputs = InputPair::new(|| [0u8; 32], || [0xFFu8; 32]);
 
         let outcome = TimingOracle::for_attacker(select_attacker_model(test_name))
             .max_samples(config.samples_per_trial)

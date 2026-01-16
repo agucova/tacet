@@ -391,7 +391,9 @@ pub fn byte_arrays_32() -> InputPair<[u8; 32], impl FnMut() -> [u8; 32], impl Fn
 ///     encrypt(input);
 /// });
 /// ```
-pub fn byte_vecs(len: usize) -> InputPair<Vec<u8>, impl FnMut() -> Vec<u8>, impl FnMut() -> Vec<u8>> {
+pub fn byte_vecs(
+    len: usize,
+) -> InputPair<Vec<u8>, impl FnMut() -> Vec<u8>, impl FnMut() -> Vec<u8>> {
     InputPair::new(
         move || vec![0u8; len],
         move || (0..len).map(|_| rand::random()).collect(),

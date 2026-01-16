@@ -19,11 +19,14 @@ fn test_input_pair_basic() {
 fn test_input_pair_generator_called() {
     // The generator is called each time generate_sample() is called
     let counter = std::cell::Cell::new(0u32);
-    let inputs = InputPair::new(|| 0u32, || {
-        let val = counter.get();
-        counter.set(val + 1);
-        val
-    });
+    let inputs = InputPair::new(
+        || 0u32,
+        || {
+            let val = counter.get();
+            counter.set(val + 1);
+            val
+        },
+    );
 
     // baseline() always returns 0
     assert_eq!(inputs.baseline(), 0);
@@ -69,24 +72,36 @@ fn test_no_false_positive_with_helpers() {
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .time_budget(Duration::from_secs(10))
         .test(inputs, |data| {
-        // XOR with zeros is identity - constant time
-        let mut result = [0u8; 32];
-        for i in 0..32 {
-            result[i] = data[i] ^ 0;
-        }
-        std::hint::black_box(result);
-    });
+            // XOR with zeros is identity - constant time
+            let mut result = [0u8; 32];
+            for i in 0..32 {
+                result[i] = data[i] ^ 0;
+            }
+            std::hint::black_box(result);
+        });
 
     match outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             assert!(leak_probability < 0.5);
         }
-        Outcome::Fail { leak_probability, .. } => {
-            panic!("Unexpected failure for constant-time XOR: P={:.1}%", leak_probability * 100.0);
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
+            panic!(
+                "Unexpected failure for constant-time XOR: P={:.1}%",
+                leak_probability * 100.0
+            );
         }
-        Outcome::Inconclusive { leak_probability, .. } => {
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
             // Acceptable - inconclusive is not a false positive
-            assert!(leak_probability < 0.5, "Should not detect leak with helpers");
+            assert!(
+                leak_probability < 0.5,
+                "Should not detect leak with helpers"
+            );
         }
         Outcome::Unmeasurable { .. } => {
             // Skip if unmeasurable
@@ -129,11 +144,14 @@ fn test_anomaly_detection_good_entropy() {
 #[test]
 fn test_anomaly_detection_low_entropy() {
     let counter = std::cell::Cell::new(0u64);
-    let inputs = InputPair::new(|| 0u64, || {
-        let val = counter.get() % 10; // Only 10 unique values
-        counter.set(counter.get() + 1);
-        val
-    });
+    let inputs = InputPair::new(
+        || 0u64,
+        || {
+            let val = counter.get() % 10; // Only 10 unique values
+            counter.set(counter.get() + 1);
+            val
+        },
+    );
 
     for _ in 0..200 {
         let val = inputs.generate_sample();

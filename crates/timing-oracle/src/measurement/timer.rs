@@ -439,6 +439,11 @@ mod tests {
 
         // Batched per-iteration should be similar to or less than single
         // (amortizes measurement overhead)
-        assert!(batched <= single * 2, "single={}, batched={}", single, batched);
+        assert!(
+            batched <= single * 2,
+            "single={}, batched={}",
+            single,
+            batched
+        );
     }
 }

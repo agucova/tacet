@@ -9,14 +9,16 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use rand::SeedableRng;
 use rand::Rng;
+use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::types::{Class, Matrix9, TimingSample, Vector9};
 
 use super::block_length::{optimal_block_length, paired_optimal_block_length};
-use super::bootstrap::{block_bootstrap_resample_into, block_bootstrap_resample_joint_into, counter_rng_seed};
+use super::bootstrap::{
+    block_bootstrap_resample_into, block_bootstrap_resample_joint_into, counter_rng_seed,
+};
 use super::quantile::{compute_deciles_inplace, compute_midquantile_deciles};
 
 #[cfg(feature = "parallel")]
@@ -216,7 +218,8 @@ pub fn bootstrap_covariance_matrix(
     } else {
         // Fall back to simple formula for very small samples
         (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
-    }.max(1);
+    }
+    .max(1);
 
     // Generate bootstrap replicates using online Welford covariance accumulation
     // This avoids allocating Vec<Vector9> (saves 72 KB for 1000 iterations)
@@ -233,7 +236,8 @@ pub fn bootstrap_covariance_matrix(
                 ),
                 |(_, mut buffer, mut acc), i| {
                     // Counter-based RNG for deterministic, well-distributed seeding
-                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+                    let mut rng =
+                        Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
                     // Resample, compute deciles, and update accumulator
                     block_bootstrap_resample_into(data, block_size, &mut rng, &mut buffer);
@@ -244,13 +248,10 @@ pub fn bootstrap_covariance_matrix(
                 },
             )
             .map(|(_, _, acc)| acc)
-            .reduce(
-                WelfordCovariance9::new,
-                |mut a, b| {
-                    a.merge(&b);
-                    a
-                },
-            )
+            .reduce(WelfordCovariance9::new, |mut a, b| {
+                a.merge(&b);
+                a
+            })
     };
 
     #[cfg(not(feature = "parallel"))]
@@ -361,7 +362,8 @@ pub fn bootstrap_difference_covariance(
     } else {
         // Fall back to simple formula for very small samples
         (1.3 * (n as f64).powf(1.0 / 3.0)).ceil() as usize
-    }.max(1);
+    }
+    .max(1);
 
     // Generate bootstrap replicates of Δ* = q_F* - q_R* using joint resampling
     #[cfg(feature = "parallel")]
@@ -372,15 +374,27 @@ pub fn bootstrap_difference_covariance(
                 // Per-thread state: RNG, scratch buffer for joint samples, and Welford accumulator
                 (
                     Xoshiro256PlusPlus::seed_from_u64(seed),
-                    vec![TimingSample { time_ns: 0.0, class: Class::Baseline }; n],
+                    vec![
+                        TimingSample {
+                            time_ns: 0.0,
+                            class: Class::Baseline
+                        };
+                        n
+                    ],
                     WelfordCovariance9::new(),
                 ),
                 |(_, mut buffer, mut acc), i| {
                     // Counter-based RNG for deterministic, well-distributed seeding
-                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+                    let mut rng =
+                        Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
                     // Joint resample the interleaved sequence (preserves temporal pairing)
-                    block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
+                    block_bootstrap_resample_joint_into(
+                        interleaved,
+                        block_size,
+                        &mut rng,
+                        &mut buffer,
+                    );
 
                     // Split by class AFTER resampling
                     let mut baseline_samples: Vec<f64> = Vec::new();
@@ -404,19 +418,22 @@ pub fn bootstrap_difference_covariance(
                 },
             )
             .map(|(_, _, acc)| acc)
-            .reduce(
-                WelfordCovariance9::new,
-                |mut a, b| {
-                    a.merge(&b);
-                    a
-                },
-            )
+            .reduce(WelfordCovariance9::new, |mut a, b| {
+                a.merge(&b);
+                a
+            })
     };
 
     #[cfg(not(feature = "parallel"))]
     let cov_accumulator: WelfordCovariance9 = {
         let mut accumulator = WelfordCovariance9::new();
-        let mut buffer = vec![TimingSample { time_ns: 0.0, class: Class::Baseline }; n];
+        let mut buffer = vec![
+            TimingSample {
+                time_ns: 0.0,
+                class: Class::Baseline
+            };
+            n
+        ];
 
         for i in 0..n_bootstrap {
             // Counter-based RNG for deterministic, well-distributed seeding
@@ -506,7 +523,8 @@ pub fn bootstrap_difference_covariance_discrete(
                     WelfordCovariance9::new(),
                 ),
                 |(_, mut baseline_buf, mut sample_buf, mut indices, mut acc), i| {
-                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+                    let mut rng =
+                        Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
                     indices.clear();
                     let n_blocks = (m + block_size - 1) / block_size;
@@ -527,13 +545,10 @@ pub fn bootstrap_difference_covariance_discrete(
                 },
             )
             .map(|(_, _, _, _, acc)| acc)
-            .reduce(
-                WelfordCovariance9::new,
-                |mut a, b| {
-                    a.merge(&b);
-                    a
-                },
-            )
+            .reduce(WelfordCovariance9::new, |mut a, b| {
+                a.merge(&b);
+                a
+            })
     };
 
     #[cfg(not(feature = "parallel"))]
@@ -853,13 +868,19 @@ mod tests {
         let empty = WelfordCovariance9::new();
         let cov0 = empty.finalize();
         let expected_conservative = Matrix9::from_diagonal(&Vector9::repeat(1e6));
-        assert_eq!(cov0, expected_conservative, "n=0 should return conservative diagonal");
+        assert_eq!(
+            cov0, expected_conservative,
+            "n=0 should return conservative diagonal"
+        );
 
         // n=1 should return conservative high-variance diagonal
         let mut one = WelfordCovariance9::new();
         one.update(&Vector9::from_element(42.0));
         let cov1 = one.finalize();
-        assert_eq!(cov1, expected_conservative, "n=1 should return conservative diagonal");
+        assert_eq!(
+            cov1, expected_conservative,
+            "n=1 should return conservative diagonal"
+        );
 
         // n=2 should compute valid covariance
         let mut two = WelfordCovariance9::new();
@@ -868,7 +889,10 @@ mod tests {
         let cov2 = two.finalize();
 
         // Should not be the conservative fallback (has actual variance)
-        assert!(cov2 != expected_conservative, "n=2 should not return conservative fallback");
+        assert!(
+            cov2 != expected_conservative,
+            "n=2 should not return conservative fallback"
+        );
 
         // Should be symmetric
         for i in 0..9 {
