@@ -284,8 +284,6 @@ H₀: max|Δ| ≤ θ  (effect within acceptable bounds)
 H₁: max|Δ| > θ  (exploitable timing leak)
 ```
 
-This follows the [SILENT methodology](https://arxiv.org/abs/2504.19821), which properly controls false positives at the boundary.
-
 ### Adaptive Bayesian Analysis
 
 The oracle adaptively collects samples until it can reach a conclusion:
@@ -318,8 +316,6 @@ For full methodology: [docs/spec.md](docs/spec.md)
 
 ## References
 
-- Dunsche et al. (2025): [SILENT](https://arxiv.org/abs/2504.19821) — Practical significance testing for timing side channels
-- Dunsche et al. (2024): [RTLF bounded FPR](https://www.usenix.org/conference/usenixsecurity24/presentation/dunsche)
 - Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
 - Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf)
 

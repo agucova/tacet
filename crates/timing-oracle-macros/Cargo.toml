@@ -1,8 +1,9 @@
 [package]
 name = "timing-oracle-macros"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MPL-2.0"
+readme = "README.md"
 description = "Proc macros for timing-oracle timing side-channel detection"
 repository = "https://github.com/agucova/timing-oracle"
 keywords = ["timing", "side-channel", "security", "cryptography", "testing"]

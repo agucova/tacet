@@ -1784,7 +1784,7 @@ dependencies = [
 
 [[package]]
 name = "timing-oracle"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -1832,7 +1832,7 @@ dependencies = [
 
 [[package]]
 name = "timing-oracle-core"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "libm",
  "nalgebra 0.34.1",
@@ -1845,7 +1845,7 @@ dependencies = [
 
 [[package]]
 name = "timing-oracle-macros"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "proc-macro2",
  "quote",

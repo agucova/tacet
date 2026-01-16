@@ -6,9 +6,24 @@ use super::super::test_cases::TestCase;
 use super::{DetectionResult, Detector, RawData};
 use std::any::Any;
 use std::cell::RefCell;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Instant;
 use timing_oracle::{helpers::InputPair, AttackerModel, Outcome, TimingOracle};
+
+/// Operation type - wraps a callable for pre-generation
+type Op = Arc<dyn Fn() + Send + Sync>;
+
+/// Wrapper for Op that implements Hash (based on pointer address)
+#[derive(Clone)]
+struct OpWrapper(Op);
+
+impl Hash for OpWrapper {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Hash the pointer address - each unique operation has unique hash
+        Arc::as_ptr(&self.0).hash(state);
+    }
+}
 
 /// Adapter for timing-oracle
 pub struct TimingOracleDetector {
@@ -20,8 +35,8 @@ pub struct TimingOracleDetector {
 
 /// Prepared operations from a test case
 struct PreparedOps {
-    fixed: Arc<dyn Fn() + Send + Sync>,
-    random: Arc<dyn Fn() + Send + Sync>,
+    fixed: Op,
+    random: Op,
 }
 
 impl TimingOracleDetector {
@@ -77,15 +92,22 @@ impl Detector for TimingOracleDetector {
 
         let oracle = TimingOracle::for_attacker(self.attacker_model);
 
-        // Use a boolean to indicate which class: false = baseline (fixed), true = sample (random)
-        let inputs = InputPair::new(|| false, || true);
+        // Pre-generate the operation to call (not a boolean selector)
+        // This avoids branching during measurement - just an indirect call
+        // Use new_unchecked since all baseline/sample values will have same hash
+        let inputs = InputPair::new_unchecked(
+            {
+                let op = Arc::clone(&fixed_op);
+                move || OpWrapper(Arc::clone(&op))
+            },
+            {
+                let op = Arc::clone(&random_op);
+                move || OpWrapper(Arc::clone(&op))
+            },
+        );
 
-        let outcome = oracle.max_samples(samples).test(inputs, move |is_sample| {
-            if *is_sample {
-                random_op();
-            } else {
-                fixed_op();
-            }
+        let outcome = oracle.max_samples(samples).test(inputs, move |op: &OpWrapper| {
+            (op.0)();  // No branch - just call the pre-selected operation
         });
 
         let duration = start.elapsed();

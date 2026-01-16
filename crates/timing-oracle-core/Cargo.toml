@@ -1,9 +1,10 @@
 [package]
 name = "timing-oracle-core"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2021"
 rust-version = "1.80"
 license = "MPL-2.0"
+readme = "README.md"
 description = "Core statistical analysis for timing side-channel detection (no_std)"
 keywords = ["security", "cryptography", "timing", "side-channel", "no_std"]
 categories = ["cryptography", "no-std"]

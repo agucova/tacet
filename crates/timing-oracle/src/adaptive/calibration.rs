@@ -17,7 +17,10 @@ use std::time::Instant;
 
 use crate::analysis::mde::estimate_mde;
 use crate::preflight::{run_all_checks, PreflightResult};
-use crate::statistics::{bootstrap_difference_covariance, paired_optimal_block_length};
+use crate::statistics::{
+    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
+    paired_optimal_block_length,
+};
 use crate::types::{Class, Matrix2, Matrix9, TimingSample};
 
 /// Calibration results from the initial measurement phase.
@@ -255,9 +258,17 @@ pub fn calibrate(
         })
         .collect();
 
-    // Bootstrap covariance estimation
-    let cov_estimate =
-        bootstrap_difference_covariance(&interleaved, config.bootstrap_iterations, config.seed);
+    // Bootstrap covariance estimation (spec Section 2.8: use m-out-of-n bootstrap for discrete mode)
+    let cov_estimate = if discrete_mode {
+        bootstrap_difference_covariance_discrete(
+            &baseline_ns,
+            &sample_ns,
+            config.bootstrap_iterations,
+            config.seed,
+        )
+    } else {
+        bootstrap_difference_covariance(&interleaved, config.bootstrap_iterations, config.seed)
+    };
 
     // Check covariance validity
     if !cov_estimate.is_stable() {

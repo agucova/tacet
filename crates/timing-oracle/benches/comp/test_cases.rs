@@ -1119,7 +1119,8 @@ impl TestCase for InterleavedOps {
 
     fn fixed_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {
-            let mut acc = 0u64;
+            // Same computation as random - only final XOR differs (constant-time)
+            let mut acc = 42u64;
             for i in 0..50 {
                 // Fast op
                 acc = acc.wrapping_add(std::hint::black_box(i));
@@ -1128,13 +1129,14 @@ impl TestCase for InterleavedOps {
                     acc = std::hint::black_box(acc.wrapping_mul(3));
                 }
             }
-            std::hint::black_box(acc);
+            std::hint::black_box(acc ^ 0xDEADBEEF);
         })
     }
 
     fn random_operation(&self) -> Box<dyn Fn() + Send + Sync> {
         Box::new(|| {
-            let mut acc = 1u64; // Different starting value, same work
+            // Same computation as fixed - only final XOR differs (constant-time)
+            let mut acc = 42u64;
             for i in 0..50 {
                 // Fast op
                 acc = acc.wrapping_add(std::hint::black_box(i));
@@ -1143,34 +1145,34 @@ impl TestCase for InterleavedOps {
                     acc = std::hint::black_box(acc.wrapping_mul(3));
                 }
             }
-            std::hint::black_box(acc);
+            std::hint::black_box(acc ^ 0xCAFEBABE);
         })
     }
 
     fn fixed_code(&self) -> String {
         r#"
-            let mut acc = 0u64;
+            let mut acc = 42u64;
             for i in 0..50 {
                 acc = acc.wrapping_add(std::hint::black_box(i));
                 for _ in 0..10 {
                     acc = std::hint::black_box(acc.wrapping_mul(3));
                 }
             }
-            std::hint::black_box(acc);
+            std::hint::black_box(acc ^ 0xDEADBEEF);
         "#
         .to_string()
     }
 
     fn random_code(&self) -> String {
         r#"
-            let mut acc = 1u64;
+            let mut acc = 42u64;
             for i in 0..50 {
                 acc = acc.wrapping_add(std::hint::black_box(i));
                 for _ in 0..10 {
                     acc = std::hint::black_box(acc.wrapping_mul(3));
                 }
             }
-            std::hint::black_box(acc);
+            std::hint::black_box(acc ^ 0xCAFEBABE);
         "#
         .to_string()
     }
