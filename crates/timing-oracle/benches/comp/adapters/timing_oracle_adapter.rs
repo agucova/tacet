@@ -106,9 +106,11 @@ impl Detector for TimingOracleDetector {
             },
         );
 
-        let outcome = oracle.max_samples(samples).test(inputs, move |op: &OpWrapper| {
-            (op.0)();  // No branch - just call the pre-selected operation
-        });
+        let outcome = oracle
+            .max_samples(samples)
+            .test(inputs, move |op: &OpWrapper| {
+                (op.0)(); // No branch - just call the pre-selected operation
+            });
 
         let duration = start.elapsed();
 

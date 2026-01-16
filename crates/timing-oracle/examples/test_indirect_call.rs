@@ -1,9 +1,9 @@
 //! Test if indirect calls to different addresses cause false positives
 
-use std::sync::Arc;
 use std::hint::black_box;
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use std::sync::Arc;
 use std::time::Duration;
+use timing_oracle::{helpers::InputPair, AttackerModel, TimingOracle};
 
 fn main() {
     // Create two closures - identical code, different memory addresses
@@ -53,19 +53,45 @@ fn main() {
         .time_budget(Duration::from_secs(30))
         .max_samples(20000)
         .test(inputs, |op: &OpWrapper| {
-            (op.0)();  // Indirect call - different target for baseline vs sample
+            (op.0)(); // Indirect call - different target for baseline vs sample
         });
 
     match &outcome {
-        timing_oracle::Outcome::Pass { leak_probability, samples_used, .. } => {
-            println!("PASS - leak_probability: {:.4}, samples: {}", leak_probability, samples_used);
+        timing_oracle::Outcome::Pass {
+            leak_probability,
+            samples_used,
+            ..
+        } => {
+            println!(
+                "PASS - leak_probability: {:.4}, samples: {}",
+                leak_probability, samples_used
+            );
         }
-        timing_oracle::Outcome::Fail { leak_probability, effect, samples_used, .. } => {
-            println!("FAIL - leak_probability: {:.4}, samples: {}", leak_probability, samples_used);
-            println!("  effect: shift={:.2}ns, tail={:.2}ns", effect.shift_ns, effect.tail_ns);
+        timing_oracle::Outcome::Fail {
+            leak_probability,
+            effect,
+            samples_used,
+            ..
+        } => {
+            println!(
+                "FAIL - leak_probability: {:.4}, samples: {}",
+                leak_probability, samples_used
+            );
+            println!(
+                "  effect: shift={:.2}ns, tail={:.2}ns",
+                effect.shift_ns, effect.tail_ns
+            );
         }
-        timing_oracle::Outcome::Inconclusive { leak_probability, reason, samples_used, .. } => {
-            println!("INCONCLUSIVE - leak_probability: {:.4}, samples: {}", leak_probability, samples_used);
+        timing_oracle::Outcome::Inconclusive {
+            leak_probability,
+            reason,
+            samples_used,
+            ..
+        } => {
+            println!(
+                "INCONCLUSIVE - leak_probability: {:.4}, samples: {}",
+                leak_probability, samples_used
+            );
             println!("  reason: {:?}", reason);
         }
         timing_oracle::Outcome::Unmeasurable { recommendation, .. } => {

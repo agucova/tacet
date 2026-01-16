@@ -1,10 +1,10 @@
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
 use std::time::Duration;
+use timing_oracle::{helpers::InputPair, AttackerModel, TimingOracle};
 
 fn main() {
     let inputs = InputPair::new(
-        || false,  // baseline class
-        || true,   // sample class
+        || false, // baseline class
+        || true,  // sample class
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::SharedHardware)
