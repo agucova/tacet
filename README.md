@@ -3,20 +3,22 @@
 **Detect timing side channels in Rust code with statistically rigorous methods.**
 
 ```
-$ cargo test --test aes_timing
+$ cargo test --test aes_timing -- --nocapture
 
+[aes128_block_encrypt_constant_time]
 timing-oracle
 ──────────────────────────────────────────────────────────────
 
-  Samples: 5000 per class
-  Quality: Excellent
+  Samples: 6000 per class
+  Quality: Good
 
   ✓ No timing leak detected
 
-    Probability of leak: 2.3%
-    Effect: 0.8 ns
-      Shift: 0.5 ns
-      Tail:  0.3 ns
+    Probability of leak: 0.0%
+    Effect: 0.0 ns
+      Shift: 0.0 ns
+      Tail:  0.0 ns
+      95% CI: 0.0–12.5 ns
 
 ──────────────────────────────────────────────────────────────
 ```
@@ -316,6 +318,7 @@ For full methodology: [docs/spec.md](docs/spec.md)
 
 ## References
 
+- Van Goethem et al. (2020): [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) — HTTP/2 timing attacks over internet
 - Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
 - Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf)
 
