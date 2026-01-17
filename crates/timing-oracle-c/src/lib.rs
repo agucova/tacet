@@ -61,10 +61,6 @@ fn sqrt(x: f64) -> f64 {
     libm::sqrt(x)
 }
 
-fn sq(x: f64) -> f64 {
-    x * x
-}
-
 pub mod types;
 
 // Re-export all types at crate root for convenience
@@ -391,7 +387,6 @@ pub extern "C" fn to_inconclusive_reason_str(reason: ToInconclusiveReason) -> *c
         ToInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
         ToInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
         ToInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
-        ToInconclusiveReason::ModelMismatch => c"ModelMismatch".as_ptr(),
     }
 }
 
@@ -722,10 +717,11 @@ fn run_calibration_phase<F: Fn() -> f64>(
     Box<ToResult>,
 > {
     use timing_oracle_core::adaptive::{
-        AdaptiveState, Calibration, CalibrationSnapshot, PRIOR_SCALE_FACTOR,
+        calibrate_prior_scale, compute_prior_cov_9d, AdaptiveState, Calibration,
+        CalibrationSnapshot,
     };
     use timing_oracle_core::statistics::{bootstrap_difference_covariance, OnlineStats};
-    use timing_oracle_core::types::{Class, Matrix2, TimingSample};
+    use timing_oracle_core::types::{Class, TimingSample};
 
     // Create interleaved schedule
     let mut schedule = vec![false; CALIBRATION_SAMPLES * 2];
@@ -840,15 +836,14 @@ fn run_calibration_phase<F: Fn() -> f64>(
     };
     let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
 
-    // Compute prior covariance using theta_eff (not theta_user)
-    // Per spec §2.3.4: prior should be based on effective threshold
-    let prior_sigma = theta_eff * PRIOR_SCALE_FACTOR;
-    let prior_cov = Matrix2::new(sq(prior_sigma), 0.0, 0.0, sq(prior_sigma));
+    // Compute 9D prior covariance using calibrated scale factor
+    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, rng_seed);
+    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior);
 
     let calibration = Calibration::new(
         sigma_rate,
         10, // block_length (default)
-        prior_cov,
+        prior_cov_9d,
         theta_ns,
         CALIBRATION_SAMPLES,
         false, // discrete_mode (could detect from data)
@@ -857,9 +852,8 @@ fn run_calibration_phase<F: Fn() -> f64>(
         calibration_snapshot,
         ns_per_tick,
         samples_per_second,
-        // v4.1 fields
         c_floor,
-        q_thresh,
+        q_thresh, // projection_mismatch_thresh
         theta_tick,
         theta_eff,
         theta_floor_initial,
@@ -942,9 +936,9 @@ fn build_result(
             elapsed_secs,
         } => {
             // Determine exploitability based on new thresholds from Timeless Timing Attacks
-            let max_effect = posterior.beta_mean[0]
+            let max_effect = posterior.beta_proj[0]
                 .abs()
-                .max(posterior.beta_mean[1].abs());
+                .max(posterior.beta_proj[1].abs());
             let exploitability = if max_effect < 10.0 {
                 ToExploitability::SharedHardwareOnly
             } else if max_effect < 100.0 {
@@ -1084,12 +1078,6 @@ fn convert_reason(
             ToInconclusiveReason::ThresholdUnachievable,
             Some(format!("{} {}", message, guidance)),
         ),
-        InconclusiveReason::ModelMismatch {
-            message, guidance, ..
-        } => (
-            ToInconclusiveReason::ModelMismatch,
-            Some(format!("{} {}", message, guidance)),
-        ),
     }
 }
 
@@ -1206,7 +1194,6 @@ mod tests {
                 ToInconclusiveReason::ThresholdUnachievable,
                 "ThresholdUnachievable",
             ),
-            (ToInconclusiveReason::ModelMismatch, "ModelMismatch"),
         ];
 
         for (variant, expected) in variants {

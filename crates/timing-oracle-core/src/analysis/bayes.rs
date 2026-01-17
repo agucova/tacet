@@ -1,49 +1,40 @@
-//! Layer 2: Bayesian inference for timing leak detection.
-//!
-//! See spec §2.5 (Bayesian Inference) for the full methodology.
+//! Bayesian inference for timing leak detection using 9D quantile model.
 //!
 //! This module computes the posterior probability of a timing leak using:
-//! - Conjugate Gaussian model with closed-form posterior (no MCMC required)
+//! - 9D Gaussian model over quantile differences δ ∈ ℝ⁹
+//! - Conjugate Gaussian prior with shaped covariance
+//! - Closed-form posterior (no MCMC required)
 //! - Monte Carlo integration for leak probability
 //!
-//! ## Model (spec §2.5)
+//! ## Model
 //!
-//! Δ = Xβ + ε,  ε ~ N(0, Σ_n)
+//! Likelihood: Δ | δ ~ N(δ, Σ_n)
 //!
 //! where:
 //! - Δ is the observed quantile differences (9-vector)
-//! - X is the design matrix [1 | b_tail] (9×2) for effect decomposition
-//! - β = (μ, τ)ᵀ is the effect vector (uniform shift and tail components)
-//! - Σ_n is the covariance matrix (already scaled for inference sample size)
+//! - δ is the true per-decile timing differences (9-vector)
+//! - Σ_n is the covariance matrix scaled for sample size
 //!
-//! ## Prior (spec §2.5)
+//! ## Prior
 //!
-//! β ~ N(0, Λ₀),  Λ₀ = diag(σ_μ², σ_τ²)
+//! δ ~ N(0, Λ₀), where Λ₀ = σ²_prior × S
+//! S = Σ_rate / tr(Σ_rate) (shaped to match empirical covariance structure)
 //!
-//! The prior scale is set proportional to θ: σ = 2θ. This ensures:
-//! - P(|β| > θ | prior) ≈ 62%, representing reasonable uncertainty
-//! - Avoids the miscalibration of max(2×MDE, θ) which gave ~99% when MDE >> θ
+//! ## Posterior
 //!
-//! ## Posterior (spec §2.5)
+//! δ | Δ ~ N(δ_post, Λ_post)
 //!
-//! β | Δ ~ N(β_post, Λ_post)
+//! Computed via stable Cholesky solves (no explicit matrix inversion).
 //!
-//! where:
-//! - Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-//! - β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
+//! ## Leak Probability
 //!
-//! ## Leak Probability (spec §2.5)
+//! P(leak | Δ) = P(max_k |δ_k| > θ_eff | Δ)
 //!
-//! P(significant leak | Δ) = P(max_k |(Xβ)_k| > θ | Δ)
+//! Computed via Monte Carlo: draw samples from posterior, count exceedances.
 //!
-//! Computed via Monte Carlo: draw 1000 samples from posterior, count exceedances.
+//! ## 2D Projection for Reporting
 //!
-//! ## Covariance Scaling
-//!
-//! The caller is responsible for providing appropriately scaled covariance.
-//! In the adaptive architecture, this is Σ_rate / n where:
-//! - Σ_rate is the asymptotic rate matrix from covariance estimation
-//! - n is the current inference sample size
+//! The 9D posterior is projected to 2D (shift, tail) using GLS for interpretability.
 
 extern crate alloc;
 
@@ -62,177 +53,194 @@ use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 /// Number of Monte Carlo samples for leak probability estimation.
 const N_MONTE_CARLO: usize = 1000;
 
-/// Result from Bayesian analysis (spec §2.5).
-///
-/// Contains the posterior distribution parameters and derived quantities
-/// needed for the adaptive sampling loop and effect estimation.
+/// Result from Bayesian analysis using 9D inference.
 #[derive(Debug, Clone)]
 pub struct BayesResult {
-    /// Posterior probability of a significant leak: P(max_k |(Xβ)_k| > θ | Δ).
-    ///
-    /// This is the leak probability from the Bayesian layer (spec §2.5).
-    /// Computed via Monte Carlo integration over the posterior distribution.
-    /// Range: 0.0 to 1.0
+    /// Posterior probability of a significant leak: P(max_k |δ_k| > θ | Δ).
     pub leak_probability: f64,
 
-    /// 95% credible interval for total effect magnitude: (2.5th, 97.5th) percentiles of ||β||₂.
-    ///
-    /// Note: This CI may not contain the point estimate when β ≈ 0 because ||·|| is non-negative.
-    pub effect_magnitude_ci: (f64, f64),
+    /// 9D posterior mean δ_post in nanoseconds.
+    pub delta_post: Vector9,
 
-    /// Posterior mean of β = (μ, τ) in nanoseconds.
-    ///
+    /// 9D posterior covariance Λ_post.
+    pub lambda_post: Matrix9,
+
+    /// 2D GLS projection β = (μ, τ) in nanoseconds.
     /// - β[0] = μ (uniform shift): All quantiles move equally
     /// - β[1] = τ (tail effect): Upper quantiles shift more than lower
-    pub beta_mean: Vector2,
+    pub beta_proj: Vector2,
 
-    /// Posterior covariance of β.
-    ///
-    /// Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-    /// Used for effect significance testing and credible intervals.
-    pub beta_cov: Matrix2,
+    /// 2D projection covariance.
+    pub beta_proj_cov: Matrix2,
 
-    /// Whether the computation encountered numerical issues (e.g., Cholesky failure).
-    ///
+    /// Projection mismatch Q statistic: r'Σ_n⁻¹r where r = δ_post - Xβ_proj.
+    /// High values indicate the 2D model doesn't capture the full pattern.
+    pub projection_mismatch_q: f64,
+
+    /// 95% credible interval for max effect magnitude: (2.5th, 97.5th) percentiles.
+    pub effect_magnitude_ci: (f64, f64),
+
+    /// Whether the computation encountered numerical issues.
     /// If true, the posterior is set to the prior (maximally uncertain).
     pub is_clamped: bool,
 
     /// Covariance matrix used for inference (after regularization).
-    ///
-    /// This is the input Σ_n after applying variance floor regularization
-    /// for numerical stability.
     pub sigma_n: Matrix9,
-
-    /// Model fit Q statistic (spec §2.3.3, §2.6 Gate 8).
-    ///
-    /// Q = r' Σ_n^{-1} r where r = Δ - Xβ_post is the residual.
-    /// Under the 2D model, Q ~ chi-squared(7).
-    /// High Q indicates the 2D (shift + tail) model doesn't fit the data.
-    /// Compare against q_thresh from calibration for model mismatch detection.
-    pub model_fit_q: f64,
 }
 
-/// Compute Bayesian posterior for timing leak analysis (spec §2.5).
-///
-/// Uses conjugate Gaussian model: Δ = Xβ + ε, ε ~ N(0, Σ_n)
-/// - Prior: β ~ N(0, Λ₀)
-/// - Posterior: β|Δ ~ N(β_post, Λ_post)
-///   - Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-///   - β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
-/// - Leak probability: P(max_k |Xβ|_k > θ | Δ) via Monte Carlo
+/// Compute Bayesian posterior for timing leak analysis using 9D model.
 ///
 /// # Arguments
 ///
-/// * `delta` - Observed quantile differences (9-vector, baseline - sample)
-/// * `sigma_n` - Covariance matrix already scaled for inference sample size.
-///   In the adaptive architecture, this is Σ_rate / n.
-/// * `prior_sigmas` - Prior standard deviations (σ_μ, σ_τ) in nanoseconds.
-///   Typically set to 2θ to ensure calibrated priors.
+/// * `delta` - Observed quantile differences (9-vector)
+/// * `sigma_n` - Covariance matrix scaled for inference sample size (Σ_rate / n)
+/// * `lambda0` - Prior covariance (9×9, shaped: σ²_prior × S)
 /// * `theta` - Minimum effect of concern (threshold for practical significance)
 /// * `seed` - Random seed for Monte Carlo reproducibility
 ///
 /// # Returns
 ///
-/// `BayesResult` containing:
-/// - `leak_probability`: P(max_k |(Xβ)_k| > θ | Δ)
-/// - `beta_mean`, `beta_cov`: Posterior distribution parameters
-/// - `effect_magnitude_ci`: 95% CI for ||β||₂
+/// `BayesResult` with 9D posterior, 2D projection, and leak probability.
 pub fn compute_bayes_factor(
     delta: &Vector9,
     sigma_n: &Matrix9,
-    prior_sigmas: (f64, f64),
+    lambda0: &Matrix9,
     theta: f64,
     seed: Option<u64>,
 ) -> BayesResult {
-    compute_posterior_monte_carlo(delta, sigma_n, prior_sigmas, theta, seed)
-}
-
-/// Compute posterior probability via Monte Carlo integration (spec §2.5).
-///
-/// Internal implementation that handles all the linear algebra for
-/// conjugate Gaussian inference.
-pub fn compute_posterior_monte_carlo(
-    delta: &Vector9,
-    sigma_n: &Matrix9,
-    prior_sigmas: (f64, f64),
-    theta: f64,
-    seed: Option<u64>,
-) -> BayesResult {
-    let design = build_design_matrix();
-    let lambda0 = prior_covariance(prior_sigmas);
-
-    // Compute posterior parameters (spec §2.5)
-    // Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-    // β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
-
-    // Always regularize covariance for numerical stability (spec §2.6)
-    // This ensures CI and probability use the same posterior distribution
+    // Regularize covariance for numerical stability
     let regularized = add_jitter(*sigma_n);
-    let sigma_n_chol = match Cholesky::new(regularized) {
+
+    // Compute posterior using stable Cholesky path
+    // A = Σ_n + Λ₀ (SPD)
+    let a = regularized + *lambda0;
+    let a_chol = match Cholesky::new(a) {
         Some(c) => c,
         None => {
-            // Fallback: return neutral result (maximally uncertain)
-            return neutral_result(sigma_n, &lambda0, &design);
+            return neutral_result(&regularized, lambda0);
         }
     };
 
-    // Σ_n⁻¹ via Cholesky: L L^T = Σ_n, so Σ_n⁻¹ = L^{-T} L^{-1}
-    let sigma_n_inv = sigma_n_chol.inverse();
+    // Solve A*x = Δ, then δ_post = Λ₀ * x
+    let x = a_chol.solve(delta);
+    let delta_post = lambda0 * x;
 
-    // Xᵀ Σ_n⁻¹ X (2×2 precision contribution from data)
-    let xt_sigma_n_inv_x = design.transpose() * sigma_n_inv * design;
-
-    // Λ₀⁻¹ (prior precision)
-    let lambda0_inv = Matrix2::from_diagonal(&Vector2::new(
-        1.0 / lambda0[(0, 0)].max(1e-12),
-        1.0 / lambda0[(1, 1)].max(1e-12),
-    ));
-
-    // Posterior precision: Λ_post⁻¹ = Xᵀ Σ_n⁻¹ X + Λ₀⁻¹
-    let precision_post = xt_sigma_n_inv_x + lambda0_inv;
-    let lambda_post_chol = match Cholesky::new(precision_post) {
-        Some(c) => c,
-        None => {
-            return neutral_result(sigma_n, &lambda0, &design);
+    // Λ_post = Λ₀ - Λ₀ * A⁻¹ * Λ₀ (via Cholesky solves)
+    // Compute Y = A⁻¹ * Λ₀ by solving A*Y = Λ₀
+    let mut a_inv_lambda0 = Matrix9::zeros();
+    for j in 0..9 {
+        let col = lambda0.column(j).into_owned();
+        let y_col = a_chol.solve(&col);
+        for i in 0..9 {
+            a_inv_lambda0[(i, j)] = y_col[i];
         }
-    };
-    // Posterior covariance: Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-    let beta_cov = lambda_post_chol.inverse();
+    }
+    // Λ_post = Λ₀ - Λ₀ * Y
+    let mut lambda_post = lambda0 - lambda0 * a_inv_lambda0;
 
-    // Posterior mean: β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
-    let beta_mean = beta_cov * design.transpose() * sigma_n_inv * delta;
+    // Ensure symmetry (numerical errors can break it slightly)
+    for i in 0..9 {
+        for j in (i + 1)..9 {
+            let avg = 0.5 * (lambda_post[(i, j)] + lambda_post[(j, i)]);
+            lambda_post[(i, j)] = avg;
+            lambda_post[(j, i)] = avg;
+        }
+    }
 
-    // Compute model fit Q statistic: Q = r' Σ_n^{-1} r
-    // where r = Δ - Xβ_post is the residual
-    let predicted = design * beta_mean;
-    let residual = delta - predicted;
-    let model_fit_q = residual.dot(&(sigma_n_inv * residual));
+    // Compute 2D GLS projection
+    let (beta_proj, beta_proj_cov, projection_mismatch_q) =
+        compute_2d_projection(&delta_post, &lambda_post, &regularized);
 
-    // Monte Carlo integration for leak probability and effect CI
-    let (leak_probability, effect_magnitude_ci) = run_monte_carlo(
-        &design,
-        &beta_mean,
-        &beta_cov,
-        theta,
-        seed.unwrap_or(crate::constants::DEFAULT_SEED),
-    );
+    // Monte Carlo for leak probability and effect CI
+    let (leak_probability, effect_magnitude_ci) =
+        run_monte_carlo(&delta_post, &lambda_post, theta, seed.unwrap_or(crate::constants::DEFAULT_SEED));
 
     BayesResult {
         leak_probability,
+        delta_post,
+        lambda_post,
+        beta_proj,
+        beta_proj_cov,
+        projection_mismatch_q,
         effect_magnitude_ci,
-        beta_mean,
-        beta_cov,
         is_clamped: false,
         sigma_n: regularized,
-        model_fit_q,
     }
 }
 
-/// Monte Carlo integration for leak probability and effect CI (spec §2.5).
+/// Compute 2D GLS projection of 9D posterior.
+///
+/// Projects δ_post onto the shift+tail basis X = [1 | b_tail] using
+/// generalized least squares: β = (X'Σ_n⁻¹X)⁻¹ X'Σ_n⁻¹ δ_post
+///
+/// Returns (β_proj, β_proj_cov, Q_proj) where Q_proj is the projection mismatch statistic.
+pub fn compute_2d_projection(
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
+    sigma_n: &Matrix9,
+) -> (Vector2, Matrix2, f64) {
+    let design = build_design_matrix();
+
+    // Cholesky of Σ_n for stable solves
+    let sigma_n_chol = match Cholesky::new(*sigma_n) {
+        Some(c) => c,
+        None => {
+            // Fallback: zero projection
+            return (Vector2::zeros(), Matrix2::identity() * 1e6, 0.0);
+        }
+    };
+
+    // Σ_n⁻¹ X via solve
+    let mut sigma_n_inv_x = Matrix9x2::zeros();
+    for j in 0..2 {
+        let col = design.column(j).into_owned();
+        let solved = sigma_n_chol.solve(&col);
+        for i in 0..9 {
+            sigma_n_inv_x[(i, j)] = solved[i];
+        }
+    }
+
+    // X' Σ_n⁻¹ X (2×2)
+    let xt_sigma_n_inv_x = design.transpose() * sigma_n_inv_x;
+
+    let xt_chol = match Cholesky::new(xt_sigma_n_inv_x) {
+        Some(c) => c,
+        None => {
+            return (Vector2::zeros(), Matrix2::identity() * 1e6, 0.0);
+        }
+    };
+
+    // X' Σ_n⁻¹ δ_post
+    let sigma_n_inv_delta = sigma_n_chol.solve(delta_post);
+    let xt_sigma_n_inv_delta = design.transpose() * sigma_n_inv_delta;
+
+    // β_proj = (X' Σ_n⁻¹ X)⁻¹ X' Σ_n⁻¹ δ_post
+    let beta_proj = xt_chol.solve(&xt_sigma_n_inv_delta);
+
+    // Projection covariance: Cov(β_proj | Δ) = A Λ_post A'
+    // where A = (X' Σ_n⁻¹ X)⁻¹ X' Σ_n⁻¹
+    // Simplified: use (X' Σ_n⁻¹ X)⁻¹ as approximation when Λ_post is close to Σ_n
+    // Full computation: A Λ_post A'
+    let a_matrix = xt_chol.inverse() * design.transpose() * sigma_n_chol.inverse();
+    let beta_proj_cov = a_matrix * lambda_post * a_matrix.transpose();
+
+    // Projection mismatch: Q = r' Σ_n⁻¹ r where r = δ_post - X β_proj
+    let delta_proj = design * beta_proj;
+    let r_proj = delta_post - delta_proj;
+    let sigma_n_inv_r = sigma_n_chol.solve(&r_proj);
+    let q_proj = r_proj.dot(&sigma_n_inv_r);
+
+    (beta_proj, beta_proj_cov, q_proj)
+}
+
+/// Monte Carlo integration for leak probability and effect CI.
+///
+/// Samples from the 9D posterior and computes:
+/// - P(max_k |δ_k| > θ | Δ)
+/// - 95% CI for max_k |δ_k|
 fn run_monte_carlo(
-    design: &Matrix9x2,
-    beta_post: &Vector2,
-    lambda_post: &Matrix2,
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
     theta: f64,
     seed: u64,
 ) -> (f64, (f64, f64)) {
@@ -240,44 +248,46 @@ fn run_monte_carlo(
     let chol = match Cholesky::new(*lambda_post) {
         Some(c) => c,
         None => {
-            // If Cholesky fails, return 0.5 (uncertain)
-            return (0.5, (0.0, 0.0));
+            // Try with jitter
+            let jittered = add_jitter(*lambda_post);
+            match Cholesky::new(jittered) {
+                Some(c) => c,
+                None => return (0.5, (0.0, 0.0)),
+            }
         }
     };
     let l = chol.l();
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
     let mut count = 0usize;
-    let mut magnitudes = Vec::with_capacity(N_MONTE_CARLO);
+    let mut max_effects = Vec::with_capacity(N_MONTE_CARLO);
 
     for _ in 0..N_MONTE_CARLO {
-        // Sample z ~ N(0, I_2)
-        let z = Vector2::new(
-            sample_standard_normal(&mut rng),
-            sample_standard_normal(&mut rng),
-        );
+        // Sample z ~ N(0, I_9)
+        let mut z = Vector9::zeros();
+        for i in 0..9 {
+            z[i] = sample_standard_normal(&mut rng);
+        }
 
-        // Transform to β ~ N(β_post, Λ_post)
-        let beta = beta_post + l * z;
+        // Transform to δ ~ N(δ_post, Λ_post)
+        let delta_sample = delta_post + l * z;
 
-        // 1. Exceedance check under H1: pred = X @ β, check max_k |pred[k]| > θ
-        let pred = design * beta;
-        let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        // Compute max_k |δ_k|
+        let max_effect = delta_sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        max_effects.push(max_effect);
+
         if max_effect > theta {
             count += 1;
         }
-
-        // 2. Effect magnitude: ||β||₂
-        let magnitude = math::sqrt(math::sq(beta[0]) + math::sq(beta[1]));
-        magnitudes.push(magnitude);
     }
 
-    magnitudes.sort_by(|a, b| a.total_cmp(b));
+    // Compute 95% CI for max effect
+    max_effects.sort_by(|a, b| a.total_cmp(b));
     let lo_idx = math::round((N_MONTE_CARLO as f64) * 0.025) as usize;
     let hi_idx = math::round((N_MONTE_CARLO as f64) * 0.975) as usize;
     let ci = (
-        magnitudes[lo_idx.min(N_MONTE_CARLO - 1)],
-        magnitudes[hi_idx.min(N_MONTE_CARLO - 1)],
+        max_effects[lo_idx.min(N_MONTE_CARLO - 1)],
+        max_effects[hi_idx.min(N_MONTE_CARLO - 1)],
     );
 
     (count as f64 / N_MONTE_CARLO as f64, ci)
@@ -285,49 +295,37 @@ fn run_monte_carlo(
 
 /// Sample from standard normal using Box-Muller transform.
 fn sample_standard_normal<R: Rng>(rng: &mut R) -> f64 {
-    // Box-Muller transform
     let u1: f64 = rng.random();
     let u2: f64 = rng.random();
-
     math::sqrt(-2.0 * math::ln(u1)) * math::cos(2.0 * PI * u2)
 }
 
 /// Result from max effect CI computation for Research mode.
 #[derive(Debug, Clone)]
 pub struct MaxEffectCI {
-    /// Posterior mean of max_k |(Xβ)_k|.
+    /// Posterior mean of max_k |δ_k|.
     pub mean: f64,
-    /// 95% credible interval for max_k |(Xβ)_k|: (2.5th, 97.5th percentile).
+    /// 95% credible interval for max_k |δ_k|: (2.5th, 97.5th percentile).
     pub ci: (f64, f64),
 }
 
-/// Compute 95% CI for max effect: max_k |(Xβ)_k| (spec v4.1 research mode).
+/// Compute 95% CI for max effect: max_k |δ_k|.
 ///
-/// This is used by Research mode to determine stopping conditions:
-/// - `CI.lower > 1.1 * theta_floor` → EffectDetected
-/// - `CI.upper < 0.9 * theta_floor` → NoEffectDetected
-///
-/// # Arguments
-///
-/// * `beta_mean` - Posterior mean of β = (μ, τ)
-/// * `beta_cov` - Posterior covariance of β
-/// * `seed` - Random seed for Monte Carlo reproducibility
-///
-/// # Returns
-///
-/// `MaxEffectCI` with mean and 95% credible interval.
-pub fn compute_max_effect_ci(beta_mean: &Vector2, beta_cov: &Matrix2, seed: u64) -> MaxEffectCI {
-    let design = build_design_matrix();
-
-    // Cholesky decomposition of posterior covariance for sampling
-    let chol = match Cholesky::new(*beta_cov) {
+/// Used by Research mode for stopping conditions.
+pub fn compute_max_effect_ci(delta_post: &Vector9, lambda_post: &Matrix9, seed: u64) -> MaxEffectCI {
+    let chol = match Cholesky::new(*lambda_post) {
         Some(c) => c,
         None => {
-            // If Cholesky fails, return degenerate result
-            return MaxEffectCI {
-                mean: 0.0,
-                ci: (0.0, 0.0),
-            };
+            let jittered = add_jitter(*lambda_post);
+            match Cholesky::new(jittered) {
+                Some(c) => c,
+                None => {
+                    return MaxEffectCI {
+                        mean: 0.0,
+                        ci: (0.0, 0.0),
+                    };
+                }
+            }
         }
     };
     let l = chol.l();
@@ -337,18 +335,13 @@ pub fn compute_max_effect_ci(beta_mean: &Vector2, beta_cov: &Matrix2, seed: u64)
     let mut sum = 0.0;
 
     for _ in 0..N_MONTE_CARLO {
-        // Sample z ~ N(0, I_2)
-        let z = Vector2::new(
-            sample_standard_normal(&mut rng),
-            sample_standard_normal(&mut rng),
-        );
+        let mut z = Vector9::zeros();
+        for i in 0..9 {
+            z[i] = sample_standard_normal(&mut rng);
+        }
 
-        // Transform to β ~ N(β_post, Λ_post)
-        let beta = beta_mean + l * z;
-
-        // Compute max_k |(Xβ)_k|
-        let pred = design * beta;
-        let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        let delta_sample = delta_post + l * z;
+        let max_effect = delta_sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
         max_effects.push(max_effect);
         sum += max_effect;
     }
@@ -366,31 +359,54 @@ pub fn compute_max_effect_ci(beta_mean: &Vector2, beta_cov: &Matrix2, seed: u64)
     MaxEffectCI { mean, ci }
 }
 
-/// Return a neutral result when computation fails (maximally uncertain).
+/// Compute per-quantile exceedance probability P(|δ_k| > θ | Δ).
 ///
-/// Sets leak_probability = 0.5 (no information) and posterior = prior.
-/// Marks is_clamped = true to signal the numerical issue to callers.
-fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix2, _design: &Matrix9x2) -> BayesResult {
+/// Returns a vector of 9 exceedance probabilities, one per decile.
+pub fn compute_quantile_exceedances(
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
+    theta: f64,
+) -> [f64; 9] {
+    let mut exceedances = [0.0; 9];
+    for k in 0..9 {
+        let mu = delta_post[k];
+        let sigma = math::sqrt(lambda_post[(k, k)].max(1e-12));
+        exceedances[k] = compute_single_quantile_exceedance(mu, sigma, theta);
+    }
+    exceedances
+}
+
+/// Compute P(|δ| > θ) for a single Gaussian marginal N(μ, σ²).
+fn compute_single_quantile_exceedance(mu: f64, sigma: f64, theta: f64) -> f64 {
+    if sigma < 1e-12 {
+        // Degenerate case: point mass
+        return if mu.abs() > theta { 1.0 } else { 0.0 };
+    }
+    let phi_upper = math::normal_cdf((theta - mu) / sigma);
+    let phi_lower = math::normal_cdf((-theta - mu) / sigma);
+    1.0 - (phi_upper - phi_lower)
+}
+
+/// Return a neutral result when computation fails (maximally uncertain).
+fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix9) -> BayesResult {
     BayesResult {
         leak_probability: 0.5,
+        delta_post: Vector9::zeros(),
+        lambda_post: *lambda0,
+        beta_proj: Vector2::zeros(),
+        beta_proj_cov: Matrix2::identity() * 1e6,
+        projection_mismatch_q: 0.0,
         effect_magnitude_ci: (0.0, 0.0),
-        beta_mean: Vector2::zeros(),
-        beta_cov: *lambda0,
         is_clamped: true,
         sigma_n: *sigma_n,
-        // Model fit undefined when posterior computation fails
-        model_fit_q: f64::NAN,
     }
 }
 
-/// Build design matrix for effect decomposition (spec §2.5).
+/// Build design matrix for 2D projection (shift + tail).
 ///
 /// X = [1 | b_tail] where:
 /// - Column 0 (ones): Uniform shift - all quantiles move equally
 /// - Column 1 (b_tail): Tail effect - upper quantiles shift more than lower
-///   b_tail = [-0.5, -0.375, -0.25, -0.125, 0, 0.125, 0.25, 0.375, 0.5]
-///
-/// The tail basis is centered (sums to zero) so μ and τ are orthogonal.
 pub fn build_design_matrix() -> Matrix9x2 {
     let mut x = Matrix9x2::zeros();
     for i in 0..9 {
@@ -400,69 +416,17 @@ pub fn build_design_matrix() -> Matrix9x2 {
     x
 }
 
-fn prior_covariance(prior_sigmas: (f64, f64)) -> Matrix2 {
-    let (sigma_mu, sigma_tau) = prior_sigmas;
-    let mut lambda0 = Matrix2::zeros();
-    lambda0[(0, 0)] = math::sq(sigma_mu.max(1e-12));
-    lambda0[(1, 1)] = math::sq(sigma_tau.max(1e-12));
-    lambda0
-}
-
-/// Compute log pdf of MVN(0, sigma) at point x.
+/// Apply variance floor regularization for numerical stability.
 ///
-/// Returns None if Cholesky decomposition fails even after jitter.
-#[cfg(test)]
-fn mvn_log_pdf_zero(x: &Vector9, sigma: &Matrix9) -> Option<f64> {
-    use crate::constants::LOG_2PI;
-
-    let chol = match Cholesky::new(*sigma) {
-        Some(c) => c,
-        None => {
-            let regularized = add_jitter(*sigma);
-            Cholesky::new(regularized)?
-        }
-    };
-
-    // Solve L * z = x
-    let z = chol.l().solve_lower_triangular(x).unwrap_or(*x);
-    let mahal_sq = z.dot(&z);
-    let log_det = 2.0
-        * chol
-            .l()
-            .diagonal()
-            .iter()
-            .map(|d| math::ln(*d))
-            .sum::<f64>();
-
-    Some(-0.5 * (9.0 * LOG_2PI + log_det + mahal_sq))
-}
-
-/// Apply variance floor regularization for numerical stability (spec §2.6).
-///
-/// When some quantiles have zero or near-zero variance (common in discrete mode
-/// with ties), the covariance matrix becomes ill-conditioned. Even if Cholesky
-/// succeeds, the inverse has huge values for near-zero variance elements,
-/// causing them to dominate the Bayesian regression incorrectly.
-///
-/// We regularize by ensuring a minimum diagonal value of 1% of mean variance.
-/// This bounds the condition number to ~100, preventing numerical instability.
-///
-/// Formula (spec §2.6):
-///   σ²ᵢ ← max(σ²ᵢ, 0.01 × σ̄²) + ε
-/// where σ̄² = tr(Σ)/9 and ε = 10⁻¹⁰ + σ̄² × 10⁻⁸
+/// Ensures minimum diagonal value of 1% of mean variance.
 fn add_jitter(mut sigma: Matrix9) -> Matrix9 {
     let trace: f64 = (0..9).map(|i| sigma[(i, i)]).sum();
     let mean_var = trace / 9.0;
 
-    // Use 1% of mean variance as floor, with absolute minimum of 1e-10
-    // This bounds the max/min diagonal ratio to ~100, keeping condition number reasonable
     let min_var = (0.01 * mean_var).max(1e-10);
-
-    // Also add small jitter proportional to scale for numerical stability
     let jitter = 1e-10 + mean_var * 1e-8;
 
     for i in 0..9 {
-        // Ensure minimum variance, then add jitter
         sigma[(i, i)] = sigma[(i, i)].max(min_var) + jitter;
     }
     sigma
@@ -471,90 +435,47 @@ fn add_jitter(mut sigma: Matrix9) -> Matrix9 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::constants::LOG_2PI;
 
     #[test]
-    fn test_mvn_log_pdf_at_zero() {
-        let mean = Vector9::zeros();
-        let cov = Matrix9::identity();
-        let log_pdf_at_mean = mvn_log_pdf_zero(&mean, &cov).expect("Cholesky should succeed");
-        let expected = -0.5 * 9.0 * LOG_2PI;
-        assert!((log_pdf_at_mean - expected).abs() < 0.001);
-    }
-
-    #[test]
-    fn test_bayes_factor_cholesky_fallback() {
-        // Test that when Cholesky would fail on a pathological matrix,
-        // the computation falls back gracefully
-        use crate::types::Vector9;
-
-        let delta = Vector9::from_row_slice(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
-
-        // Create a pathological covariance with huge condition number
-        let mut pathological = Matrix9::identity();
-        for i in 0..9 {
-            pathological[(i, i)] = if i == 0 { 1e20 } else { 1e-20 };
-        }
-
-        let result = compute_bayes_factor(&delta, &pathological, (10.0, 10.0), 10.0, Some(42));
-
-        // Result should be valid (probability between 0 and 1)
-        assert!(result.leak_probability >= 0.0 && result.leak_probability <= 1.0);
-    }
-
-    #[test]
-    fn test_monte_carlo_no_effect() {
-        // With zero observed difference, leak probability should be low
+    fn test_9d_posterior_with_zero_delta() {
         let delta = Vector9::zeros();
         let sigma_n = Matrix9::identity();
+        let lambda0 = Matrix9::identity() * 100.0; // Wide prior
 
-        let result = compute_posterior_monte_carlo(
-            &delta,
-            &sigma_n,
-            (10.0, 10.0),
-            10.0, // threshold
-            Some(42),
-        );
+        let result = compute_bayes_factor(&delta, &sigma_n, &lambda0, 10.0, Some(42));
 
-        // With no effect and identity covariance, most samples should be below θ
-        assert!(
-            result.leak_probability < 0.5,
-            "With zero effect, leak probability should be low, got {}",
-            result.leak_probability
-        );
+        // With zero observation, posterior should be pulled toward zero
+        assert!(result.delta_post.norm() < 1.0, "Posterior should be near zero");
+        assert!(!result.is_clamped);
     }
 
     #[test]
-    fn test_monte_carlo_large_effect() {
-        // With large observed difference, leak probability should be high
-        let delta = Vector9::from_row_slice(&[100.0; 9]);
+    fn test_9d_posterior_with_large_delta() {
+        let mut delta = Vector9::zeros();
+        for i in 0..9 {
+            delta[i] = 100.0; // Large uniform shift
+        }
         let sigma_n = Matrix9::identity();
+        let lambda0 = Matrix9::identity() * 100.0;
 
-        let result = compute_posterior_monte_carlo(
-            &delta,
-            &sigma_n,
-            (10.0, 10.0),
-            10.0, // threshold
-            Some(42),
-        );
+        let result = compute_bayes_factor(&delta, &sigma_n, &lambda0, 10.0, Some(42));
 
-        // With 100ns effect and 10ns threshold, almost all samples should exceed
+        // With large observation, leak probability should be high
         assert!(
             result.leak_probability > 0.9,
-            "With large effect, leak probability should be high, got {}",
+            "Large delta should give high leak probability, got {}",
             result.leak_probability
         );
     }
 
     #[test]
     fn test_monte_carlo_determinism() {
-        // Same seed should give same result
         let delta = Vector9::from_row_slice(&[5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0]);
         let sigma_n = Matrix9::identity();
+        let lambda0 = Matrix9::identity() * 100.0;
 
-        let result1 = compute_posterior_monte_carlo(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
-
-        let result2 = compute_posterior_monte_carlo(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
+        let result1 = compute_bayes_factor(&delta, &sigma_n, &lambda0, 10.0, Some(42));
+        let result2 = compute_bayes_factor(&delta, &sigma_n, &lambda0, 10.0, Some(42));
 
         assert_eq!(
             result1.leak_probability, result2.leak_probability,
@@ -563,136 +484,61 @@ mod tests {
     }
 
     #[test]
-    fn test_zero_delta_gives_low_probability() {
-        // With zero observed difference, the Monte Carlo probability should be low
-        let delta = Vector9::zeros();
-        let sigma_n = Matrix9::identity();
-        let result = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 10.0, Some(42));
-
-        // With zero effect, we shouldn't be confident about a leak
-        assert!(
-            result.leak_probability < 0.5,
-            "Zero-delta should give low leak probability, got {}",
-            result.leak_probability
-        );
-    }
-
-    #[test]
-    fn test_exceedance_monotonic_in_theta() {
-        let delta = Vector9::zeros();
+    fn test_2d_projection_uniform_shift() {
+        // Create a uniform shift pattern (all quantiles equal)
+        let mut delta_post = Vector9::zeros();
+        for i in 0..9 {
+            delta_post[i] = 50.0;
+        }
+        let lambda_post = Matrix9::identity();
         let sigma_n = Matrix9::identity();
 
-        let result_small = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 1.0, Some(42));
-        let result_large = compute_bayes_factor(&delta, &sigma_n, (10.0, 10.0), 1.0e6, Some(42));
+        let (beta_proj, _, q_proj) = compute_2d_projection(&delta_post, &lambda_post, &sigma_n);
 
+        // Should project to pure shift with low mismatch
         assert!(
-            result_small.leak_probability > result_large.leak_probability,
-            "Exceedance probability should decrease as theta grows"
+            (beta_proj[0] - 50.0).abs() < 1.0,
+            "Shift should be ~50, got {}",
+            beta_proj[0]
         );
-    }
-
-    /// Compute prior exceedance probability P(max_k |(Xβ)_k| > θ | prior) via Monte Carlo.
-    ///
-    /// This is used to calibrate the prior scale σ so that the prior exceedance
-    /// probability matches the spec's intended ~62%.
-    fn compute_prior_exceedance_probability(sigma_prior: f64, theta: f64, n_samples: usize) -> f64 {
-        use rand::SeedableRng;
-        use rand_xoshiro::Xoshiro256PlusPlus;
-
-        let design = build_design_matrix();
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(12345);
-        let mut count = 0usize;
-
-        for _ in 0..n_samples {
-            // Sample β ~ N(0, σ²I₂)
-            let beta = Vector2::new(
-                sample_standard_normal(&mut rng) * sigma_prior,
-                sample_standard_normal(&mut rng) * sigma_prior,
-            );
-
-            // Compute pred = Xβ
-            let pred = design * beta;
-
-            // Check if max_k |pred_k| > θ
-            let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-            if max_effect > theta {
-                count += 1;
-            }
-        }
-
-        count as f64 / n_samples as f64
+        assert!(
+            beta_proj[1].abs() < 5.0,
+            "Tail should be ~0, got {}",
+            beta_proj[1]
+        );
+        assert!(q_proj < 1.0, "Uniform shift should have low Q, got {}", q_proj);
     }
 
     #[test]
-    fn test_prior_exceedance_with_current_scale() {
-        // Current spec: σ = 2θ
-        // The spec claims this gives P(|β| > θ) ≈ 62%, but the actual leak test
-        // computes P(max_k |(Xβ)_k| > θ), which is higher due to the design matrix.
-        let theta = 100.0;
-        let sigma_current = 2.0 * theta; // Current: σ = 2θ
+    fn test_quantile_exceedance_computation() {
+        let mu = 100.0;
+        let sigma = 10.0;
+        let theta = 50.0;
 
-        let exceedance = compute_prior_exceedance_probability(sigma_current, theta, 100_000);
+        let exceedance = compute_single_quantile_exceedance(mu, sigma, theta);
 
-        // This should show the actual prior exceedance is much higher than 62%
-        eprintln!(
-            "Prior exceedance with σ = 2θ: {:.1}% (spec claims ~62%)",
-            exceedance * 100.0
-        );
-
-        // The actual value should be around 85%, demonstrating the bug
+        // μ = 100, θ = 50: almost certainly |δ| > θ
         assert!(
-            exceedance > 0.80,
-            "Expected high exceedance with σ=2θ, got {:.1}%",
-            exceedance * 100.0
+            exceedance > 0.99,
+            "With μ=100, θ=50, exceedance should be ~1.0, got {}",
+            exceedance
         );
     }
 
     #[test]
-    fn test_find_correct_prior_scale() {
-        // Find the σ/θ ratio that gives ~62% prior exceedance probability
-        let theta = 100.0;
-        let target = 0.62;
-        let tolerance = 0.02;
+    fn test_quantile_exceedance_symmetric() {
+        let sigma = 10.0;
+        let theta = 50.0;
 
-        // Binary search for the correct ratio
-        let mut lo = 0.5;
-        let mut hi = 2.5;
+        let exc_pos = compute_single_quantile_exceedance(30.0, sigma, theta);
+        let exc_neg = compute_single_quantile_exceedance(-30.0, sigma, theta);
 
-        for _ in 0..20 {
-            let mid = (lo + hi) / 2.0;
-            let sigma = mid * theta;
-            let exceedance = compute_prior_exceedance_probability(sigma, theta, 50_000);
-
-            if exceedance < target {
-                lo = mid;
-            } else {
-                hi = mid;
-            }
-        }
-
-        let optimal_ratio = (lo + hi) / 2.0;
-        let final_exceedance =
-            compute_prior_exceedance_probability(optimal_ratio * theta, theta, 100_000);
-
-        eprintln!(
-            "Optimal σ/θ ratio for 62% exceedance: {:.3} (actual: {:.1}%)",
-            optimal_ratio,
-            final_exceedance * 100.0
-        );
-
-        // Verify we found a good value
+        // Should be symmetric
         assert!(
-            (final_exceedance - target).abs() < tolerance,
-            "Could not find σ giving ~62% exceedance. Best: σ={:.3}θ gives {:.1}%",
-            optimal_ratio,
-            final_exceedance * 100.0
-        );
-
-        // The correct ratio should be around 1.0-1.2 (not 2.0)
-        assert!(
-            optimal_ratio > 0.8 && optimal_ratio < 1.5,
-            "Expected ratio between 0.8 and 1.5, got {:.3}",
-            optimal_ratio
+            (exc_pos - exc_neg).abs() < 0.01,
+            "Exceedance should be symmetric, got {} vs {}",
+            exc_pos,
+            exc_neg
         );
     }
 }

@@ -269,7 +269,19 @@ impl Default for AdaptiveState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Matrix2, Vector2};
+    use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
+
+    fn make_test_posterior(beta_proj: Vector2, beta_proj_cov: Matrix2, leak_prob: f64, n: usize) -> Posterior {
+        Posterior::new(
+            Vector9::zeros(),
+            Matrix9::identity(),
+            beta_proj,
+            beta_proj_cov,
+            leak_prob,
+            1.0, // projection_mismatch_q
+            n,
+        )
+    }
 
     #[test]
     fn test_adaptive_state_new() {
@@ -311,12 +323,11 @@ mod tests {
     fn test_posterior_update() {
         let mut state = AdaptiveState::new();
 
-        let posterior1 = Posterior::new(
+        let posterior1 = make_test_posterior(
             Vector2::new(10.0, 5.0),
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             1000,
-            5.0, // model_fit_q
         );
 
         // First update - no previous posterior
@@ -325,12 +336,11 @@ mod tests {
         assert!(state.current_posterior().is_some());
 
         // Second update - should compute KL
-        let posterior2 = Posterior::new(
+        let posterior2 = make_test_posterior(
             Vector2::new(11.0, 5.5),
             Matrix2::new(3.5, 0.0, 0.0, 0.9),
             0.80,
             2000,
-            6.0, // model_fit_q
         );
         let kl2 = state.update_posterior(posterior2);
         assert!(kl2 > 0.0); // Should have some divergence
@@ -389,12 +399,11 @@ mod tests {
         // Add some data
         state.add_batch_with_conversion(vec![100, 110], vec![200, 210], 1.0);
         state.update_kl(0.5);
-        let posterior = Posterior::new(
+        let posterior = make_test_posterior(
             Vector2::new(10.0, 5.0),
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             100,
-            5.0, // model_fit_q
         );
         state.update_posterior(posterior);
 

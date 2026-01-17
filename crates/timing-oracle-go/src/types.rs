@@ -126,8 +126,6 @@ pub enum ToGoInconclusiveReason {
     ConditionsChanged = 6,
     /// Requested threshold is below measurement floor.
     ThresholdUnachievable = 7,
-    /// Model doesn't fit the data - 2D model insufficient.
-    ModelMismatch = 8,
 }
 
 /// Pattern of timing effect.

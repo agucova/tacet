@@ -6,6 +6,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 `timing-oracle` is a Rust library for detecting timing side channels in cryptographic code. It uses statistical methodology to compare timing distributions between baseline and sample inputs, outputting leak probability, effect sizes, and exploitability assessments.
 
+## Documentation Structure
+
+| Document | Purpose |
+|----------|---------|
+| `docs/spec.md` | Core specification (v5.0) — language-agnostic statistical methodology, abstract types, normative requirements (RFC 2119) |
+| `docs/guide.md` | User guide — getting started, threat model selection, interpreting results, common pitfalls |
+| `docs/implementation-guide.md` | Implementation guide — platform-specific timers, pre-flight checks, measurement protocol, optimization |
+| `docs/api-rust.md` | Rust API reference |
+| `docs/api-c.md` | C/C++ API reference |
+| `docs/api-go.md` | Go API reference |
+
+**Spec section references in code:** The codebase contains 150+ references to spec sections (§2.3, §3.1, etc.). When updating the spec, ensure section numbers are updated in code comments.
+
 ## Build Commands
 
 ```bash

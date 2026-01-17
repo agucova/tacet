@@ -16,7 +16,7 @@ use alloc::string::String;
 
 use super::drift::{CalibrationSnapshot, ConditionDrift, DriftThresholds};
 use super::Posterior;
-use crate::types::Matrix2;
+use crate::types::Matrix9;
 
 /// Result of quality gate checks.
 #[derive(Debug, Clone)]
@@ -107,22 +107,6 @@ pub enum InconclusiveReason {
         /// Suggested remediation.
         guidance: String,
     },
-
-    /// Model mismatch detected - the 2D shift+tail model doesn't fit (Gate 8, verdict-blocking).
-    ///
-    /// The residual Q statistic exceeds the bootstrap-calibrated threshold,
-    /// indicating the observed quantile differences don't match the expected
-    /// shift + tail pattern. This is a verdict-blocking condition.
-    ModelMismatch {
-        /// The Q statistic (residual^T Σ^{-1} residual).
-        q_statistic: f64,
-        /// The threshold from bootstrap calibration.
-        q_threshold: f64,
-        /// Human-readable message.
-        message: String,
-        /// Suggested remediation.
-        guidance: String,
-    },
 }
 
 /// Configuration for quality gate thresholds.
@@ -185,8 +169,8 @@ pub struct QualityGateCheckInputs<'a> {
     /// Current posterior distribution.
     pub posterior: &'a Posterior,
 
-    /// Prior covariance matrix (from calibration).
-    pub prior_cov: &'a Matrix2,
+    /// 9D prior covariance matrix (from calibration).
+    pub prior_cov_9d: &'a Matrix9,
 
     /// Effect threshold θ in nanoseconds (user's requested threshold).
     pub theta_ns: f64,
@@ -212,7 +196,6 @@ pub struct QualityGateCheckInputs<'a> {
     /// Pass `None` to skip drift detection.
     pub current_stats_snapshot: Option<&'a CalibrationSnapshot>,
 
-    // === v4.1 additions for new quality gates ===
     /// Floor-rate constant (c_floor) from calibration.
     /// Used to compute theta_floor(n) = c_floor / sqrt(n).
     pub c_floor: f64,
@@ -221,13 +204,12 @@ pub struct QualityGateCheckInputs<'a> {
     /// The floor below which timer quantization dominates.
     pub theta_tick: f64,
 
-    /// Model fit Q statistic (residual^T Σ^{-1} residual).
+    /// Projection mismatch Q statistic (r^T Σ^{-1} r).
     /// Pass `None` if not yet computed.
-    pub q_fit: Option<f64>,
+    pub projection_mismatch_q: Option<f64>,
 
-    /// Model mismatch threshold from bootstrap calibration.
-    /// Q > q_thresh indicates model mismatch.
-    pub q_thresh: f64,
+    /// Projection mismatch threshold from bootstrap calibration.
+    pub projection_mismatch_thresh: f64,
 }
 
 /// Check all quality gates and return result.
@@ -239,14 +221,10 @@ pub struct QualityGateCheckInputs<'a> {
 /// 1. Posterior too close to prior (data not informative)
 /// 2. Learning rate collapsed
 /// 3. Would take too long
-/// 4. Threshold unachievable (v4.1)
+/// 4. Threshold unachievable
 /// 5. Time budget exceeded
 /// 6. Sample budget exceeded
 /// 7. Condition drift detected
-/// 8. Model mismatch (v4.1, verdict-blocking)
-///
-/// Gates 1-7 are checked before any Pass/Fail decision.
-/// Gate 8 (ModelMismatch) is verdict-blocking and prevents confident verdicts.
 ///
 /// # Arguments
 ///
@@ -271,7 +249,7 @@ pub fn check_quality_gates(
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 4 (v4.1): Threshold unachievable
+    // Gate 4: Threshold unachievable
     if let Some(reason) = check_threshold_unachievable(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
@@ -288,12 +266,6 @@ pub fn check_quality_gates(
 
     // Gate 7: Condition drift detected
     if let Some(reason) = check_condition_drift(inputs, config) {
-        return QualityGateResult::Stop(reason);
-    }
-
-    // Gate 8 (v4.1): Model mismatch (verdict-blocking)
-    // This gate prevents Pass/Fail verdicts when the model doesn't fit
-    if let Some(reason) = check_model_mismatch(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
@@ -339,61 +311,34 @@ fn check_threshold_unachievable(
     None
 }
 
-/// Gate 8 (v4.1): Check if the model doesn't fit the data (verdict-blocking).
-///
-/// If Q > q_thresh, the 2D (shift + tail) model doesn't explain the observed
-/// quantile differences well. This is a verdict-blocking condition that
-/// prevents confident Pass/Fail verdicts.
-fn check_model_mismatch(
-    _inputs: &QualityGateCheckInputs,
-    _config: &QualityGateConfig,
-) -> Option<InconclusiveReason> {
-    // TODO: Temporarily disabled - re-enable after debugging
-    return None;
-
-    // Need Q statistic to check
-    #[allow(unreachable_code)]
-    let q_fit = _inputs.q_fit?;
-
-    if q_fit > _inputs.q_thresh {
-        return Some(InconclusiveReason::ModelMismatch {
-            q_statistic: q_fit,
-            q_threshold: _inputs.q_thresh,
-            message: alloc::format!(
-                "Model mismatch: Q = {:.2} > threshold {:.2}",
-                q_fit,
-                _inputs.q_thresh
-            ),
-            guidance: String::from(
-                "The observed timing pattern doesn't fit the shift+tail model. \
-                This could indicate: non-standard timing patterns, measurement artifacts, \
-                or genuine but unusual side-channel behavior. Interpret results with caution.",
-            ),
-        });
-    }
-
-    None
-}
-
 /// Gate 1: Check if posterior variance is too close to prior variance.
 ///
-/// If det(posterior_cov) / det(prior_cov) > max_variance_ratio, the data
-/// isn't reducing our uncertainty enough to be useful.
+/// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀|)
+/// Gate triggers when per-dimension variance ratio exceeds threshold.
 fn check_variance_ratio(
     inputs: &QualityGateCheckInputs,
     config: &QualityGateConfig,
 ) -> Option<InconclusiveReason> {
-    let prior_det = inputs.prior_cov.determinant();
-    let post_det = inputs.posterior.beta_cov.determinant();
+    let prior_det = inputs.prior_cov_9d.determinant();
+    let post_det = inputs.posterior.lambda_post.determinant();
 
     if prior_det <= 0.0 || post_det <= 0.0 {
         // Can't compute ratio with non-positive determinants
         return None;
     }
 
-    let variance_ratio = post_det / prior_det;
+    // Use log-det ratio for numerical stability with 9D matrices
+    let log_det_ratio = libm::log(post_det / prior_det);
 
-    if variance_ratio > config.max_variance_ratio {
+    // Convert to per-dimension log ratio (geometric mean)
+    let log_variance_ratio = log_det_ratio / 9.0;
+    let log_threshold = libm::log(config.max_variance_ratio);
+
+    // Convert log ratio to variance ratio for reporting
+    let variance_ratio = libm::exp(log_variance_ratio);
+
+    // Trigger when per-dimension variance ratio > threshold
+    if log_variance_ratio > log_threshold {
         return Some(InconclusiveReason::DataTooNoisy {
             message: alloc::format!(
                 "Posterior variance is {:.0}% of prior; data not informative",
@@ -513,8 +458,8 @@ fn extrapolate_samples_to_decision(
         return usize::MAX; // Already at threshold
     }
 
-    // Posterior std (use trace as proxy for overall uncertainty)
-    let current_std = libm::sqrt(inputs.posterior.beta_cov.trace());
+    // Posterior std (use trace of 2D projection as proxy for overall uncertainty)
+    let current_std = libm::sqrt(inputs.posterior.beta_proj_cov.trace());
 
     if current_std < 1e-9 {
         return inputs.n_total; // Already very certain
@@ -580,29 +525,31 @@ fn check_condition_drift(
 mod tests {
     use super::*;
     use crate::statistics::StatsSnapshot;
-    use crate::types::Vector2;
+    use crate::types::{Matrix2, Vector2, Vector9};
 
     fn make_posterior(leak_prob: f64, variance: f64) -> Posterior {
         Posterior::new(
+            Vector9::zeros(),
+            Matrix9::identity() * variance,
             Vector2::new(5.0, 3.0),
             Matrix2::new(variance, 0.0, 0.0, variance),
             leak_prob,
+            1.0, // projection_mismatch_q
             1000,
-            5.0, // model_fit_q
         )
     }
 
-    fn make_prior_cov() -> Matrix2 {
-        Matrix2::new(100.0, 0.0, 0.0, 100.0) // Prior variance = 100
+    fn make_prior_cov_9d() -> Matrix9 {
+        Matrix9::identity() * 100.0 // Prior variance = 100 per dimension
     }
 
     fn make_inputs<'a>(
         posterior: &'a Posterior,
-        prior_cov: &'a Matrix2,
+        prior_cov_9d: &'a Matrix9,
     ) -> QualityGateCheckInputs<'a> {
         QualityGateCheckInputs {
             posterior,
-            prior_cov,
+            prior_cov_9d,
             theta_ns: 100.0,
             n_total: 5000,
             elapsed_secs: 5.0,
@@ -610,19 +557,18 @@ mod tests {
             samples_per_second: 100_000.0,
             calibration_snapshot: None,
             current_stats_snapshot: None,
-            // v4.1 fields
             c_floor: 3535.5, // ~50 * sqrt(5000)
             theta_tick: 1.0,
-            q_fit: None,     // No model fit check in basic tests
-            q_thresh: 18.48, // chi-squared(7, 0.99) fallback
+            projection_mismatch_q: None,
+            projection_mismatch_thresh: 18.48,
         }
     }
 
     #[test]
     fn test_variance_ratio_gate_passes() {
         let posterior = make_posterior(0.5, 10.0); // variance = 10, ratio = 10/100 = 0.1 < 0.5
-        let prior_cov = make_prior_cov();
-        let inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let inputs = make_inputs(&posterior, &prior_cov_9d);
         let config = QualityGateConfig::default();
 
         let result = check_variance_ratio(&inputs, &config);
@@ -632,8 +578,8 @@ mod tests {
     #[test]
     fn test_variance_ratio_gate_fails() {
         let posterior = make_posterior(0.5, 80.0); // variance = 80, ratio = 80/100 = 0.8 > 0.5
-        let prior_cov = make_prior_cov();
-        let inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let inputs = make_inputs(&posterior, &prior_cov_9d);
         let config = QualityGateConfig::default();
 
         let result = check_variance_ratio(&inputs, &config);
@@ -646,8 +592,8 @@ mod tests {
     #[test]
     fn test_learning_rate_gate_passes() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.recent_kl_sum = Some(0.05); // Sum > 0.001
         let config = QualityGateConfig::default();
 
@@ -658,8 +604,8 @@ mod tests {
     #[test]
     fn test_learning_rate_gate_fails() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.recent_kl_sum = Some(0.0005); // Sum < 0.001
         let config = QualityGateConfig::default();
 
@@ -673,8 +619,8 @@ mod tests {
     #[test]
     fn test_time_budget_gate() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.elapsed_secs = 35.0; // Exceeds 30s budget
         let config = QualityGateConfig::default();
 
@@ -688,8 +634,8 @@ mod tests {
     #[test]
     fn test_sample_budget_gate() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.n_total = 1_000_001; // Exceeds 1M budget
         let config = QualityGateConfig::default();
 
@@ -703,8 +649,8 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_no_snapshots() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let inputs = make_inputs(&posterior, &prior_cov_9d);
         // No snapshots provided
         let config = QualityGateConfig::default();
 
@@ -715,7 +661,7 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_no_drift() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
+        let prior_cov_9d = make_prior_cov_9d();
 
         let stats = StatsSnapshot {
             mean: 100.0,
@@ -726,7 +672,7 @@ mod tests {
         let cal_snapshot = CalibrationSnapshot::new(stats, stats);
         let post_snapshot = CalibrationSnapshot::new(stats, stats);
 
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.calibration_snapshot = Some(&cal_snapshot);
         inputs.current_stats_snapshot = Some(&post_snapshot);
 
@@ -739,7 +685,7 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_detects_variance_change() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
+        let prior_cov_9d = make_prior_cov_9d();
 
         let cal_stats = StatsSnapshot {
             mean: 100.0,
@@ -756,7 +702,7 @@ mod tests {
         let cal_snapshot = CalibrationSnapshot::new(cal_stats, cal_stats);
         let post_snapshot = CalibrationSnapshot::new(post_stats, post_stats);
 
-        let mut inputs = make_inputs(&posterior, &prior_cov);
+        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
         inputs.calibration_snapshot = Some(&cal_snapshot);
         inputs.current_stats_snapshot = Some(&post_snapshot);
 
@@ -772,8 +718,8 @@ mod tests {
     #[test]
     fn test_full_quality_gates_pass() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov = make_prior_cov();
-        let inputs = make_inputs(&posterior, &prior_cov);
+        let prior_cov_9d = make_prior_cov_9d();
+        let inputs = make_inputs(&posterior, &prior_cov_9d);
         let config = QualityGateConfig::default();
 
         let result = check_quality_gates(&inputs, &config);

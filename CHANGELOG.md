@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Documentation
+
+- **Major restructure (spec v4.2 → v5.0):**
+  - Specification (`docs/spec.md`) refactored to be language-agnostic with RFC 2119 terminology
+  - Added Abstract Types section (§2) with pseudocode ADT definitions
+  - Added API Design Principles section (§5) for preventing user mistakes
+  - Moved implementation details to new `docs/implementation-guide.md`
+  - Moved detailed interpretation guidance to `docs/guide.md`
+  - Renamed `docs/api-reference.md` to `docs/api-rust.md`
+  - Added `docs/api-c.md` for C/C++ bindings
+  - Added `docs/api-go.md` for Go bindings
+
 ## [0.1.0] - 2025-01-05
 
 ### Added

@@ -1,6 +1,6 @@
-# timing-oracle API Reference
+# timing-oracle Rust API Reference
 
-Complete API documentation for timing-oracle. For conceptual overview, see [guide.md](guide.md). For troubleshooting, see [troubleshooting.md](troubleshooting.md).
+Complete API documentation for the Rust implementation of timing-oracle. For conceptual overview, see [guide.md](guide.md). For troubleshooting, see [troubleshooting.md](troubleshooting.md). For other language bindings, see [api-c.md](api-c.md) or [api-go.md](api-go.md).
 
 ## Table of Contents
 

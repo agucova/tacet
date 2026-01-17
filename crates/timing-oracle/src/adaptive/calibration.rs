@@ -23,7 +23,8 @@ use crate::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
     paired_optimal_block_length, AcquisitionStream, OnlineStats,
 };
-use crate::types::{Matrix2, Matrix9};
+use crate::types::Matrix9;
+use timing_oracle_core::adaptive::{calibrate_prior_scale, compute_prior_cov_9d};
 
 /// Calibration results from the initial measurement phase.
 ///
@@ -39,9 +40,9 @@ pub struct Calibration {
     /// Used for block bootstrap to preserve autocorrelation structure.
     pub block_length: usize,
 
-    /// Prior covariance for beta = (mu, tau).
-    /// Set to diag(sigma_mu^2, sigma_tau^2) where sigma = max(2*MDE, theta).
-    pub prior_cov: Matrix2,
+    /// 9D prior covariance for δ = (δ₁, ..., δ₉).
+    /// Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate) (shaped).
+    pub prior_cov_9d: Matrix9,
 
     /// Timer resolution in nanoseconds.
     pub timer_resolution_ns: f64,
@@ -73,27 +74,25 @@ pub struct Calibration {
     /// Used to compare against post-test statistics (spec Section 2.6, Gate 6).
     pub calibration_snapshot: CalibrationSnapshot,
 
-    // === v4.1 additions ===
-    /// Floor-rate constant (spec Section 2.3.4).
-    /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
+    /// Floor-rate constant.
+    /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_rate).
     /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
     pub c_floor: f64,
 
-    /// Model mismatch threshold (spec Section 2.3.3, 2.6 Gate 8).
-    /// 99th percentile of bootstrap Q* distribution.
-    /// When Q > q_thresh, the 2D (shift + tail) model doesn't fit the data well.
-    pub q_thresh: f64,
+    /// Projection mismatch threshold.
+    /// 99th percentile of bootstrap Q_proj distribution.
+    pub projection_mismatch_thresh: f64,
 
     /// Initial measurement floor at calibration time.
     /// theta_floor(n_cal) = max(c_floor / sqrt(n_cal), theta_tick).
     pub theta_floor_initial: f64,
 
-    /// Effective threshold for this run (spec Section 2.3.4).
+    /// Effective threshold for this run.
     /// theta_eff = max(theta_user, theta_floor) or just theta_floor in research mode.
     /// This is what we actually test against.
     pub theta_eff: f64,
 
-    /// Timer resolution floor component (spec Section 2.3.4).
+    /// Timer resolution floor component.
     /// theta_tick = (1 tick in ns) / K where K is the batch size.
     /// The floor below which timer quantization dominates.
     pub theta_tick: f64,
@@ -327,9 +326,8 @@ pub fn calibrate(
     // v4.1: Compute floor-rate constant and model mismatch threshold
     let c_floor = compute_floor_rate_constant(&sigma_rate, config.seed);
 
-    // Use bootstrap-calibrated q_thresh from covariance estimation
-    // This is the 99th percentile of the Q* distribution computed during bootstrap
-    let q_thresh = cov_estimate.q_thresh;
+    // Note: cov_estimate.q_thresh (bootstrap-calibrated projection mismatch threshold)
+    // is used directly when constructing the Calibration struct below.
 
     // Timer tick floor: 1 tick / batch size (batch size = 1 for now, updated by collector)
     // config.timer_resolution_ns is already in ns
@@ -346,42 +344,24 @@ pub fn calibrate(
         theta_floor_initial
     };
 
-    // Set prior covariance: sigma proportional to theta_eff (spec Section 2.5)
+    // Set 9D prior covariance (spec Section 2.5)
     //
-    // The prior scale is calibrated so that the prior leak probability
-    // P(max_k |(Xβ)_k| > θ_eff | prior) ≈ 62%, representing reasonable uncertainty.
+    // The prior is calibrated so that P(max_k |δ_k| > θ_eff | prior) ≈ 62%,
+    // representing reasonable uncertainty about the presence of timing leaks.
     //
-    // IMPORTANT: We use theta_eff (not theta_user) because:
-    // 1. If theta_user < theta_floor, we can't detect effects that small anyway
-    // 2. The prior should represent uncertainty about effects exceeding what we can measure
-    //
-    // The leak test uses max over the 9-vector Xβ (predicted quantile
-    // differences), not just β itself. The design matrix X amplifies β, so the
-    // prior scale must account for this transformation.
-    //
-    // With β ~ N(0, σ²I₂) and X the 9×2 design matrix [1 | b_tail]:
-    //   - σ = 2θ gives P(max_k |(Xβ)_k| > θ) ≈ 85% (too high, causes FPR ~40%)
-    //   - σ = 1.12θ gives P(max_k |(Xβ)_k| > θ) ≈ 62% (matches spec intent)
-    //
-    // The 1.12 factor was determined via Monte Carlo calibration (see
-    // bayes.rs::tests::test_find_correct_prior_scale).
+    // We use a shaped prior: Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate).
+    // This matches the empirical covariance structure while maintaining
+    // the desired exceedance probability.
     //
     // The variance ratio quality gate (Gate 1) catches cases where
     // posterior ≈ prior (data uninformative).
-    const PRIOR_SCALE_FACTOR: f64 = 1.12;
-    let prior_sigma_shift = theta_eff * PRIOR_SCALE_FACTOR;
-    let prior_sigma_tail = theta_eff * PRIOR_SCALE_FACTOR;
-    let prior_cov = Matrix2::new(
-        prior_sigma_shift.powi(2),
-        0.0,
-        0.0,
-        prior_sigma_tail.powi(2),
-    );
+    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, config.seed);
+    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior);
 
     Ok(Calibration {
         sigma_rate,
         block_length,
-        prior_cov,
+        prior_cov_9d,
         timer_resolution_ns: config.timer_resolution_ns,
         samples_per_second,
         discrete_mode,
@@ -391,9 +371,8 @@ pub fn calibrate(
         mde_tail_ns: mde.tail_ns,
         preflight_result,
         calibration_snapshot,
-        // v4.1 fields
         c_floor,
-        q_thresh,
+        projection_mismatch_thresh: cov_estimate.q_thresh,
         theta_floor_initial,
         theta_eff,
         theta_tick,
@@ -636,7 +615,7 @@ mod tests {
         );
         assert!(cal.block_length >= 1, "Block length should be at least 1");
         assert!(
-            cal.prior_cov[(0, 0)] > 0.0,
+            cal.prior_cov_9d[(0, 0)] > 0.0,
             "Prior variance should be positive"
         );
         assert!(

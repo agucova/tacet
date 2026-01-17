@@ -237,7 +237,7 @@ pub fn run_adaptive(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov: &calibration.prior_cov,
+        prior_cov_9d: &calibration.prior_cov_9d,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -249,15 +249,14 @@ pub fn run_adaptive(
         samples_per_second: calibration.samples_per_second,
         calibration_snapshot: Some(&calibration.calibration_snapshot),
         current_stats_snapshot: current_stats.as_ref(),
-        // v4.1 fields for new quality gates
         c_floor: calibration.c_floor,
         theta_tick: calibration.theta_tick,
-        q_fit: if posterior.model_fit_q.is_nan() {
+        projection_mismatch_q: if posterior.projection_mismatch_q.is_nan() {
             None
         } else {
-            Some(posterior.model_fit_q)
+            Some(posterior.projection_mismatch_q)
         },
-        q_thresh: calibration.q_thresh,
+        projection_mismatch_thresh: calibration.projection_mismatch_thresh,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -338,25 +337,23 @@ fn compute_posterior_from_state(
     // Scale covariance: Sigma_n = Sigma_rate / n
     let sigma_n = calibration.sigma_rate / (n as f64);
 
-    // Compute prior sigmas from prior covariance
-    let prior_sigma_shift = calibration.prior_cov[(0, 0)].sqrt();
-    let prior_sigma_tail = calibration.prior_cov[(1, 1)].sqrt();
-
-    // Run Bayesian inference
+    // Run 9D Bayesian inference with prior covariance
     let bayes_result = compute_bayes_factor(
         &observed_diff,
         &sigma_n,
-        (prior_sigma_shift, prior_sigma_tail),
+        &calibration.prior_cov_9d,
         config.theta_ns,
         Some(config.seed),
     );
 
     Some(Posterior::new(
-        bayes_result.beta_mean,
-        bayes_result.beta_cov,
+        bayes_result.delta_post,
+        bayes_result.lambda_post,
+        bayes_result.beta_proj,
+        bayes_result.beta_proj_cov,
         bayes_result.leak_probability,
+        bayes_result.projection_mismatch_q,
         n,
-        bayes_result.model_fit_q,
     ))
 }
 
@@ -402,7 +399,7 @@ pub fn adaptive_step(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov: &calibration.prior_cov,
+        prior_cov_9d: &calibration.prior_cov_9d,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -414,15 +411,14 @@ pub fn adaptive_step(
         samples_per_second: calibration.samples_per_second,
         calibration_snapshot: Some(&calibration.calibration_snapshot),
         current_stats_snapshot: current_stats.as_ref(),
-        // v4.1 fields for new quality gates
         c_floor: calibration.c_floor,
         theta_tick: calibration.theta_tick,
-        q_fit: if posterior.model_fit_q.is_nan() {
+        projection_mismatch_q: if posterior.projection_mismatch_q.is_nan() {
             None
         } else {
-            Some(posterior.model_fit_q)
+            Some(posterior.projection_mismatch_q)
         },
-        q_thresh: calibration.q_thresh,
+        projection_mismatch_thresh: calibration.projection_mismatch_thresh,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {

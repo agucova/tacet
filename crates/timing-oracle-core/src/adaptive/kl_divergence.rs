@@ -19,6 +19,8 @@ use super::Posterior;
 /// This measures how much the posterior has changed from the previous iteration.
 /// Small KL indicates the posterior is no longer updating despite new data.
 ///
+/// Uses the 2D projection (shift, tail) from the 9D posterior for tracking.
+///
 /// # Arguments
 ///
 /// * `p` - The new posterior (typically more peaked)
@@ -30,26 +32,26 @@ use super::Posterior;
 pub fn kl_divergence_gaussian(p: &Posterior, q: &Posterior) -> f64 {
     let k = 2.0_f64;
 
-    // Compute Σ_q⁻¹
-    let q_cov_inv = match invert_2x2(&q.beta_cov) {
+    // Compute Σ_q⁻¹ using 2D projection covariance
+    let q_cov_inv = match invert_2x2(&q.beta_proj_cov) {
         Some(inv) => inv,
         None => return f64::INFINITY, // Singular covariance
     };
 
     let mu_diff = [
-        p.beta_mean[0] - q.beta_mean[0],
-        p.beta_mean[1] - q.beta_mean[1],
+        p.beta_proj[0] - q.beta_proj[0],
+        p.beta_proj[1] - q.beta_proj[1],
     ];
 
     // tr(Σ_q⁻¹ Σ_p)
-    let trace_term = trace_product_2x2(&q_cov_inv, &p.beta_cov);
+    let trace_term = trace_product_2x2(&q_cov_inv, &p.beta_proj_cov);
 
     // (μ_q - μ_p)ᵀ Σ_q⁻¹ (μ_q - μ_p)
     let mahalanobis = mahalanobis_2d(&mu_diff, &q_cov_inv);
 
     // ln(det(Σ_q)/det(Σ_p))
-    let det_p = determinant_2x2(&p.beta_cov);
-    let det_q = determinant_2x2(&q.beta_cov);
+    let det_p = determinant_2x2(&p.beta_proj_cov);
+    let det_q = determinant_2x2(&q.beta_proj_cov);
     let log_det_ratio = if det_p > 0.0 && det_q > 0.0 {
         libm::log(det_q / det_p)
     } else {
@@ -108,16 +110,26 @@ fn mahalanobis_2d(x: &[f64; 2], sigma_inv: &Matrix2) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Vector2;
+    use crate::types::{Matrix9, Vector2, Vector9};
+
+    fn make_test_posterior(beta_proj: Vector2, beta_proj_cov: Matrix2, leak_prob: f64) -> Posterior {
+        Posterior::new(
+            Vector9::zeros(),
+            Matrix9::identity(),
+            beta_proj,
+            beta_proj_cov,
+            leak_prob,
+            1.0,
+            100,
+        )
+    }
 
     #[test]
     fn test_kl_identical_distributions() {
-        let p = Posterior::new(
+        let p = make_test_posterior(
             Vector2::new(5.0, 3.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
-            100,
-            5.0, // model_fit_q
         );
         let q = p.clone();
 
@@ -133,19 +145,15 @@ mod tests {
 
     #[test]
     fn test_kl_different_means() {
-        let p = Posterior::new(
+        let p = make_test_posterior(
             Vector2::new(5.0, 3.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
-            100,
-            5.0, // model_fit_q
         );
-        let q = Posterior::new(
+        let q = make_test_posterior(
             Vector2::new(0.0, 0.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
-            100,
-            5.0, // model_fit_q
         );
 
         let kl = kl_divergence_gaussian(&p, &q);
@@ -161,19 +169,15 @@ mod tests {
 
     #[test]
     fn test_kl_different_variances() {
-        let p = Posterior::new(
+        let p = make_test_posterior(
             Vector2::new(0.0, 0.0),
-            Matrix2::new(2.0, 0.0, 0.0, 2.0), // Wider
+            Matrix2::new(2.0, 0.0, 0.0, 2.0),
             0.5,
-            100,
-            5.0, // model_fit_q
         );
-        let q = Posterior::new(
+        let q = make_test_posterior(
             Vector2::new(0.0, 0.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
-            100,
-            5.0, // model_fit_q
         );
 
         let kl = kl_divergence_gaussian(&p, &q);

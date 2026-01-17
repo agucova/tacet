@@ -2,7 +2,7 @@
 
 This guide provides a comprehensive understanding of timing side channel detection, the statistical methodology behind timing-oracle, and advanced usage patterns.
 
-For quick usage examples, see the [README](../README.md). For complete API documentation, see [api-reference.md](api-reference.md).
+For quick usage examples, see the [README](../README.md). For complete API documentation, see [api-rust.md](api-rust.md), [api-c.md](api-c.md), or [api-go.md](api-go.md).
 
 ## Table of Contents
 
@@ -24,6 +24,13 @@ For quick usage examples, see the [README](../README.md). For complete API docum
   - [Covariance Estimation](#covariance-estimation)
   - [Adaptive Sampling](#adaptive-sampling)
   - [Bayesian Posterior Computation](#bayesian-posterior-computation)
+- [Interpreting Results in Depth](#interpreting-results-in-depth)
+  - [Understanding Leak Probability](#understanding-leak-probability)
+  - [Understanding θ_user vs θ_eff vs θ_floor](#understanding-θ_user-vs-θ_eff-vs-θ_floor)
+  - [Effect Size and Pattern](#effect-size-and-pattern)
+  - [Exploitability Assessment](#exploitability-assessment)
+  - [Handling Inconclusive Results](#handling-inconclusive-results)
+  - [Projection Mismatch](#projection-mismatch)
 - [Limitations](#limitations)
 - [References](#references)
 
@@ -382,6 +389,110 @@ P(leak | data) = P(data | leak) × P(leak) / P(data)
 ```
 
 Where P(leak) is the prior (default 0.25) and the likelihood ratio is computed via the multivariate normal densities.
+
+---
+
+## Interpreting Results in Depth
+
+This section provides detailed guidance on understanding timing-oracle output.
+
+### Understanding Leak Probability
+
+The `leak_probability` is $P(\max_k |\delta_k| > \theta_{\text{eff}} \mid \Delta)$—the posterior probability that at least one quantile's timing difference exceeds your effective threshold.
+
+| Probability | Interpretation | Outcome |
+|-------------|----------------|---------|
+| < 5% | Confident no leak | **Pass** |
+| 5–50% | Probably safe, uncertain | Inconclusive (needs more data) |
+| 50–95% | Probably leaking, uncertain | Inconclusive (needs more data) |
+| > 95% | Confident leak | **Fail** |
+
+**Important**: This is a Bayesian posterior probability, not a frequentist p-value. When we report "72% probability of a leak," we mean: given the data and our model, 72% of the posterior mass corresponds to effects exceeding the threshold.
+
+### Understanding θ_user vs θ_eff vs θ_floor
+
+The library distinguishes between three threshold values:
+
+| Value | Meaning |
+|-------|---------|
+| θ_user | What you requested (via attacker model) |
+| θ_floor | What the measurement could actually resolve |
+| θ_eff | What was actually tested: max(θ_user, θ_floor) |
+
+**When θ_eff = θ_user:** Results directly answer "is there a leak > θ_user?"
+
+**When θ_eff > θ_user:** Results answer "is there a leak > θ_eff?" A `Pass` means "no leak above θ_eff," but there could still be a leak between θ_user and θ_eff that wasn't detectable.
+
+If θ_eff > θ_user, the result will include a quality warning explaining that the requested threshold couldn't be achieved. Consider using a PMU timer or accepting the elevated threshold.
+
+### Effect Size and Pattern
+
+The `EffectEstimate` decomposes the timing difference into interpretable components:
+
+**2D Projection (when it fits well):**
+- **Shift (μ)**: Uniform timing difference affecting all quantiles equally. Typical cause: different code path, branch on secret bit.
+- **Tail (τ)**: Upper quantiles affected more than lower. Typical cause: cache misses, secret-dependent memory access patterns.
+
+**Effect patterns:**
+
+| Pattern | Signature | Typical Cause |
+|---------|-----------|---------------|
+| UniformShift | μ significant, τ ≈ 0 | Branch on secret bit, different code path |
+| TailEffect | μ ≈ 0, τ significant | Cache-timing leak, memory access patterns |
+| Mixed | Both μ and τ significant | Multiple leak sources |
+| Complex | Projection mismatch high | Asymmetric or multi-modal pattern |
+| Indeterminate | Neither significant | No detectable leak |
+
+**Top Quantiles (when projection doesn't fit):**
+
+When the 2D shift+tail model doesn't fit well (projection mismatch is high), the result includes `top_quantiles` showing which specific quantiles are most affected. For example, if the 90th percentile shows a large effect but other quantiles don't, this suggests a tail-heavy leak that the 2D model can't fully capture.
+
+### Exploitability Assessment
+
+Risk assessment based on effect size, informed by academic research on timing attack feasibility:
+
+| Level | Effect Size | Attack Vector |
+|-------|-------------|---------------|
+| SharedHardwareOnly | < 10 ns | Requires ~1k queries on same physical core (SGX, containers, hyperthreading) |
+| Http2Multiplexing | 10–100 ns | Requires ~100k concurrent HTTP/2 requests using request multiplexing |
+| StandardRemote | 100 ns – 10 μs | Requires ~1k-10k queries with standard network timing |
+| ObviousLeak | > 10 μs | Trivially observable with <100 queries |
+
+**Note**: Actual exploitability depends on network conditions, attacker capabilities, and whether the timing difference is consistent. These categories are heuristics based on published research.
+
+### Handling Inconclusive Results
+
+Inconclusive means "couldn't reach 95% confidence either way." This is not a failure—it's honest reporting that the data doesn't support a strong claim.
+
+| Reason | Meaning | Suggested Action |
+|--------|---------|------------------|
+| DataTooNoisy | Posterior ≈ prior after sampling | Use a better timer (PMU), reduce system noise, or increase sample budget |
+| NotLearning | KL divergence collapsed for 5+ batches | Check for systematic measurement issues, consider different inputs |
+| WouldTakeTooLong | Projected time exceeds budget | Accept uncertainty, adjust θ, or increase time budget |
+| ThresholdUnachievable | θ_user < θ_floor even at max budget | Use a cycle counter (PMU timer) or accept the elevated θ |
+| TimeBudgetExceeded | Ran out of time | Increase `time_budget` configuration |
+| SampleBudgetExceeded | Ran out of samples | Increase `max_samples` configuration |
+| ConditionsChanged | Calibration assumptions violated | Run in isolation, reduce system load, ensure stable conditions |
+
+**What to do with Inconclusive:**
+1. Check the `leak_probability`—it shows the current best estimate
+2. Look at quality issues in the diagnostics
+3. Consider whether more resources (time, samples) would help
+4. For CI, you may choose to treat Inconclusive as a soft failure requiring investigation
+
+### Projection Mismatch
+
+When `diagnostics.projection_mismatch_ok = false`:
+
+- The 2D shift+tail summary doesn't fit the observed 9D quantile pattern well
+- **This does NOT affect the verdict**—the 9D posterior handles arbitrary patterns
+- Check `effect.top_quantiles` for which specific quantiles show timing differences
+- The `interpretation_caveat` field explains why the 2D summary may be inaccurate
+
+Common causes of projection mismatch:
+- Bi-modal timing distributions (operation sometimes takes a fast path, sometimes slow)
+- Asymmetric effects (only certain quantiles affected)
+- Complex cache behavior with multiple distinct timing modes
 
 ---
 

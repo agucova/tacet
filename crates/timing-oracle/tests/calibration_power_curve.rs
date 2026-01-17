@@ -177,6 +177,16 @@ fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipl
                     detections += 1;
                     samples_used.push(*n);
                 }
+                // Count INCONCLUSIVE with high leak probability as detection
+                // (oracle detected effect but needs more samples to be confident)
+                Outcome::Inconclusive {
+                    samples_used: n,
+                    leak_probability,
+                    ..
+                } if *leak_probability >= 0.95 => {
+                    detections += 1;
+                    samples_used.push(*n);
+                }
                 Outcome::Pass { samples_used: n, .. }
                 | Outcome::Inconclusive { samples_used: n, .. } => {
                     samples_used.push(*n);

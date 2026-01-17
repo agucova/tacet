@@ -145,7 +145,7 @@ pub unsafe extern "C" fn togo_calibrate(
                 let core_cal = timing_oracle_core::adaptive::Calibration::new(
                     cal.sigma_rate,
                     cal.block_length,
-                    cal.prior_cov,
+                    cal.prior_cov_9d,
                     cal.theta_ns,
                     cal.calibration_samples,
                     cal.discrete_mode,
@@ -155,7 +155,7 @@ pub unsafe extern "C" fn togo_calibrate(
                     cal.timer_resolution_ns,
                     cal.samples_per_second,
                     cal.c_floor,
-                    cal.q_thresh,
+                    cal.projection_mismatch_thresh,
                     cal.theta_tick,
                     cal.theta_eff,
                     cal.theta_floor_initial,
@@ -408,7 +408,7 @@ pub unsafe extern "C" fn togo_analyze(
         let core_cal = timing_oracle_core::adaptive::Calibration::new(
             cal.sigma_rate,
             cal.block_length,
-            cal.prior_cov,
+            cal.prior_cov_9d,
             cal.theta_ns,
             cal.calibration_samples,
             cal.discrete_mode,
@@ -418,7 +418,7 @@ pub unsafe extern "C" fn togo_analyze(
             cal.timer_resolution_ns,
             cal.samples_per_second,
             cal.c_floor,
-            cal.q_thresh,
+            cal.projection_mismatch_thresh,
             cal.theta_tick,
             cal.theta_eff,
             cal.theta_floor_initial,
@@ -584,7 +584,6 @@ pub extern "C" fn togo_inconclusive_reason_str(reason: ToGoInconclusiveReason) -
         ToGoInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
         ToGoInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
         ToGoInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
-        ToGoInconclusiveReason::ModelMismatch => c"ModelMismatch".as_ptr(),
     }
 }
 
@@ -610,8 +609,8 @@ unsafe fn fill_result_from_outcome(
             (*result).elapsed_secs = *elapsed_secs;
 
             // Effect from posterior beta
-            let shift_ns = posterior.beta_mean[0];
-            let tail_ns = posterior.beta_mean[1];
+            let shift_ns = posterior.beta_proj[0];
+            let tail_ns = posterior.beta_proj[1];
             let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
 
             (*result).effect.shift_ns = shift_ns;
@@ -619,7 +618,7 @@ unsafe fn fill_result_from_outcome(
             (*result).effect.pattern = classify_effect_pattern(shift_ns, tail_ns);
 
             // CI from posterior covariance (simplified)
-            let ci_width = 1.96 * sqrt(posterior.beta_cov[(0, 0)] + posterior.beta_cov[(1, 1)]);
+            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
             (*result).effect.ci_low_ns = total_effect - ci_width;
             (*result).effect.ci_high_ns = total_effect + ci_width;
 
@@ -637,15 +636,15 @@ unsafe fn fill_result_from_outcome(
             (*result).samples_used = *samples_per_class;
             (*result).elapsed_secs = *elapsed_secs;
 
-            let shift_ns = posterior.beta_mean[0];
-            let tail_ns = posterior.beta_mean[1];
+            let shift_ns = posterior.beta_proj[0];
+            let tail_ns = posterior.beta_proj[1];
 
             (*result).effect.shift_ns = shift_ns;
             (*result).effect.tail_ns = tail_ns;
             (*result).effect.pattern = classify_effect_pattern(shift_ns, tail_ns);
 
             let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-            let ci_width = 1.96 * sqrt(posterior.beta_cov[(0, 0)] + posterior.beta_cov[(1, 1)]);
+            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
             (*result).effect.ci_low_ns = total_effect - ci_width;
             (*result).effect.ci_high_ns = total_effect + ci_width;
 
@@ -664,8 +663,8 @@ unsafe fn fill_result_from_outcome(
 
             if let Some(p) = posterior {
                 (*result).leak_probability = p.leak_probability;
-                (*result).effect.shift_ns = p.beta_mean[0];
-                (*result).effect.tail_ns = p.beta_mean[1];
+                (*result).effect.shift_ns = p.beta_proj[0];
+                (*result).effect.tail_ns = p.beta_proj[1];
             }
 
             // Map inconclusive reason
@@ -687,7 +686,6 @@ unsafe fn fill_result_from_outcome(
                 InconclusiveReason::ThresholdUnachievable { .. } => {
                     ToGoInconclusiveReason::ThresholdUnachievable
                 }
-                InconclusiveReason::ModelMismatch { .. } => ToGoInconclusiveReason::ModelMismatch,
             };
 
             // Set recommendation string
@@ -703,7 +701,6 @@ unsafe fn fill_result_from_outcome(
                 }
                 InconclusiveReason::ConditionsChanged { guidance, .. } => guidance.clone(),
                 InconclusiveReason::ThresholdUnachievable { guidance, .. } => guidance.clone(),
-                InconclusiveReason::ModelMismatch { guidance, .. } => guidance.clone(),
             };
 
             if let Ok(cstr) = CString::new(guidance) {

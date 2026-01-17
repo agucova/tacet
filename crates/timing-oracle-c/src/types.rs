@@ -123,10 +123,8 @@ pub enum ToInconclusiveReason {
     SampleBudgetExceeded,
     /// Measurement conditions changed during test.
     ConditionsChanged,
-    /// Requested threshold is below measurement floor (v4.1).
+    /// Requested threshold is below measurement floor.
     ThresholdUnachievable,
-    /// Model doesn't fit the data - 2D model insufficient (v4.1).
-    ModelMismatch,
 }
 
 /// Pattern of timing effect.

@@ -68,3 +68,15 @@ pub fn round(x: f64) -> f64 {
 pub fn sq(x: f64) -> f64 {
     x * x
 }
+
+/// Standard normal CDF: Φ(x) = (1 + erf(x/√2)) / 2
+#[inline]
+pub fn normal_cdf(x: f64) -> f64 {
+    0.5 * (1.0 + libm::erf(x * core::f64::consts::FRAC_1_SQRT_2))
+}
+
+/// Absolute value.
+#[inline]
+pub fn abs(x: f64) -> f64 {
+    libm::fabs(x)
+}

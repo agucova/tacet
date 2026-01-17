@@ -680,16 +680,31 @@ pub struct Diagnostics {
     /// True if stationarity ratio is within acceptable bounds (0.5-2.0).
     pub stationarity_ok: bool,
 
-    /// Model fit: chi-squared statistic for residuals.
-    /// Should be approximately chi-squared with 7 degrees of freedom under correct model.
-    pub model_fit_chi2: f64,
+    /// Projection mismatch Q statistic.
+    ///
+    /// Measures how well the 2D (shift, tail) model fits the 9D quantile differences.
+    /// A high value indicates the effect is concentrated at specific quantiles
+    /// rather than following the shift+tail pattern.
+    pub projection_mismatch_q: f64,
 
-    /// Bootstrap-calibrated threshold for model fit Q statistic.
-    /// Q > model_fit_threshold indicates poor model fit.
-    pub model_fit_threshold: f64,
+    /// Bootstrap-calibrated threshold for projection mismatch Q statistic.
+    /// Q > threshold indicates the 2D projection may be unreliable.
+    pub projection_mismatch_threshold: f64,
 
-    /// True if chi-squared is within acceptable bounds (Q <= model_fit_threshold).
-    pub model_fit_ok: bool,
+    /// True if projection fits well (Q <= threshold).
+    ///
+    /// When false, the shift_ns and tail_ns estimates should be interpreted
+    /// with caution; use top_quantiles for more detailed information.
+    pub projection_mismatch_ok: bool,
+
+    /// Top quantiles by exceedance probability (when projection mismatch detected).
+    ///
+    /// When projection_mismatch_ok is false, this field contains detailed
+    /// information about which quantiles drive the leak detection. This helps
+    /// diagnose effects that don't fit the shift+tail model (e.g., effects
+    /// concentrated at a single quantile).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_quantiles: Option<Vec<TopQuantile>>,
 
     /// Outlier rate for baseline class (fraction trimmed).
     pub outlier_rate_baseline: f64,

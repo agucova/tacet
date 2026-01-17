@@ -1018,7 +1018,7 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            posterior.model_fit_q,
+            posterior.projection_mismatch_q,
             stationarity,
         );
 
@@ -1055,7 +1055,7 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            posterior.model_fit_q,
+            posterior.projection_mismatch_q,
             stationarity,
         );
 
@@ -1090,14 +1090,14 @@ impl TimingOracle {
             .map(|p| build_effect_estimate(p, theta_ns))
             .unwrap_or_default();
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
+        let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
         let diagnostics = build_diagnostics(
             calibration,
             timer,
             start_time,
             &self.config,
             theta_ns,
-            model_fit_q,
+            projection_mismatch_q,
             stationarity,
         );
 
@@ -1289,10 +1289,10 @@ impl TimingOracle {
                 );
             }
 
-            // Compute max effect CI
+            // Compute max effect CI from 9D posterior
             let max_effect_ci = compute_max_effect_ci(
-                &posterior.beta_mean,
-                &posterior.beta_cov,
+                &posterior.delta_post,
+                &posterior.lambda_post,
                 self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
             );
 
@@ -1340,11 +1340,11 @@ impl TimingOracle {
         let n = state.n_total() as f64;
         let theta_floor = (calibration.c_floor / n.sqrt()).max(calibration.theta_tick);
 
-        // Compute max effect CI
+        // Compute max effect CI from 9D posterior
         let (max_effect_ns, max_effect_ci, detectable) = if let Some(p) = posterior {
             let ci = compute_max_effect_ci(
-                &p.beta_mean,
-                &p.beta_cov,
+                &p.delta_post,
+                &p.lambda_post,
                 self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
             );
             let detectable = ci.ci.0 > theta_floor;
@@ -1355,7 +1355,7 @@ impl TimingOracle {
 
         // Check model mismatch (non-blocking in research mode)
         let model_mismatch = posterior
-            .map(|p| p.model_fit_q > calibration.q_thresh)
+            .map(|p| p.projection_mismatch_q > calibration.projection_mismatch_thresh)
             .unwrap_or(false);
 
         // Build effect estimate
@@ -1364,7 +1364,7 @@ impl TimingOracle {
             .unwrap_or_default();
 
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
+        let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
         // Research mode doesn't track stationarity separately (would need refactoring)
         let diagnostics = build_diagnostics(
             calibration,
@@ -1372,7 +1372,7 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            model_fit_q,
+            projection_mismatch_q,
             None,
         );
 
@@ -1399,7 +1399,7 @@ use crate::adaptive::Posterior;
 
 /// Build an EffectEstimate from a posterior.
 fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64) -> EffectEstimate {
-    let pattern = classify_pattern(&posterior.beta_mean, &posterior.beta_cov);
+    let pattern = classify_pattern(&posterior.beta_proj, &posterior.beta_proj_cov);
 
     // Compute credible interval from posterior covariance
     let shift_std = posterior.shift_se();
@@ -1426,7 +1426,7 @@ fn build_diagnostics(
     start_time: Instant,
     config: &Config,
     theta_ns: f64,
-    model_fit_q: f64,
+    projection_mismatch_q: f64,
     stationarity: Option<crate::analysis::StationarityResult>,
 ) -> Diagnostics {
     // Convert preflight warnings to PreflightWarningInfo
@@ -1473,9 +1473,9 @@ fn build_diagnostics(
         // Use stationarity result if available, otherwise assume no drift
         stationarity_ratio: stationarity.map(|s| s.ratio).unwrap_or(1.0),
         stationarity_ok: stationarity.map(|s| s.ok).unwrap_or(true),
-        model_fit_chi2: model_fit_q,
-        model_fit_threshold: calibration.q_thresh,
-        model_fit_ok: model_fit_q <= calibration.q_thresh,
+        model_fit_chi2: projection_mismatch_q,
+        model_fit_threshold: calibration.projection_mismatch_thresh,
+        model_fit_ok: projection_mismatch_q <= calibration.projection_mismatch_thresh,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,
@@ -1549,17 +1549,6 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
         } => InconclusiveReason::ThresholdUnachievable {
             theta_user: *theta_user,
             best_achievable: *best_achievable,
-            message: message.clone(),
-            guidance: guidance.clone(),
-        },
-        AdaptiveInconclusiveReason::ModelMismatch {
-            q_statistic,
-            q_threshold,
-            message,
-            guidance,
-        } => InconclusiveReason::ModelMismatch {
-            q_statistic: *q_statistic,
-            q_threshold: *q_threshold,
             message: message.clone(),
             guidance: guidance.clone(),
         },

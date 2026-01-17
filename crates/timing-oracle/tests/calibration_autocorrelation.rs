@@ -230,8 +230,13 @@ fn run_autocorr_grid(
                         calibration_utils::busy_wait_ns(total_ns);
                     });
 
-                // Count rejections (Fail outcomes)
-                if matches!(outcome, Outcome::Fail { .. }) {
+                // Count rejections (Fail or Inconclusive with high leak probability)
+                let is_rejection = match &outcome {
+                    Outcome::Fail { .. } => true,
+                    Outcome::Inconclusive { leak_probability, .. } => *leak_probability >= 0.95,
+                    _ => false,
+                };
+                if is_rejection {
                     rejections += 1;
                 }
 

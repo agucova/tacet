@@ -27,7 +27,6 @@ use alloc::string::String;
 
 use crate::analysis::bayes::compute_bayes_factor;
 use crate::constants::DEFAULT_SEED;
-use crate::math::sqrt;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 
 use super::{
@@ -329,7 +328,7 @@ pub fn adaptive_step(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov: &calibration.prior_cov,
+        prior_cov_9d: &calibration.prior_cov_9d,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs,
@@ -341,15 +340,14 @@ pub fn adaptive_step(
         samples_per_second: calibration.samples_per_second,
         calibration_snapshot: Some(&calibration.calibration_snapshot),
         current_stats_snapshot: current_stats.as_ref(),
-        // v4.1 fields for new quality gates
         c_floor: calibration.c_floor,
         theta_tick: calibration.theta_tick,
-        q_fit: if posterior.model_fit_q.is_nan() {
+        projection_mismatch_q: if posterior.projection_mismatch_q.is_nan() {
             None
         } else {
-            Some(posterior.model_fit_q)
+            Some(posterior.projection_mismatch_q)
         },
-        q_thresh: calibration.q_thresh,
+        projection_mismatch_thresh: calibration.projection_mismatch_thresh,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -400,25 +398,23 @@ fn compute_posterior(
     // Scale covariance: Sigma_n = Sigma_rate / n
     let sigma_n = calibration.covariance_for_n(n);
 
-    // Compute prior sigmas from prior covariance
-    let prior_sigma_shift = sqrt(calibration.prior_cov[(0, 0)]);
-    let prior_sigma_tail = sqrt(calibration.prior_cov[(1, 1)]);
-
-    // Run Bayesian inference
+    // Run 9D Bayesian inference with prior covariance
     let bayes_result = compute_bayes_factor(
         &observed_diff,
         &sigma_n,
-        (prior_sigma_shift, prior_sigma_tail),
+        &calibration.prior_cov_9d,
         config.theta_ns,
         Some(config.seed),
     );
 
     Some(Posterior::new(
-        bayes_result.beta_mean,
-        bayes_result.beta_cov,
+        bayes_result.delta_post,
+        bayes_result.lambda_post,
+        bayes_result.beta_proj,
+        bayes_result.beta_proj_cov,
         bayes_result.leak_probability,
+        bayes_result.projection_mismatch_q,
         n,
-        bayes_result.model_fit_q,
     ))
 }
 
@@ -426,7 +422,7 @@ fn compute_posterior(
 mod tests {
     use super::*;
     use crate::statistics::StatsSnapshot;
-    use crate::types::{Matrix2, Matrix9, Vector2};
+    use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
 
     fn make_test_calibration() -> Calibration {
         use crate::adaptive::CalibrationSnapshot;
@@ -447,24 +443,35 @@ mod tests {
         );
 
         Calibration::new(
-            Matrix9::identity() * 1000.0,             // sigma_rate
-            10,                                       // block_length
-            Matrix2::new(10000.0, 0.0, 0.0, 10000.0), // prior_cov
-            100.0,                                    // theta_ns
-            5000,                                     // calibration_samples
-            false,                                    // discrete_mode
-            5.0,                                      // mde_shift_ns
-            10.0,                                     // mde_tail_ns
-            snapshot,                                 // calibration_snapshot
-            1.0,                                      // timer_resolution_ns
-            100_000.0,                                // samples_per_second
-            // v4.1 fields
-            10.0,  // c_floor
-            18.48, // q_thresh (chi-squared(7, 0.99) fallback)
-            0.001, // theta_tick
-            100.0, // theta_eff
-            0.1,   // theta_floor_initial
-            42,    // rng_seed
+            Matrix9::identity() * 1000.0,  // sigma_rate
+            10,                            // block_length
+            Matrix9::identity() * 10000.0, // prior_cov_9d
+            100.0,                         // theta_ns
+            5000,                          // calibration_samples
+            false,                         // discrete_mode
+            5.0,                           // mde_shift_ns
+            10.0,                          // mde_tail_ns
+            snapshot,                      // calibration_snapshot
+            1.0,                           // timer_resolution_ns
+            100_000.0,                     // samples_per_second
+            10.0,                          // c_floor
+            18.48,                         // projection_mismatch_thresh
+            0.001,                         // theta_tick
+            100.0,                         // theta_eff
+            0.1,                           // theta_floor_initial
+            42,                            // rng_seed
+        )
+    }
+
+    fn make_test_posterior(leak_prob: f64) -> Posterior {
+        Posterior::new(
+            Vector9::zeros(),
+            Matrix9::identity(),
+            Vector2::new(10.0, 5.0),
+            Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            leak_prob,
+            1.0, // projection_mismatch_q
+            1000,
         )
     }
 
@@ -493,13 +500,7 @@ mod tests {
 
     #[test]
     fn test_adaptive_outcome_accessors() {
-        let posterior = Posterior::new(
-            Vector2::new(10.0, 5.0),
-            Matrix2::new(1.0, 0.0, 0.0, 1.0),
-            0.95,
-            1000,
-            5.0, // model_fit_q
-        );
+        let posterior = make_test_posterior(0.95);
 
         let outcome = AdaptiveOutcome::LeakDetected {
             posterior: posterior.clone(),
@@ -526,13 +527,7 @@ mod tests {
 
     #[test]
     fn test_step_result_accessors() {
-        let posterior = Posterior::new(
-            Vector2::new(10.0, 5.0),
-            Matrix2::new(1.0, 0.0, 0.0, 1.0),
-            0.5,
-            1000,
-            5.0, // model_fit_q
-        );
+        let posterior = make_test_posterior(0.5);
 
         let result = StepResult::Continue {
             posterior: posterior.clone(),
