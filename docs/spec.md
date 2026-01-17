@@ -1,4 +1,4 @@
-# timing-oracle Specification (v4.1)
+# timing-oracle Specification (v4.2)
 
 ## 1. Overview
 
@@ -112,7 +112,6 @@ The system operates in two phases:
 │   • Set prior scale    • Update θ_floor   • Research outcome    │
 │   • Warmup caches      • Compute P(>θ)                          │
 │   • Pre-flight checks  • Check quality                          │
-│                        • Check model fit                         │
 │                        • Check stopping                          │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
@@ -123,8 +122,8 @@ The system operates in two phases:
 - Estimate covariance structure via stream-based block bootstrap
 - Compute "covariance rate" $\Sigma_{\text{rate}}$ that scales as $\Sigma = \Sigma_{\text{rate}} / n$
 - Compute initial measurement floor $\theta_{\text{floor}}$ and floor-rate constant $c_{\text{floor}}$
-- Compute model mismatch threshold $Q_{\text{thresh}}$ from bootstrap distribution
-- Compute effective threshold $\theta_{\text{eff}}$ and set prior scale
+- Compute projection mismatch threshold $Q_{\text{proj,thresh}}$ from bootstrap distribution
+- Compute effective threshold $\theta_{\text{eff}}$ and calibrate prior scale
 - Run pre-flight checks (timer sanity, harness sanity, stationarity)
 
 **Phase 2: Adaptive Loop** (iterates until decision)
@@ -133,8 +132,7 @@ The system operates in two phases:
 - Scale covariance: $\Sigma_n = \Sigma_{\text{rate}} / n$
 - Update $\theta_{\text{floor}}(n)$ using floor-rate constant
 - Compute posterior and $P(\text{effect} > \theta_{\text{eff}})$
-- Check quality gates first (posterior ≈ prior → Inconclusive)
-- Check model fit gate (large residuals → Inconclusive)
+- Check quality gates (posterior ≈ prior → Inconclusive)
 - Check decision boundaries (P > 95% → Fail, P < 5% → Pass)
 - Check time/sample budgets
 
@@ -255,27 +253,23 @@ $$
 
 where $\bar{\sigma}^2 = \text{tr}(\Sigma)/9$ and $\varepsilon = 10^{-10} + \bar{\sigma}^2 \cdot 10^{-8}$.
 
-#### 2.3.3 Model Mismatch Threshold Calibration
+#### 2.3.3 Projection Mismatch Threshold Calibration
 
-During bootstrap, we also calibrate the threshold for the model fit diagnostic (see §2.6 Gate 8):
+During bootstrap, we calibrate the threshold for the projection mismatch diagnostic (see §2.6 Diagnostics). This determines when the 2D shift+tail summary is a faithful description of the inferred 9D quantile profile.
 
 For each bootstrap replicate $\Delta^*$:
-1. Compute GLS fit: $\hat{\beta}^* = (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1} \Delta^*$
-2. Compute residual: $r^* = \Delta^* - X\hat{\beta}^*$
-3. Compute fit statistic: $Q^* = (r^*)^\top \Sigma_n^{-1} r^*$
+1. Compute 9D posterior mean: $\delta^*_{\text{post}}$ under the Bayesian update
+2. Compute GLS projection: $\beta^*_{\text{proj}} = A \delta^*_{\text{post}}$
+3. Compute projection residual: $r^*_{\text{proj}} = \delta^*_{\text{post}} - X\beta^*_{\text{proj}}$
+4. Compute mismatch statistic: $Q^*_{\text{proj}} = (r^*_{\text{proj}})^\top \Sigma_n^{-1} r^*_{\text{proj}}$
 
-The mismatch threshold is the 99th percentile of the bootstrap distribution:
+The projection mismatch threshold is the 99th percentile of the bootstrap distribution:
 
 $$
-Q_{\text{thresh}} = q_{0.99}(\{Q^*_b\}_{b=1}^B)
+Q_{\text{proj,thresh}} = q_{0.99}(\{Q^*_{\text{proj},b}\}_{b=1}^B)
 $$
 
-This bootstrap-calibrated threshold is preferred over the asymptotic $\chi^2_7$ reference because:
-- The posterior mean involves shrinkage from the prior
-- $\Sigma_n$ is estimated, not known
-- The bootstrap automatically adapts to the actual covariance structure
-
-**Fallback:** If bootstrap calibration fails, use $Q_{\text{thresh}} = \chi^2_{7, 0.99} \approx 18.48$ as a conservative diagnostic cutoff.
+**Note:** This threshold is used for the non-blocking projection mismatch diagnostic, not for verdict gating. See §2.6 for details.
 
 #### 2.3.4 Measurement Floor and Effective Threshold
 
@@ -283,21 +277,15 @@ A critical design element is distinguishing between what the user *wants* to det
 
 **Floor-rate constant:**
 
-Under the model's scaling assumption $\Sigma_n = \Sigma_{\text{rate}}/n$, the measurement floor scales as $1/\sqrt{n}$. We compute a floor-rate constant once at calibration:
+Under the model's scaling assumption $\Sigma_n = \Sigma_{\text{rate}}/n$, the measurement floor scales as $1/\sqrt{n}$. We compute a floor-rate constant once at calibration based on the 9D decision functional $m(\delta) = \max_k |\delta_k|$.
 
-Define the prediction covariance in "rate form":
-
-$$
-\Sigma_{\text{pred,rate}} := X \left( X^\top \Sigma_{\text{rate}}^{-1} X \right)^{-1} X^\top
-$$
-
-Draw $Z_0 \sim \mathcal{N}(0, \Sigma_{\text{pred,rate}})$ via Monte Carlo (50,000 samples) and compute:
+Draw $Z_0 \sim \mathcal{N}(0, \Sigma_{\text{rate}})$ via Monte Carlo (50,000 samples) and compute:
 
 $$
 c_{\text{floor}} := q_{0.95}\left( \max_k |Z_{0,k}| \right)
 $$
 
-This is the 95th percentile of the max absolute prediction under unit sample size.
+This is the 95th percentile of the max absolute value under unit sample size.
 
 **Measurement floor (dynamic):**
 
@@ -355,19 +343,45 @@ During the adaptive loop, $\theta_{\text{floor}}(n)$ is recomputed analytically 
 1. If $\theta_{\text{floor}}(n)$ drops below $\theta_{\text{user}}$ during sampling, update $\theta_{\text{eff}} = \theta_{\text{user}}$ (the user's threshold becomes achievable)
 2. Track whether you're on pace to reach $\theta_{\text{user}}$; if extrapolation shows you won't make it within budget, consider early termination with `Inconclusive`
 
-**Prior scale:**
+#### 2.3.5 Prior Scale Calibration
 
-The prior on effect parameters $\beta = (\mu, \tau)$ is set proportional to the effective threshold:
+The prior on the 9D effect profile $\delta$ should represent genuine uncertainty about whether effects exceed $\theta_{\text{eff}}$—neither near-certain leak nor near-certain safety.
+
+**Prior structure (shaped ridge):**
+
+The prior covariance is "shaped" to match the empirical covariance structure while controlling scale:
 
 $$
-\sigma_{\text{prior}} = 1.12 \cdot \theta_{\text{eff}}
+\Lambda_0 = \sigma_{\text{prior}}^2 \cdot S, \quad S := \frac{\Sigma_{\text{rate}}}{\text{tr}(\Sigma_{\text{rate}})}
 $$
 
-This ensures the prior leak probability $P(\max_k |(X\beta)_k| > \theta_{\text{eff}} \mid \text{prior}) \approx 62\%$, representing genuine uncertainty about whether effects exceed the effective threshold.
+Since $\text{tr}(S) = 1$, the parameter $\sigma_{\text{prior}}$ remains an interpretable global scale. This shaping respects the correlation structure across quantiles and improves stability without adding parameters.
 
-**Important:** The leak test computes $P(\max_k |(X\beta)_k| > \theta_{\text{eff}})$ using the transformed predictions $X\beta$, not the raw parameter vector $\beta$. The design matrix $X$ amplifies $\beta$ into 9 correlated predictions, and taking the max over these increases the exceedance probability. The factor 1.12 (rather than 2.0) accounts for this transformation and was determined via Monte Carlo calibration.
+**Robustness fallback:** If $\Sigma_{\text{rate}}$ is ill-conditioned or discrete-timer mode is active, apply shrinkage:
 
-#### 2.3.5 Deterministic Seeding Policy
+$$
+S \leftarrow (1-\lambda)S + \lambda \frac{I_9}{9}
+$$
+
+with a conservative default $\lambda \in [0.05, 0.2]$, chosen deterministically from conditioning diagnostics. If conditioning remains poor, set $S = I_9/9$.
+
+**Numerical calibration of $\sigma_{\text{prior}}$:**
+
+Choose $\sigma_{\text{prior}}$ so that the prior exceedance probability equals a fixed target $\pi_0$ (default 0.62):
+
+$$
+P\left(\max_k |\delta_k| > \theta_{\text{eff}} \;\middle|\; \delta \sim \mathcal{N}(0, \Lambda_0)\right) = \pi_0
+$$
+
+Given $\Lambda_0 = \sigma_{\text{prior}}^2 S$, this is a 1D root-find on $\sigma_{\text{prior}}$ using deterministic Monte Carlo (e.g., 50k draws). The target $\pi_0 = 0.62$ represents genuine uncertainty about whether effects exceed the effective threshold.
+
+**Normative requirements:**
+
+- The RNG seed MUST be deterministic (per §2.3.6)
+- The calibration MUST be performed once per run, during calibration
+- The prior MUST remain fixed throughout the adaptive loop. If $\theta_{\text{eff}}$ changes as $n$ grows, it affects only exceedance checks, not the prior.
+
+#### 2.3.6 Deterministic Seeding Policy
 
 To ensure reproducible results, all random number generation is deterministic by default.
 
@@ -381,7 +395,7 @@ To ensure reproducible results, all random number generation is deterministic by
   - A fixed library constant seed (default: 0x74696D696E67, "timing" in ASCII)
   - A stable hash of configuration parameters
 
-- All Monte Carlo RNG seeds (leak probability, floor constant) are similarly deterministic
+- All Monte Carlo RNG seeds (leak probability, floor constant, prior scale) are similarly deterministic
 
 - The chosen seeds are reported in `Diagnostics.seed` (and `Calibration.rng_seed`)
 
@@ -401,104 +415,112 @@ $$
 
 ```rust
 struct Calibration {
-    sigma_rate: Matrix9x9,      // Covariance rate: Σ = Σ_rate / n
-    block_length: usize,        // Estimated from acquisition stream
-    c_floor: f64,               // Floor-rate constant
-    q_thresh: f64,              // Model mismatch threshold (99th percentile)
-    theta_floor_initial: f64,   // Initial measurement floor
-    theta_eff: f64,             // Effective threshold for this run
-    prior_cov: Matrix2x2,       // Prior covariance for β
-    timer_resolution_ns: f64,   // Detected tick size
-    samples_per_second: f64,    // For time estimation
-    rng_seed: u64,              // Deterministic seed used
+    sigma_rate: Matrix9x9,       // Covariance rate: Σ = Σ_rate / n
+    block_length: usize,         // Estimated from acquisition stream
+    c_floor: f64,                // Floor-rate constant
+    q_proj_thresh: f64,          // Projection mismatch threshold (99th percentile)
+    theta_floor_initial: f64,    // Initial measurement floor
+    theta_eff: f64,              // Effective threshold for this run
+    prior_shape: Matrix9x9,      // S matrix for shaped prior
+    sigma_prior: f64,            // Calibrated prior scale
+    timer_resolution_ns: f64,    // Detected tick size
+    samples_per_second: f64,     // For time estimation
+    rng_seed: u64,               // Deterministic seed used
 }
 ```
 
 ### 2.4 Bayesian Model
 
-We use a conjugate Gaussian model that admits closed-form posteriors—no MCMC required.
+We use a conjugate Gaussian model over the full 9D quantile-difference profile that admits closed-form posteriors—no MCMC required.
 
-#### Design Matrix
+#### 2.4.1 Latent Parameter
 
-We decompose the observed quantile differences into interpretable components:
-
-- **Uniform shift** ($\mu$): All quantiles move by the same amount (e.g., a branch that adds constant overhead)
-- **Tail effect** ($\tau$): Upper quantiles shift more than lower ones (e.g., cache misses that occur probabilistically)
-
-The design matrix encodes this decomposition:
+The latent parameter is the true per-decile timing difference profile:
 
 $$
-X = \begin{bmatrix} \mathbf{1} & \mathbf{b}_{\text{tail}} \end{bmatrix} \in \mathbb{R}^{9 \times 2}
+\delta \in \mathbb{R}^9 \quad \text{(true decile-difference profile)}
 $$
 
-where:
-- $\mathbf{1} = (1, 1, 1, 1, 1, 1, 1, 1, 1)^\top$ — uniform shift moves all 9 quantiles equally
-- $\mathbf{b}_{\text{tail}} = (-0.5, -0.375, -0.25, -0.125, 0, 0.125, 0.25, 0.375, 0.5)^\top$ — tail effect moves upper quantiles up, lower quantiles down
+This is unconstrained—the model can represent any quantile-difference pattern, unlike a low-rank projection.
 
-The tail basis is centered (sums to zero) so that $\mu$ and $\tau$ are orthogonal. An effect of $\mu = 10, \tau = 0$ means a pure 10ns uniform shift; $\mu = 0, \tau = 20$ means upper quantiles are 10ns slower while lower quantiles are 10ns faster.
-
-**Design limitation:** The antisymmetric tail basis assumes symmetric patterns. Real cache-timing leaks often show asymmetric upper-tail effects. The model *can* fit these (μ absorbs the mean shift, τ captures the spread), but interpretation of τ becomes less intuitive. When the model fit is poor (see §2.6 Gate 8), the $(\mu, \tau)$ decomposition should be interpreted with caution.
-
-#### Likelihood
+#### 2.4.2 Likelihood
 
 $$
-\Delta \mid \beta \sim \mathcal{N}(X\beta, \Sigma_n)
+\Delta \mid \delta \sim \mathcal{N}(\delta, \Sigma_n)
 $$
 
-where $\Sigma_n = \Sigma_{\text{rate}} / n$ is the scaled covariance.
+where $\Sigma_n = \Sigma_{\text{rate}} / n$ is the scaled covariance. This is the minimal mean-structure assumption: the covariance is estimated; the mean is unconstrained.
 
-#### Prior
+#### 2.4.3 Prior
 
 $$
-\beta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \text{diag}(\sigma_{\text{prior}}^2, \sigma_{\text{prior}}^2)
+\delta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \sigma_{\text{prior}}^2 \cdot S
 $$
 
-where $\sigma_{\text{prior}} = 1.12 \cdot \theta_{\text{eff}}$ (see §2.3.4).
+where $S$ is the shaped prior matrix and $\sigma_{\text{prior}}$ is calibrated numerically (see §2.3.5).
 
-#### Posterior
+#### 2.4.4 Posterior
 
 With Gaussian likelihood and Gaussian prior, the posterior is also Gaussian⁴:
 
 $$
-\beta \mid \Delta \sim \mathcal{N}(\beta_{\text{post}}, \Lambda_{\text{post}})
+\delta \mid \Delta \sim \mathcal{N}(\delta_{\text{post}}, \Lambda_{\text{post}})
 $$
 
 where:
 
 $$
-\Lambda_{\text{post}} = \left( X^\top \Sigma_n^{-1} X + \Lambda_0^{-1} \right)^{-1}
+\Lambda_{\text{post}} = \left( \Lambda_0^{-1} + \Sigma_n^{-1} \right)^{-1}
 $$
 
 $$
-\beta_{\text{post}} = \Lambda_{\text{post}} X^\top \Sigma_n^{-1} \Delta
+\delta_{\text{post}} = \Lambda_{\text{post}} \Sigma_n^{-1} \Delta
 $$
 
-The posterior mean $\beta_{\text{post}} = (\mu, \tau)^\top$ gives the estimated shift and tail effects in nanoseconds.
+The posterior mean $\delta_{\text{post}} \in \mathbb{R}^9$ gives the estimated timing difference at each decile in nanoseconds.
+
+**Implementation guidance (normative):**
+
+The oracle MUST NOT form explicit matrix inverses in floating point. Use Cholesky solves on SPD matrices. A stable compute path:
+
+```rust
+// Form A := Σ_n + Λ_0 (SPD)
+// Solve A x = Δ for x
+// Then δ_post = Λ_0 x
+// And Λ_post = Λ_0 - Λ_0 A⁻¹ Λ_0 (via solves)
+```
+
+This avoids $\Sigma_n^{-1}$ explicitly.
 
 ⁴ Bishop, C. M. (2006). Pattern Recognition and Machine Learning, §3.3. Springer.
 
-#### Leak Probability
+#### 2.4.5 Decision Functional and Leak Probability
 
-The key question is: "what's the probability of a leak exceeding $\theta_{\text{eff}}$?" We compute:
+The decision is based on the maximum absolute effect across all quantiles:
 
 $$
-P(\text{leak} > \theta_{\text{eff}} \mid \Delta) = P\bigl(\max_k |(X\beta)_k| > \theta_{\text{eff}} \;\big|\; \Delta\bigr)
+m(\delta) := \max_k |\delta_k|
+$$
+
+The leak probability is:
+
+$$
+P(\text{leak} > \theta_{\text{eff}} \mid \Delta) = P\bigl(m(\delta) > \theta_{\text{eff}} \;\big|\; \Delta\bigr)
 $$
 
 Since the posterior is Gaussian, we compute this by Monte Carlo integration:
 
 ```python
-samples = draw_from_normal(beta_post, Lambda_post, n=10000, seed=deterministic_seed)
+samples = draw_from_normal(delta_post, Lambda_post, n=10000, seed=deterministic_seed)
 count = 0
-for beta in samples:
-    pred = X @ beta  # 9-vector of predicted quantile differences
-    max_effect = max(abs(pred))
+for delta in samples:
+    max_effect = max(abs(delta))
     if max_effect > theta_eff:
         count += 1
 leak_probability = count / 10000
 ```
 
-This is O(1)—we're drawing from a 2D Gaussian and doing simple arithmetic. The seed is deterministic (see §2.3.5).
+This is O(1)—we're drawing from a 9D Gaussian and doing simple arithmetic. The seed is deterministic (see §2.3.6).
 
 **Interpreting the probability:**
 
@@ -510,13 +532,46 @@ This is calibrated by construction under the Gaussian model. Empirical validatio
 
 All inference uses $\theta_{\text{eff}}$, not $\theta_{\text{user}}$. When these differ, the output clearly reports both values so the user understands what was actually tested.
 
+#### 2.4.6 2D Projection for Reporting
+
+The 9D posterior is used for decisions, but we provide a 2D summary for interpretability when the pattern is simple.
+
+**Design matrix (for projection only):**
+
+$$
+X = \begin{bmatrix} \mathbf{1} & \mathbf{b}_{\text{tail}} \end{bmatrix} \in \mathbb{R}^{9 \times 2}
+$$
+
+where:
+- $\mathbf{1} = (1, 1, 1, 1, 1, 1, 1, 1, 1)^\top$ — uniform shift
+- $\mathbf{b}_{\text{tail}} = (-0.5, -0.375, -0.25, -0.125, 0, 0.125, 0.25, 0.375, 0.5)^\top$ — tail effect
+
+**GLS projection operator:**
+
+$$
+A := (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1}
+$$
+
+**Posterior for projection summary:**
+
+Since $\beta_{\text{proj}} = A\delta$ is linear in $\delta$, under the 9D posterior:
+
+- Mean: $\beta_{\text{proj,post}} = A \delta_{\text{post}}$
+- Covariance: $\text{Cov}(\beta_{\text{proj}} \mid \Delta) = A \Lambda_{\text{post}} A^\top$
+
+The projection gives interpretable components:
+- **Shift ($\mu$)**: Uniform timing difference affecting all quantiles equally
+- **Tail ($\tau$)**: Upper quantiles affected more than lower (or vice versa)
+
+**Important:** The 2D projection is for reporting only. Decisions are based on the 9D posterior. When the projection doesn't fit well (see §2.6 Diagnostics), the oracle adds an interpretation caveat and provides alternative explanations.
+
 ### 2.5 Adaptive Sampling Loop
 
 The core innovation: collect samples until confident, with natural early stopping.
 
 **Verdict-blocking semantics:**
 
-> Pass/Fail verdicts are emitted **only** if (i) all measurement quality gates pass, (ii) condition drift checks pass, and (iii) the model fit gate passes (no ModelMismatch). Otherwise the oracle must return Inconclusive, reporting the posterior probability as an "estimate under the model" but not asserting a strong claim.
+> Pass/Fail verdicts are emitted **only** if all measurement quality gates pass and condition drift checks pass. Otherwise the oracle must return Inconclusive, reporting the posterior probability as an "estimate under the model" but not asserting a strong claim.
 
 This policy ensures: **CI verdicts should almost never be confidently wrong.**
 
@@ -542,17 +597,18 @@ fn run_adaptive(calibration: &Calibration, theta_user: f64, config: &Config) -> 
         // 3. Update posterior (cheap - no bootstrap)
         let posterior = state.compute_posterior(theta_eff);
 
-        // 4. Compute model fit statistic
-        let residual = state.delta - X * posterior.beta;
-        let q_fit = residual.dot(&state.sigma_n_inv * residual);
-        let model_mismatch = q_fit > calibration.q_thresh;
+        // 4. Compute projection mismatch (non-blocking diagnostic)
+        let beta_proj = projection_operator * posterior.delta_post;
+        let r_proj = posterior.delta_post - design_matrix * beta_proj;
+        let q_proj = r_proj.dot(&state.sigma_n_inv * r_proj);
+        let projection_mismatch = q_proj > calibration.q_proj_thresh;
 
         // 5. Check ALL quality gates FIRST (verdict-blocking)
         if let Some(reason) = check_quality_gates(&state, &posterior, calibration, config) {
             return Outcome::Inconclusive {
                 reason,
                 leak_probability: posterior.leak_probability,
-                effect: posterior.effect_estimate(),
+                effect: posterior.effect_estimate(projection_mismatch),
                 theta_user,
                 theta_eff,
                 theta_floor,
@@ -560,30 +616,11 @@ fn run_adaptive(calibration: &Calibration, theta_user: f64, config: &Config) -> 
             };
         }
 
-        // 6. Check model fit gate (verdict-blocking)
-        if model_mismatch {
-            return Outcome::Inconclusive {
-                reason: InconclusiveReason::ModelMismatch {
-                    q_statistic: q_fit,
-                    q_threshold: calibration.q_thresh,
-                    message: "Observed quantile pattern not well-explained by shift+tail model".into(),
-                    guidance: "The timing difference may have a shape not captured by the 2D basis. \
-                               Inspect raw quantile differences for asymmetric or multi-modal patterns.".into(),
-                },
-                leak_probability: posterior.leak_probability,
-                effect: posterior.effect_estimate_with_caveat(),
-                theta_user,
-                theta_eff,
-                theta_floor,
-                samples_used: state.n_total,
-            };
-        }
-
-        // 7. Check decision boundaries (only if all gates pass)
+        // 6. Check decision boundaries (projection mismatch does NOT block)
         if posterior.leak_probability > 0.95 {
             return Outcome::Fail {
                 leak_probability: posterior.leak_probability,
-                effect: posterior.effect_estimate(),
+                effect: posterior.effect_estimate(projection_mismatch),
                 theta_user,
                 theta_eff,
                 theta_floor,
@@ -593,7 +630,7 @@ fn run_adaptive(calibration: &Calibration, theta_user: f64, config: &Config) -> 
         if posterior.leak_probability < 0.05 {
             return Outcome::Pass {
                 leak_probability: posterior.leak_probability,
-                effect: posterior.effect_estimate(),
+                effect: posterior.effect_estimate(projection_mismatch),
                 theta_user,
                 theta_eff,
                 theta_floor,
@@ -601,7 +638,7 @@ fn run_adaptive(calibration: &Calibration, theta_user: f64, config: &Config) -> 
             };
         }
 
-        // 8. Check budgets
+        // 7. Check budgets
         if state.budget_exhausted(config) {
             return Outcome::Inconclusive {
                 reason: InconclusiveReason::BudgetExhausted { .. },
@@ -629,9 +666,9 @@ Each iteration requires:
 1. Collect batch: O(batch_size)
 2. Recompute quantiles: O(n log n) — but incremental updates possible
 3. Scale covariance: O(1)
-4. GLS regression: O(1) — 2×2 and 9×9 matrix operations
-5. Model fit check: O(1) — single quadratic form
-6. Monte Carlo integration: O(10,000)
+4. Posterior update: O(1) — 9×9 matrix operations
+5. Projection mismatch check: O(1) — single quadratic form
+6. Monte Carlo integration: O(10,000 × 9)
 7. Update θ_floor: O(1) — analytical formula
 
 Total: dominated by quantile computation, which can be optimized with streaming quantile algorithms.
@@ -643,18 +680,22 @@ Default batch size is 1,000 samples. This balances:
 - Small enough for responsive early stopping
 - Matches typical calibration sample count
 
-### 2.6 Quality Gates
+### 2.6 Quality Gates and Diagnostics
 
-Quality gates detect when data is too poor to reach a confident decision. **All gates are verdict-blocking**: if any gate triggers, the oracle returns Inconclusive rather than Pass/Fail.
+Quality gates detect when data is too poor to reach a confident decision. **Verdict-blocking gates** cause the oracle to return Inconclusive rather than Pass/Fail. **Non-blocking diagnostics** add caveats to the output but do not prevent verdicts.
 
-#### Gate 1: Posterior ≈ Prior (Data Too Noisy)
+#### Verdict-Blocking Gates
 
-If measurement uncertainty is high, the posterior barely moves from the prior:
+##### Gate 1: Posterior ≈ Prior (Data Too Noisy)
+
+If measurement uncertainty is high, the posterior barely moves from the prior. For the 9D model, use log-det ratio:
+
+$$
+\rho := \log \frac{|\Lambda_{\text{post}}|}{|\Lambda_0|}
+$$
 
 ```rust
-let variance_ratio = posterior.beta_cov.det() / calibration.prior_cov.det();
-
-if variance_ratio > 0.5 {
+if rho > log(0.5) {  // Posterior volume not reduced much
     return Some(InconclusiveReason::DataTooNoisy {
         message: "Posterior variance is >50% of prior; data not informative",
         guidance: "Try: cycle counter, reduce system load, increase batch size",
@@ -662,11 +703,11 @@ if variance_ratio > 0.5 {
 }
 ```
 
+Alternative: use trace ratio $\text{tr}(\Lambda_{\text{post}})/\text{tr}(\Lambda_0) > 0.5$ if log-det is numerically unstable.
+
 **Why this matters:** A wide posterior centered at zero can have substantial mass above θ—not because we're confident there's a leak, but because we're uncertain about everything. This gate catches that pathology.
 
-**Critical for threshold elevation:** When $\theta_{\text{user}} \ll \theta_{\text{floor}}$, this gate prevents false decisions by catching the case where the posterior hasn't learned anything meaningful relative to the effective threshold.
-
-#### Gate 2: Learning Rate Collapsed
+##### Gate 2: Learning Rate Collapsed
 
 Track KL divergence between successive posteriors:
 
@@ -688,7 +729,9 @@ $$
 \text{KL}(p_{\text{new}} \| p_{\text{old}}) = \frac{1}{2}\left( \text{tr}(\Lambda_{\text{old}}^{-1} \Lambda_{\text{new}}) + (\mu_{\text{old}} - \mu_{\text{new}})^\top \Lambda_{\text{old}}^{-1} (\mu_{\text{old}} - \mu_{\text{new}}) - k + \ln\frac{|\Lambda_{\text{old}}|}{|\Lambda_{\text{new}}|} \right)
 $$
 
-#### Gate 3: Would Take Too Long
+where $k = 9$ for the 9D model.
+
+##### Gate 3: Would Take Too Long
 
 Extrapolate time to decision:
 
@@ -705,29 +748,7 @@ if time_needed > config.time_budget * 10.0 {
 }
 ```
 
-**Extrapolation heuristic:**
-
-Posterior standard deviation shrinks as $1/\sqrt{n}$. To reach a decision boundary:
-
-```rust
-fn extrapolate_samples_to_decision(state: &State, posterior: &Posterior) -> usize {
-    let p = posterior.leak_probability;
-
-    // Distance to nearest decision boundary
-    let margin = f64::min((p - 0.05).abs(), (0.95 - p).abs());
-
-    // Current posterior spread
-    let current_std = posterior.beta_cov.trace().sqrt();
-
-    // Rough estimate: need to shrink std proportionally to margin
-    let std_reduction_needed = current_std / margin;
-    let sample_multiplier = std_reduction_needed.powi(2);
-
-    (state.n_total as f64 * sample_multiplier) as usize
-}
-```
-
-#### Gate 4: Threshold Unachievable
+##### Gate 4: Threshold Unachievable
 
 If even at maximum budget, we cannot reach $\theta_{\text{user}}$:
 
@@ -748,7 +769,7 @@ if theta_floor_at_max > theta_user && theta_user > 0.0 {
 }
 ```
 
-#### Gate 5: Time Budget Exceeded
+##### Gate 5: Time Budget Exceeded
 
 ```rust
 if state.elapsed() > config.time_budget {
@@ -759,7 +780,7 @@ if state.elapsed() > config.time_budget {
 }
 ```
 
-#### Gate 6: Sample Budget Exceeded
+##### Gate 6: Sample Budget Exceeded
 
 ```rust
 if state.n_total >= config.max_samples {
@@ -770,41 +791,11 @@ if state.n_total >= config.max_samples {
 }
 ```
 
-#### Gate 7: Condition Drift Detected
+##### Gate 7: Condition Drift Detected
 
-The covariance estimate $\Sigma_{\text{rate}}$ is computed during calibration. If measurement conditions change during the adaptive loop (e.g., concurrent system load, thermal throttling, or other interference), this estimate becomes invalid and can cause false positives or negatives.
+The covariance estimate $\Sigma_{\text{rate}}$ is computed during calibration. If measurement conditions change during the adaptive loop, this estimate becomes invalid.
 
 We detect condition drift by comparing measurement statistics from calibration against the full test run:
-
-**Online statistics tracking:**
-
-During sample collection, we track per-class statistics incrementally using Welford's algorithm:
-
-```rust
-struct OnlineStats {
-    count: usize,
-    mean: f64,
-    m2: f64,           // For variance: Σ(x - mean)²
-    prev_value: f64,   // For lag-1 autocorrelation
-    autocorr_sum: f64, // Σ(x_i - μ)(x_{i-1} - μ)
-}
-```
-
-This has O(1) overhead per sample—negligible compared to the measurement itself.
-
-**Calibration snapshot:**
-
-At the end of calibration, we save a snapshot of the statistics for each class:
-
-$$
-S_{\text{cal}} = \{ \bar{x}_{\text{cal}}, \sigma^2_{\text{cal}}, \rho_{\text{cal}}(1) \}
-$$
-
-where $\rho(1)$ is the lag-1 autocorrelation coefficient.
-
-**Post-test comparison:**
-
-After the adaptive loop completes, we compute the same statistics over all collected samples and check for significant drift:
 
 ```rust
 struct ConditionDrift {
@@ -813,105 +804,72 @@ struct ConditionDrift {
     mean_drift: f64,        // |μ_post - μ_cal| / σ_cal
 }
 
-// Trigger Inconclusive if any threshold exceeded
 if drift.variance_ratio > 2.0 || drift.variance_ratio < 0.5 {
-    // Variance changed by 2x+ → measurement noise regime changed
     return Some(InconclusiveReason::ConditionsChanged { drift });
 }
 
 if drift.autocorr_change > 0.3 {
-    // Autocorrelation structure changed → different interference pattern
     return Some(InconclusiveReason::ConditionsChanged { drift });
 }
 
 if drift.mean_drift > 3.0 {
-    // Mean shifted by 3+ standard deviations → systematic change
     return Some(InconclusiveReason::ConditionsChanged { drift });
 }
 ```
 
-**Why this matters:**
+#### Non-Blocking Diagnostics
 
-The Bayesian layer assumes the covariance estimate from calibration remains valid. When running in noisy environments (e.g., concurrent test execution), system load can create:
+##### Projection Mismatch Diagnostic
 
-1. **Systematic timing biases** that affect one measurement class more than the other
-2. **Non-stationary noise** where variance or autocorrelation changes over time
-3. **Regime changes** between calibration and the adaptive loop
+Under the 9D model, there is no risk of "mean model cannot represent the observed shape"—the 9D posterior can represent any quantile pattern. The projection mismatch diagnostic measures whether the 2D shift+tail summary faithfully describes the inferred 9D shape.
 
-These conditions can cause confident but incorrect verdicts. Gate 7 detects when calibration assumptions are violated and returns `Inconclusive` rather than a potentially misleading `Pass` or `Fail`.
-
-**Default thresholds:**
-
-| Parameter | Default | Meaning |
-|-----------|---------|---------|
-| `max_variance_ratio` | 2.0 | Variance can at most double |
-| `min_variance_ratio` | 0.5 | Variance can at most halve |
-| `max_autocorr_change` | 0.3 | Autocorrelation can shift by ±0.3 |
-| `max_mean_drift_sigmas` | 3.0 | Mean can shift by 3 standard deviations |
-
-#### Gate 8: Model Mismatch (Lack of Fit)
-
-The 2D effect model constrains the mean structure to $\text{span}(X)$. Real timing leaks can induce quantile-difference shapes outside this span (e.g., upper-tail-only effects, asymmetric bumps). When the model fits poorly, the posterior on $\beta$ can be confident while predictions are wrong.
-
-**Residual and fit statistic:**
-
-At each iteration, compute:
+**Projection mismatch statistic:**
 
 $$
-r := \Delta - X\hat{\beta}, \quad \hat{\beta} := \beta_{\text{post}}
+r_{\text{proj}} := \delta_{\text{post}} - X\beta_{\text{proj,post}}
 $$
 
 $$
-Q := r^\top \Sigma_n^{-1} r
+Q_{\text{proj}} := r_{\text{proj}}^\top \Sigma_n^{-1} r_{\text{proj}}
 $$
 
-Under the idealized model (Gaussian likelihood, correctly specified $X$, known $\Sigma$), $Q \sim \chi^2_7$ with $\nu = 9 - 2 = 7$ degrees of freedom. However, due to shrinkage from the prior and estimated covariance, we use the bootstrap-calibrated threshold $Q_{\text{thresh}}$ (see §2.3.3) rather than relying on the asymptotic distribution.
+**Semantics (normative):**
 
-**Gate rule:**
+- Projection mismatch MUST NOT be verdict-blocking
+- If $Q_{\text{proj}} > Q_{\text{proj,thresh}}$, the oracle MUST:
+  - Set `effect.interpretation_caveat`
+  - Report a "top quantiles" shape hint (see below)
+  - Mark `Diagnostics.projection_mismatch_ok = false`
 
-```rust
-if q_fit > calibration.q_thresh {
-    return Some(InconclusiveReason::ModelMismatch {
-        q_statistic: q_fit,
-        q_threshold: calibration.q_thresh,
-        message: "Observed quantile pattern not well-explained by shift+tail model",
-        guidance: "The timing difference may have a shape not captured by the 2D basis. \
-                   Inspect raw quantile differences for asymmetric or multi-modal patterns.",
-    });
-}
-```
+**Top quantiles shape hint:**
 
-**Verdict-blocking semantics:**
+When projection mismatch is high, report the 2–3 most relevant quantiles ranked by per-quantile exceedance probability:
 
-When ModelMismatch triggers:
-- Return `Outcome::Inconclusive` (never Pass/Fail)
-- Still report $(\mu, \tau)$ as a *projection summary* for debugging
-- Label `EffectPattern` as `Indeterminate`
-- Include caveat that the 2D interpretation is unreliable
+$$
+p_k := P(|\delta_k| > \theta_{\text{eff}} \mid \Delta)
+$$
 
-**Why this matters:**
+Since the posterior is Gaussian, the marginal $\delta_k \mid \Delta \sim \mathcal{N}(\mu_k, s_k^2)$ where:
 
-This gate makes the library **fail-safe under model misspecification**. You don't need to abandon the 2D model to be rigorous—you just need to refuse strong verdicts when the model's fit is demonstrably poor. This is classical "lack of fit" diagnostics applied to security tooling.
+$$
+\mu_k = (\delta_{\text{post}})_k, \quad s_k^2 = (\Lambda_{\text{post}})_{kk}
+$$
+
+Compute:
+
+$$
+p_k = 1 - \left[\Phi\left(\frac{\theta_{\text{eff}} - \mu_k}{s_k}\right) - \Phi\left(\frac{-\theta_{\text{eff}} - \mu_k}{s_k}\right)\right]
+$$
+
+**Selection rule:** Select top 2–3 indices by $p_k$ (descending). Optional stability filter: include only those with $p_k \geq 0.10$; if fewer than 2 remain, relax to include the top 2.
+
+**Reporting:** For each selected quantile, report mean, 95% CI, and exceedance probability. This is O(9) and requires no extra Monte Carlo.
 
 ### 2.7 Minimum Detectable Effect
 
 The MDE answers: "what's the smallest effect I could reliably detect given the noise level?"
 
-**Derivation:**
-
-Under the GLS estimator $\hat{\beta} = (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1} \Delta$, the MDE with 50% power is:
-
-$$
-\text{MDE}_\mu = z_{0.975} \cdot \sqrt{\left( \mathbf{1}^\top \Sigma_n^{-1} \mathbf{1} \right)^{-1}}
-$$
-
-$$
-\text{MDE}_\tau = z_{0.975} \cdot \sqrt{\left( \mathbf{b}_{\text{tail}}^\top \Sigma_n^{-1} \mathbf{b}_{\text{tail}} \right)^{-1}}
-$$
-
-**Relation to $\theta_{\text{floor}}$:**
-
-The MDE values above are per-parameter. The measurement floor $\theta_{\text{floor}}$ is defined for the decision functional $\max_k |(X\beta)_k|$, which requires the familywise correction described in §2.3.4.
+For the 9D model, the MDE is defined in terms of the decision functional $m(\delta) = \max_k |\delta_k|$. The measurement floor $\theta_{\text{floor}}$ serves this purpose—it's the smallest effect that can be reliably distinguished from noise at the current sample size.
 
 **Scaling:** MDE ∝ $1/\sqrt{n}$. With adaptive sampling, we can report MDE dynamically:
 
@@ -942,12 +900,11 @@ Research mode uses the same Bayesian machinery as normal mode, but:
 1. Sets $\theta_{\text{user}} = 0$, so $\theta_{\text{eff}} = \theta_{\text{floor}}$
 2. Reports posterior credible intervals instead of exceedance probabilities
 3. Returns a `Research` outcome instead of Pass/Fail
-4. Does not hard-stop on model mismatch (exploratory goal), but downgrades interpretation
 
-The decision functional is the same scalar used everywhere:
+The decision functional is the same:
 
 $$
-m(\beta) = \max_k |(X\beta)_k|
+m(\delta) = \max_k |\delta_k|
 $$
 
 #### Algorithm
@@ -960,7 +917,7 @@ fn run_research_mode(calibration: &Calibration, config: &Config) -> ResearchOutc
         // 1. Collect batch
         state.collect_batch(config.batch_size);
 
-        // 2. Update posterior on β
+        // 2. Update posterior on δ
         let posterior = state.compute_posterior();
 
         // 3. Recompute θ_floor analytically
@@ -969,12 +926,11 @@ fn run_research_mode(calibration: &Calibration, config: &Config) -> ResearchOutc
             calibration.theta_tick,
         );
 
-        // 4. Check model fit (does not terminate, but affects interpretation)
-        let residual = state.delta - X * posterior.beta;
-        let q_fit = residual.dot(&state.sigma_n_inv * residual);
-        let model_mismatch = q_fit > calibration.q_thresh;
+        // 4. Check projection mismatch (affects interpretation, not stopping)
+        let q_proj = compute_projection_mismatch(&posterior, &state);
+        let projection_mismatch = q_proj > calibration.q_proj_thresh;
 
-        // 5. Compute posterior distribution of m = max|Xβ|
+        // 5. Compute posterior distribution of m = max|δ|
         let m_samples = posterior.sample_max_effect(10_000);
         let m_mean = mean(&m_samples);
         let m_ci = (percentile(&m_samples, 2.5), percentile(&m_samples, 97.5));
@@ -989,15 +945,10 @@ fn run_research_mode(calibration: &Calibration, config: &Config) -> ResearchOutc
                 max_effect_ci: m_ci,
                 theta_floor,
                 detectable: true,
-                model_mismatch,
-                effect: if model_mismatch {
-                    posterior.effect_estimate_with_caveat()
-                } else {
-                    posterior.effect_estimate()
-                },
+                projection_mismatch,
+                effect: posterior.effect_estimate(projection_mismatch),
                 samples_used: state.n_total,
-                quality: compute_quality(&state),
-                diagnostics: compute_diagnostics(&state),
+                // ...
             };
         }
 
@@ -1005,56 +956,23 @@ fn run_research_mode(calibration: &Calibration, config: &Config) -> ResearchOutc
         if m_ci.1 < theta_floor * 0.9 {
             return ResearchOutcome {
                 status: ResearchStatus::NoEffectDetected,
-                max_effect_ns: m_mean,
-                max_effect_ci: m_ci,
-                theta_floor,
-                detectable: false,
-                model_mismatch,
-                effect: if model_mismatch {
-                    posterior.effect_estimate_with_caveat()
-                } else {
-                    posterior.effect_estimate()
-                },
-                samples_used: state.n_total,
-                quality: compute_quality(&state),
-                diagnostics: compute_diagnostics(&state),
+                // ...
             };
         }
 
         // 6c. θ_floor hit the tick floor (can't improve further)
-        let tick_floor = calibration.theta_tick;
-        if theta_floor <= tick_floor * 1.01 {
+        if theta_floor <= calibration.theta_tick * 1.01 {
             return ResearchOutcome {
                 status: ResearchStatus::ResolutionLimitReached,
-                max_effect_ns: m_mean,
-                max_effect_ci: m_ci,
-                theta_floor,
-                detectable: m_ci.0 > theta_floor,
-                model_mismatch,
-                effect: if model_mismatch {
-                    posterior.effect_estimate_with_caveat()
-                } else {
-                    posterior.effect_estimate()
-                },
-                samples_used: state.n_total,
-                quality: compute_quality(&state),
-                diagnostics: compute_diagnostics(&state),
+                // ...
             };
         }
 
-        // 6d. Quality gates (except model mismatch, which is tracked but not blocking)
+        // 6d. Quality gates
         if let Some(issue) = check_quality_gates_research(&state, &posterior, calibration, config) {
             return ResearchOutcome {
                 status: ResearchStatus::QualityIssue(issue),
-                max_effect_ns: m_mean,
-                max_effect_ci: m_ci,
-                theta_floor,
-                detectable: m_ci.0 > theta_floor,
-                model_mismatch,
-                effect: posterior.effect_estimate_with_caveat(),
-                samples_used: state.n_total,
-                quality: MeasurementQuality::Poor,
-                diagnostics: compute_diagnostics(&state),
+                // ...
             };
         }
 
@@ -1062,40 +980,11 @@ fn run_research_mode(calibration: &Calibration, config: &Config) -> ResearchOutc
         if state.budget_exhausted(config) {
             return ResearchOutcome {
                 status: ResearchStatus::BudgetExhausted,
-                max_effect_ns: m_mean,
-                max_effect_ci: m_ci,
-                theta_floor,
-                detectable: m_ci.0 > theta_floor,
-                model_mismatch,
-                effect: if model_mismatch {
-                    posterior.effect_estimate_with_caveat()
-                } else {
-                    posterior.effect_estimate()
-                },
-                samples_used: state.n_total,
-                quality: compute_quality(&state),
-                diagnostics: compute_diagnostics(&state),
+                // ...
             };
         }
     }
 }
-```
-
-#### Model Mismatch in Research Mode
-
-Unlike normal mode, Research mode does not terminate on model mismatch (since the goal is exploratory). However:
-
-1. **Downgrade interpretation**: Set `EffectPattern::Indeterminate` and add caveat to effect estimate
-2. **Flag mismatch**: Set `model_mismatch: true` in output
-3. **Caveat the CI**: The `max_effect_ci` is labeled as "under projection model" when mismatch occurs
-
-**Output caveat when model_mismatch is true:**
-
-```
-⚠ Model fit is poor (Q = 24.3 > threshold 18.5)
-  The (μ, τ) decomposition may not accurately describe the timing pattern.
-  The max effect CI is computed under the projection model and should be
-  interpreted with caution. Inspect raw quantile differences directly.
 ```
 
 #### Stopping Conditions
@@ -1105,20 +994,10 @@ Unlike normal mode, Research mode does not terminate on model mismatch (since th
 | Effect detected | CI lower bound > 1.1 × θ_floor | `EffectDetected` |
 | No effect detected | CI upper bound < 0.9 × θ_floor | `NoEffectDetected` |
 | Resolution limit | θ_floor ≈ θ_tick | `ResolutionLimitReached` |
-| Quality issue | Any quality gate triggers (except mismatch) | `QualityIssue` |
+| Quality issue | Any quality gate triggers | `QualityIssue` |
 | Budget exhausted | Time or samples exceeded | `BudgetExhausted` |
 
 The 1.1× and 0.9× margins provide hysteresis to prevent oscillating near the boundary.
-
-#### Interpretation
-
-Research mode answers: "Is there a distributional difference above what we can resolve?"
-
-- **Detectable = true**: The 95% CI for max effect is entirely above θ_floor. There is a timing difference.
-- **Detectable = false**: The 95% CI is entirely below θ_floor. No timing difference above the noise floor.
-- **Inconclusive**: The CI straddles θ_floor, or we couldn't measure reliably.
-
-When `model_mismatch = true`, the $(\mu, \tau)$ decomposition is unreliable, but the `detectable` flag and `max_effect_ci` (as a projection) may still provide useful guidance.
 
 ### 2.9 Dependence Estimation
 
@@ -1145,8 +1024,6 @@ QualityIssue {
     guidance: "High autocorrelation reduces effective sample size",
 }
 ```
-
-**Important:** Dependence estimation must be on the acquisition stream to match the block bootstrap. Per-class ACF may be retained as a secondary diagnostic but should not drive block length selection.
 
 ### 2.10 Discrete Timer Mode
 
@@ -1186,6 +1063,10 @@ $$
 
 This provides consistent variance estimation when the standard CLT doesn't apply.
 
+**Prior shape fallback:**
+
+In discrete mode, apply shrinkage to the prior shape matrix (see §2.3.5).
+
 **Gaussian approximation caveat:**
 
 The Gaussian likelihood is a rougher approximation with discrete data. We report `QualityIssue::DiscreteTimer` on all outputs and frame probabilities as "approximate under Gaussianized model."
@@ -1193,6 +1074,17 @@ The Gaussian likelihood is a rougher approximation with discrete data. We report
 ### 2.11 Calibration Validation
 
 The Bayesian approach requires empirical validation that posteriors are well-calibrated.
+
+**Null calibration test (normative requirement):**
+
+The oracle MUST provide (or run in internal test suite) a "fixed-vs-fixed" validation:
+
+- Run the full pipeline under null (same distribution both classes)
+- Empirically verify that:
+  - The rate of `Fail` is near 0 and bounded by configured error tolerance
+  - The rate of `Pass` at the pass threshold is consistent with expectations, conditional on quality gates passing
+
+This is an end-to-end check that $c_{\text{floor}}$, $\Sigma$ scaling, prior calibration, and posterior computation are not systematically anti-conservative.
 
 **Calibration testing procedure:**
 
@@ -1210,12 +1102,6 @@ The Bayesian approach requires empirical validation that posteriors are well-cal
 | θ | ~50% | 35-65% |
 | 2θ | ~95% | 85-100% |
 | 3θ | ~99% | 95-100% |
-
-**Calibration issues to watch for:**
-
-- **Overconfidence**: Reporting high P when true effect < θ → prior too narrow or covariance underestimated
-- **Underconfidence**: Reporting low P when true effect > θ → covariance overestimated or prior too wide
-- **Discrete mode pathology**: Calibration degradation with coarse timers
 
 ---
 
@@ -1250,7 +1136,7 @@ Before measurement begins, several sanity checks detect common problems:
 
 **Harness sanity (fixed-vs-fixed)**: Split fixed samples in half and run the analysis. If a "leak" is detected between identical inputs, something is wrong with the test harness. This catches bugs that would otherwise produce false positives.
 
-### 3.2.1 Stationarity Check
+#### 3.2.1 Stationarity Check
 
 Non-stationarity breaks bootstrap assumptions. We implement a rolling-variance check:
 
@@ -1394,8 +1280,8 @@ The oracle returns one of five outcomes:
 pub enum Outcome {
     /// No timing leak detected. P(leak) < pass_threshold (default 0.05).
     Pass {
-        leak_probability: f64,     // P(effect > θ_eff | data)
-        effect: EffectEstimate,    // Shift/tail decomposition
+        leak_probability: f64,     // P(max|δ| > θ_eff | data)
+        effect: EffectEstimate,    // Projection summary + top quantiles if needed
         theta_user: f64,           // What the user requested
         theta_eff: f64,            // What was actually tested
         theta_floor: f64,          // Measurement floor at final n
@@ -1446,7 +1332,7 @@ pub struct ResearchOutcome {
     /// Why we stopped
     pub status: ResearchStatus,
 
-    /// Posterior mean of max_k |(Xβ)_k|
+    /// Posterior mean of max_k |δ_k|
     pub max_effect_ns: f64,
 
     /// 95% credible interval for max effect
@@ -1458,12 +1344,10 @@ pub struct ResearchOutcome {
     /// Is the effect confidently above the floor?
     pub detectable: bool,
 
-    /// True if model fit check failed (Q > threshold)
-    /// When true, (μ, τ) decomposition is unreliable
-    pub model_mismatch: bool,
+    /// True if 2D projection doesn't fit well
+    pub projection_mismatch: bool,
 
-    /// Decomposition into shift + tail components
-    /// Interpret with caution if model_mismatch is true
+    /// Decomposition into shift + tail components (projection summary)
     pub effect: EffectEstimate,
 
     /// Measurement metadata
@@ -1510,14 +1394,6 @@ pub enum InconclusiveReason {
 
     /// Measurement conditions changed between calibration and test.
     ConditionsChanged { drift: ConditionDrift },
-
-    /// Model fit is poor; quantile pattern not well-explained by shift+tail basis.
-    ModelMismatch {
-        q_statistic: f64,
-        q_threshold: f64,
-        message: String,
-        guidance: String,
-    },
 }
 
 pub struct ConditionDrift {
@@ -1530,19 +1406,37 @@ pub struct ConditionDrift {
 }
 
 pub struct EffectEstimate {
-    pub shift_ns: f64,                     // Uniform shift (positive = baseline slower)
-    pub tail_ns: f64,                      // Tail effect (positive = baseline has heavier upper tail)
-    pub credible_interval_ns: (f64, f64),  // 95% CI for total effect
+    /// Uniform shift from 2D projection (positive = fixed class slower)
+    pub shift_ns: f64,
+    /// Tail effect from 2D projection (positive = fixed class has heavier upper tail)
+    pub tail_ns: f64,
+    /// 95% CI for total effect (from 9D posterior)
+    pub credible_interval_ns: (f64, f64),
+    /// Pattern classification
     pub pattern: EffectPattern,
-    /// When true, the (μ, τ) decomposition may be unreliable due to poor model fit
+    /// When projection mismatch is high, explains why 2D summary may be inaccurate
     pub interpretation_caveat: Option<String>,
+    /// Top quantiles by exceedance probability (populated when projection mismatch is high)
+    pub top_quantiles: Option<Vec<TopQuantile>>,
+}
+
+pub struct TopQuantile {
+    /// Which quantile (e.g., 0.9 for 90th percentile)
+    pub quantile_p: f64,
+    /// Posterior mean effect at this quantile (ns)
+    pub mean_ns: f64,
+    /// 95% marginal credible interval (ns)
+    pub ci95_ns: (f64, f64),
+    /// P(|δ_k| > θ_eff | data) for this quantile
+    pub exceed_prob: f64,
 }
 
 pub enum EffectPattern {
     UniformShift,   // All quantiles shifted equally
     TailEffect,     // Upper quantiles shifted more
     Mixed,          // Both components significant
-    Indeterminate,  // Neither significant, or model fit poor
+    Complex,        // Projection mismatch high; pattern doesn't fit 2D basis
+    Indeterminate,  // Neither significant
 }
 
 pub enum Exploitability {
@@ -1565,12 +1459,14 @@ pub struct Diagnostics {
     pub effective_sample_size: usize,
     pub stationarity_ratio: f64,
     pub stationarity_ok: bool,
-    pub model_fit_chi2: f64,       // Chi-squared statistic for model fit (Q = r'Σ⁻¹r)
-    pub model_fit_threshold: f64,  // Bootstrap-calibrated threshold or χ²₇(0.99) = 18.48 fallback
-    pub model_fit_ok: bool,
     pub outlier_rate_baseline: f64,
     pub outlier_rate_sample: f64,
     pub outlier_asymmetry_ok: bool,
+
+    // Projection mismatch (non-blocking)
+    pub projection_mismatch_q: f64,
+    pub projection_mismatch_threshold: f64,
+    pub projection_mismatch_ok: bool,
 
     // Timer info
     pub discrete_mode: bool,
@@ -1585,8 +1481,8 @@ pub struct Diagnostics {
     pub quality_issues: Vec<QualityIssue>,
     pub preflight_warnings: Vec<PreflightWarningInfo>,
 
-    // Reproduction info (for verbose/debug output)
-    pub seed: Option<u64>,           // RNG seed used for reproducibility
+    // Reproduction info
+    pub seed: Option<u64>,
     pub attacker_model: Option<String>,
     pub threshold_ns: f64,
     pub timer_name: String,
@@ -1602,10 +1498,9 @@ pub struct QualityIssue {
 pub enum IssueCode {
     HighDependence, LowEffectiveSamples, StationaritySuspect, DiscreteTimer,
     SmallSampleDiscrete, HighGeneratorCost, LowUniqueInputs, QuantilesFiltered,
-    ThresholdElevated, ThresholdClamped, HighWinsorRate, ModelMismatch,
+    ThresholdElevated, ThresholdClamped, HighWinsorRate, ProjectionMismatch,
 }
 
-/// Preflight warning with severity and category for structured handling.
 pub struct PreflightWarningInfo {
     pub category: PreflightCategory,
     pub severity: PreflightSeverity,
@@ -1613,22 +1508,18 @@ pub struct PreflightWarningInfo {
     pub guidance: Option<String>,
 }
 
-/// Severity of preflight warnings.
 pub enum PreflightSeverity {
-    /// Sampling efficiency issue - results still valid but may need more samples.
     Informational,
-    /// Statistical assumption violation - undermines result confidence.
     ResultUndermining,
 }
 
-/// Category of preflight check that generated the warning.
 pub enum PreflightCategory {
-    TimerSanity,    // Timer sanity checks
-    Sanity,         // Fixed-vs-Fixed consistency
-    Generator,      // Generator cost comparison
-    Autocorrelation,// Serial dependence check
-    System,         // System configuration (CPU governor, etc.)
-    Resolution,     // Timer resolution check
+    TimerSanity,
+    Sanity,
+    Generator,
+    Autocorrelation,
+    System,
+    Resolution,
 }
 ```
 
@@ -1644,43 +1535,27 @@ The most important configuration choice is your **attacker model**, which determ
 pub enum AttackerModel {
     /// Co-resident attacker with cycle-level timing.
     /// θ = 0.6 ns (~2 cycles @ 3GHz)
-    ///
-    /// Use for: SGX enclaves, cross-VM attacks, containers on shared hosts,
-    /// hyperthreading siblings, local privilege escalation.
     SharedHardware,
 
     /// Post-quantum crypto sentinel.
     /// θ = 3.3 ns (~10 cycles @ 3GHz)
-    ///
-    /// Use for: ML-KEM, ML-DSA, and other post-quantum implementations.
-    /// Catches KyberSlash-class (~20 cycle) vulnerabilities.
     PostQuantumSentinel,
 
     /// Adjacent network attacker (LAN, HTTP/2 multiplexing).
     /// θ = 100 ns
-    ///
-    /// Use for: Internal services, microservices, HTTP/2 APIs where
-    /// Timeless Timing Attacks apply (request multiplexing eliminates jitter).
     AdjacentNetwork,
 
     /// Remote network attacker (general internet).
     /// θ = 50 μs
-    ///
-    /// Use for: Public APIs, web services, legacy HTTP/1.1 services.
     RemoteNetwork,
 
     /// Research mode: no threshold, reports posterior directly.
-    ///
-    /// Use for: Profiling, debugging, academic analysis.
-    /// Returns ResearchOutcome instead of Pass/Fail.
     Research,
 
     /// Custom threshold in nanoseconds.
     Custom { threshold_ns: f64 },
 }
 ```
-
-**Preset summary:**
 
 | Preset | θ | Use case |
 |--------|---|----------|
@@ -1690,63 +1565,7 @@ pub enum AttackerModel {
 | `RemoteNetwork` | 50 μs | Internet, legacy services |
 | `Research` | θ_floor (dynamic) | Profiling, debugging (not for CI) |
 
-**Sources:**
-
-- **Crosby et al. (2009)**: "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC.
-- **Van Goethem et al. (2020)**: "Timeless Timing Attacks." USENIX Security. Shows HTTP/2 request multiplexing enables LAN-like precision over the internet.
-- **Kario**: Argues timing differences as small as one clock cycle can be detectable when sharing hardware.
-
-**Recommended usage:**
-
-```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
-
-let inputs = InputPair::new(
-    || [0u8; 32],
-    || rand::random::<[u8; 32]>(),
-);
-
-// Choose based on deployment scenario
-let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-    .test(inputs, |data| operation(data));
-
-match outcome {
-    Outcome::Pass { leak_probability, effect, theta_user, theta_eff, .. } => {
-        if theta_eff > theta_user {
-            println!("No leak at θ_eff={:.1}ns (requested {:.1}ns)", theta_eff, theta_user);
-        } else {
-            println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
-        }
-    }
-    Outcome::Fail { leak_probability, effect, exploitability, .. } => {
-        println!("Leak detected: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
-    }
-    Outcome::Inconclusive { reason, leak_probability, .. } => {
-        println!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
-        match reason {
-            InconclusiveReason::ModelMismatch { guidance, .. } => {
-                println!("Model fit issue: {}", guidance);
-            }
-            _ => {}
-        }
-    }
-    Outcome::Unmeasurable { recommendation, .. } => {
-        println!("Skipping: {}", recommendation);
-    }
-    Outcome::Research(res) => {
-        println!("Max effect: {:.1} ns [{:.1}, {:.1}]",
-                 res.max_effect_ns, res.max_effect_ci.0, res.max_effect_ci.1);
-        println!("Detectable: {}", res.detectable);
-        if res.model_mismatch {
-            println!("⚠ Model fit is poor; (μ,τ) decomposition unreliable");
-        }
-    }
-}
-```
-
 #### TimingOracle Configuration
-
-The main configuration type. Use `for_attacker()` as the entry point:
 
 ```rust
 impl TimingOracle {
@@ -1757,7 +1576,7 @@ impl TimingOracle {
     pub fn pass_threshold(self, p: f64) -> Self;  // P(leak) < p → Pass (default 0.05)
     pub fn fail_threshold(self, p: f64) -> Self;  // P(leak) > p → Fail (default 0.95)
 
-    // Resource limits (optional, for CI or constrained environments)
+    // Resource limits
     pub fn time_budget(self, duration: Duration) -> Self;
     pub fn max_samples(self, n: usize) -> Self;
 
@@ -1770,8 +1589,6 @@ impl TimingOracle {
     pub fn research() -> Self;
 }
 ```
-
-All configuration is optional. The defaults work well for most use cases.
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -1809,16 +1626,6 @@ match outcome {
 }
 ```
 
-**For CI assertions:**
-
-```rust
-// Strict: fail on Fail, pass on Pass, fail on Inconclusive
-assert!(matches!(outcome, Outcome::Pass { .. }));
-
-// Lenient: fail only on Fail
-assert!(!matches!(outcome, Outcome::Fail { .. }));
-```
-
 ### 4.4 Builder API
 
 ```rust
@@ -1848,31 +1655,26 @@ match outcome {
         println!("95% CI: [{:.1}, {:.1}] ns", res.max_effect_ci.0, res.max_effect_ci.1);
         println!("Measurement floor: {:.1} ns", res.theta_floor);
 
-        if res.model_mismatch {
-            println!("⚠ Model fit is poor (interpret μ,τ with caution)");
+        if res.projection_mismatch {
+            println!("⚠ Complex pattern; 2D summary is approximate");
+            if let Some(top) = &res.effect.top_quantiles {
+                for q in top {
+                    println!("  {:}th percentile: {:.1} ns (P={:.0}%)",
+                             (q.quantile_p * 100.0) as u32,
+                             q.mean_ns,
+                             q.exceed_prob * 100.0);
+                }
+            }
         }
 
         match res.status {
             ResearchStatus::EffectDetected => {
-                println!("✓ Timing difference detected (CI > θ_floor)");
+                println!("✓ Timing difference detected");
             }
             ResearchStatus::NoEffectDetected => {
                 println!("✗ No timing difference above {:.1} ns", res.theta_floor);
             }
-            ResearchStatus::ResolutionLimitReached => {
-                println!("⚠ Hit timer resolution limit");
-                if res.detectable {
-                    println!("  Effect appears present but cannot be precisely bounded");
-                }
-            }
-            ResearchStatus::QualityIssue(reason) => {
-                println!("⚠ Quality issue: {:?}", reason);
-            }
-            ResearchStatus::BudgetExhausted => {
-                println!("⚠ Budget exhausted");
-                println!("  Current estimate: {:.1} ns [{:.1}, {:.1}]",
-                         res.max_effect_ns, res.max_effect_ci.0, res.max_effect_ci.1);
-            }
+            _ => {}
         }
     }
     _ => unreachable!("Research mode always returns Research variant"),
@@ -1885,7 +1687,7 @@ match outcome {
 
 ### 5.1 Leak Probability
 
-The `leak_probability` is $P(\max_k |(X\beta)_k| > \theta_{\text{eff}} \mid \Delta)$—the posterior probability of an effect exceeding your effective threshold.
+The `leak_probability` is $P(\max_k |\delta_k| > \theta_{\text{eff}} \mid \Delta)$—the posterior probability of an effect exceeding your effective threshold at any quantile.
 
 | Probability | Interpretation | Outcome |
 |-------------|----------------|---------|
@@ -1894,13 +1696,7 @@ The `leak_probability` is $P(\max_k |(X\beta)_k| > \theta_{\text{eff}} \mid \Del
 | 50–95% | Probably leaking, uncertain | Inconclusive (needs more data) |
 | > 95% | Confident leak | **Fail** |
 
-The 5%/95% boundaries are configurable via `pass_threshold` and `fail_threshold`.
-
-**Important:** Pass/Fail are only emitted when all quality gates pass, including the model fit gate. If you receive Inconclusive with `ModelMismatch`, the leak probability is reported as "estimate under the model" but should not be interpreted as a confident claim.
-
 ### 5.2 Understanding θ_user vs θ_eff vs θ_floor
-
-When interpreting results, pay attention to three threshold values:
 
 | Value | Meaning |
 |-------|---------|
@@ -1908,28 +1704,33 @@ When interpreting results, pay attention to three threshold values:
 | θ_floor | What the measurement could resolve |
 | θ_eff | What was actually tested (max of the above) |
 
-**When θ_eff = θ_user:** The measurement achieved your requested sensitivity. Results directly answer "is there a leak > θ_user?"
+**When θ_eff = θ_user:** Results directly answer "is there a leak > θ_user?"
 
-**When θ_eff > θ_user:** The measurement couldn't achieve your requested sensitivity. Results answer "is there a leak > θ_eff?" which is a weaker statement. A `Pass` means "no leak above θ_eff," but there could still be a leak between θ_user and θ_eff.
+**When θ_eff > θ_user:** Results answer "is there a leak > θ_eff?" A `Pass` means "no leak above θ_eff," but there could still be a leak between θ_user and θ_eff.
 
-**Example:**
+### 5.3 Effect Size and Pattern
 
-```
-Requested: θ_user = 10 ns
-Achieved:  θ_floor = 41 ns (timer-limited)
-Tested:    θ_eff = 41 ns
+The `EffectEstimate` provides two levels of explanation:
 
-Pass with P(leak) = 2% means:
-  ✓ No leak > 41 ns
-  ? Unknown for 10-41 ns range
-```
-
-### 5.3 Effect Size
-
+**2D Projection (when it fits well):**
 - **Shift (μ)**: Uniform timing difference. Cause: different code path, branch on secret.
 - **Tail (τ)**: Upper quantiles affected more. Cause: cache misses, secret-dependent memory access.
 
-Both reported in nanoseconds with 95% credible intervals.
+**Top Quantiles (when projection doesn't fit):**
+
+When `projection_mismatch` is true, the pattern is complex. Check `top_quantiles` for where the effect concentrates:
+
+```rust
+if let Some(top) = &effect.top_quantiles {
+    for q in top {
+        println!("{:}th percentile: {:.1} ns [{:.1}, {:.1}] (P={:.0}%)",
+                 (q.quantile_p * 100.0) as u32,
+                 q.mean_ns,
+                 q.ci95_ns.0, q.ci95_ns.1,
+                 q.exceed_prob * 100.0);
+    }
+}
+```
 
 **Effect patterns:**
 
@@ -1938,26 +1739,23 @@ Both reported in nanoseconds with 95% credible intervals.
 | UniformShift | μ significant, τ ≈ 0 | Branch on secret bit |
 | TailEffect | μ ≈ 0, τ significant | Cache-timing leak |
 | Mixed | Both significant | Multiple leak sources |
-| Indeterminate | Neither significant, or model fit poor | No detectable leak, or pattern not captured |
-
-**Model mismatch caveat:** When `interpretation_caveat` is set on the effect estimate, the $(\mu, \tau)$ decomposition may not accurately describe the timing pattern. Inspect raw quantile differences for asymmetric or multi-modal effects.
+| Complex | Projection mismatch high | Asymmetric or multi-modal pattern |
+| Indeterminate | Neither significant | No detectable leak |
 
 ### 5.4 Exploitability
 
-Risk assessment based on effect size (updated for Timeless Timing Attacks, Van Goethem et al. 2020):
+Risk assessment based on effect size:
 
 | Level | Effect Size | Attack Vector |
 |-------|-------------|---------------|
-| SharedHardwareOnly | < 10 ns | ~1k queries on same core (SGX, containers) |
+| SharedHardwareOnly | < 10 ns | ~1k queries on same core |
 | Http2Multiplexing | 10–100 ns | ~100k concurrent HTTP/2 requests |
 | StandardRemote | 100 ns – 10 μs | ~1k-10k queries with standard timing |
 | ObviousLeak | > 10 μs | <100 queries, trivially observable |
 
-**Note**: Thresholds updated based on Timeless Timing Attacks (Van Goethem et al., USENIX Security 2020), which demonstrated that HTTP/2 request multiplexing enables LAN-like timing precision over the internet.
-
 ### 5.5 Inconclusive Results
 
-Inconclusive means "couldn't reach 95% confidence either way." This is different from "don't know"—you still get a probability estimate.
+Inconclusive means "couldn't reach 95% confidence either way."
 
 | Reason | Meaning | Suggested Action |
 |--------|---------|------------------|
@@ -1968,73 +1766,15 @@ Inconclusive means "couldn't reach 95% confidence either way." This is different
 | TimeBudgetExceeded | Ran out of time | Increase time budget |
 | SampleBudgetExceeded | Ran out of samples | Increase sample budget |
 | ConditionsChanged | Calibration assumptions violated | Run in isolation, reduce system load |
-| **ModelMismatch** | Quantile pattern not well-explained by 2D basis | Inspect raw quantile differences; consider asymmetric leak patterns |
 
-**For CI:**
+### 5.6 Projection Mismatch
 
-```rust
-match outcome {
-    Outcome::Inconclusive { leak_probability, reason, .. } => {
-        match reason {
-            InconclusiveReason::ModelMismatch { .. } => {
-                // Model doesn't fit—could be a leak with unusual shape
-                eprintln!("Warning: Possible leak with atypical pattern (P={:.0}%)", 
-                         leak_probability * 100.0);
-            }
-            _ if leak_probability > 0.5 => {
-                // Probably leaking but not confident—treat as failure
-                panic!("Likely timing leak (P={:.0}%)", leak_probability * 100.0);
-            }
-            _ => {
-                // Probably safe but not confident—treat as warning
-                eprintln!("Warning: Could not confirm constant-time behavior");
-            }
-        }
-    }
-    _ => {}
-}
-```
+When `diagnostics.projection_mismatch_ok = false`:
 
-### 5.6 Research Mode Results
-
-Research mode results should be interpreted as exploratory analysis:
-
-| Status | Meaning | Confidence |
-|--------|---------|------------|
-| EffectDetected | CI clearly above θ_floor | High—there is a timing difference |
-| NoEffectDetected | CI clearly below θ_floor | High—no detectable difference |
-| ResolutionLimitReached | Hit timer limit | Medium—limited by hardware |
-| QualityIssue | Measurement problems | Low—interpret with caution |
-| BudgetExhausted | Ran out of resources | Variable—check CI width |
-
-**Key insight:** `detectable` is always relative to θ_floor. A `detectable = false` result means "no effect above the noise floor," which depends on timer quality and sample count.
-
-**Model mismatch in Research mode:** When `model_mismatch = true`:
-- The `detectable` flag and `max_effect_ci` may still provide useful guidance
-- The $(\mu, \tau)$ decomposition is unreliable
-- Consider inspecting raw quantile differences directly
-
-### 5.7 Quality Assessment
-
-Quality reflects how trustworthy the measurement is:
-
-| Quality | Meaning | MDE |
-|---------|---------|-----|
-| Excellent | Optimal measurement conditions | < 5 ns |
-| Good | Minor issues, results valid | 5-20 ns |
-| Poor | Results may lack precision | 20-100 ns |
-| TooNoisy | Results may be unreliable | > 100 ns |
-
-Common issues and fixes:
-
-| Issue | Symptom | Fix |
-|-------|---------|-----|
-| HighDependence | ESS << n | Isolate to dedicated core |
-| StationaritySuspect | Drift over time | Pin CPU frequency, longer warmup |
-| DiscreteTimer | < 10% unique values | Use cycle counter if available |
-| ThresholdElevated | θ_eff > θ_user | Use cycle counter or accept elevated θ |
-| HighWinsorRate | > 1% outliers | Reduce system interference |
-| ModelMismatch | High residual Q | Leak may have unusual shape; inspect quantiles |
+- The 2D shift+tail summary doesn't fit the observed pattern well
+- **This does NOT affect the verdict**—the 9D posterior handles arbitrary patterns
+- Check `effect.top_quantiles` for where the timing difference concentrates
+- The `interpretation_caveat` explains why the 2D summary may be inaccurate
 
 ---
 
@@ -2045,23 +1785,24 @@ Common issues and fixes:
 | $\{(c_t, y_t)\}$ | Acquisition stream: class labels and timing measurements |
 | $T$ | Acquisition stream length ($\approx 2n$) |
 | $F$, $R$ | Per-class sample sets (filtered from stream) |
-| $\Delta$ | 9-vector of signed quantile differences |
+| $\Delta$ | 9-vector of observed quantile differences |
+| $\delta$ | 9-vector of true (latent) quantile differences |
 | $\hat{q}_F(k)$, $\hat{q}_R(k)$ | Empirical quantiles for Fixed and Random classes |
-| $X$ | $9 \times 2$ design matrix $[\mathbf{1} \mid \mathbf{b}_{\text{tail}}]$ |
-| $\beta = (\mu, \tau)^\top$ | Effect parameters: shift and tail |
+| $X$ | $9 \times 2$ projection basis $[\mathbf{1} \mid \mathbf{b}_{\text{tail}}]$ |
+| $\beta_{\text{proj}}$ | 2D projection: $(\mu, \tau)^\top$ |
 | $\Sigma_n$ | Covariance matrix at sample size $n$ |
 | $\Sigma_{\text{rate}}$ | Covariance rate: $\Sigma_n = \Sigma_{\text{rate}} / n$ |
-| $\Sigma_{\text{pred,rate}}$ | Prediction covariance rate: $X (X^\top \Sigma_{\text{rate}}^{-1} X)^{-1} X^\top$ |
-| $\Lambda_0$ | Prior covariance for $\beta$ |
-| $\Lambda_{\text{post}}$ | Posterior covariance for $\beta$ |
+| $\Lambda_0$ | Prior covariance: $\sigma_{\text{prior}}^2 \cdot S$ |
+| $\Lambda_{\text{post}}$ | Posterior covariance for $\delta$ |
+| $S$ | Shaped prior matrix: $\Sigma_{\text{rate}} / \text{tr}(\Sigma_{\text{rate}})$ |
 | $\theta_{\text{user}}$ | User-requested threshold |
 | $\theta_{\text{floor}}$ | Measurement floor (smallest resolvable effect) |
 | $c_{\text{floor}}$ | Floor-rate constant: $\theta_{\text{floor,stat}} = c_{\text{floor}} / \sqrt{n}$ |
 | $\theta_{\text{tick}}$ | Timer resolution component of floor |
 | $\theta_{\text{eff}}$ | Effective threshold used for inference |
-| $m(\beta)$ | Decision functional: $\max_k |(X\beta)_k|$ |
-| $Q$ | Model fit statistic: $r^\top \Sigma_n^{-1} r$ |
-| $Q_{\text{thresh}}$ | Bootstrap-calibrated mismatch threshold (99th percentile) |
+| $m(\delta)$ | Decision functional: $\max_k |\delta_k|$ |
+| $Q_{\text{proj}}$ | Projection mismatch statistic |
+| $Q_{\text{proj,thresh}}$ | Projection mismatch threshold (99th percentile) |
 | $\hat{b}$ | Block length (Politis-White, on acquisition stream) |
 | MDE | Minimum detectable effect |
 | $n$ | Samples per class |
@@ -2080,9 +1821,9 @@ Common issues and fixes:
 | Calibration samples | 5,000 | Initial covariance estimation |
 | Pass threshold | 0.05 | 95% confidence of no leak |
 | Fail threshold | 0.95 | 95% confidence of leak |
-| Variance ratio gate | 0.5 | Posterior ≈ prior detection |
-| Model mismatch percentile | 99th | Q_thresh from bootstrap distribution |
-| Model mismatch fallback | χ²₇,₀.₉₉ ≈ 18.48 | Conservative lack-of-fit cutoff |
+| Prior exceedance target | 0.62 | Genuine uncertainty about exceedance |
+| Variance ratio gate | 0.5 | Posterior ≈ prior detection (log-det or trace) |
+| Projection mismatch percentile | 99th | Q_proj_thresh from bootstrap |
 | Block length cap | min(3√T, T/3) | Prevent degenerate blocks |
 | Discrete threshold | 10% unique | Trigger discrete mode |
 | Min ticks per call | 5 | Measurability floor |
@@ -2092,6 +1833,7 @@ Common issues and fixes:
 | Default sample budget | 100,000 | Maximum samples |
 | CI hysteresis (Research) | 10% | Margin for detection decisions |
 | Default RNG seed | 0x74696D696E67 | "timing" in ASCII |
+| Prior shrinkage (λ) | 0.05–0.2 | Robustness for ill-conditioned Σ |
 
 ## Appendix C: References
 
@@ -2117,61 +1859,54 @@ Common issues and fixes:
 
 9. Bernstein, D. J. et al. (2024). "KyberSlash." — Timing vulnerability example
 
+10. Dunsche, M. et al. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. — Relevant hypotheses framework
+
 **Existing tools:**
 
-10. dudect (C): https://github.com/oreparaz/dudect
-11. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
+11. dudect (C): https://github.com/oreparaz/dudect
+12. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
 
 ---
 
-## Appendix D: Changelog from v3
+## Appendix D: Changelog from v4.1
 
 ### Summary of Changes
 
-| Aspect | v3 | v4 |
-|--------|----|----|
-| Bootstrap resampling | Per-class paired indices | Stream-based (acquisition order) |
-| Block length estimation | Per-class ACF | Acquisition stream ACF |
-| Prior scale | σ = 1.12θ | σ = 1.12 × θ_eff |
-| θ = 0 handling | Clamp to timer resolution | Research mode with CI-based semantics |
-| Sub-floor θ | Silent clamp | Explicit elevation + ThresholdElevated warning |
-| θ_floor computation | Not defined | Floor-rate constant + analytical 1/√n scaling |
-| θ_floor dynamics | N/A | Analytical update (no per-iteration MC) |
-| Model fit check | Not present | Q statistic with bootstrap-calibrated threshold |
-| Quality gate order | After decisions | Before decisions (verdict-blocking) |
-| New quality gates | N/A | ThresholdUnachievable, ModelMismatch |
-| Research mode | "θ → 0" (degenerate) | Proper posterior + CI reporting |
-| Research mismatch | N/A | Tracked but non-blocking; downgrades interpretation |
-| RNG policy | Unspecified | Deterministic seeding (reproducible results) |
-| Output types | 4 variants | 5 variants (+ Research) |
-| InconclusiveReason | 6 variants | 8 variants (+ ThresholdUnachievable, ModelMismatch) |
+| Aspect | v4.1 | v4.2 |
+|--------|------|------|
+| Inference model | 2D (β ∈ ℝ²) constrained to span(X) | 9D (δ ∈ ℝ⁹) unconstrained |
+| Prior structure | Isotropic on β | Shaped ridge on δ: Λ₀ = σ²S |
+| Prior scale | κ = 1.12 (closed-form) | Numerical root-finding |
+| Decision functional | max_k \|(Xβ)_k\| | max_k \|δ_k\| |
+| c_floor definition | Based on prediction covariance | Based on Σ_rate directly |
+| Model mismatch | Verdict-blocking gate | Non-blocking diagnostic |
+| Projection summary | Primary output | Secondary (when it fits) |
+| Top quantiles | Not present | Shown when projection mismatch high |
+| EffectPattern | 4 variants | 5 variants (+ Complex) |
 
 ### Key Fixes
 
-1. **Stream-based bootstrap (Amendment 1)**: v3's per-class paired resampling didn't preserve adjacency in the acquisition process, potentially underestimating variance and producing overconfident posteriors. v4 resamples the acquisition stream directly, then splits by class—correctly preserving common-mode drift and cross-class correlation.
+1. **9D inference (Amendment 6)**: The 2D basis constraint caused frequent ModelMismatch → Inconclusive for real-world leaks with asymmetric patterns. Moving to 9D removes this failure mode while keeping conjugacy.
 
-2. **Block length on acquisition stream**: v3 computed block length per-class. v4 computes it on the acquisition stream to match the bootstrap resampling.
+2. **Shaped prior**: The isotropic prior ignored quantile correlation. The shaped prior Λ₀ = σ²S respects the covariance structure.
 
-3. **Model mismatch gate (Amendment 2)**: v3 had no check for whether the 2D basis could represent the observed quantile pattern. v4 computes a whitened residual statistic Q and compares to a bootstrap-calibrated threshold, returning Inconclusive when fit is poor. This makes the library fail-safe under model misspecification.
+3. **Numerical prior scale**: The closed-form κ ≈ 1.12 assumed i.i.d. coordinates. Numerical root-finding handles correlation correctly.
 
-4. **Verdict-blocking semantics (Amendment 3)**: v3's quality gates could be checked after decisions in some code paths. v4 explicitly requires all gates to pass before Pass/Fail, ensuring strong verdicts only when assumptions are verified.
+4. **Projection mismatch is non-blocking**: Since 9D inference can represent any pattern, poor 2D fit is an explainability issue, not a validity threat.
 
-5. **Deterministic RNG (Amendment 4)**: v3 had unspecified RNG behavior. v4 requires deterministic seeding so that identical timing samples + config produce identical results. This eliminates CI flakiness from algorithmic randomness.
+5. **Top quantiles reporting**: When the 2D summary doesn't fit, users get actionable information about where the effect concentrates.
 
-6. **Floor-rate constant (Amendment 5)**: v3 would have required per-iteration Monte Carlo for θ_floor. v4 computes c_floor once at calibration and uses analytical $1/\sqrt{n}$ scaling, improving reproducibility and performance.
+### Migration Notes
 
-7. **θ = 0 degeneracy**: v3's Research mode would always return ~100% leak probability because P(|X| > 0) = 1 for any continuous distribution. v4 uses CI-based semantics with θ_floor as the reference.
-
-8. **"Fail from prior" pathology**: v3 could return Fail when θ_user ≪ θ_floor because the prior had high mass above θ_user. v4 checks quality gates before decisions and uses θ_eff consistently.
-
-9. **Per-coordinate vs familywise floor**: v3's implicit MDE used per-coordinate z_{0.975}. v4 uses proper familywise correction via the floor-rate constant computed from max|Z| distribution.
-
-10. **Silent threshold clamping**: v3 would clamp θ to timer resolution without telling the user. v4 reports θ_user, θ_eff, and θ_floor explicitly, with ThresholdElevated warnings.
+- The calibration phase still estimates Σ_rate via stream-based block bootstrap on Δ. No change required.
+- The adaptive loop still uses Σ_n = Σ_rate/n scaling.
+- Verdict-blocking quality gates are unchanged except ModelMismatch is removed.
+- API changes are additive: new fields in Diagnostics and EffectEstimate; InconclusiveReason::ModelMismatch removed.
 
 ### Design Philosophy
 
-The guiding principle for v4 is:
+The guiding principle remains:
 
 > **CI verdicts should almost never be confidently wrong.**
 
-When assumptions are violated (dependence mis-modeled, drift, misspecified effect shape), the oracle prefers **Inconclusive with an actionable reason** rather than emitting a confident Pass/Fail. This makes timing-oracle suitable for security-critical applications where false confidence is worse than admitted uncertainty.
+The 9D model strengthens this by eliminating a class of false Inconclusives that occurred when real leaks had patterns outside the 2D basis. Now, unusual patterns still get detected and reported—just with a different explanation format.
