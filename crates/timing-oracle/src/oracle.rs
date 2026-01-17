@@ -792,6 +792,22 @@ impl TimingOracle {
             calibration_sample_cycles.clone(),
         );
 
+        // Create stationarity tracker for drift detection (spec Section 3.2.1)
+        let ns_per_cycle = 1.0 / timer.cycles_per_ns();
+        let tracker_seed = self.config.measurement_seed.unwrap_or(DEFAULT_SEED).wrapping_add(0xDEAD);
+        let mut stationarity_tracker = crate::analysis::StationarityTracker::new(
+            self.config.max_samples * 2, // baseline + sample
+            tracker_seed,
+        );
+
+        // Add calibration samples to stationarity tracker
+        for &cycles in &calibration_baseline_cycles {
+            stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+        }
+        for &cycles in &calibration_sample_cycles {
+            stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+        }
+
         // Adaptive loop
         let mut input_idx = n_cal; // Start after calibration samples
         loop {
@@ -799,6 +815,7 @@ impl TimingOracle {
             if adaptive_state.elapsed() > self.config.time_budget {
                 let posterior = adaptive_state.current_posterior();
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
+                let stationarity = stationarity_tracker.compute();
 
                 return self.build_inconclusive_outcome(
                     InconclusiveReason::TimeBudgetExceeded {
@@ -810,14 +827,15 @@ impl TimingOracle {
                     &timer,
                     start_time,
                     theta_ns,
+                    stationarity,
                 );
             }
 
             // Check sample budget
             if adaptive_state.n_total() >= self.config.max_samples {
                 let posterior = adaptive_state.current_posterior();
-
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
+                let stationarity = stationarity_tracker.compute();
 
                 return self.build_inconclusive_outcome(
                     InconclusiveReason::SampleBudgetExceeded {
@@ -829,6 +847,7 @@ impl TimingOracle {
                     &timer,
                     start_time,
                     theta_ns,
+                    stationarity,
                 );
             }
 
@@ -838,6 +857,7 @@ impl TimingOracle {
                 // Out of pre-generated inputs
                 let posterior = adaptive_state.current_posterior();
                 let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
+                let stationarity = stationarity_tracker.compute();
 
                 return self.build_inconclusive_outcome(
                     InconclusiveReason::SampleBudgetExceeded {
@@ -849,6 +869,7 @@ impl TimingOracle {
                     &timer,
                     start_time,
                     theta_ns,
+                    stationarity,
                 );
             }
 
@@ -874,6 +895,7 @@ impl TimingOracle {
                             }
                         });
                         batch_baseline.push(cycles);
+                        stationarity_tracker.push(cycles as f64 * ns_per_cycle);
                     }
                     Class::Sample => {
                         let cycles = timer.measure_cycles(|| {
@@ -883,6 +905,7 @@ impl TimingOracle {
                             }
                         });
                         batch_sample.push(cycles);
+                        stationarity_tracker.push(cycles as f64 * ns_per_cycle);
                     }
                 }
             }
@@ -904,6 +927,7 @@ impl TimingOracle {
                     samples_per_class,
                     elapsed: _,
                 } => {
+                    let stationarity = stationarity_tracker.compute();
                     return self.build_fail_outcome(
                         &posterior,
                         samples_per_class,
@@ -911,6 +935,7 @@ impl TimingOracle {
                         &timer,
                         start_time,
                         theta_ns,
+                        stationarity,
                     );
                 }
                 AdaptiveOutcome::NoLeakDetected {
@@ -918,6 +943,7 @@ impl TimingOracle {
                     samples_per_class,
                     elapsed: _,
                 } => {
+                    let stationarity = stationarity_tracker.compute();
                     return self.build_pass_outcome(
                         &posterior,
                         samples_per_class,
@@ -925,6 +951,7 @@ impl TimingOracle {
                         &timer,
                         start_time,
                         theta_ns,
+                        stationarity,
                     );
                 }
                 AdaptiveOutcome::Continue { posterior, .. } => {
@@ -935,6 +962,7 @@ impl TimingOracle {
                 AdaptiveOutcome::Inconclusive { reason, .. } => {
                     // Real stop condition (DataTooNoisy, NotLearning, WouldTakeTooLong, Timeout)
                     let result_reason = convert_adaptive_reason(&reason);
+                    let stationarity = stationarity_tracker.compute();
                     return self.build_inconclusive_outcome(
                         result_reason,
                         &adaptive_state,
@@ -942,6 +970,7 @@ impl TimingOracle {
                         &timer,
                         start_time,
                         theta_ns,
+                        stationarity,
                     );
                 }
             }
@@ -960,10 +989,12 @@ impl TimingOracle {
         timer: &BoxedTimer,
         start_time: Instant,
         theta_ns: f64,
+        stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns);
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
+        let diagnostics =
+            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, posterior.model_fit_q, stationarity);
 
         Outcome::Pass {
             leak_probability: posterior.leak_probability,
@@ -986,11 +1017,13 @@ impl TimingOracle {
         timer: &BoxedTimer,
         start_time: Instant,
         theta_ns: f64,
+        stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns);
         let exploitability = Exploitability::from_effect_ns(effect.total_effect_ns());
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
+        let diagnostics =
+            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, posterior.model_fit_q, stationarity);
 
         Outcome::Fail {
             leak_probability: posterior.leak_probability,
@@ -1014,6 +1047,7 @@ impl TimingOracle {
         timer: &BoxedTimer,
         start_time: Instant,
         theta_ns: f64,
+        stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
         let posterior = state.current_posterior();
         let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
@@ -1021,7 +1055,9 @@ impl TimingOracle {
             .map(|p| build_effect_estimate(p, theta_ns))
             .unwrap_or_default();
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
+        let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
+        let diagnostics =
+            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, model_fit_q, stationarity);
 
         Outcome::Inconclusive {
             reason,
@@ -1285,7 +1321,10 @@ impl TimingOracle {
             .unwrap_or_default();
 
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
+        let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
+        // Research mode doesn't track stationarity separately (would need refactoring)
+        let diagnostics =
+            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, model_fit_q, None);
 
         Outcome::Research(ResearchOutcome {
             status,
@@ -1337,6 +1376,8 @@ fn build_diagnostics(
     start_time: Instant,
     config: &Config,
     theta_ns: f64,
+    model_fit_q: f64,
+    stationarity: Option<crate::analysis::StationarityResult>,
 ) -> Diagnostics {
     // Convert preflight warnings to PreflightWarningInfo
     let preflight = &calibration.preflight_result;
@@ -1385,11 +1426,12 @@ fn build_diagnostics(
     Diagnostics {
         dependence_length: calibration.block_length,
         effective_sample_size: calibration.calibration_samples / calibration.block_length.max(1),
-        stationarity_ratio: 1.0, // TODO: compute from calibration vs inference variance
-        stationarity_ok: true,
-        model_fit_chi2: 0.0, // TODO: compute residual chi-squared
-        model_fit_threshold: 18.48, // chi-squared(7, 0.99), TODO: use calibration.q_thresh
-        model_fit_ok: true,
+        // Use stationarity result if available, otherwise assume no drift
+        stationarity_ratio: stationarity.map(|s| s.ratio).unwrap_or(1.0),
+        stationarity_ok: stationarity.map(|s| s.ok).unwrap_or(true),
+        model_fit_chi2: model_fit_q,
+        model_fit_threshold: calibration.q_thresh,
+        model_fit_ok: model_fit_q <= calibration.q_thresh,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,

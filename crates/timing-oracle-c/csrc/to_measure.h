@@ -5,6 +5,11 @@
  * This header declares the timing-critical measurement functions called from
  * the Rust FFI layer. These functions are implemented in C to ensure maximum
  * control over the hot loop and platform-specific timer access.
+ *
+ * Supported timers:
+ * - x86_64: rdtsc (standard), perf_event (PMU, requires elevated privileges)
+ * - ARM64 Linux: cntvct_el0 (standard), perf_event (PMU, requires elevated privileges)
+ * - ARM64 macOS: cntvct_el0 (standard), kperf (PMU, requires root)
  */
 
 #ifndef TO_MEASURE_H
@@ -17,6 +22,71 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/* ============================================================================
+ * Timer Preference
+ * ============================================================================ */
+
+/**
+ * @brief Timer preference for measurement.
+ *
+ * Controls which timer implementation to use:
+ * - AUTO: Try PMU first (perf/kperf), fall back to standard (rdtsc/cntvct)
+ * - STANDARD: Always use standard timer (rdtsc on x86, cntvct on ARM)
+ * - PREFER_PMU: Use PMU timer or fail if unavailable
+ */
+typedef enum {
+    TO_TIMER_PREF_AUTO = 0,      /**< Try PMU first, fall back to standard */
+    TO_TIMER_PREF_STANDARD = 1,  /**< Always use standard timer */
+    TO_TIMER_PREF_PREFER_PMU = 2 /**< Require PMU timer */
+} to_timer_pref_t;
+
+/**
+ * @brief Active timer type (internal).
+ */
+typedef enum {
+    TO_TIMER_TYPE_RDTSC = 0,        /**< x86_64 RDTSC */
+    TO_TIMER_TYPE_CNTVCT = 1,       /**< ARM64 CNTVCT_EL0 */
+    TO_TIMER_TYPE_PERF = 2,         /**< Linux perf_event */
+    TO_TIMER_TYPE_KPERF = 3,        /**< macOS kperf */
+    TO_TIMER_TYPE_CLOCK_GETTIME = 4 /**< Fallback clock_gettime */
+} to_timer_type_t;
+
+/**
+ * @brief Initialize the timer subsystem.
+ *
+ * Must be called before to_collect_batch() if using non-default timer.
+ * Safe to call multiple times; subsequent calls are no-ops.
+ *
+ * @param pref Timer preference (AUTO, STANDARD, or PREFER_PMU)
+ * @return 0 on success, -1 if PREFER_PMU but PMU unavailable
+ */
+int to_timer_init(to_timer_pref_t pref);
+
+/**
+ * @brief Clean up the timer subsystem.
+ *
+ * Releases any resources (file descriptors, etc.) acquired during init.
+ * Safe to call multiple times or without prior init.
+ */
+void to_timer_cleanup(void);
+
+/**
+ * @brief Get the currently active timer type.
+ *
+ * @return The timer type being used for measurements
+ */
+to_timer_type_t to_get_timer_type(void);
+
+/**
+ * @brief Get the cycles-per-nanosecond ratio for the active timer.
+ *
+ * For PMU timers, this is calibrated at init time.
+ * For standard timers, this is derived from timer frequency.
+ *
+ * @return Cycles per nanosecond (e.g., 3.0 for 3GHz CPU)
+ */
+double to_get_cycles_per_ns(void);
 
 /**
  * @brief Callback type for generating input data.

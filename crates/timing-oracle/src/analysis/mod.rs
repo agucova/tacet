@@ -17,3 +17,7 @@ pub use timing_oracle_core::analysis::{
 // Keep diagnostics locally (depends on main crate types)
 mod diagnostics;
 pub use diagnostics::{compute_diagnostics, DiagnosticsExtra};
+
+// Stationarity tracking for drift detection
+mod stationarity;
+pub use stationarity::{StationarityResult, StationarityTracker};

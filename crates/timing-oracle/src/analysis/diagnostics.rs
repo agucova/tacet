@@ -27,6 +27,8 @@ pub struct DiagnosticsExtra {
     pub duplicate_fraction: f64,
     /// Number of calibration samples used.
     pub calibration_samples: usize,
+    /// Bootstrap-calibrated model mismatch threshold (99th percentile of Q*).
+    pub q_thresh: f64,
 }
 
 /// Compute all diagnostic checks.
@@ -120,7 +122,7 @@ pub fn compute_diagnostics(
         stationarity_ok,
         model_fit_chi2,
         model_fit_ok,
-        model_fit_threshold: 18.48, // chi-squared(7, 0.99), TODO: use calibration.q_thresh
+        model_fit_threshold: if extra.q_thresh > 0.0 { extra.q_thresh } else { 18.48 },
         outlier_rate_baseline: outlier_rate_fixed,
         outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,
@@ -132,7 +134,25 @@ pub fn compute_diagnostics(
         total_time_secs: 0.0, // Will be filled in by caller
         warnings,
         quality_issues: Vec::new(),
-        preflight_warnings: Vec::new(), // TODO: Populate from preflight results
+        preflight_warnings: {
+            let mut pw = Vec::new();
+            for w in &preflight.warnings.sanity {
+                pw.push(w.to_warning_info());
+            }
+            for w in &preflight.warnings.generator {
+                pw.push(w.to_warning_info());
+            }
+            for w in &preflight.warnings.autocorr {
+                pw.push(w.to_warning_info());
+            }
+            for w in &preflight.warnings.system {
+                pw.push(w.to_warning_info());
+            }
+            for w in &preflight.warnings.resolution {
+                pw.push(w.to_warning_info());
+            }
+            pw
+        },
         // Reproduction info - to be filled in by caller with config context
         seed: None,
         attacker_model: None,

@@ -88,6 +88,21 @@ extern "C" {
     fn to_get_timer_frequency() -> u64;
     #[allow(dead_code)] // Part of C API, may be used for calibration
     fn to_read_timer() -> u64;
+
+    /// Initialize the timer subsystem with specified preference.
+    /// Returns 0 on success, -1 if PREFER_PMU but PMU unavailable.
+    fn to_timer_init(pref: i32) -> i32;
+
+    /// Clean up the timer subsystem, releasing any resources.
+    fn to_timer_cleanup();
+
+    /// Get the currently active timer type.
+    #[allow(dead_code)] // Part of C API
+    fn to_get_timer_type() -> i32;
+
+    /// Get cycles per nanosecond ratio for the active timer.
+    #[allow(dead_code)] // Part of C API
+    fn to_get_cycles_per_ns() -> f64;
 }
 
 /// Callback type for generating input data.
@@ -104,6 +119,37 @@ pub type OperationFn = unsafe extern "C" fn(
     input: *const u8,
     input_size: usize,
 );
+
+/// Convert ToTimerPref to C enum value.
+fn timer_pref_to_c(pref: ToTimerPref) -> i32 {
+    match pref {
+        ToTimerPref::Auto => 0,
+        ToTimerPref::Standard => 1,
+        ToTimerPref::PreferPmu => 2,
+    }
+}
+
+/// Initialize the timer subsystem based on config preference.
+/// Returns Ok(()) on success, Err(ToResult) if PMU was required but unavailable.
+unsafe fn init_timer(config: &ToConfig) -> Result<(), ToResult> {
+    let pref = timer_pref_to_c(config.timer_preference);
+    let result = to_timer_init(pref);
+
+    if result != 0 && config.timer_preference == ToTimerPref::PreferPmu {
+        return Err(ToResult {
+            outcome: ToOutcome::Inconclusive,
+            inconclusive_reason: ToInconclusiveReason::ThresholdUnachievable,
+            recommendation: make_recommendation(
+                "PMU timer requested but unavailable. On Linux, try: sudo or \
+                 echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid. \
+                 On macOS, try: sudo"
+            ),
+            ..ToResult::default()
+        });
+    }
+
+    Ok(())
+}
 
 // ============================================================================
 // Public C API
@@ -138,18 +184,26 @@ pub unsafe extern "C" fn to_test(
     operation: OperationFn,
     ctx: *mut c_void,
 ) -> ToResult {
-    let result = catch_unwind(|| {
-        let config = if config.is_null() {
-            ToConfig::default()
-        } else {
-            (*config).clone()
-        };
+    let config = if config.is_null() {
+        ToConfig::default()
+    } else {
+        (*config).clone()
+    };
 
+    // Initialize timer based on config preference
+    if let Err(result) = init_timer(&config) {
+        return result;
+    }
+
+    let result = catch_unwind(|| {
         let start_time = std::time::Instant::now();
         run_test_impl(&config, input_size, generator, operation, ctx, || {
             start_time.elapsed().as_secs_f64()
         })
     });
+
+    // Always cleanup timer, even if panic occurred
+    to_timer_cleanup();
 
     match result {
         Ok(outcome) => outcome,
@@ -202,15 +256,20 @@ pub unsafe extern "C" fn to_test_with_time(
     ctx: *mut c_void,
     elapsed_secs: *const f64,
 ) -> ToResult {
+    let config = if config.is_null() {
+        ToConfig::default()
+    } else {
+        (*config).clone()
+    };
+
+    // Initialize timer based on config preference
+    if let Err(result) = init_timer(&config) {
+        return result;
+    }
+
     #[cfg(feature = "std")]
     {
         let result = catch_unwind(|| {
-            let config = if config.is_null() {
-                ToConfig::default()
-            } else {
-                (*config).clone()
-            };
-
             run_test_impl(&config, input_size, generator, operation, ctx, || {
                 if elapsed_secs.is_null() {
                     0.0
@@ -219,6 +278,9 @@ pub unsafe extern "C" fn to_test_with_time(
                 }
             })
         });
+
+        // Always cleanup timer, even if panic occurred
+        to_timer_cleanup();
 
         match result {
             Ok(outcome) => outcome,
@@ -236,19 +298,16 @@ pub unsafe extern "C" fn to_test_with_time(
     #[cfg(not(feature = "std"))]
     {
         // No panic catching in no_std - panics will abort
-        let config = if config.is_null() {
-            ToConfig::default()
-        } else {
-            (*config).clone()
-        };
-
-        run_test_impl(&config, input_size, generator, operation, ctx, || {
+        let result = run_test_impl(&config, input_size, generator, operation, ctx, || {
             if elapsed_secs.is_null() {
                 0.0
             } else {
                 *elapsed_secs
             }
-        })
+        });
+
+        to_timer_cleanup();
+        result
     }
 }
 
@@ -1292,7 +1351,7 @@ mod tests {
         assert!(!name.is_empty(), "Timer name should not be empty");
 
         // Should be one of the known timer names
-        let known_timers = ["rdtsc", "cntvct_el0", "clock_gettime"];
+        let known_timers = ["rdtsc", "cntvct_el0", "clock_gettime", "perf", "kperf"];
         assert!(
             known_timers.iter().any(|&t| name.contains(t)),
             "Unknown timer name: {}",

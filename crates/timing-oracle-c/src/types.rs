@@ -38,6 +38,24 @@ impl ToAttackerModel {
     }
 }
 
+/// Timer preference for measurements.
+///
+/// Controls which timer implementation to use:
+/// - Auto: Try PMU first (perf/kperf), fall back to standard (rdtsc/cntvct)
+/// - Standard: Always use standard timer
+/// - PreferPmu: Use PMU timer or fail if unavailable
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToTimerPref {
+    /// Try PMU first, fall back to standard timer.
+    #[default]
+    Auto,
+    /// Always use standard timer (rdtsc/cntvct_el0).
+    Standard,
+    /// Require PMU timer, fail if unavailable.
+    PreferPmu,
+}
+
 /// Configuration for the timing test.
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -56,6 +74,8 @@ pub struct ToConfig {
     pub fail_threshold: f64,
     /// Random seed. 0 = system entropy.
     pub seed: u64,
+    /// Timer preference. Default: Auto.
+    pub timer_preference: ToTimerPref,
 }
 
 impl Default for ToConfig {
@@ -68,6 +88,7 @@ impl Default for ToConfig {
             pass_threshold: 0.05,
             fail_threshold: 0.95,
             seed: 0,
+            timer_preference: ToTimerPref::default(),
         }
     }
 }

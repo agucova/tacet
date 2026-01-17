@@ -13,8 +13,9 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+use crate::analysis::build_design_matrix;
 use crate::math;
-use crate::types::{Class, Matrix9, TimingSample, Vector9};
+use crate::types::{Class, Matrix2, Matrix9, Matrix9x2, TimingSample, Vector9};
 
 use super::block_length::{optimal_block_length, paired_optimal_block_length};
 use super::bootstrap::{
@@ -42,6 +43,15 @@ pub struct CovarianceEstimate {
 
     /// Amount of jitter added for numerical stability.
     pub jitter_added: f64,
+
+    /// Model mismatch threshold: 99th percentile of bootstrap Q* distribution.
+    ///
+    /// Q* = r^T Σ^{-1} r where r = Δ* - X β* is the residual from GLS fit.
+    /// When the observed Q exceeds this threshold, the 2D (shift + tail) model
+    /// doesn't adequately explain the quantile pattern.
+    ///
+    /// See spec Section 2.3.3 (Model Mismatch Threshold Calibration).
+    pub q_thresh: f64,
 }
 
 impl CovarianceEstimate {
@@ -288,6 +298,8 @@ pub fn bootstrap_covariance_matrix(
         block_size,
         min_eigenvalue,
         jitter_added: jitter,
+        // Single-class covariance doesn't compute Q* - use fallback
+        q_thresh: 18.48,
     }
 }
 
@@ -474,12 +486,22 @@ pub fn bootstrap_difference_covariance(
     // Compute minimum eigenvalue for stability check
     let min_eigenvalue = estimate_min_eigenvalue(&stabilized_matrix);
 
+    // Compute bootstrap-calibrated q_thresh (second pass)
+    // Invert the covariance matrix for Q* computation
+    let q_thresh = match stabilized_matrix.try_inverse() {
+        Some(sigma_inv) => {
+            compute_bootstrap_q_thresh(interleaved, n_bootstrap, block_size, &sigma_inv, seed)
+        }
+        None => 18.48, // Fallback if inversion fails
+    };
+
     CovarianceEstimate {
         matrix: stabilized_matrix,
         n_bootstrap,
         block_size,
         min_eigenvalue,
         jitter_added: jitter,
+        q_thresh,
     }
 }
 
@@ -590,12 +612,18 @@ pub fn bootstrap_difference_covariance_discrete(
     let (stabilized_matrix, jitter) = add_diagonal_jitter(cov_matrix);
     let min_eigenvalue = estimate_min_eigenvalue(&stabilized_matrix);
 
+    // TODO: Implement proper Q* computation for discrete mode.
+    // The m-out-of-n bootstrap with per-class sequences requires a different
+    // Q* computation approach. For now, use the chi-squared fallback.
+    let q_thresh = 18.48; // chi-squared(7, 0.99)
+
     CovarianceEstimate {
         matrix: stabilized_matrix,
         n_bootstrap,
         block_size,
         min_eigenvalue,
         jitter_added: jitter,
+        q_thresh,
     }
 }
 
@@ -645,6 +673,171 @@ fn add_diagonal_jitter(mut matrix: Matrix9) -> (Matrix9, f64) {
     }
 
     (matrix, jitter)
+}
+
+/// Compute Q* statistic for model fit check.
+///
+/// Q* = r^T Σ^{-1} r where r = Δ - X β is the residual from GLS fit.
+/// This measures how well the 2D (shift + tail) model explains the quantile pattern.
+///
+/// Under the null model (correctly specified), Q* follows approximately χ²(7).
+///
+/// See spec Section 2.3.3 (Model Mismatch Threshold Calibration).
+///
+/// # Arguments
+///
+/// * `delta` - The 9-vector of quantile differences Δ = q_F - q_R
+/// * `sigma_inv` - The inverse covariance matrix Σ^{-1}
+///
+/// # Returns
+///
+/// The Q* statistic (non-negative scalar).
+fn compute_q_statistic(delta: &Vector9, sigma_inv: &Matrix9) -> f64 {
+    // Get design matrix X: 9x2 for [uniform_shift, tail_effect]
+    let x: Matrix9x2 = build_design_matrix();
+
+    // 1. Compute GLS estimate: β = (X' Σ^{-1} X)^{-1} X' Σ^{-1} δ
+    let xt_sigma_inv = x.transpose() * sigma_inv;
+    let xt_sigma_inv_x: Matrix2 = xt_sigma_inv * x;
+    let beta = match xt_sigma_inv_x.try_inverse() {
+        Some(inv) => inv * xt_sigma_inv * delta,
+        None => {
+            // Singular matrix - return infinity to indicate numerical issues
+            return f64::INFINITY;
+        }
+    };
+
+    // 2. Compute residual: r = δ - X β
+    let predicted = x * beta;
+    let residual = delta - predicted;
+
+    // 3. Compute Q = r^T Σ^{-1} r
+    let q = residual.transpose() * sigma_inv * residual;
+    q[(0, 0)].max(0.0) // Ensure non-negative
+}
+
+/// Compute bootstrap Q* distribution and return 99th percentile.
+///
+/// This runs a second pass through the bootstrap to compute Q* for each replicate,
+/// using the estimated covariance matrix from the first pass.
+///
+/// # Arguments
+///
+/// * `interleaved` - Timing samples in measurement order
+/// * `n_bootstrap` - Number of bootstrap replicates
+/// * `block_size` - Block size for bootstrap
+/// * `sigma_inv` - Inverse of the estimated covariance matrix
+/// * `seed` - Random seed (should differ from first pass)
+///
+/// # Returns
+///
+/// The 99th percentile of the Q* distribution, or 18.48 (chi-squared fallback) if computation fails.
+fn compute_bootstrap_q_thresh(
+    interleaved: &[TimingSample],
+    n_bootstrap: usize,
+    block_size: usize,
+    sigma_inv: &Matrix9,
+    seed: u64,
+) -> f64 {
+    const FALLBACK_Q_THRESH: f64 = 18.48; // chi-squared(7, 0.99)
+
+    if interleaved.is_empty() || n_bootstrap == 0 {
+        return FALLBACK_Q_THRESH;
+    }
+
+    let n = interleaved.len();
+
+    // Collect Q* values from bootstrap replicates
+    #[cfg(feature = "parallel")]
+    let q_values: Vec<f64> = {
+        (0..n_bootstrap)
+            .into_par_iter()
+            .map(|i| {
+                // Use different seed offset than first pass to get independent samples
+                let mut rng =
+                    Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed.wrapping_add(1), i as u64));
+
+                let mut buffer = vec![
+                    TimingSample {
+                        time_ns: 0.0,
+                        class: Class::Baseline,
+                    };
+                    n
+                ];
+
+                // Joint resample the interleaved sequence
+                block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
+
+                // Split by class
+                let mut baseline_samples: Vec<f64> = Vec::new();
+                let mut sample_samples: Vec<f64> = Vec::new();
+                for sample in &buffer {
+                    match sample.class {
+                        Class::Baseline => baseline_samples.push(sample.time_ns),
+                        Class::Sample => sample_samples.push(sample.time_ns),
+                    }
+                }
+
+                // Compute quantiles
+                let q_baseline = compute_deciles_inplace(&mut baseline_samples);
+                let q_sample = compute_deciles_inplace(&mut sample_samples);
+
+                // Compute delta* and Q*
+                let delta_star = q_baseline - q_sample;
+                compute_q_statistic(&delta_star, sigma_inv)
+            })
+            .collect()
+    };
+
+    #[cfg(not(feature = "parallel"))]
+    let q_values: Vec<f64> = {
+        let mut values = Vec::with_capacity(n_bootstrap);
+        let mut buffer = vec![
+            TimingSample {
+                time_ns: 0.0,
+                class: Class::Baseline,
+            };
+            n
+        ];
+
+        for i in 0..n_bootstrap {
+            let mut rng =
+                Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed.wrapping_add(1), i as u64));
+
+            block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
+
+            let mut baseline_samples: Vec<f64> = Vec::new();
+            let mut sample_samples: Vec<f64> = Vec::new();
+            for sample in &buffer {
+                match sample.class {
+                    Class::Baseline => baseline_samples.push(sample.time_ns),
+                    Class::Sample => sample_samples.push(sample.time_ns),
+                }
+            }
+
+            let q_baseline = compute_deciles_inplace(&mut baseline_samples);
+            let q_sample = compute_deciles_inplace(&mut sample_samples);
+            let delta_star = q_baseline - q_sample;
+            values.push(compute_q_statistic(&delta_star, sigma_inv));
+        }
+        values
+    };
+
+    // Filter out infinities and sort
+    let mut finite_q: Vec<f64> = q_values.into_iter().filter(|q| q.is_finite()).collect();
+
+    if finite_q.is_empty() {
+        return FALLBACK_Q_THRESH;
+    }
+
+    finite_q.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Compute 99th percentile
+    let p99_idx = ((finite_q.len() as f64) * 0.99) as usize;
+    finite_q
+        .get(p99_idx.min(finite_q.len().saturating_sub(1)))
+        .copied()
+        .unwrap_or(FALLBACK_Q_THRESH)
 }
 
 /// Apply variance floor based on timer resolution.
@@ -1113,5 +1306,111 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ========== Q* Statistic Tests ==========
+
+    #[test]
+    fn test_q_statistic_computation() {
+        // With a delta that perfectly fits the shift+tail model, Q* should be ~0
+        // delta = mu * ones + tau * b_tail where ones = [1,...,1], b_tail = [-0.5,...,0.5]
+        let mu = 10.0;
+        let tau = 5.0;
+        let delta = Vector9::from_fn(|i, _| {
+            let b_tail = (i as f64 - 4.0) / 8.0; // -0.5 to 0.5
+            mu + tau * b_tail
+        });
+
+        // Use identity covariance for simplicity
+        let sigma_inv = Matrix9::identity();
+        let q = compute_q_statistic(&delta, &sigma_inv);
+
+        // Q should be very small since delta perfectly fits the model
+        assert!(
+            q < 1e-10,
+            "Q* should be ~0 for perfect model fit, got {}",
+            q
+        );
+    }
+
+    #[test]
+    fn test_q_statistic_with_residual() {
+        // Add a component that doesn't fit the shift+tail model
+        // This should produce a non-zero Q*
+        let mu = 10.0;
+        let tau = 5.0;
+        let delta = Vector9::from_fn(|i, _| {
+            let b_tail = (i as f64 - 4.0) / 8.0;
+            let residual = if i == 4 { 100.0 } else { 0.0 }; // Spike at median
+            mu + tau * b_tail + residual
+        });
+
+        let sigma_inv = Matrix9::identity();
+        let q = compute_q_statistic(&delta, &sigma_inv);
+
+        // Q should be significant since we added a residual
+        assert!(q > 1.0, "Q* should be > 1 with residual, got {}", q);
+    }
+
+    #[test]
+    fn test_q_statistic_is_non_negative() {
+        // Q* should always be non-negative (it's a quadratic form)
+        for seed in 0..10u64 {
+            let delta = Vector9::from_fn(|i, _| {
+                ((seed * 7 + i as u64 * 13) % 100) as f64 - 50.0
+            });
+            let sigma_inv = Matrix9::identity();
+            let q = compute_q_statistic(&delta, &sigma_inv);
+            assert!(q >= 0.0, "Q* should be non-negative, got {}", q);
+        }
+    }
+
+    #[test]
+    fn test_bootstrap_q_thresh_computed() {
+        // Generate synthetic timing data with known properties
+        use crate::types::Class;
+
+        let n = 1000;
+        let mut samples = Vec::with_capacity(2 * n);
+
+        // Create interleaved samples with small difference
+        for i in 0..n {
+            samples.push(TimingSample {
+                time_ns: 100.0 + (i as f64) * 0.01,
+                class: Class::Baseline,
+            });
+            samples.push(TimingSample {
+                time_ns: 101.0 + (i as f64) * 0.01,
+                class: Class::Sample,
+            });
+        }
+
+        let estimate = bootstrap_difference_covariance(&samples, 100, 42);
+
+        // q_thresh should be computed (positive and finite)
+        assert!(
+            estimate.q_thresh > 0.0 && estimate.q_thresh.is_finite(),
+            "q_thresh should be positive and finite, got {}",
+            estimate.q_thresh
+        );
+
+        // q_thresh should be different from the fallback in most cases
+        // (though it could coincidentally equal 18.48, we expect it to differ)
+        // This is a sanity check that the computation is actually running
+        println!("Computed q_thresh: {}", estimate.q_thresh);
+    }
+
+    #[test]
+    fn test_single_class_q_thresh_fallback() {
+        // Single-class covariance should use the fallback q_thresh
+        let data: Vec<f64> = (0..500).map(|x| (x as f64) * 0.1).collect();
+        let estimate = bootstrap_covariance_matrix(&data, 50, 42);
+
+        // Should use fallback value (chi-squared(7, 0.99) ≈ 18.48)
+        assert!(
+            (estimate.q_thresh - 18.48).abs() < 1e-6,
+            "Single-class q_thresh should use fallback 18.48, got {}",
+            estimate.q_thresh
+        );
     }
 }

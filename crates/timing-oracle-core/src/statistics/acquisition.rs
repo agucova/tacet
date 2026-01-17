@@ -11,6 +11,8 @@ extern crate alloc;
 use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
+use crate::types::{Class, TimingSample};
+
 /// Class label for a timing sample.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum SampleClass {
@@ -165,6 +167,25 @@ impl AcquisitionStream {
             stream.push(SampleClass::Random, *s as f64 * ns_per_tick);
         }
         stream
+    }
+
+    /// Convert to Vec<TimingSample> for bootstrap functions.
+    ///
+    /// This is an adapter method that converts the acquisition stream to the
+    /// `TimingSample` format used by the bootstrap covariance estimation functions.
+    ///
+    /// Maps `SampleClass::Fixed` → `Class::Baseline`, `SampleClass::Random` → `Class::Sample`.
+    pub fn to_timing_samples(&self) -> Vec<TimingSample> {
+        self.samples
+            .iter()
+            .map(|&(class, time_ns)| TimingSample {
+                time_ns,
+                class: match class {
+                    SampleClass::Fixed => Class::Baseline,
+                    SampleClass::Random => Class::Sample,
+                },
+            })
+            .collect()
     }
 }
 

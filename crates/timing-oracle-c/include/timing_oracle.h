@@ -92,6 +92,28 @@ typedef enum {
 } to_attacker_model_t;
 
 /* ============================================================================
+ * Timer Preference
+ *
+ * Controls which timer implementation to use for measurements:
+ * - Auto: Try PMU first (perf/kperf), fall back to standard (rdtsc/cntvct)
+ * - Standard: Always use standard timer (rdtsc on x86, cntvct on ARM)
+ * - PreferPmu: Use PMU timer or fail if unavailable
+ *
+ * PMU timers provide ~0.3ns resolution but require elevated privileges:
+ * - Linux: sudo, CAP_PERFMON, or perf_event_paranoid <= 2
+ * - macOS: sudo (kperf requires root)
+ * ============================================================================ */
+
+typedef enum {
+    /** Try PMU first (perf/kperf), fall back to standard timer */
+    TO_TIMER_AUTO = 0,
+    /** Always use standard timer (rdtsc/cntvct_el0) */
+    TO_TIMER_STANDARD = 1,
+    /** Require PMU timer, fail if unavailable */
+    TO_TIMER_PREFER_PMU = 2
+} to_timer_pref_t;
+
+/* ============================================================================
  * Configuration
  * ============================================================================ */
 
@@ -116,6 +138,8 @@ typedef struct {
     double fail_threshold;
     /** Random seed. 0 = use system entropy. */
     uint64_t seed;
+    /** Timer preference. Default: TO_TIMER_AUTO. */
+    to_timer_pref_t timer_preference;
 } to_config_t;
 
 /**

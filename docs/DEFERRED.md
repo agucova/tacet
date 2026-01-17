@@ -65,60 +65,73 @@ These implementation choices improve user experience compared to the spec:
 - `handle_unreliable()` - policy-based handling
 - `leak_probability()`, `effect()`, `quality()`, `diagnostics()` - unified access
 
-## Deferred Items
+## Recently Implemented (v4.1 completion)
 
-### Not Implemented (Lower Priority)
+### Implemented in v4.1 Migration
 
-1. **AcquisitionStream type** - Per-acquisition interleaved storage
-   - Current: Per-class `Vec<u64>` storage
-   - Spec: `Vec<(SampleClass, f64)>` acquisition stream
-   - Impact: Slightly less accurate dependence estimation
-   - Note: Current approach works well in practice
+1. **Bootstrap-calibrated q_thresh** ✓
+   - Now computes 99th percentile of Q* distribution during bootstrap
+   - Two-pass approach: first pass computes covariance, second pass computes Q* distribution
+   - Falls back to chi-squared(7, 0.99) = 18.48 only when inversion fails or discrete mode
+   - Location: `crates/timing-oracle-core/src/statistics/covariance.rs`
 
-2. **Bootstrap-calibrated q_thresh** - Computing Q* distribution during bootstrap
-   - Current: Uses chi-squared(7, 0.99) = 18.48 fallback everywhere
-   - Spec: Should compute 99th percentile of Q* from bootstrap
-   - Impact: Slightly conservative model fit threshold
-   - TODOs remain in code: `// TODO: use calibration.q_thresh`
+2. **AcquisitionStream integration** ✓
+   - Added `to_timing_samples()` adapter method to `AcquisitionStream`
+   - Calibration now uses `AcquisitionStream` for interleaved sample construction
+   - Location: `crates/timing-oracle-core/src/statistics/acquisition.rs`
+   - Location: `crates/timing-oracle/src/adaptive/calibration.rs`
 
-3. **ThresholdElevated QualityIssue** - Emitting when theta_eff > theta_user
-   - Current: Not implemented
-   - Spec: Should emit QualityIssue when threshold elevated
-   - Impact: Less visibility into threshold elevation
+3. **ThresholdElevated QualityIssue** ✓
+   - Emits when `theta_eff > theta_user` (measurement floor exceeds user threshold)
+   - Provides clear guidance about using cycle counters for better resolution
+   - Location: `crates/timing-oracle/src/oracle.rs` (build_diagnostics)
 
-4. **CI-based stopping for research mode** - Full implementation
-   - Current: Basic research status variants defined
-   - Spec: Stopping when CI.lower > 1.1 * theta_floor
-   - Impact: Research mode not fully operational
+4. **CI-based stopping for research mode** ✓
+   - Full implementation of `run_research_mode()` method
+   - Stopping conditions: EffectDetected, NoEffectDetected, ResolutionLimitReached, QualityIssue, BudgetExhausted
+   - Location: `crates/timing-oracle/src/oracle.rs`
 
-### Test File Fixes Needed
+## Remaining Deferred Items
 
-The following test files need `Outcome::Research(_)` match arms added:
+### Lower Priority (Optional)
 
-- `tests/async_timing.rs` (4 match statements)
-- `tests/calibration_coverage.rs` (1 match statement)
-- `tests/calibration_estimation.rs` (1 match statement)
-- `tests/calibration_bayesian.rs` (1 match statement)
-- `tests/crypto_attacks.rs` (~16 match statements)
-- `tests/discrete_mode.rs` (2 match statements)
-- `tests/hash_timing.rs` (10 match statements)
-- `tests/macro_tests.rs` (3 match statements)
-- `tests/pqcrypto_timing.rs` (12 match statements)
-- `tests/power_analysis.rs` (5 match statements)
-- `tests/rsa_timing.rs` (6 match statements)
-- `tests/rsa_vulnerability_assessment.rs` (1 match statement)
-- `tests/aead_timing.rs` (8 match statements)
-- `tests/aes_timing.rs` (6 match statements)
-- `tests/ecc_timing.rs` (7 match statements)
+1. **Full AcquisitionStream in oracle measurement loop**
+   - Current: Oracle stores samples in separate `Vec<u64>` for baseline/sample
+   - Spec: Could use `AcquisitionStream` throughout measurement loop
+   - Impact: Minor improvement to dependence estimation during collection
+   - Note: Calibration already uses AcquisitionStream; oracle measurement is more complex refactor
 
-Pattern to add after each `Outcome::Unmeasurable` arm:
-```rust
-Outcome::Research(_) => {}  // or return, (), etc. depending on context
-```
+2. **Bootstrap-calibrated q_thresh for discrete mode**
+   - Current: Discrete mode uses chi-squared fallback (18.48)
+   - Spec: Should compute Q* distribution using m-out-of-n bootstrap
+   - Impact: Conservative fallback is acceptable for discrete data
+   - Note: Discrete mode uses different bootstrap structure (per-class sequences)
 
-### Benchmark Adapter Updates
+### Test File Fixes ✓ COMPLETED
 
-- `benches/comp/adapters/timing_oracle_adapter.rs` needs Research variant
+All test files have been updated with `Outcome::Research(_)` match arms:
+
+- ✓ `tests/async_timing.rs`
+- ✓ `tests/calibration_coverage.rs`
+- ✓ `tests/calibration_estimation.rs`
+- ✓ `tests/calibration_bayesian.rs`
+- ✓ `tests/crypto_attacks.rs`
+- ✓ `tests/discrete_mode.rs`
+- ✓ `tests/hash_timing.rs`
+- ✓ `tests/macro_tests.rs`
+- ✓ `tests/pqcrypto_timing.rs`
+- ✓ `tests/power_analysis.rs`
+- ✓ `tests/rsa_timing.rs`
+- ✓ `tests/rsa_vulnerability_assessment.rs`
+- ✓ `tests/aead_timing.rs`
+- ✓ `tests/aes_timing.rs`
+- ✓ `tests/ecc_timing.rs`
+- ✓ `tests/calibration_utils.rs`
+
+### Benchmark Adapter Updates ✓ COMPLETED
+
+- ✓ `benches/comp/adapters/timing_oracle_adapter.rs` - Research variant added
+- ✓ `benches/oracle.rs` - Research variant added to match arms
 
 ## Breaking Changes Summary
 
@@ -132,7 +145,10 @@ Outcome::Research(_) => {}  // or return, (), etc. depending on context
 
 ## Notes
 
-- Main package compiles successfully
-- All examples compile successfully
-- Test suite needs match arm updates (not blocking for library users)
-- Research mode is defined but not fully integrated into adaptive loop
+- All packages compile successfully (timing-oracle, timing-oracle-core, timing-oracle-c)
+- All examples compile and run successfully
+- All test files updated with Research variant match arms
+- Research mode fully integrated with CI-based stopping conditions
+- Bootstrap-calibrated q_thresh implemented for standard mode
+- AcquisitionStream integrated into calibration phase
+- ThresholdElevated QualityIssue emitted when measurement floor exceeds user threshold

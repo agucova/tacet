@@ -21,9 +21,9 @@ use crate::constants::DEFAULT_SEED;
 use crate::preflight::{run_all_checks, PreflightResult};
 use crate::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
-    paired_optimal_block_length, OnlineStats,
+    paired_optimal_block_length, AcquisitionStream, OnlineStats,
 };
-use crate::types::{Class, Matrix2, Matrix9, TimingSample};
+use crate::types::{Matrix2, Matrix9};
 
 /// Calibration results from the initial measurement phase.
 ///
@@ -277,23 +277,12 @@ pub fn calibrate(
         1
     };
 
-    // Create interleaved TimingSample sequence for joint bootstrap
-    let interleaved: Vec<TimingSample> = baseline_ns
-        .iter()
-        .zip(sample_ns.iter())
-        .flat_map(|(&b, &s)| {
-            [
-                TimingSample {
-                    time_ns: b,
-                    class: Class::Baseline,
-                },
-                TimingSample {
-                    time_ns: s,
-                    class: Class::Sample,
-                },
-            ]
-        })
-        .collect();
+    // Create acquisition stream for joint bootstrap (spec Section 2.3.1)
+    // The stream preserves acquisition order which is critical for correct
+    // dependence estimation during bootstrap resampling.
+    let mut acquisition_stream = AcquisitionStream::with_capacity(2 * n);
+    acquisition_stream.push_batch_interleaved(&baseline_ns, &sample_ns);
+    let interleaved = acquisition_stream.to_timing_samples();
 
     // Bootstrap covariance estimation (spec Section 2.8: use m-out-of-n bootstrap for discrete mode)
     let cov_estimate = if discrete_mode {
@@ -349,9 +338,9 @@ pub fn calibrate(
     // v4.1: Compute floor-rate constant and model mismatch threshold
     let c_floor = compute_floor_rate_constant(&sigma_rate, config.seed);
 
-    // TODO: Implement proper q_thresh computation from bootstrap Q* distribution
-    // Fallback: chi-squared(7, 0.99) ≈ 18.48
-    let q_thresh = 18.48;
+    // Use bootstrap-calibrated q_thresh from covariance estimation
+    // This is the 99th percentile of the Q* distribution computed during bootstrap
+    let q_thresh = cov_estimate.q_thresh;
 
     // Timer tick floor: 1 tick / batch size (batch size = 1 for now, updated by collector)
     // config.timer_resolution_ns is already in ns
