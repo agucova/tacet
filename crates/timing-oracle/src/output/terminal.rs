@@ -7,6 +7,72 @@ use crate::result::{
 };
 use timing_oracle_core::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
 
+/// Default terminal width for text wrapping.
+const DEFAULT_WRAP_WIDTH: usize = 72;
+
+/// Wrap text to fit within a given width, with indentation for continuation lines.
+///
+/// The first line has no indent applied (caller handles prefix like bullets).
+/// Continuation lines get the specified indent to align with the first line's content.
+///
+/// # Arguments
+/// * `text` - The text to wrap
+/// * `width` - Maximum line width
+/// * `first_line_used` - Characters already used on first line (e.g., "    • " = 6)
+/// * `cont_indent` - Indentation string for continuation lines
+fn wrap_text(text: &str, width: usize, first_line_used: usize, cont_indent: &str) -> String {
+    let first_available = width.saturating_sub(first_line_used);
+    let cont_available = width.saturating_sub(cont_indent.len());
+
+    if first_available == 0 || cont_available == 0 {
+        return text.to_string();
+    }
+
+    let words: Vec<&str> = text.split_whitespace().collect();
+    if words.is_empty() {
+        return String::new();
+    }
+
+    let mut lines = Vec::new();
+    let mut current_line = String::new();
+    let mut is_first_line = true;
+
+    for word in words {
+        let available = if is_first_line {
+            first_available
+        } else {
+            cont_available
+        };
+
+        if current_line.is_empty() {
+            current_line = word.to_string();
+        } else if current_line.len() + 1 + word.len() <= available {
+            current_line.push(' ');
+            current_line.push_str(word);
+        } else {
+            lines.push((is_first_line, current_line));
+            is_first_line = false;
+            current_line = word.to_string();
+        }
+    }
+
+    if !current_line.is_empty() {
+        lines.push((is_first_line, current_line));
+    }
+
+    lines
+        .into_iter()
+        .map(|(is_first, line)| {
+            if is_first {
+                line
+            } else {
+                format!("{}{}", cont_indent, line)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Format an Outcome for human-readable terminal output.
 ///
 /// Uses ANSI colors and a spec-aligned layout for clear presentation.
@@ -39,17 +105,8 @@ pub fn format_outcome(outcome: &Outcome) -> String {
 
             let prob_pct = leak_probability * 100.0;
             output.push_str(&format!("    Probability of leak: {:.1}%\n", prob_pct));
-
-            let magnitude = effect.total_effect_ns();
             output.push_str(&format!(
-                "    Effect: {:.1} ns {}\n",
-                magnitude,
-                format_pattern(effect.pattern),
-            ));
-            output.push_str(&format!("      Shift: {:.1} ns\n", effect.shift_ns,));
-            output.push_str(&format!("      Tail:  {:.1} ns\n", effect.tail_ns,));
-            output.push_str(&format!(
-                "      95% CI: {:.1}–{:.1} ns\n",
+                "    95% CI: {:.1}–{:.1} ns\n",
                 effect.credible_interval_ns.0, effect.credible_interval_ns.1,
             ));
 
@@ -216,7 +273,10 @@ pub fn format_outcome(outcome: &Outcome) -> String {
 
         Outcome::Research(research) => {
             output.push_str(&format!("  Samples: {} per class\n", research.samples_used));
-            output.push_str(&format!("  Quality: {}\n", format_quality(research.quality)));
+            output.push_str(&format!(
+                "  Quality: {}\n",
+                format_quality(research.quality)
+            ));
             output.push('\n');
 
             // Status-based header
@@ -264,7 +324,10 @@ pub fn format_outcome(outcome: &Outcome) -> String {
                 research.effect.total_effect_ns(),
                 format_pattern(research.effect.pattern),
             ));
-            output.push_str(&format!("      Shift: {:.1} ns\n", research.effect.shift_ns));
+            output.push_str(&format!(
+                "      Shift: {:.1} ns\n",
+                research.effect.shift_ns
+            ));
             output.push_str(&format!("      Tail:  {:.1} ns\n", research.effect.tail_ns));
 
             // Model mismatch warning
@@ -476,7 +539,9 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
             // Status line
             let status_str = match &research.status {
                 timing_oracle_core::result::ResearchStatus::EffectDetected => "Effect Detected",
-                timing_oracle_core::result::ResearchStatus::NoEffectDetected => "No Effect Detected",
+                timing_oracle_core::result::ResearchStatus::NoEffectDetected => {
+                    "No Effect Detected"
+                }
                 timing_oracle_core::result::ResearchStatus::ResolutionLimitReached => {
                     "Resolution Limit"
                 }
@@ -640,12 +705,15 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
     if !diagnostics.quality_issues.is_empty() {
         out.push_str(&format!("\n  {} Quality Issues\n", "\u{26A0}".yellow()));
         for issue in &diagnostics.quality_issues {
-            out.push_str(&format!(
-                "    \u{2022} {}: {}\n",
-                format_issue_code(issue.code).bold(),
-                issue.message
-            ));
-            out.push_str(&format!("      \u{2192} {}\n", issue.guidance.dimmed()));
+            let code_str = format!("{}: ", format_issue_code(issue.code));
+            // First line: "    • Code: message" - calculate used width for first line
+            let first_used = 6 + code_str.len(); // "    • " + "Code: "
+            let cont_indent = format!("      {}", " ".repeat(code_str.len()));
+            let wrapped_msg = wrap_text(&issue.message, DEFAULT_WRAP_WIDTH, first_used, &cont_indent);
+            out.push_str(&format!("    \u{2022} {}{}\n", code_str.bold(), wrapped_msg));
+            // Guidance: "      → tip" (8 chars used on first line)
+            let wrapped_guidance = wrap_text(&issue.guidance, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("      \u{2192} {}\n", wrapped_guidance.dimmed()));
         }
     }
 
@@ -787,14 +855,24 @@ fn format_debug_environment(diagnostics: &Diagnostics) -> String {
     out
 }
 
+/// Check if an environment variable is set to a truthy value.
+///
+/// Returns true if the variable is set to "1", "true", or "yes" (case-insensitive).
+/// Returns false if unset, empty, "0", "false", or "no".
+fn env_is_truthy(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| matches!(v.to_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false)
+}
+
 /// Check if verbose output is enabled via environment variable.
 pub fn is_verbose() -> bool {
-    std::env::var("TIMING_ORACLE_VERBOSE").is_ok()
+    env_is_truthy("TIMING_ORACLE_VERBOSE")
 }
 
 /// Check if debug output is enabled via environment variable.
 pub fn is_debug() -> bool {
-    std::env::var("TIMING_ORACLE_DEBUG").is_ok()
+    env_is_truthy("TIMING_ORACLE_DEBUG")
 }
 
 /// Format MeasurementQuality for display (with colors).
@@ -803,7 +881,7 @@ fn format_quality(quality: MeasurementQuality) -> String {
         MeasurementQuality::Excellent => "Excellent".green().to_string(),
         MeasurementQuality::Good => "Good".green().to_string(),
         MeasurementQuality::Poor => "Poor".yellow().to_string(),
-        MeasurementQuality::TooNoisy => "Too Noisy".red().to_string(),
+        MeasurementQuality::TooNoisy => "High Noise".yellow().to_string(),
     }
 }
 
@@ -813,7 +891,7 @@ fn format_quality_plain(quality: MeasurementQuality) -> &'static str {
         MeasurementQuality::Excellent => "Excellent",
         MeasurementQuality::Good => "Good",
         MeasurementQuality::Poor => "Poor",
-        MeasurementQuality::TooNoisy => "TooNoisy",
+        MeasurementQuality::TooNoisy => "HighNoise",
     }
 }
 
@@ -872,9 +950,13 @@ fn format_measurement_notes(warnings: &[PreflightWarningInfo]) -> String {
             PreflightSeverity::ResultUndermining => "\u{2022}".red().to_string(),
             PreflightSeverity::Informational => "\u{2022}".to_string(),
         };
-        out.push_str(&format!("    {} {}\n", bullet, warning.message));
+        // Wrap message: first line has "    • " prefix (6 chars), continuation aligns
+        let wrapped_msg = wrap_text(&warning.message, DEFAULT_WRAP_WIDTH, 6, "      ");
+        out.push_str(&format!("    {} {}\n", bullet, wrapped_msg));
         if let Some(guidance) = &warning.guidance {
-            out.push_str(&format!("      {}\n", guidance.dimmed()));
+            // Guidance is indented 6 chars on all lines
+            let wrapped_guidance = wrap_text(guidance, DEFAULT_WRAP_WIDTH, 6, "      ");
+            out.push_str(&format!("      {}\n", wrapped_guidance.dimmed()));
         }
     }
 
@@ -888,48 +970,43 @@ fn format_inconclusive_diagnostics(diagnostics: &Diagnostics) -> String {
     let mut out = String::new();
 
     // Filter for system-related warnings that explain the inconclusiveness
-    let system_warnings: Vec<&PreflightWarningInfo> = diagnostics
+    let system_config: Vec<&PreflightWarningInfo> = diagnostics
         .preflight_warnings
         .iter()
-        .filter(|w| {
-            matches!(
-                w.category,
-                PreflightCategory::System
-                    | PreflightCategory::Resolution
-                    | PreflightCategory::Autocorrelation
-            )
-        })
+        .filter(|w| w.category == PreflightCategory::System)
+        .collect();
+    let resolution: Vec<&PreflightWarningInfo> = diagnostics
+        .preflight_warnings
+        .iter()
+        .filter(|w| w.category == PreflightCategory::Resolution)
         .collect();
 
-    if system_warnings.is_empty() && diagnostics.quality_issues.is_empty() {
+    // Only print header if there's actual content to display
+    if system_config.is_empty() && resolution.is_empty() {
         return out;
     }
 
     out.push_str("\n  \u{2139} Why This May Have Happened:\n");
 
-    // Group by category
-    let system_config: Vec<_> = system_warnings
-        .iter()
-        .filter(|w| w.category == PreflightCategory::System)
-        .collect();
-    let resolution: Vec<_> = system_warnings
-        .iter()
-        .filter(|w| w.category == PreflightCategory::Resolution)
-        .collect();
-
     if !system_config.is_empty() {
         out.push_str("\n    System Configuration:\n");
         for warning in system_config {
-            out.push_str(&format!("      \u{2022} {}\n", warning.message));
+            // "      • " = 8 chars
+            let wrapped = wrap_text(&warning.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("      \u{2022} {}\n", wrapped));
         }
     }
 
     if !resolution.is_empty() {
         out.push_str("\n    Timer Resolution:\n");
         for warning in resolution {
-            out.push_str(&format!("      \u{2022} {}\n", warning.message));
+            // "      • " = 8 chars
+            let wrapped = wrap_text(&warning.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("      \u{2022} {}\n", wrapped));
             if let Some(guidance) = &warning.guidance {
-                out.push_str(&format!("      \u{2192} Tip: {}\n", guidance.dimmed()));
+                // "      → Tip: " = 13 chars
+                let wrapped_tip = wrap_text(guidance, DEFAULT_WRAP_WIDTH, 13, "             ");
+                out.push_str(&format!("      \u{2192} Tip: {}\n", wrapped_tip.dimmed()));
             }
         }
     }
@@ -957,11 +1034,6 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
         .preflight_warnings
         .iter()
         .filter(|w| w.category == PreflightCategory::TimerSanity)
-        .collect();
-    let generator: Vec<_> = diagnostics
-        .preflight_warnings
-        .iter()
-        .filter(|w| w.category == PreflightCategory::Generator)
         .collect();
     let autocorr: Vec<_> = diagnostics
         .preflight_warnings
@@ -991,7 +1063,9 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
                 "      Sanity (F-vs-F):    {}\n",
                 format_severity_indicator(w.severity)
             ));
-            out.push_str(&format!("        {}\n", w.message));
+            // 8 chars indent for message
+            let wrapped = wrap_text(&w.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("        {}\n", wrapped));
         }
     }
 
@@ -1004,18 +1078,20 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
                 "      Timer monotonic:    {}\n",
                 format_severity_indicator(w.severity)
             ));
-            out.push_str(&format!("        {}\n", w.message));
+            // 8 chars indent for message
+            let wrapped = wrap_text(&w.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("        {}\n", wrapped));
         }
     }
 
     // Stationarity
     let stationarity_status = if diagnostics.stationarity_ok {
-        format!("{:.2}x {}", diagnostics.stationarity_ratio, "OK".green())
+        format!("{} {:.2}x", "OK".green(), diagnostics.stationarity_ratio)
     } else {
         format!(
-            "{:.2}x {}",
-            diagnostics.stationarity_ratio,
-            "Suspect".yellow()
+            "{} {:.2}x",
+            "Suspect".yellow(),
+            diagnostics.stationarity_ratio
         )
     };
     out.push_str(&format!(
@@ -1026,19 +1102,6 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
     // Sampling Efficiency section
     out.push_str("\n    Sampling Efficiency:\n");
 
-    // Generator
-    if generator.is_empty() {
-        out.push_str(&format!("      Generator cost:     {}\n", "OK".green()));
-    } else {
-        for w in &generator {
-            out.push_str(&format!(
-                "      Generator cost:     {}\n",
-                format_severity_indicator(w.severity)
-            ));
-            out.push_str(&format!("        {}\n", w.message));
-        }
-    }
-
     // Autocorrelation
     if autocorr.is_empty() {
         out.push_str(&format!("      Autocorrelation:    {}\n", "OK".green()));
@@ -1048,7 +1111,9 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
                 "      Autocorrelation:    {}\n",
                 format_severity_indicator(w.severity)
             ));
-            out.push_str(&format!("        {}\n", w.message));
+            // 8 chars indent
+            let wrapped = wrap_text(&w.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("        {}\n", wrapped));
         }
     }
 
@@ -1060,20 +1125,22 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
     };
     if resolution.is_empty() {
         out.push_str(&format!(
-            "      Timer resolution:   {:.1}ns{} {}\n",
+            "      Timer resolution:   {} {:.1}ns{}\n",
+            "OK".green(),
             diagnostics.timer_resolution_ns,
-            timer_name,
-            "OK".green()
+            timer_name
         ));
     } else {
         for w in &resolution {
             out.push_str(&format!(
-                "      Timer resolution:   {:.1}ns{} {}\n",
+                "      Timer resolution:   {} {:.1}ns{}\n",
+                format_severity_indicator(w.severity),
                 diagnostics.timer_resolution_ns,
-                timer_name,
-                format_severity_indicator(w.severity)
+                timer_name
             ));
-            out.push_str(&format!("        {}\n", w.message));
+            // 8 chars indent
+            let wrapped = wrap_text(&w.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("        {}\n", wrapped));
         }
     }
 
@@ -1083,9 +1150,13 @@ fn format_preflight_validation(diagnostics: &Diagnostics) -> String {
         out.push_str(&format!("      Configuration:      {}\n", "OK".green()));
     } else {
         for w in &system {
-            out.push_str(&format!("      {} {}\n", "\u{26A0}".yellow(), w.message));
+            // "      ⚠ " = 8 chars visual width
+            let wrapped = wrap_text(&w.message, DEFAULT_WRAP_WIDTH, 8, "        ");
+            out.push_str(&format!("      {} {}\n", "\u{26A0}".yellow(), wrapped));
             if let Some(guidance) = &w.guidance {
-                out.push_str(&format!("        {}\n", guidance.dimmed()));
+                // 8 chars indent
+                let wrapped_guidance = wrap_text(guidance, DEFAULT_WRAP_WIDTH, 8, "        ");
+                out.push_str(&format!("        {}\n", wrapped_guidance.dimmed()));
             }
         }
     }
@@ -1126,6 +1197,39 @@ fn exploitability_lines(exploit: Exploitability) -> (String, String) {
 mod tests {
     use super::*;
     use crate::result::{Diagnostics, EffectEstimate};
+
+    #[test]
+    fn test_wrap_text_short() {
+        // Short text that fits on one line
+        let result = wrap_text("Hello world", 72, 6, "      ");
+        assert_eq!(result, "Hello world");
+    }
+
+    #[test]
+    fn test_wrap_text_long() {
+        // Long text that needs to wrap
+        let text = "This is a very long message that should wrap to multiple lines because it exceeds the maximum width";
+        let result = wrap_text(text, 40, 6, "      ");
+        let lines: Vec<&str> = result.lines().collect();
+        assert!(lines.len() >= 2, "Should wrap to multiple lines");
+        // First line should not exceed available width (40 - 6 = 34)
+        assert!(lines[0].len() <= 34, "First line too long: {}", lines[0]);
+        // Continuation lines should have proper indent
+        for line in lines.iter().skip(1) {
+            assert!(line.starts_with("      "), "Missing indent: '{}'", line);
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_preserves_indent() {
+        let text = "Short message here plus some more words to wrap";
+        let result = wrap_text(text, 30, 8, "        ");
+        let lines: Vec<&str> = result.lines().collect();
+        // Continuation lines should all start with the indent
+        for line in lines.iter().skip(1) {
+            assert!(line.starts_with("        "), "Line missing indent: '{}'", line);
+        }
+    }
 
     fn make_pass_outcome() -> Outcome {
         Outcome::Pass {

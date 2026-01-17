@@ -447,24 +447,24 @@ mod tests {
         );
 
         Calibration::new(
-            Matrix9::identity() * 1000.0, // sigma_rate
-            10,                           // block_length
+            Matrix9::identity() * 1000.0,             // sigma_rate
+            10,                                       // block_length
             Matrix2::new(10000.0, 0.0, 0.0, 10000.0), // prior_cov
-            100.0,                        // theta_ns
-            5000,                         // calibration_samples
-            false,                        // discrete_mode
-            5.0,                          // mde_shift_ns
-            10.0,                         // mde_tail_ns
-            snapshot,                     // calibration_snapshot
-            1.0,                          // timer_resolution_ns
-            100_000.0,                    // samples_per_second
+            100.0,                                    // theta_ns
+            5000,                                     // calibration_samples
+            false,                                    // discrete_mode
+            5.0,                                      // mde_shift_ns
+            10.0,                                     // mde_tail_ns
+            snapshot,                                 // calibration_snapshot
+            1.0,                                      // timer_resolution_ns
+            100_000.0,                                // samples_per_second
             // v4.1 fields
-            10.0,                         // c_floor
-            18.48,                        // q_thresh (chi-squared(7, 0.99) fallback)
-            0.001,                        // theta_tick
-            100.0,                        // theta_eff
-            0.1,                          // theta_floor_initial
-            42,                           // rng_seed
+            10.0,  // c_floor
+            18.48, // q_thresh (chi-squared(7, 0.99) fallback)
+            0.001, // theta_tick
+            100.0, // theta_eff
+            0.1,   // theta_floor_initial
+            42,    // rng_seed
         )
     }
 

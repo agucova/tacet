@@ -114,11 +114,8 @@ pub type GeneratorFn = unsafe extern "C" fn(
 );
 
 /// Callback type for the operation to time.
-pub type OperationFn = unsafe extern "C" fn(
-    context: *mut c_void,
-    input: *const u8,
-    input_size: usize,
-);
+pub type OperationFn =
+    unsafe extern "C" fn(context: *mut c_void, input: *const u8, input_size: usize);
 
 /// Convert ToTimerPref to C enum value.
 fn timer_pref_to_c(pref: ToTimerPref) -> i32 {
@@ -130,22 +127,22 @@ fn timer_pref_to_c(pref: ToTimerPref) -> i32 {
 }
 
 /// Initialize the timer subsystem based on config preference.
-/// Returns Ok(()) on success, Err(ToResult) if PMU was required but unavailable.
-unsafe fn init_timer(config: &ToConfig) -> Result<(), ToResult> {
+/// Returns Ok(()) on success, Err(Box<ToResult>) if PMU was required but unavailable.
+unsafe fn init_timer(config: &ToConfig) -> Result<(), Box<ToResult>> {
     let pref = timer_pref_to_c(config.timer_preference);
     let result = to_timer_init(pref);
 
     if result != 0 && config.timer_preference == ToTimerPref::PreferPmu {
-        return Err(ToResult {
+        return Err(Box::new(ToResult {
             outcome: ToOutcome::Inconclusive,
             inconclusive_reason: ToInconclusiveReason::ThresholdUnachievable,
             recommendation: make_recommendation(
                 "PMU timer requested but unavailable. On Linux, try: sudo or \
                  echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid. \
-                 On macOS, try: sudo"
+                 On macOS, try: sudo",
             ),
             ..ToResult::default()
-        });
+        }));
     }
 
     Ok(())
@@ -192,7 +189,7 @@ pub unsafe extern "C" fn to_test(
 
     // Initialize timer based on config preference
     if let Err(result) = init_timer(&config) {
-        return result;
+        return *result;
     }
 
     let result = catch_unwind(|| {
@@ -264,7 +261,7 @@ pub unsafe extern "C" fn to_test_with_time(
 
     // Initialize timer based on config preference
     if let Err(result) = init_timer(&config) {
-        return result;
+        return *result;
     }
 
     #[cfg(feature = "std")]
@@ -483,7 +480,9 @@ fn run_test_impl<F: Fn() -> f64>(
         adaptive_step, AdaptiveOutcome, AdaptiveStepConfig, InconclusiveReason, StepResult,
     };
 
-    let theta_ns = config.attacker_model.to_threshold_ns(config.custom_threshold_ns);
+    let theta_ns = config
+        .attacker_model
+        .to_threshold_ns(config.custom_threshold_ns);
     let max_samples = if config.max_samples == 0 {
         100_000
     } else {
@@ -530,7 +529,7 @@ fn run_test_impl<F: Fn() -> f64>(
                 timer_resolution_ns,
                 recommendation: make_recommendation(
                     "Operation completes faster than timer resolution. \
-                     Consider using a higher-precision timer or batching operations."
+                     Consider using a higher-precision timer or batching operations.",
                 ),
                 timer_name: unsafe { to_get_timer_name() },
                 platform: c"".as_ptr(),
@@ -556,7 +555,7 @@ fn run_test_impl<F: Fn() -> f64>(
         &get_elapsed_secs,
     ) {
         Ok(result) => result,
-        Err(result) => return result,
+        Err(result) => return *result,
     };
 
     // ==========================================================================
@@ -576,7 +575,10 @@ fn run_test_impl<F: Fn() -> f64>(
         // Check if we've exceeded time budget before collecting more
         if elapsed_secs > time_budget_secs {
             let posterior = state.current_posterior().cloned();
-            let current_probability = posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5);
+            let current_probability = posterior
+                .as_ref()
+                .map(|p| p.leak_probability)
+                .unwrap_or(0.5);
             return build_result(
                 AdaptiveOutcome::Inconclusive {
                     reason: InconclusiveReason::TimeBudgetExceeded {
@@ -597,7 +599,10 @@ fn run_test_impl<F: Fn() -> f64>(
         // Check sample budget
         if state.n_total() >= max_samples {
             let posterior = state.current_posterior().cloned();
-            let current_probability = posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5);
+            let current_probability = posterior
+                .as_ref()
+                .map(|p| p.leak_probability)
+                .unwrap_or(0.5);
             return build_result(
                 AdaptiveOutcome::Inconclusive {
                     reason: InconclusiveReason::SampleBudgetExceeded {
@@ -615,7 +620,13 @@ fn run_test_impl<F: Fn() -> f64>(
         }
 
         // Run adaptive step
-        let result = adaptive_step(&calibration, &mut state, ns_per_tick, elapsed_secs, &step_config);
+        let result = adaptive_step(
+            &calibration,
+            &mut state,
+            ns_per_tick,
+            elapsed_secs,
+            &step_config,
+        );
 
         match result {
             StepResult::Decision(outcome) => {
@@ -654,7 +665,7 @@ fn run_pilot_phase(
 
     // Start with batch_k = 1
     let mut timings = vec![0u64; PILOT_SAMPLES * 2];
-    let mut schedule = vec![false; PILOT_SAMPLES * 2];
+    let mut schedule = [false; PILOT_SAMPLES * 2];
     for i in 0..PILOT_SAMPLES {
         schedule[i * 2] = true;
         schedule[i * 2 + 1] = false;
@@ -691,6 +702,7 @@ fn run_pilot_phase(
 }
 
 /// Run calibration phase to estimate covariance and set priors.
+#[allow(clippy::too_many_arguments)]
 fn run_calibration_phase<F: Fn() -> f64>(
     generator: GeneratorFn,
     operation: OperationFn,
@@ -707,7 +719,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
         timing_oracle_core::adaptive::Calibration,
         timing_oracle_core::adaptive::AdaptiveState,
     ),
-    ToResult,
+    Box<ToResult>,
 > {
     use timing_oracle_core::adaptive::{
         AdaptiveState, Calibration, CalibrationSnapshot, PRIOR_SCALE_FACTOR,
@@ -762,10 +774,8 @@ fn run_calibration_phase<F: Fn() -> f64>(
     }
 
     // Create calibration snapshot for drift detection
-    let calibration_snapshot = CalibrationSnapshot::new(
-        baseline_stats.finalize(),
-        sample_stats.finalize(),
-    );
+    let calibration_snapshot =
+        CalibrationSnapshot::new(baseline_stats.finalize(), sample_stats.finalize());
 
     // Bootstrap for covariance estimation
     let interleaved: Vec<TimingSample> = baseline_timings_ns
@@ -788,18 +798,18 @@ fn run_calibration_phase<F: Fn() -> f64>(
     let cov_estimate = bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed);
 
     if !cov_estimate.is_stable() {
-        return Err(ToResult {
+        return Err(Box::new(ToResult {
             outcome: ToOutcome::Inconclusive,
             inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
             recommendation: make_recommendation(
-                "Covariance matrix is not stable; try more samples"
+                "Covariance matrix is not stable; try more samples",
             ),
             timer_resolution_ns: ns_per_tick,
             timer_name: unsafe { to_get_timer_name() },
             elapsed_secs: get_elapsed_secs(),
             samples_used: CALIBRATION_SAMPLES,
             ..ToResult::default()
-        });
+        }));
     }
 
     // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
@@ -864,6 +874,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
 }
 
 /// Collect a batch of samples and add to state.
+#[allow(clippy::too_many_arguments)]
 fn collect_batch(
     state: &mut timing_oracle_core::adaptive::AdaptiveState,
     generator: GeneratorFn,
@@ -1051,24 +1062,34 @@ fn convert_reason(
         InconclusiveReason::NotLearning { guidance, .. } => {
             (ToInconclusiveReason::NotLearning, Some(guidance.clone()))
         }
-        InconclusiveReason::WouldTakeTooLong { guidance, .. } => {
-            (ToInconclusiveReason::WouldTakeTooLong, Some(guidance.clone()))
-        }
+        InconclusiveReason::WouldTakeTooLong { guidance, .. } => (
+            ToInconclusiveReason::WouldTakeTooLong,
+            Some(guidance.clone()),
+        ),
         InconclusiveReason::TimeBudgetExceeded { .. } => {
             (ToInconclusiveReason::TimeBudgetExceeded, None)
         }
         InconclusiveReason::SampleBudgetExceeded { .. } => {
             (ToInconclusiveReason::SampleBudgetExceeded, None)
         }
-        InconclusiveReason::ConditionsChanged { message, guidance, .. } => {
-            (ToInconclusiveReason::ConditionsChanged, Some(format!("{} {}", message, guidance)))
-        }
-        InconclusiveReason::ThresholdUnachievable { message, guidance, .. } => {
-            (ToInconclusiveReason::ThresholdUnachievable, Some(format!("{} {}", message, guidance)))
-        }
-        InconclusiveReason::ModelMismatch { message, guidance, .. } => {
-            (ToInconclusiveReason::ModelMismatch, Some(format!("{} {}", message, guidance)))
-        }
+        InconclusiveReason::ConditionsChanged {
+            message, guidance, ..
+        } => (
+            ToInconclusiveReason::ConditionsChanged,
+            Some(format!("{} {}", message, guidance)),
+        ),
+        InconclusiveReason::ThresholdUnachievable {
+            message, guidance, ..
+        } => (
+            ToInconclusiveReason::ThresholdUnachievable,
+            Some(format!("{} {}", message, guidance)),
+        ),
+        InconclusiveReason::ModelMismatch {
+            message, guidance, ..
+        } => (
+            ToInconclusiveReason::ModelMismatch,
+            Some(format!("{} {}", message, guidance)),
+        ),
     }
 }
 
@@ -1093,7 +1114,11 @@ mod tests {
 
         for (variant, expected) in variants {
             let ptr = to_outcome_str(variant);
-            assert!(!ptr.is_null(), "to_outcome_str returned null for {:?}", variant);
+            assert!(
+                !ptr.is_null(),
+                "to_outcome_str returned null for {:?}",
+                variant
+            );
             let cstr = unsafe { CStr::from_ptr(ptr) };
             assert_eq!(cstr.to_str().unwrap(), expected);
         }
@@ -1110,7 +1135,11 @@ mod tests {
 
         for (variant, expected) in variants {
             let ptr = to_effect_pattern_str(variant);
-            assert!(!ptr.is_null(), "to_effect_pattern_str returned null for {:?}", variant);
+            assert!(
+                !ptr.is_null(),
+                "to_effect_pattern_str returned null for {:?}",
+                variant
+            );
             let cstr = unsafe { CStr::from_ptr(ptr) };
             assert_eq!(cstr.to_str().unwrap(), expected);
         }
@@ -1127,7 +1156,11 @@ mod tests {
 
         for (variant, expected) in variants {
             let ptr = to_exploitability_str(variant);
-            assert!(!ptr.is_null(), "to_exploitability_str returned null for {:?}", variant);
+            assert!(
+                !ptr.is_null(),
+                "to_exploitability_str returned null for {:?}",
+                variant
+            );
             let cstr = unsafe { CStr::from_ptr(ptr) };
             assert_eq!(cstr.to_str().unwrap(), expected);
         }
@@ -1144,7 +1177,11 @@ mod tests {
 
         for (variant, expected) in variants {
             let ptr = to_quality_str(variant);
-            assert!(!ptr.is_null(), "to_quality_str returned null for {:?}", variant);
+            assert!(
+                !ptr.is_null(),
+                "to_quality_str returned null for {:?}",
+                variant
+            );
             let cstr = unsafe { CStr::from_ptr(ptr) };
             assert_eq!(cstr.to_str().unwrap(), expected);
         }
@@ -1156,16 +1193,29 @@ mod tests {
             (ToInconclusiveReason::DataTooNoisy, "DataTooNoisy"),
             (ToInconclusiveReason::NotLearning, "NotLearning"),
             (ToInconclusiveReason::WouldTakeTooLong, "WouldTakeTooLong"),
-            (ToInconclusiveReason::TimeBudgetExceeded, "TimeBudgetExceeded"),
-            (ToInconclusiveReason::SampleBudgetExceeded, "SampleBudgetExceeded"),
+            (
+                ToInconclusiveReason::TimeBudgetExceeded,
+                "TimeBudgetExceeded",
+            ),
+            (
+                ToInconclusiveReason::SampleBudgetExceeded,
+                "SampleBudgetExceeded",
+            ),
             (ToInconclusiveReason::ConditionsChanged, "ConditionsChanged"),
-            (ToInconclusiveReason::ThresholdUnachievable, "ThresholdUnachievable"),
+            (
+                ToInconclusiveReason::ThresholdUnachievable,
+                "ThresholdUnachievable",
+            ),
             (ToInconclusiveReason::ModelMismatch, "ModelMismatch"),
         ];
 
         for (variant, expected) in variants {
             let ptr = to_inconclusive_reason_str(variant);
-            assert!(!ptr.is_null(), "to_inconclusive_reason_str returned null for {:?}", variant);
+            assert!(
+                !ptr.is_null(),
+                "to_inconclusive_reason_str returned null for {:?}",
+                variant
+            );
             let cstr = unsafe { CStr::from_ptr(ptr) };
             assert_eq!(cstr.to_str().unwrap(), expected);
         }
@@ -1245,7 +1295,9 @@ mod tests {
             assert!(
                 (threshold - expected).abs() < 1e-10,
                 "Threshold mismatch for {:?}: got {}, expected {}",
-                model, threshold, expected
+                model,
+                threshold,
+                expected
             );
         }
 
@@ -1325,7 +1377,11 @@ mod tests {
 
         // Should be a valid semver format (x.y.z)
         let parts: Vec<&str> = version.split('.').collect();
-        assert!(parts.len() >= 2, "Version should have at least major.minor: {}", version);
+        assert!(
+            parts.len() >= 2,
+            "Version should have at least major.minor: {}",
+            version
+        );
 
         // Each part should be a valid number
         for (i, part) in parts.iter().enumerate() {
@@ -1334,7 +1390,8 @@ mod tests {
             assert!(
                 num_part.parse::<u32>().is_ok(),
                 "Version part {} is not a number: {}",
-                i, part
+                i,
+                part
             );
         }
     }

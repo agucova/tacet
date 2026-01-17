@@ -42,7 +42,13 @@ const REMOTE_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     model_name: "RemoteNetwork",
     attacker_model: AttackerModel::RemoteNetwork,
     theta_ns: 50_000.0, // 50μs
-    effects: [(0.5, 25_000), (1.0, 50_000), (2.0, 100_000), (5.0, 250_000), (10.0, 500_000)],
+    effects: [
+        (0.5, 25_000),
+        (1.0, 50_000),
+        (2.0, 100_000),
+        (5.0, 250_000),
+        (10.0, 500_000),
+    ],
 };
 
 // PostQuantumSentinel has θ ≈ 3.3ns which is below Instant precision,
@@ -66,11 +72,11 @@ const SHARED_HARDWARE_EFFECTS: EffectSizes = EffectSizes {
     attacker_model: AttackerModel::SharedHardware,
     theta_ns: 0.6,
     effects: [
-        (10.0, 6),      // ~10×θ ≈ 6ns
-        (50.0, 30),     // ~50×θ
-        (100.0, 60),    // ~100×θ
-        (500.0, 300),   // ~500×θ
-        (1000.0, 600),  // ~1000×θ
+        (10.0, 6),     // ~10×θ ≈ 6ns
+        (50.0, 30),    // ~50×θ
+        (100.0, 60),   // ~100×θ
+        (500.0, 300),  // ~500×θ
+        (1000.0, 600), // ~1000×θ
     ],
 };
 

@@ -84,7 +84,7 @@ impl CoverageRunner {
             Outcome::Unmeasurable { .. } => {
                 self.unmeasurable += 1;
             }
-        Outcome::Research(_) => {}
+            Outcome::Research(_) => {}
         }
     }
 
@@ -633,7 +633,11 @@ fn run_coverage_test(test_name: &str, effects: &[u64]) {
 
         eprintln!(
             "[{}] {}ns: {}/{} covered ({:.1}% coverage)",
-            test_name, effect_ns, covered, completed, coverage * 100.0
+            test_name,
+            effect_ns,
+            covered,
+            completed,
+            coverage * 100.0
         );
 
         // Check coverage for effects >= 2θ (200ns for AdjacentNetwork)
@@ -682,7 +686,10 @@ fn run_coverage_test(test_name: &str, effects: &[u64]) {
 
     eprintln!(
         "\n[{}] Overall: {}/{} covered ({:.1}% coverage)",
-        test_name, total_covered, total_completed, overall_coverage * 100.0
+        test_name,
+        total_covered,
+        total_completed,
+        overall_coverage * 100.0
     );
 
     // Check if we have enough data

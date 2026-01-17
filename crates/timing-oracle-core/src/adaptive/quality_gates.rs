@@ -213,7 +213,6 @@ pub struct QualityGateCheckInputs<'a> {
     pub current_stats_snapshot: Option<&'a CalibrationSnapshot>,
 
     // === v4.1 additions for new quality gates ===
-
     /// Floor-rate constant (c_floor) from calibration.
     /// Used to compute theta_floor(n) = c_floor / sqrt(n).
     pub c_floor: f64,
@@ -400,9 +399,7 @@ fn check_variance_ratio(
                 "Posterior variance is {:.0}% of prior; data not informative",
                 variance_ratio * 100.0
             ),
-            guidance: String::from(
-                "Try: cycle counter, reduce system load, increase batch size",
-            ),
+            guidance: String::from("Try: cycle counter, reduce system load, increase batch size"),
             variance_ratio,
         });
     }
@@ -726,8 +723,8 @@ mod tests {
             autocorr_lag1: 0.1,
             count: 5000,
         };
-        let cal_snapshot = CalibrationSnapshot::new(stats.clone(), stats.clone());
-        let post_snapshot = CalibrationSnapshot::new(stats.clone(), stats.clone());
+        let cal_snapshot = CalibrationSnapshot::new(stats, stats);
+        let post_snapshot = CalibrationSnapshot::new(stats, stats);
 
         let mut inputs = make_inputs(&posterior, &prior_cov);
         inputs.calibration_snapshot = Some(&cal_snapshot);
@@ -756,8 +753,8 @@ mod tests {
             autocorr_lag1: 0.1,
             count: 5000,
         };
-        let cal_snapshot = CalibrationSnapshot::new(cal_stats.clone(), cal_stats.clone());
-        let post_snapshot = CalibrationSnapshot::new(post_stats.clone(), post_stats.clone());
+        let cal_snapshot = CalibrationSnapshot::new(cal_stats, cal_stats);
+        let post_snapshot = CalibrationSnapshot::new(post_stats, post_stats);
 
         let mut inputs = make_inputs(&posterior, &prior_cov);
         inputs.calibration_snapshot = Some(&cal_snapshot);

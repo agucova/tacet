@@ -72,7 +72,10 @@ impl ConditionDrift {
                 cal.baseline.variance,
                 post.baseline.variance,
             ),
-            variance_ratio_sample: compute_variance_ratio(cal.sample.variance, post.sample.variance),
+            variance_ratio_sample: compute_variance_ratio(
+                cal.sample.variance,
+                post.sample.variance,
+            ),
             autocorr_change_baseline: libm::fabs(
                 post.baseline.autocorr_lag1 - cal.baseline.autocorr_lag1,
             ),

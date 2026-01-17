@@ -499,8 +499,8 @@ impl TestCase for TableLookup {
             // Fixed: Always access same cache line (indices 0-15)
             let table = sbox_table();
             let mut acc = 0u8;
-            for i in 0..16 {
-                acc ^= std::hint::black_box(table[i]);
+            for value in table.iter().take(16) {
+                acc ^= std::hint::black_box(*value);
             }
             std::hint::black_box(acc);
         })
@@ -583,8 +583,8 @@ impl TestCase for CacheLineCrossing {
             let data = [0u64; 128]; // 1KB, multiple cache lines
             let mut acc = 0u64;
             // Access 8 consecutive u64s (64 bytes = 1 cache line)
-            for i in 0..8 {
-                acc = acc.wrapping_add(std::hint::black_box(data[i]));
+            for value in data.iter().take(8) {
+                acc = acc.wrapping_add(std::hint::black_box(*value));
             }
             std::hint::black_box(acc);
         })
@@ -596,8 +596,8 @@ impl TestCase for CacheLineCrossing {
             let data = [0u64; 128];
             let mut acc = 0u64;
             // Access every 8th u64 (crosses cache lines)
-            for i in 0..8 {
-                acc = acc.wrapping_add(std::hint::black_box(data[i * 8]));
+            for value in data.iter().step_by(8).take(8) {
+                acc = acc.wrapping_add(std::hint::black_box(*value));
             }
             std::hint::black_box(acc);
         })
@@ -885,8 +885,8 @@ impl TestCase for RsaPaddingCheck {
             let mut padded = [0u8; 128];
             padded[0] = 0x00;
             padded[1] = 0x02;
-            for i in 2..120 {
-                padded[i] = 0xFF; // Non-zero padding
+            for value in padded.iter_mut().take(120).skip(2) {
+                *value = 0xFF; // Non-zero padding
             }
             padded[120] = 0x00; // Separator
             std::hint::black_box(check_pkcs1_padding(&padded));
@@ -899,8 +899,8 @@ impl TestCase for RsaPaddingCheck {
             let mut padded = [0u8; 128];
             padded[0] = 0x01; // Wrong! Should be 0x00
             padded[1] = 0x02;
-            for i in 2..120 {
-                padded[i] = 0xFF;
+            for value in padded.iter_mut().take(120).skip(2) {
+                *value = 0xFF;
             }
             padded[120] = 0x00;
             std::hint::black_box(check_pkcs1_padding(&padded));
@@ -1439,8 +1439,9 @@ fn xor_bytes(a: &[u8; 32], b: &[u8; 32]) -> [u8; 32] {
 
 fn sbox_table() -> [u8; 256] {
     let mut table = [0u8; 256];
-    for i in 0..256 {
-        table[i] = ((i as u8).wrapping_mul(0x1B)) ^ ((i as u8).rotate_left(3));
+    for (i, value) in table.iter_mut().enumerate() {
+        let byte = i as u8;
+        *value = byte.wrapping_mul(0x1B) ^ byte.rotate_left(3);
     }
     table
 }
@@ -1480,8 +1481,8 @@ fn check_pkcs1_padding(data: &[u8]) -> bool {
     if data[1] != 0x02 {
         return false;
     }
-    for i in 2..data.len() {
-        if data[i] == 0x00 {
+    for (i, &value) in data.iter().enumerate().skip(2) {
+        if value == 0x00 {
             return i >= 10;
         }
     }

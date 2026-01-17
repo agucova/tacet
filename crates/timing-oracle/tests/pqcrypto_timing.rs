@@ -663,7 +663,7 @@ fn sphincs_sha2_128f_verify_constant_time() {
     // Sample: random messages/sigs
     // Both classes use the same index management pattern
     let baseline_msgs: Vec<[u8; 32]> = vec![fixed_message; SAMPLES];
-    let baseline_sigs: Vec<_> = vec![fixed_sig.clone(); SAMPLES];
+    let baseline_sigs: Vec<_> = vec![fixed_sig; SAMPLES];
 
     let idx0 = std::cell::Cell::new(0usize);
     let idx1 = std::cell::Cell::new(0usize);

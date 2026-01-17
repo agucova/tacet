@@ -63,7 +63,6 @@ pub struct Calibration {
     pub samples_per_second: f64,
 
     // === v4.1 additions ===
-
     /// Floor-rate constant (spec Section 2.3.4).
     /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
     /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
@@ -242,12 +241,12 @@ mod tests {
             1.0,                          // timer_resolution_ns
             10000.0,                      // samples_per_second
             // v4.1 fields
-            10.0,                         // c_floor
-            18.48,                        // q_thresh (chi-squared(7, 0.99) fallback)
-            0.001,                        // theta_tick
-            100.0,                        // theta_eff
-            0.1,                          // theta_floor_initial
-            42,                           // rng_seed
+            10.0,  // c_floor
+            18.48, // q_thresh (chi-squared(7, 0.99) fallback)
+            0.001, // theta_tick
+            100.0, // theta_eff
+            0.1,   // theta_floor_initial
+            42,    // rng_seed
         )
     }
 

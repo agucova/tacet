@@ -74,7 +74,6 @@ pub struct Calibration {
     pub calibration_snapshot: CalibrationSnapshot,
 
     // === v4.1 additions ===
-
     /// Floor-rate constant (spec Section 2.3.4).
     /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
     /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
@@ -191,12 +190,6 @@ pub struct CalibrationConfig {
     /// Random seed for bootstrap and preflight randomization.
     pub seed: u64,
 
-    /// Optional: time to generate baseline inputs (nanoseconds).
-    pub baseline_gen_time_ns: Option<f64>,
-
-    /// Optional: time to generate sample inputs (nanoseconds).
-    pub sample_gen_time_ns: Option<f64>,
-
     /// Whether to skip preflight checks.
     pub skip_preflight: bool,
 }
@@ -210,8 +203,6 @@ impl Default for CalibrationConfig {
             theta_ns: 100.0,
             alpha: 0.01,
             seed: DEFAULT_SEED,
-            baseline_gen_time_ns: None,
-            sample_gen_time_ns: None,
             skip_preflight: false,
         }
     }
@@ -325,8 +316,6 @@ pub fn calibrate(
         run_all_checks(
             &baseline_ns,
             &sample_ns,
-            config.baseline_gen_time_ns,
-            config.sample_gen_time_ns,
             config.timer_resolution_ns,
             config.seed,
         )
@@ -629,8 +618,6 @@ mod tests {
             theta_ns: 100.0,
             alpha: 0.01,
             seed: 42,
-            baseline_gen_time_ns: None,
-            sample_gen_time_ns: None,
             skip_preflight: true, // Skip in tests for speed
         };
 

@@ -149,18 +149,17 @@ fn test_to_test_with_time() {
 
     // Caller-managed time tracking
     let start = std::time::Instant::now();
-    let mut elapsed_secs = 0.0f64;
 
     let result = unsafe {
         // Update elapsed time before calling
-        elapsed_secs = start.elapsed().as_secs_f64();
+        let elapsed_secs = start.elapsed().as_secs_f64();
         to_test_with_time(
             &config,
             64,
             random_generator,
             xor_operation,
             &mut ctx as *mut TestContext as *mut c_void,
-            &mut elapsed_secs,
+            &elapsed_secs,
         )
     };
 

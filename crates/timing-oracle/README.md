@@ -15,10 +15,7 @@ timing-oracle
   ✓ No timing leak detected
 
     Probability of leak: 0.0%
-    Effect: 0.0 ns
-      Shift: 0.0 ns
-      Tail:  0.0 ns
-      95% CI: 0.0–12.5 ns
+    95% CI: 0.0–12.5 ns
 
 ──────────────────────────────────────────────────────────────
 ```

@@ -204,13 +204,18 @@ pub fn compute_posterior_monte_carlo(
 
     // Compute model fit Q statistic: Q = r' Σ_n^{-1} r
     // where r = Δ - Xβ_post is the residual
-    let predicted = &design * &beta_mean;
+    let predicted = design * beta_mean;
     let residual = delta - predicted;
-    let model_fit_q = residual.dot(&(sigma_n_inv * &residual));
+    let model_fit_q = residual.dot(&(sigma_n_inv * residual));
 
     // Monte Carlo integration for leak probability and effect CI
-    let (leak_probability, effect_magnitude_ci) =
-        run_monte_carlo(&design, &beta_mean, &beta_cov, theta, seed.unwrap_or(crate::constants::DEFAULT_SEED));
+    let (leak_probability, effect_magnitude_ci) = run_monte_carlo(
+        &design,
+        &beta_mean,
+        &beta_cov,
+        theta,
+        seed.unwrap_or(crate::constants::DEFAULT_SEED),
+    );
 
     BayesResult {
         leak_probability,
@@ -311,11 +316,7 @@ pub struct MaxEffectCI {
 /// # Returns
 ///
 /// `MaxEffectCI` with mean and 95% credible interval.
-pub fn compute_max_effect_ci(
-    beta_mean: &Vector2,
-    beta_cov: &Matrix2,
-    seed: u64,
-) -> MaxEffectCI {
+pub fn compute_max_effect_ci(beta_mean: &Vector2, beta_cov: &Matrix2, seed: u64) -> MaxEffectCI {
     let design = build_design_matrix();
 
     // Cholesky decomposition of posterior covariance for sampling
@@ -346,7 +347,7 @@ pub fn compute_max_effect_ci(
         let beta = beta_mean + l * z;
 
         // Compute max_k |(Xβ)_k|
-        let pred = &design * beta;
+        let pred = design * beta;
         let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
         max_effects.push(max_effect);
         sum += max_effect;
@@ -425,7 +426,13 @@ fn mvn_log_pdf_zero(x: &Vector9, sigma: &Matrix9) -> Option<f64> {
     // Solve L * z = x
     let z = chol.l().solve_lower_triangular(x).unwrap_or(*x);
     let mahal_sq = z.dot(&z);
-    let log_det = 2.0 * chol.l().diagonal().iter().map(|d| math::ln(*d)).sum::<f64>();
+    let log_det = 2.0
+        * chol
+            .l()
+            .diagonal()
+            .iter()
+            .map(|d| math::ln(*d))
+            .sum::<f64>();
 
     Some(-0.5 * (9.0 * LOG_2PI + log_det + mahal_sq))
 }

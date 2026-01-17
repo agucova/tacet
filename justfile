@@ -88,6 +88,11 @@ features:
 
 # Show environment variables
 env:
+    @echo "Output verbosity (default is debug, set in .cargo/config.toml):"
+    @echo "  just test quiet ...                   # Minimal output"
+    @echo "  just test verbose ...                 # Preflight + diagnostics"
+    @echo "  cargo test ... (default)              # Full debug output"
+    @echo ""
     @echo "Calibration environment variables:"
     @echo "  CALIBRATION_TIER=iteration|quick|full|validation"
     @echo "  CALIBRATION_DATA_DIR=<path>           # Enable CSV export"

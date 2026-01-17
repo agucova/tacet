@@ -24,11 +24,11 @@ use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 /// Effect sizes to test for estimation accuracy.
 /// We use a range of effect sizes to verify accuracy across the spectrum.
 const ESTIMATION_EFFECTS_NS: [u64; 5] = [
-    50,     // Small effect (0.5× AdjacentNetwork θ)
-    100,    // At threshold
-    200,    // 2× threshold
-    500,    // 5× threshold
-    1000,   // 10× threshold (1μs)
+    50,   // Small effect (0.5× AdjacentNetwork θ)
+    100,  // At threshold
+    200,  // 2× threshold
+    500,  // 5× threshold
+    1000, // 10× threshold (1μs)
 ];
 
 // =============================================================================
@@ -119,11 +119,7 @@ fn estimation_accuracy_validation_remote_network() {
 // TEST RUNNER
 // =============================================================================
 
-fn run_estimation_test(
-    test_name: &str,
-    attacker_model: AttackerModel,
-    effects: &[u64],
-) {
+fn run_estimation_test(test_name: &str, attacker_model: AttackerModel, effects: &[u64]) {
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;
@@ -187,7 +183,10 @@ fn run_estimation_test(
                     "  Trial {}/{}: {} points collected",
                     trial + 1,
                     trials_per_effect,
-                    all_points.iter().filter(|p| (p.true_effect_ns - effect_ns as f64).abs() < 1.0).count()
+                    all_points
+                        .iter()
+                        .filter(|p| (p.true_effect_ns - effect_ns as f64).abs() < 1.0)
+                        .count()
                 );
             }
         }
@@ -232,17 +231,17 @@ fn run_estimation_test(
         // Note: We only check bias, not CI coverage. The oracle's CI is for the
         // detected effect magnitude, not accounting for systematic measurement bias.
         // CI coverage is tested separately in calibration_coverage.rs.
-        if stats.true_effect_ns >= 200.0 {
-            if stats.bias_fraction.abs() > config.tier.max_estimation_bias() {
-                eprintln!(
-                    "[{}] FAILED: Bias {:.1}% at {}ns exceeds {:.0}%",
-                    test_name,
-                    stats.bias_fraction * 100.0,
-                    stats.true_effect_ns,
-                    config.tier.max_estimation_bias() * 100.0
-                );
-                any_failed = true;
-            }
+        if stats.true_effect_ns >= 200.0
+            && stats.bias_fraction.abs() > config.tier.max_estimation_bias()
+        {
+            eprintln!(
+                "[{}] FAILED: Bias {:.1}% at {}ns exceeds {:.0}%",
+                test_name,
+                stats.bias_fraction * 100.0,
+                stats.true_effect_ns,
+                config.tier.max_estimation_bias() * 100.0
+            );
+            any_failed = true;
         }
     }
 
@@ -253,11 +252,12 @@ fn run_estimation_test(
         .filter(|s| s.true_effect_ns > 0.0)
         .map(|s| s.bias_fraction.abs())
         .sum::<f64>()
-        / stats_by_effect.iter().filter(|s| s.true_effect_ns > 0.0).count().max(1) as f64;
-    let avg_coverage: f64 = stats_by_effect
-        .iter()
-        .map(|s| s.coverage)
-        .sum::<f64>()
+        / stats_by_effect
+            .iter()
+            .filter(|s| s.true_effect_ns > 0.0)
+            .count()
+            .max(1) as f64;
+    let avg_coverage: f64 = stats_by_effect.iter().map(|s| s.coverage).sum::<f64>()
         / stats_by_effect.len().max(1) as f64;
 
     eprintln!("\n[{}] Overall:", test_name);
@@ -278,7 +278,10 @@ fn run_estimation_test(
         panic!("[{}] FAILED: Estimation accuracy check failed", test_name);
     }
 
-    eprintln!("\n[{}] PASSED: Estimation accuracy within acceptable bounds", test_name);
+    eprintln!(
+        "\n[{}] PASSED: Estimation accuracy within acceptable bounds",
+        test_name
+    );
 }
 
 /// Extract estimation data from an Outcome.

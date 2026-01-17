@@ -6,8 +6,8 @@
 
 extern crate alloc;
 
-use alloc::string::String;
 use crate::math::ceil;
+use alloc::string::String;
 
 /// Default minimum ticks per measurement for reliable quantization.
 pub const DEFAULT_TARGET_TICKS: f64 = 50.0;
@@ -174,9 +174,7 @@ mod tests {
     fn test_no_batching_needed() {
         let decision = compute_batch_k_from_ticks(
             100.0, // 100 ticks per call
-            1000.0,
-            10.0,
-            50.0, // target 50 ticks
+            1000.0, 10.0, 50.0, // target 50 ticks
             20,
         );
 
@@ -189,9 +187,7 @@ mod tests {
     fn test_batching_needed() {
         let decision = compute_batch_k_from_ticks(
             10.0, // 10 ticks per call
-            100.0,
-            10.0,
-            50.0, // target 50 ticks
+            100.0, 10.0, 50.0, // target 50 ticks
             20,
         );
 
@@ -206,9 +202,7 @@ mod tests {
     fn test_unmeasurable() {
         let decision = compute_batch_k_from_ticks(
             0.5, // 0.5 ticks per call (very fast)
-            5.0,
-            10.0,
-            50.0, // target 50 ticks
+            5.0, 10.0, 50.0, // target 50 ticks
             20,   // max K=20
         );
 
@@ -222,9 +216,7 @@ mod tests {
     fn test_max_batch_k_cap() {
         let decision = compute_batch_k_from_ticks(
             5.0, // 5 ticks per call
-            50.0,
-            10.0,
-            200.0, // target 200 ticks
+            50.0, 10.0, 200.0, // target 200 ticks
             20,    // max K=20
         );
 

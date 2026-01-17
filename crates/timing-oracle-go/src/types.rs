@@ -78,7 +78,8 @@ impl Default for ToGoConfig {
 impl ToGoConfig {
     /// Get the effective theta threshold in nanoseconds.
     pub fn theta_ns(&self) -> f64 {
-        self.attacker_model.to_threshold_ns(self.custom_threshold_ns)
+        self.attacker_model
+            .to_threshold_ns(self.custom_threshold_ns)
     }
 
     /// Get nanoseconds per tick based on timer frequency.

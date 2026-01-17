@@ -32,9 +32,9 @@ const ADJACENT_NETWORK_CALIBRATION: CalibrationEffects = CalibrationEffects {
     model_name: "AdjacentNetwork",
     attacker_model: AttackerModel::AdjacentNetwork,
     effects: [
-        (0.0, 0, false),     // Null: expect low P, not true positive
-        (1.0, 100, true),    // At threshold (100ns): ~50% P, is true positive
-        (2.0, 200, true),    // Above threshold: high P, is true positive
+        (0.0, 0, false),  // Null: expect low P, not true positive
+        (1.0, 100, true), // At threshold (100ns): ~50% P, is true positive
+        (2.0, 200, true), // Above threshold: high P, is true positive
     ],
 };
 
@@ -43,8 +43,8 @@ const REMOTE_NETWORK_CALIBRATION: CalibrationEffects = CalibrationEffects {
     attacker_model: AttackerModel::RemoteNetwork,
     effects: [
         (0.0, 0, false),
-        (1.0, 50_000, true),   // At threshold (50μs)
-        (2.0, 100_000, true),  // Above threshold
+        (1.0, 50_000, true),  // At threshold (50μs)
+        (2.0, 100_000, true), // Above threshold
     ],
 };
 
@@ -135,11 +135,7 @@ fn bayesian_calibration_validation_pmu() {
 // TEST RUNNER
 // =============================================================================
 
-fn run_calibration_test(
-    test_name: &str,
-    calibration: &CalibrationEffects,
-    _pmu_required: bool,
-) {
+fn run_calibration_test(test_name: &str, calibration: &CalibrationEffects, _pmu_required: bool) {
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;
@@ -295,15 +291,24 @@ fn run_calibration_test(
         panic!("[{}] FAILED: Bayesian calibration check failed", test_name);
     }
 
-    eprintln!("\n[{}] PASSED: Bayesian calibration within acceptable bounds", test_name);
+    eprintln!(
+        "\n[{}] PASSED: Bayesian calibration within acceptable bounds",
+        test_name
+    );
 }
 
 /// Extract leak probability from an Outcome.
 fn extract_leak_probability(outcome: &Outcome) -> Option<f64> {
     match outcome {
-        Outcome::Pass { leak_probability, .. }
-        | Outcome::Fail { leak_probability, .. }
-        | Outcome::Inconclusive { leak_probability, .. } => Some(*leak_probability),
+        Outcome::Pass {
+            leak_probability, ..
+        }
+        | Outcome::Fail {
+            leak_probability, ..
+        }
+        | Outcome::Inconclusive {
+            leak_probability, ..
+        } => Some(*leak_probability),
         Outcome::Unmeasurable { .. } | Outcome::Research(_) => None,
     }
 }

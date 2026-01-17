@@ -135,8 +135,6 @@ pub unsafe extern "C" fn togo_calibrate(
             theta_ns,
             alpha: 0.01,
             seed,
-            baseline_gen_time_ns: None,
-            sample_gen_time_ns: None,
             skip_preflight: true, // Skip preflight for FFI (Go handles measurement)
         };
 
@@ -390,8 +388,6 @@ pub unsafe extern "C" fn togo_analyze(
             theta_ns,
             alpha: 0.01,
             seed,
-            baseline_gen_time_ns: None,
-            sample_gen_time_ns: None,
             skip_preflight: true,
         };
 
@@ -453,7 +449,13 @@ pub unsafe extern "C" fn togo_analyze(
             state.add_batch(b_chunk.to_vec(), s_chunk.to_vec());
             elapsed_secs += time_per_batch;
 
-            let step = adaptive_step(&core_cal, &mut state, ns_per_tick, elapsed_secs, &step_config);
+            let step = adaptive_step(
+                &core_cal,
+                &mut state,
+                ns_per_tick,
+                elapsed_secs,
+                &step_config,
+            );
 
             if let StepResult::Decision(outcome) = step {
                 return Ok((
@@ -530,10 +532,10 @@ pub unsafe extern "C" fn togo_result_free(result: *mut ToGoResult) {
 #[no_mangle]
 pub extern "C" fn togo_outcome_str(outcome: ToGoOutcome) -> *const c_char {
     match outcome {
-        ToGoOutcome::Pass => b"Pass\0".as_ptr() as *const c_char,
-        ToGoOutcome::Fail => b"Fail\0".as_ptr() as *const c_char,
-        ToGoOutcome::Inconclusive => b"Inconclusive\0".as_ptr() as *const c_char,
-        ToGoOutcome::Unmeasurable => b"Unmeasurable\0".as_ptr() as *const c_char,
+        ToGoOutcome::Pass => c"Pass".as_ptr(),
+        ToGoOutcome::Fail => c"Fail".as_ptr(),
+        ToGoOutcome::Inconclusive => c"Inconclusive".as_ptr(),
+        ToGoOutcome::Unmeasurable => c"Unmeasurable".as_ptr(),
     }
 }
 
@@ -541,10 +543,10 @@ pub extern "C" fn togo_outcome_str(outcome: ToGoOutcome) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn togo_effect_pattern_str(pattern: ToGoEffectPattern) -> *const c_char {
     match pattern {
-        ToGoEffectPattern::UniformShift => b"UniformShift\0".as_ptr() as *const c_char,
-        ToGoEffectPattern::TailEffect => b"TailEffect\0".as_ptr() as *const c_char,
-        ToGoEffectPattern::Mixed => b"Mixed\0".as_ptr() as *const c_char,
-        ToGoEffectPattern::Indeterminate => b"Indeterminate\0".as_ptr() as *const c_char,
+        ToGoEffectPattern::UniformShift => c"UniformShift".as_ptr(),
+        ToGoEffectPattern::TailEffect => c"TailEffect".as_ptr(),
+        ToGoEffectPattern::Mixed => c"Mixed".as_ptr(),
+        ToGoEffectPattern::Indeterminate => c"Indeterminate".as_ptr(),
     }
 }
 
@@ -552,10 +554,10 @@ pub extern "C" fn togo_effect_pattern_str(pattern: ToGoEffectPattern) -> *const 
 #[no_mangle]
 pub extern "C" fn togo_exploitability_str(exploit: ToGoExploitability) -> *const c_char {
     match exploit {
-        ToGoExploitability::Negligible => b"Negligible\0".as_ptr() as *const c_char,
-        ToGoExploitability::PossibleLan => b"PossibleLAN\0".as_ptr() as *const c_char,
-        ToGoExploitability::LikelyLan => b"LikelyLAN\0".as_ptr() as *const c_char,
-        ToGoExploitability::PossibleRemote => b"PossibleRemote\0".as_ptr() as *const c_char,
+        ToGoExploitability::Negligible => c"Negligible".as_ptr(),
+        ToGoExploitability::PossibleLan => c"PossibleLAN".as_ptr(),
+        ToGoExploitability::LikelyLan => c"LikelyLAN".as_ptr(),
+        ToGoExploitability::PossibleRemote => c"PossibleRemote".as_ptr(),
     }
 }
 
@@ -563,10 +565,10 @@ pub extern "C" fn togo_exploitability_str(exploit: ToGoExploitability) -> *const
 #[no_mangle]
 pub extern "C" fn togo_quality_str(quality: ToGoQuality) -> *const c_char {
     match quality {
-        ToGoQuality::Excellent => b"Excellent\0".as_ptr() as *const c_char,
-        ToGoQuality::Good => b"Good\0".as_ptr() as *const c_char,
-        ToGoQuality::Poor => b"Poor\0".as_ptr() as *const c_char,
-        ToGoQuality::TooNoisy => b"TooNoisy\0".as_ptr() as *const c_char,
+        ToGoQuality::Excellent => c"Excellent".as_ptr(),
+        ToGoQuality::Good => c"Good".as_ptr(),
+        ToGoQuality::Poor => c"Poor".as_ptr(),
+        ToGoQuality::TooNoisy => c"TooNoisy".as_ptr(),
     }
 }
 
@@ -574,23 +576,15 @@ pub extern "C" fn togo_quality_str(quality: ToGoQuality) -> *const c_char {
 #[no_mangle]
 pub extern "C" fn togo_inconclusive_reason_str(reason: ToGoInconclusiveReason) -> *const c_char {
     match reason {
-        ToGoInconclusiveReason::None => b"None\0".as_ptr() as *const c_char,
-        ToGoInconclusiveReason::DataTooNoisy => b"DataTooNoisy\0".as_ptr() as *const c_char,
-        ToGoInconclusiveReason::NotLearning => b"NotLearning\0".as_ptr() as *const c_char,
-        ToGoInconclusiveReason::WouldTakeTooLong => b"WouldTakeTooLong\0".as_ptr() as *const c_char,
-        ToGoInconclusiveReason::TimeBudgetExceeded => {
-            b"TimeBudgetExceeded\0".as_ptr() as *const c_char
-        }
-        ToGoInconclusiveReason::SampleBudgetExceeded => {
-            b"SampleBudgetExceeded\0".as_ptr() as *const c_char
-        }
-        ToGoInconclusiveReason::ConditionsChanged => {
-            b"ConditionsChanged\0".as_ptr() as *const c_char
-        }
-        ToGoInconclusiveReason::ThresholdUnachievable => {
-            b"ThresholdUnachievable\0".as_ptr() as *const c_char
-        }
-        ToGoInconclusiveReason::ModelMismatch => b"ModelMismatch\0".as_ptr() as *const c_char,
+        ToGoInconclusiveReason::None => c"None".as_ptr(),
+        ToGoInconclusiveReason::DataTooNoisy => c"DataTooNoisy".as_ptr(),
+        ToGoInconclusiveReason::NotLearning => c"NotLearning".as_ptr(),
+        ToGoInconclusiveReason::WouldTakeTooLong => c"WouldTakeTooLong".as_ptr(),
+        ToGoInconclusiveReason::TimeBudgetExceeded => c"TimeBudgetExceeded".as_ptr(),
+        ToGoInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
+        ToGoInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
+        ToGoInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
+        ToGoInconclusiveReason::ModelMismatch => c"ModelMismatch".as_ptr(),
     }
 }
 

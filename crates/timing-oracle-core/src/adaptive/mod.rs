@@ -24,9 +24,7 @@ mod quality_gates;
 mod state;
 mod step;
 
-pub use calibration::{
-    compute_prior_cov, Calibration, CalibrationConfig, PRIOR_SCALE_FACTOR,
-};
+pub use calibration::{compute_prior_cov, Calibration, CalibrationConfig, PRIOR_SCALE_FACTOR};
 pub use drift::{CalibrationSnapshot, ConditionDrift, DriftThresholds};
 pub use kl_divergence::kl_divergence_gaussian;
 pub use posterior::Posterior;

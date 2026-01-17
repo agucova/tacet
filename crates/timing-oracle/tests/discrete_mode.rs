@@ -235,7 +235,7 @@ fn discrete_mode_fpr_calibration() {
             Outcome::Unmeasurable { .. } => {
                 // Skip unmeasurable trials
             }
-        Outcome::Research(_) => {}
+            Outcome::Research(_) => {}
         }
 
         if (trial + 1) % 25 == 0 && completed_trials > 0 {

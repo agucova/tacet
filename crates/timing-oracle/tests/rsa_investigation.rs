@@ -16,6 +16,7 @@ fn rand_bytes_32() -> [u8; 32] {
 
 /// Experiment A: Both classes use THE SAME pool (should show ~0 effect)
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_a_same_pool_both_classes() {
     const POOL_SIZE: usize = 200;
 
@@ -65,18 +66,21 @@ fn exp_a_same_pool_both_classes() {
 
 /// Experiment B: Pool size variation - 10 items
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_b_pool_size_10() {
     run_with_pool_size(10, "B");
 }
 
 /// Experiment C: Pool size variation - 100 items
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_c_pool_size_100() {
     run_with_pool_size(100, "C");
 }
 
 /// Experiment D: Pool size variation - 1000 items
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_d_pool_size_1000() {
     run_with_pool_size(1000, "D");
 }
@@ -137,6 +141,7 @@ fn run_with_pool_size(pool_size: usize, label: &str) {
 
 /// Experiment E: RSA-2048 with original pattern (same ct repeated)
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_e_rsa2048_same_repeated() {
     let private_key = RsaPrivateKey::new(&mut OsRng, 2048).unwrap();
     let public_key = RsaPublicKey::from(&private_key);
@@ -232,6 +237,7 @@ fn exp_g_xor_same_repeated() {
 
 /// Experiment H: Pool size 1 for both classes (extreme case)
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_h_pool_size_1_both() {
     let private_key = RsaPrivateKey::new(&mut OsRng, 1024).unwrap();
     let public_key = RsaPublicKey::from(&private_key);
@@ -284,6 +290,7 @@ fn hamming_weight(bytes: &[u8]) -> u32 {
 /// This test generates many ciphertexts, measures decryption time for each,
 /// and computes correlation with shape properties (leading zeros, MSB, Hamming weight).
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_i1_shape_correlation() {
     use std::time::Instant;
 
@@ -450,6 +457,7 @@ fn pearson_correlation(x: &[f64], y: &[f64]) -> f64 {
 /// If the shape hypothesis is correct, two ciphertexts with the same leading byte
 /// should show minimal timing difference compared to Exp H's ~211ns.
 #[test]
+#[ignore] // Known RSA timing side-channel (RUSTSEC-2023-0071), see docs/investigation-rsa-timing-anomaly.md
 fn exp_i2_fixed_magnitude() {
     let private_key = RsaPrivateKey::new(&mut OsRng, 1024).unwrap();
     let public_key = RsaPublicKey::from(&private_key);

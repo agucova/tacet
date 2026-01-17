@@ -93,7 +93,8 @@ impl Posterior {
         // Compute credible interval from posterior covariance
         let shift_std = self.shift_se();
         let tail_std = self.tail_se();
-        let total_effect = sqrt(self.shift_ns() * self.shift_ns() + self.tail_ns() * self.tail_ns());
+        let total_effect =
+            sqrt(self.shift_ns() * self.shift_ns() + self.tail_ns() * self.tail_ns());
         let total_std = sqrt((shift_std * shift_std + tail_std * tail_std) / 2.0);
 
         let ci_low = (total_effect - 1.96 * total_std).max(0.0);

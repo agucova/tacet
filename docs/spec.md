@@ -1250,8 +1250,6 @@ Before measurement begins, several sanity checks detect common problems:
 
 **Harness sanity (fixed-vs-fixed)**: Split fixed samples in half and run the analysis. If a "leak" is detected between identical inputs, something is wrong with the test harness. This catches bugs that would otherwise produce false positives.
 
-**Generator overhead**: Measure the random input generator in isolation. If fixed and random generators differ in cost by more than 10%, **abort with an error**. The measured difference would reflect generator cost rather than the operation under test.
-
 ### 3.2.1 Stationarity Check
 
 Non-stationarity breaks bootstrap assumptions. We implement a rolling-variance check:

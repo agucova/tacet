@@ -273,62 +273,67 @@ fn rsa_2048_sign_constant_time() {
 ///
 /// Verification uses public key but still should be constant-time.
 ///
-/// NOTE: Both classes use DIFFERENT message/signature pairs to avoid
-/// microarchitectural caching artifacts. We use indices to avoid branches
-/// in the measurement closure.
+/// Uses pool-based pattern (100+ per class) to average out per-value timing
+/// variation, following the methodology from investigation-rsa-timing-anomaly.md.
+/// Both pools contain random messages to test general constant-time behavior.
+///
+/// NOTE: This test requires PMU timer (sudo) for reliable results on Apple Silicon.
+/// The standard cntvct_el0 timer (41.7ns resolution) causes ThresholdElevated,
+/// making the test unreliable without cycle-level precision.
 #[test]
+#[ignore] // Requires PMU timer: sudo -E cargo test --ignored
 fn rsa_1024_verify_constant_time() {
-    const SAMPLES: usize = 200; // Pool size per class
+    const POOL_SIZE: usize = 100;
 
     let private_key = RsaPrivateKey::new(&mut OsRng, 1024).expect("failed to generate key");
     let public_key = RsaPublicKey::from(&private_key);
     let signing_key = SigningKey::<sha2::Sha256>::new_unprefixed(private_key);
     let verifying_key = VerifyingKey::<sha2::Sha256>::new_unprefixed(public_key);
 
-    // Pre-generate TWO separate pools of message/signature pairs
-    // Interleave them in a single array: even indices = baseline, odd = sample
-    let mut all_msgs: Vec<[u8; 64]> = Vec::with_capacity(SAMPLES * 2);
-    let mut all_sigs: Vec<_> = Vec::with_capacity(SAMPLES * 2);
+    // Pre-generate two separate pools of message/signature pairs
+    let pool_a: Vec<([u8; 64], _)> = (0..POOL_SIZE)
+        .map(|_| {
+            let msg = rand_bytes_64();
+            let sig = signing_key.sign_with_rng(&mut OsRng, &msg);
+            (msg, sig)
+        })
+        .collect();
 
-    for _ in 0..SAMPLES {
-        // Baseline entry (even index)
-        let msg_b = rand_bytes_64();
-        let sig_b = signing_key.sign_with_rng(&mut OsRng, &msg_b);
-        all_msgs.push(msg_b);
-        all_sigs.push(sig_b);
+    let pool_b: Vec<([u8; 64], _)> = (0..POOL_SIZE)
+        .map(|_| {
+            let msg = rand_bytes_64();
+            let sig = signing_key.sign_with_rng(&mut OsRng, &msg);
+            (msg, sig)
+        })
+        .collect();
 
-        // Sample entry (odd index)
-        let msg_s = rand_bytes_64();
-        let sig_s = signing_key.sign_with_rng(&mut OsRng, &msg_s);
-        all_msgs.push(msg_s);
-        all_sigs.push(sig_s);
-    }
+    // Cycling indices for each pool
+    let idx_a = std::cell::Cell::new(0usize);
+    let idx_b = std::cell::Cell::new(0usize);
 
-    // Return indices: baseline gets even, sample gets odd
-    let idx = std::rc::Rc::new(std::cell::Cell::new(0usize));
-    let idx_baseline = idx.clone();
-    let idx_sample = idx.clone();
     let inputs = InputPair::new(
         move || {
-            let i = idx_baseline.get();
-            idx_baseline.set(i + 2);
-            i // Even index
+            let i = idx_a.get();
+            idx_a.set((i + 1) % POOL_SIZE);
+            i
         },
         move || {
-            let i = idx_sample.get();
-            idx_sample.set(i + 2);
-            i + 1 // Odd index
+            let i = idx_b.get();
+            idx_b.set((i + 1) % POOL_SIZE);
+            i + POOL_SIZE // Offset to distinguish from baseline
         },
     );
+
+    // Combine pools for index-based access
+    let all_pairs: Vec<_> = pool_a.into_iter().chain(pool_b).collect();
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |idx| {
-            // No branches - always index into array
-            let i = *idx % (SAMPLES * 2);
-            let result = verifying_key.verify(&all_msgs[i], &all_sigs[i]);
+            let (msg, sig) = &all_pairs[*idx];
+            let result = verifying_key.verify(msg, sig);
             std::hint::black_box(result.is_ok());
         });
 

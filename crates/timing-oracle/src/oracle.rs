@@ -24,11 +24,11 @@ use crate::adaptive::{
     CalibrationConfig, InconclusiveReason as AdaptiveInconclusiveReason,
 };
 use crate::analysis::classify_pattern;
+use crate::analysis::compute_max_effect_ci;
 use crate::config::Config;
 use crate::constants::DEFAULT_SEED;
 use crate::helpers::InputPair;
 use crate::measurement::{BoxedTimer, TimerSpec};
-use crate::analysis::compute_max_effect_ci;
 use crate::result::{
     BatchingInfo, Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, IssueCode,
     MeasurementQuality, Outcome, QualityIssue, ResearchOutcome, ResearchStatus,
@@ -519,14 +519,8 @@ impl TimingOracle {
         let initial_samples = self.config.calibration_samples + CHUNK_SIZE;
         let max_samples_total = self.config.calibration_samples + self.config.max_samples;
 
-        let baseline_gen_start = Instant::now();
-        let mut baseline_inputs: Vec<T> = (0..initial_samples)
-            .map(|_| inputs.baseline())
-            .collect();
-        let baseline_gen_time_ns =
-            baseline_gen_start.elapsed().as_nanos() as f64 / initial_samples as f64;
+        let mut baseline_inputs: Vec<T> = (0..initial_samples).map(|_| inputs.baseline()).collect();
 
-        let sample_gen_start = Instant::now();
         let mut sample_inputs: Vec<T> = (0..initial_samples)
             .map(|_| {
                 let value = inputs.generate_sample();
@@ -534,8 +528,6 @@ impl TimingOracle {
                 value
             })
             .collect();
-        let sample_gen_time_ns =
-            sample_gen_start.elapsed().as_nanos() as f64 / initial_samples as f64;
 
         // Step 3: Warmup
         for i in 0..self.config.warmup.min(initial_samples) {
@@ -718,8 +710,6 @@ impl TimingOracle {
             theta_ns,
             alpha: 0.01,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
-            baseline_gen_time_ns: Some(baseline_gen_time_ns),
-            sample_gen_time_ns: Some(sample_gen_time_ns),
             skip_preflight,
         };
 
@@ -801,7 +791,11 @@ impl TimingOracle {
 
         // Create stationarity tracker for drift detection (spec Section 3.2.1)
         let ns_per_cycle = 1.0 / timer.cycles_per_ns();
-        let tracker_seed = self.config.measurement_seed.unwrap_or(DEFAULT_SEED).wrapping_add(0xDEAD);
+        let tracker_seed = self
+            .config
+            .measurement_seed
+            .unwrap_or(DEFAULT_SEED)
+            .wrapping_add(0xDEAD);
         let mut stationarity_tracker = crate::analysis::StationarityTracker::new(
             self.config.max_samples * 2, // baseline + sample
             tracker_seed,
@@ -892,7 +886,10 @@ impl TimingOracle {
                 }
             }
 
-            let batch_size = self.config.batch_size.min(baseline_inputs.len() - input_idx);
+            let batch_size = self
+                .config
+                .batch_size
+                .min(baseline_inputs.len() - input_idx);
 
             let mut batch_baseline = Vec::with_capacity(batch_size);
             let mut batch_sample = Vec::with_capacity(batch_size);
@@ -1002,6 +999,7 @@ impl TimingOracle {
     // Outcome builders
     // =========================================================================
 
+    #[allow(clippy::too_many_arguments)]
     fn build_pass_outcome(
         &self,
         posterior: &Posterior,
@@ -1014,8 +1012,15 @@ impl TimingOracle {
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns);
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics =
-            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, posterior.model_fit_q, stationarity);
+        let diagnostics = build_diagnostics(
+            calibration,
+            timer,
+            start_time,
+            &self.config,
+            theta_ns,
+            posterior.model_fit_q,
+            stationarity,
+        );
 
         Outcome::Pass {
             leak_probability: posterior.leak_probability,
@@ -1030,6 +1035,7 @@ impl TimingOracle {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_fail_outcome(
         &self,
         posterior: &Posterior,
@@ -1043,8 +1049,15 @@ impl TimingOracle {
         let effect = build_effect_estimate(posterior, theta_ns);
         let exploitability = Exploitability::from_effect_ns(effect.total_effect_ns());
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let diagnostics =
-            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, posterior.model_fit_q, stationarity);
+        let diagnostics = build_diagnostics(
+            calibration,
+            timer,
+            start_time,
+            &self.config,
+            theta_ns,
+            posterior.model_fit_q,
+            stationarity,
+        );
 
         Outcome::Fail {
             leak_probability: posterior.leak_probability,
@@ -1060,6 +1073,7 @@ impl TimingOracle {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_inconclusive_outcome(
         &self,
         reason: InconclusiveReason,
@@ -1077,8 +1091,15 @@ impl TimingOracle {
             .unwrap_or_default();
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
         let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
-        let diagnostics =
-            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, model_fit_q, stationarity);
+        let diagnostics = build_diagnostics(
+            calibration,
+            timer,
+            start_time,
+            &self.config,
+            theta_ns,
+            model_fit_q,
+            stationarity,
+        );
 
         Outcome::Inconclusive {
             reason,
@@ -1141,8 +1162,8 @@ impl TimingOracle {
 
         // Use builder methods to ensure quality_gates is properly synchronized
         let adaptive_config = AdaptiveConfig::with_theta(theta_ns)
-            .pass_threshold(0.0)  // Not used in research mode
-            .fail_threshold(1.0)  // Not used in research mode
+            .pass_threshold(0.0) // Not used in research mode
+            .fail_threshold(1.0) // Not used in research mode
             .time_budget(self.config.time_budget)
             .max_samples(self.config.max_samples);
         let adaptive_config = AdaptiveConfig {
@@ -1242,7 +1263,7 @@ impl TimingOracle {
                 AdaptiveOutcome::Inconclusive { reason, .. } => {
                     // Quality gate failed - return with QualityIssue
                     // Convert adaptive reason to our InconclusiveReason
-                    let inconclusive_reason = convert_adaptive_reason(&reason);
+                    let inconclusive_reason = convert_adaptive_reason(reason);
                     return self.build_research_outcome(
                         ResearchStatus::QualityIssue(inconclusive_reason),
                         &adaptive_state,
@@ -1345,8 +1366,15 @@ impl TimingOracle {
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
         let model_fit_q = posterior.map(|p| p.model_fit_q).unwrap_or(0.0);
         // Research mode doesn't track stationarity separately (would need refactoring)
-        let diagnostics =
-            build_diagnostics(calibration, timer, start_time, &self.config, theta_ns, model_fit_q, None);
+        let diagnostics = build_diagnostics(
+            calibration,
+            timer,
+            start_time,
+            &self.config,
+            theta_ns,
+            model_fit_q,
+            None,
+        );
 
         Outcome::Research(ResearchOutcome {
             status,
@@ -1408,9 +1436,6 @@ fn build_diagnostics(
     for warning in &preflight.warnings.sanity {
         preflight_warnings.push(warning.to_warning_info());
     }
-    for warning in &preflight.warnings.generator {
-        preflight_warnings.push(warning.to_warning_info());
-    }
     for warning in &preflight.warnings.autocorr {
         preflight_warnings.push(warning.to_warning_info());
     }
@@ -1433,15 +1458,12 @@ fn build_diagnostics(
         quality_issues.push(QualityIssue {
             code: IssueCode::ThresholdElevated,
             message: format!(
-                "Requested threshold {} ns elevated to {} ns due to measurement floor",
+                "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
                 calibration.theta_ns, calibration.theta_eff
             ),
-            guidance: format!(
-                "Reporting probabilities for theta_eff = {:.1} ns. \
-                 For better resolution, use a cycle counter (PmuTimer on macOS, LinuxPerfTimer on Linux) \
-                 or increase sample count.",
-                calibration.theta_eff
-            ),
+            guidance: "For better resolution, use a cycle counter (PmuTimer on macOS, \
+                       LinuxPerfTimer on Linux) or increase sample count."
+                .to_string(),
         });
     }
 

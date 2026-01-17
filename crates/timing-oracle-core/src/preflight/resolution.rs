@@ -95,7 +95,8 @@ impl ResolutionWarning {
                 alloc::format!(
                     "High quantization: only {} unique values in {} samples. \
                      Timer resolution may be affecting measurement quality.",
-                    unique_values, total_samples
+                    unique_values,
+                    total_samples
                 )
             }
         }

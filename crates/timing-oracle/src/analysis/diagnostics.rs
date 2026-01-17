@@ -57,9 +57,6 @@ pub fn compute_diagnostics(
     for warning in &preflight.warnings.sanity {
         warnings.push(warning.description());
     }
-    for warning in &preflight.warnings.generator {
-        warnings.push(warning.description());
-    }
     for warning in &preflight.warnings.autocorr {
         warnings.push(warning.description());
     }
@@ -122,7 +119,11 @@ pub fn compute_diagnostics(
         stationarity_ok,
         model_fit_chi2,
         model_fit_ok,
-        model_fit_threshold: if extra.q_thresh > 0.0 { extra.q_thresh } else { 18.48 },
+        model_fit_threshold: if extra.q_thresh > 0.0 {
+            extra.q_thresh
+        } else {
+            18.48
+        },
         outlier_rate_baseline: outlier_rate_fixed,
         outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,
@@ -137,9 +138,6 @@ pub fn compute_diagnostics(
         preflight_warnings: {
             let mut pw = Vec::new();
             for w in &preflight.warnings.sanity {
-                pw.push(w.to_warning_info());
-            }
-            for w in &preflight.warnings.generator {
                 pw.push(w.to_warning_info());
             }
             for w in &preflight.warnings.autocorr {

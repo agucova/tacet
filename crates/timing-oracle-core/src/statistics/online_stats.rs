@@ -237,7 +237,10 @@ mod tests {
         let snapshot = stats.finalize();
 
         assert!((snapshot.mean - 5.0).abs() < 1e-10);
-        assert!(snapshot.variance < 1e-10, "Constant values should have ~0 variance");
+        assert!(
+            snapshot.variance < 1e-10,
+            "Constant values should have ~0 variance"
+        );
         assert_eq!(snapshot.count, 100);
     }
 

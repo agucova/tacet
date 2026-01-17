@@ -74,7 +74,9 @@ impl AutocorrWarning {
                     "High autocorrelation at lag {}: ACF={:.2} (threshold: {:.2}). \
                      This reduces effective sample size but the block bootstrap \
                      accounts for this.",
-                    lag, acf_value, threshold
+                    lag,
+                    acf_value,
+                    threshold
                 )
             }
             AutocorrWarning::InsufficientSamples {
@@ -83,7 +85,8 @@ impl AutocorrWarning {
             } => {
                 alloc::format!(
                     "Insufficient samples for autocorrelation check: {} available, {} required.",
-                    available, required
+                    available,
+                    required
                 )
             }
         }
@@ -93,8 +96,8 @@ impl AutocorrWarning {
     pub fn guidance(&self) -> Option<String> {
         match self {
             AutocorrWarning::PeriodicInterference { .. } => Some(
-                "Consider increasing sample count or checking for background tasks \
-                 that might cause periodic interference."
+                "Consider checking for background processes or periodic system tasks \
+                 to improve sample efficiency."
                     .into(),
             ),
             AutocorrWarning::InsufficientSamples { .. } => None,

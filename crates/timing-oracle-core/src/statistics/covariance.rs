@@ -754,8 +754,10 @@ fn compute_bootstrap_q_thresh(
             .into_par_iter()
             .map(|i| {
                 // Use different seed offset than first pass to get independent samples
-                let mut rng =
-                    Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed.wrapping_add(1), i as u64));
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(
+                    seed.wrapping_add(1),
+                    i as u64,
+                ));
 
                 let mut buffer = vec![
                     TimingSample {
@@ -1356,9 +1358,7 @@ mod tests {
     fn test_q_statistic_is_non_negative() {
         // Q* should always be non-negative (it's a quadratic form)
         for seed in 0..10u64 {
-            let delta = Vector9::from_fn(|i, _| {
-                ((seed * 7 + i as u64 * 13) % 100) as f64 - 50.0
-            });
+            let delta = Vector9::from_fn(|i, _| ((seed * 7 + i as u64 * 13) % 100) as f64 - 50.0);
             let sigma_inv = Matrix9::identity();
             let q = compute_q_statistic(&delta, &sigma_inv);
             assert!(q >= 0.0, "Q* should be non-negative, got {}", q);

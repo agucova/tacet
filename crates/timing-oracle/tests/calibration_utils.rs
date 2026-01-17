@@ -151,9 +151,9 @@ impl Tier {
     /// NOTE: Coverage validation is fundamentally problematic because:
     /// - Without PMU: ~50-70ns systematic overhead causes over-estimation
     /// - With PMU: cycles vs nanoseconds mismatch causes under-estimation
-    /// The CI correctly captures uncertainty in the DETECTED value, but
-    /// the detected value doesn't match the true injected value.
-    /// Set to 0% to report coverage without failing tests.
+    ///   The CI correctly captures uncertainty in the DETECTED value, but
+    ///   the detected value doesn't match the true injected value.
+    ///   Set to 0% to report coverage without failing tests.
     pub fn min_coverage(&self) -> f64 {
         match self {
             Tier::Iteration => 0.0, // Report only
@@ -590,7 +590,7 @@ impl TrialRunner {
             Outcome::Unmeasurable { .. } => {
                 self.unmeasurable += 1;
             }
-        Outcome::Research(_) => {}
+            Outcome::Research(_) => {}
         }
 
         // Export to CSV if enabled
@@ -996,9 +996,7 @@ impl TrialRecord {
                 Outcome::Unmeasurable { .. } => {
                     ("unmeasurable", None, None, None, None, None, None)
                 }
-                Outcome::Research(_) => {
-                    ("research", None, None, None, None, None, None)
-                }
+                Outcome::Research(_) => ("research", None, None, None, None, None, None),
             };
 
         Self {
@@ -1213,7 +1211,10 @@ pub struct CalibrationPoint {
 /// Bin calibration points and compute empirical rates per bin.
 ///
 /// Returns: Vec of (bin_center, empirical_rate, count)
-pub fn compute_calibration_bins(points: &[CalibrationPoint], num_bins: usize) -> Vec<(f64, f64, usize)> {
+pub fn compute_calibration_bins(
+    points: &[CalibrationPoint],
+    num_bins: usize,
+) -> Vec<(f64, f64, usize)> {
     let bin_width = 1.0 / num_bins as f64;
     let mut bins: Vec<(usize, usize)> = vec![(0, 0); num_bins]; // (true_positives, total)
 
@@ -1288,10 +1289,10 @@ pub struct EstimationPoint {
 pub struct EstimationStats {
     pub true_effect_ns: f64,
     pub mean_estimate: f64,
-    pub bias: f64,             // mean_estimate - true_effect
-    pub bias_fraction: f64,    // bias / true_effect (if true_effect > 0)
-    pub rmse: f64,             // sqrt(mean((estimate - true)^2))
-    pub coverage: f64,         // fraction of CIs containing true value
+    pub bias: f64,          // mean_estimate - true_effect
+    pub bias_fraction: f64, // bias / true_effect (if true_effect > 0)
+    pub rmse: f64,          // sqrt(mean((estimate - true)^2))
+    pub coverage: f64,      // fraction of CIs containing true value
     pub count: usize,
 }
 
@@ -1304,7 +1305,8 @@ pub fn compute_estimation_stats(points: &[EstimationPoint]) -> Option<Estimation
     let true_effect = points[0].true_effect_ns;
     let count = points.len();
 
-    let mean_estimate: f64 = points.iter().map(|p| p.estimated_effect_ns).sum::<f64>() / count as f64;
+    let mean_estimate: f64 =
+        points.iter().map(|p| p.estimated_effect_ns).sum::<f64>() / count as f64;
     let bias = mean_estimate - true_effect;
     let bias_fraction = if true_effect.abs() > 1e-9 {
         bias / true_effect
@@ -1483,10 +1485,26 @@ mod tests {
     #[test]
     fn test_calibration_bins() {
         let points = vec![
-            CalibrationPoint { stated_probability: 0.05, is_true_positive: false, true_effect_ns: 0.0 },
-            CalibrationPoint { stated_probability: 0.15, is_true_positive: false, true_effect_ns: 0.0 },
-            CalibrationPoint { stated_probability: 0.85, is_true_positive: true, true_effect_ns: 200.0 },
-            CalibrationPoint { stated_probability: 0.95, is_true_positive: true, true_effect_ns: 200.0 },
+            CalibrationPoint {
+                stated_probability: 0.05,
+                is_true_positive: false,
+                true_effect_ns: 0.0,
+            },
+            CalibrationPoint {
+                stated_probability: 0.15,
+                is_true_positive: false,
+                true_effect_ns: 0.0,
+            },
+            CalibrationPoint {
+                stated_probability: 0.85,
+                is_true_positive: true,
+                true_effect_ns: 200.0,
+            },
+            CalibrationPoint {
+                stated_probability: 0.95,
+                is_true_positive: true,
+                true_effect_ns: 200.0,
+            },
         ];
         let bins = compute_calibration_bins(&points, 10);
         assert!(!bins.is_empty());
@@ -1495,9 +1513,24 @@ mod tests {
     #[test]
     fn test_estimation_stats() {
         let points = vec![
-            EstimationPoint { true_effect_ns: 100.0, estimated_effect_ns: 95.0, ci_low_ns: 80.0, ci_high_ns: 110.0 },
-            EstimationPoint { true_effect_ns: 100.0, estimated_effect_ns: 105.0, ci_low_ns: 90.0, ci_high_ns: 120.0 },
-            EstimationPoint { true_effect_ns: 100.0, estimated_effect_ns: 100.0, ci_low_ns: 85.0, ci_high_ns: 115.0 },
+            EstimationPoint {
+                true_effect_ns: 100.0,
+                estimated_effect_ns: 95.0,
+                ci_low_ns: 80.0,
+                ci_high_ns: 110.0,
+            },
+            EstimationPoint {
+                true_effect_ns: 100.0,
+                estimated_effect_ns: 105.0,
+                ci_low_ns: 90.0,
+                ci_high_ns: 120.0,
+            },
+            EstimationPoint {
+                true_effect_ns: 100.0,
+                estimated_effect_ns: 100.0,
+                ci_low_ns: 85.0,
+                ci_high_ns: 115.0,
+            },
         ];
         let stats = compute_estimation_stats(&points).unwrap();
         assert_eq!(stats.count, 3);

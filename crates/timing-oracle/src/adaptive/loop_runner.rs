@@ -476,8 +476,7 @@ mod tests {
             autocorr_lag1: 0.1,
             count: 5000,
         };
-        let calibration_snapshot =
-            CalibrationSnapshot::new(default_stats.clone(), default_stats.clone());
+        let calibration_snapshot = CalibrationSnapshot::new(default_stats, default_stats);
 
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
@@ -493,12 +492,12 @@ mod tests {
             preflight_result: crate::preflight::PreflightResult::new(),
             calibration_snapshot,
             // v4.1 fields
-            c_floor: 3535.5,          // ~50 * sqrt(5000) - conservative floor-rate constant
-            q_thresh: 18.48,          // chi-squared(7, 0.99) fallback
+            c_floor: 3535.5, // ~50 * sqrt(5000) - conservative floor-rate constant
+            q_thresh: 18.48, // chi-squared(7, 0.99) fallback
             theta_floor_initial: 50.0, // c_floor / sqrt(5000) = 50
-            theta_eff: 100.0,         // max(theta_ns, theta_floor_initial)
-            theta_tick: 1.0,          // Timer resolution
-            rng_seed: 42,             // Test seed
+            theta_eff: 100.0, // max(theta_ns, theta_floor_initial)
+            theta_tick: 1.0, // Timer resolution
+            rng_seed: 42,    // Test seed
         }
     }
 

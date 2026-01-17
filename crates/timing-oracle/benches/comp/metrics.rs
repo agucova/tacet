@@ -73,7 +73,7 @@ pub fn measure_detection_rate(
             "{} - {} - trial {}",
             detector.name(),
             test_case.name(),
-            trial + 1
+            _trial + 1
         ));
 
         // Prepare the test case before calling detect()

@@ -15,14 +15,11 @@
 //! - **Sanity Check**: Fixed-vs-Fixed comparison to detect broken harness
 //! - **Autocorrelation**: Detects periodic interference patterns
 //! - **Resolution**: Detects timer resolution issues
-//! - **Generator Cost**: Ensures input generators have similar overhead
 
 mod autocorr;
-mod generator;
 mod resolution;
 mod sanity;
 
 pub use autocorr::{autocorrelation_check, compute_acf, AutocorrWarning};
-pub use generator::{generator_cost_check, GeneratorClass, GeneratorWarning};
 pub use resolution::{resolution_check, ResolutionWarning};
 pub use sanity::{sanity_check, SanityWarning};

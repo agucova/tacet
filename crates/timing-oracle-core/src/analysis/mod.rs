@@ -11,8 +11,8 @@ pub mod effect;
 pub mod mde;
 
 pub use bayes::{
-    build_design_matrix, compute_bayes_factor, compute_max_effect_ci, compute_posterior_monte_carlo,
-    BayesResult, MaxEffectCI,
+    build_design_matrix, compute_bayes_factor, compute_max_effect_ci,
+    compute_posterior_monte_carlo, BayesResult, MaxEffectCI,
 };
 pub use effect::{classify_pattern, decompose_effect, EffectDecomposition, EffectEstimate};
 pub use mde::{analytical_mde, estimate_mde, MdeEstimate};

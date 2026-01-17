@@ -103,9 +103,8 @@ impl StationarityTracker {
     /// Returns `None` if insufficient samples for analysis.
     pub fn compute(&self) -> Option<StationarityResult> {
         // Need at least 2 windows with samples
-        let active_windows: Vec<usize> = (0..NUM_WINDOWS)
-            .filter(|&i| self.counts[i] >= 10)
-            .collect();
+        let active_windows: Vec<usize> =
+            (0..NUM_WINDOWS).filter(|&i| self.counts[i] >= 10).collect();
 
         if active_windows.len() < 2 {
             return None;
@@ -353,7 +352,10 @@ mod tests {
         }
 
         let result = tracker.compute();
-        assert!(result.is_some(), "Should compute with 20 samples per window");
+        assert!(
+            result.is_some(),
+            "Should compute with 20 samples per window"
+        );
     }
 
     #[test]

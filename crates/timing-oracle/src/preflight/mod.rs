@@ -7,7 +7,6 @@
 //! # Checks Performed
 //!
 //! - **Sanity Check**: Fixed-vs-Fixed comparison to detect broken harness
-//! - **Generator Cost**: Ensures input generators have similar overhead
 //! - **Autocorrelation**: Detects periodic interference patterns
 //! - **Resolution**: Detects timer resolution issues
 //! - **System**: Platform-specific checks (e.g., CPU governor on Linux)
@@ -17,21 +16,19 @@
 //! Most preflight checks are no_std compatible and live in `timing-oracle-core`.
 //! This module re-exports them and adds platform-specific checks:
 //!
-//! - **From core (no_std)**: sanity_check, autocorrelation_check, resolution_check, generator_cost_check
-//! - **Platform-specific (std)**: system_check, timer_sanity_check, measure_generator_cost
+//! - **From core (no_std)**: sanity_check, autocorrelation_check, resolution_check
+//! - **Platform-specific (std)**: system_check, timer_sanity_check
 
 // Re-export core preflight checks (no_std compatible)
 pub use timing_oracle_core::preflight::{
-    autocorrelation_check, compute_acf, generator_cost_check, resolution_check, sanity_check,
-    AutocorrWarning, GeneratorClass, GeneratorWarning, ResolutionWarning, SanityWarning,
+    autocorrelation_check, compute_acf, resolution_check, sanity_check, AutocorrWarning,
+    ResolutionWarning, SanityWarning,
 };
 
 // Platform-specific checks that require std
-mod generator;
 mod resolution;
 mod system;
 
-pub use generator::measure_generator_cost;
 pub use resolution::timer_sanity_check;
 pub use system::{system_check, SystemWarning};
 
@@ -69,14 +66,6 @@ impl PreflightResult {
         self.warnings.sanity.push(warning);
     }
 
-    /// Add a generator warning.
-    pub fn add_generator_warning(&mut self, warning: GeneratorWarning) {
-        if warning.is_result_undermining() {
-            self.has_critical = true;
-        }
-        self.warnings.generator.push(warning);
-    }
-
     /// Add an autocorrelation warning.
     pub fn add_autocorr_warning(&mut self, warning: AutocorrWarning) {
         self.warnings.autocorr.push(warning);
@@ -99,7 +88,6 @@ impl PreflightResult {
     /// Check if there are any warnings.
     pub fn has_warnings(&self) -> bool {
         !self.warnings.sanity.is_empty()
-            || !self.warnings.generator.is_empty()
             || !self.warnings.autocorr.is_empty()
             || !self.warnings.system.is_empty()
             || !self.warnings.resolution.is_empty()
@@ -111,9 +99,6 @@ impl PreflightResult {
 pub struct PreflightWarnings {
     /// Warnings from sanity check (Fixed-vs-Fixed).
     pub sanity: Vec<SanityWarning>,
-
-    /// Warnings from generator cost check.
-    pub generator: Vec<GeneratorWarning>,
 
     /// Warnings from autocorrelation check.
     pub autocorr: Vec<AutocorrWarning>,
@@ -133,7 +118,7 @@ impl PreflightWarnings {
 
     /// Get total number of warnings.
     pub fn count(&self) -> usize {
-        self.sanity.len() + self.generator.len() + self.autocorr.len() + self.system.len()
+        self.sanity.len() + self.autocorr.len() + self.system.len() + self.resolution.len()
     }
 
     /// Check if empty.
@@ -148,8 +133,6 @@ impl PreflightWarnings {
 ///
 /// * `fixed_samples` - Timing samples from fixed input class (baseline)
 /// * `random_samples` - Timing samples from random input class (sample)
-/// * `fixed_gen_time_ns` - Optional: time to generate fixed inputs
-/// * `random_gen_time_ns` - Optional: time to generate random inputs
 /// * `timer_resolution_ns` - Timer resolution in nanoseconds
 /// * `seed` - Seed for reproducible randomization in sanity check
 ///
@@ -159,8 +142,6 @@ impl PreflightWarnings {
 pub fn run_all_checks(
     fixed_samples: &[f64],
     random_samples: &[f64],
-    fixed_gen_time_ns: Option<f64>,
-    random_gen_time_ns: Option<f64>,
     timer_resolution_ns: f64,
     seed: u64,
 ) -> PreflightResult {
@@ -174,13 +155,6 @@ pub fn run_all_checks(
     // Run sanity check (Fixed-vs-Fixed) with randomization
     if let Some(warning) = sanity_check(fixed_samples, timer_resolution_ns, seed) {
         result.add_sanity_warning(warning);
-    }
-
-    // Run generator cost check if timing data available
-    if let (Some(fixed_time), Some(random_time)) = (fixed_gen_time_ns, random_gen_time_ns) {
-        if let Some(warning) = generator_cost_check(fixed_time, random_time) {
-            result.add_generator_warning(warning);
-        }
     }
 
     // Run autocorrelation check

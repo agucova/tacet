@@ -898,12 +898,6 @@ pub enum PreflightCategory {
     /// Note: May be intentional for FPR validation testing.
     Sanity,
 
-    /// Generator cost comparison between classes.
-    ///
-    /// **Severity**: Informational - asymmetry may inflate differences but
-    /// doesn't invalidate the statistical analysis.
-    Generator,
-
     /// Autocorrelation in timing samples.
     ///
     /// **Severity**: Informational - reduces effective sample size but the
@@ -1499,27 +1493,11 @@ impl fmt::Display for InconclusiveReason {
                     estimated_time_secs, samples_needed, guidance
                 )
             }
-            InconclusiveReason::TimeBudgetExceeded {
-                current_probability,
-                samples_collected,
-            } => {
-                write!(
-                    f,
-                    "Time budget exceeded: P(leak)={:.1}% after {} samples",
-                    current_probability * 100.0,
-                    samples_collected
-                )
+            InconclusiveReason::TimeBudgetExceeded { .. } => {
+                write!(f, "Time budget exceeded")
             }
-            InconclusiveReason::SampleBudgetExceeded {
-                current_probability,
-                samples_collected,
-            } => {
-                write!(
-                    f,
-                    "Sample budget exceeded: P(leak)={:.1}% after {} samples",
-                    current_probability * 100.0,
-                    samples_collected
-                )
+            InconclusiveReason::SampleBudgetExceeded { .. } => {
+                write!(f, "Sample budget exceeded")
             }
             InconclusiveReason::ConditionsChanged { message, guidance } => {
                 write!(
