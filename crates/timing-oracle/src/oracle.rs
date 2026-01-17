@@ -512,19 +512,22 @@ impl TimingOracle {
         // (Research mode returns 0, which causes zero prior covariance and Cholesky failure)
         let theta_ns = raw_theta_ns.max(timer.resolution_ns());
 
-        // Step 2: Pre-generate ALL inputs before measurement (critical for accuracy)
-        // We need enough for calibration + max adaptive samples
-        let total_samples_needed = self.config.calibration_samples + self.config.max_samples;
+        // Step 2: Pre-generate inputs before measurement (critical for accuracy)
+        // Generate in chunks to avoid expensive upfront cost for tests with costly generators.
+        // Start with calibration + one chunk, then extend as needed during adaptive loop.
+        const CHUNK_SIZE: usize = 5_000;
+        let initial_samples = self.config.calibration_samples + CHUNK_SIZE;
+        let max_samples_total = self.config.calibration_samples + self.config.max_samples;
 
         let baseline_gen_start = Instant::now();
-        let baseline_inputs: Vec<T> = (0..total_samples_needed)
+        let mut baseline_inputs: Vec<T> = (0..initial_samples)
             .map(|_| inputs.baseline())
             .collect();
         let baseline_gen_time_ns =
-            baseline_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
+            baseline_gen_start.elapsed().as_nanos() as f64 / initial_samples as f64;
 
         let sample_gen_start = Instant::now();
-        let sample_inputs: Vec<T> = (0..total_samples_needed)
+        let mut sample_inputs: Vec<T> = (0..initial_samples)
             .map(|_| {
                 let value = inputs.generate_sample();
                 inputs.track_value(&value);
@@ -532,10 +535,10 @@ impl TimingOracle {
             })
             .collect();
         let sample_gen_time_ns =
-            sample_gen_start.elapsed().as_nanos() as f64 / total_samples_needed as f64;
+            sample_gen_start.elapsed().as_nanos() as f64 / initial_samples as f64;
 
         // Step 3: Warmup
-        for i in 0..self.config.warmup.min(total_samples_needed) {
+        for i in 0..self.config.warmup.min(initial_samples) {
             operation(&baseline_inputs[i % baseline_inputs.len()]);
             std::hint::black_box(());
             operation(&sample_inputs[i % sample_inputs.len()]);
@@ -546,7 +549,7 @@ impl TimingOracle {
         const PILOT_SAMPLES: usize = 100;
         let mut pilot_cycles = Vec::with_capacity(PILOT_SAMPLES * 2);
 
-        for i in 0..PILOT_SAMPLES.min(total_samples_needed) {
+        for i in 0..PILOT_SAMPLES.min(initial_samples) {
             let cycles = timer.measure_cycles(|| {
                 operation(&baseline_inputs[i]);
                 std::hint::black_box(());
@@ -755,6 +758,8 @@ impl TimingOracle {
 
         // Step 6: RESEARCH MODE CHECK
         // If using AttackerModel::Research, run research-specific loop
+        // Note: Research mode uses the initial_samples buffer; it will hit sample budget
+        // if it needs more samples than were pre-generated.
         if matches!(self.config.attacker_model, Some(AttackerModel::Research)) {
             return self.run_research_mode(
                 calibration,
@@ -767,21 +772,23 @@ impl TimingOracle {
                 &mut timer,
                 &mut operation,
                 &mut rng,
-                total_samples_needed,
+                initial_samples,
                 start_time,
             );
         }
 
         // Step 7: ADAPTIVE PHASE - Collect samples until decision
+        // Use builder methods to ensure quality_gates is properly synchronized
+        let adaptive_config = AdaptiveConfig::with_theta(theta_ns)
+            .pass_threshold(self.config.pass_threshold)
+            .fail_threshold(self.config.fail_threshold)
+            .time_budget(self.config.time_budget)
+            .max_samples(self.config.max_samples);
+        // Note: batch_size and seed are not exposed in builder, set via struct update
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
-            pass_threshold: self.config.pass_threshold,
-            fail_threshold: self.config.fail_threshold,
-            time_budget: self.config.time_budget,
-            max_samples: self.config.max_samples,
-            theta_ns,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
-            ..AdaptiveConfig::default()
+            ..adaptive_config
         };
 
         let mut adaptive_state = AdaptiveState::with_capacity(self.config.max_samples);
@@ -851,27 +858,41 @@ impl TimingOracle {
                 );
             }
 
-            // Collect a batch
-            let batch_size = self.config.batch_size.min(total_samples_needed - input_idx);
-            if batch_size == 0 {
-                // Out of pre-generated inputs
-                let posterior = adaptive_state.current_posterior();
-                let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
-                let stationarity = stationarity_tracker.compute();
+            // Collect a batch - generate more samples if needed
+            let samples_available = baseline_inputs.len();
+            if input_idx >= samples_available {
+                // Need more samples - check if we've hit the max
+                if samples_available >= max_samples_total {
+                    // Truly out of samples
+                    let posterior = adaptive_state.current_posterior();
+                    let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
+                    let stationarity = stationarity_tracker.compute();
 
-                return self.build_inconclusive_outcome(
-                    InconclusiveReason::SampleBudgetExceeded {
-                        current_probability: leak_probability,
-                        samples_collected: adaptive_state.n_total(),
-                    },
-                    &adaptive_state,
-                    &calibration,
-                    &timer,
-                    start_time,
-                    theta_ns,
-                    stationarity,
-                );
+                    return self.build_inconclusive_outcome(
+                        InconclusiveReason::SampleBudgetExceeded {
+                            current_probability: leak_probability,
+                            samples_collected: adaptive_state.n_total(),
+                        },
+                        &adaptive_state,
+                        &calibration,
+                        &timer,
+                        start_time,
+                        theta_ns,
+                        stationarity,
+                    );
+                }
+
+                // Generate another chunk of samples
+                let chunk_to_generate = CHUNK_SIZE.min(max_samples_total - samples_available);
+                for _ in 0..chunk_to_generate {
+                    baseline_inputs.push(inputs.baseline());
+                    let value = inputs.generate_sample();
+                    inputs.track_value(&value);
+                    sample_inputs.push(value);
+                }
             }
+
+            let batch_size = self.config.batch_size.min(baseline_inputs.len() - input_idx);
 
             let mut batch_baseline = Vec::with_capacity(batch_size);
             let mut batch_sample = Vec::with_capacity(batch_size);
@@ -1118,15 +1139,16 @@ impl TimingOracle {
         // Use a minimal theta for the adaptive machinery (we don't use thresholds in Research mode)
         let theta_ns = timer.resolution_ns();
 
+        // Use builder methods to ensure quality_gates is properly synchronized
+        let adaptive_config = AdaptiveConfig::with_theta(theta_ns)
+            .pass_threshold(0.0)  // Not used in research mode
+            .fail_threshold(1.0)  // Not used in research mode
+            .time_budget(self.config.time_budget)
+            .max_samples(self.config.max_samples);
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
-            pass_threshold: 0.0,  // Not used in research mode
-            fail_threshold: 1.0,  // Not used in research mode
-            time_budget: self.config.time_budget,
-            max_samples: self.config.max_samples,
-            theta_ns,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
-            ..AdaptiveConfig::default()
+            ..adaptive_config
         };
 
         let mut input_idx = n_cal;
