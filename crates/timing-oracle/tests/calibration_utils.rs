@@ -250,7 +250,7 @@ impl TimerBackend {
         {
             // kperf requires elevated privileges on macOS
             // Check if we're running as root or have the right entitlements
-            unsafe { libc::geteuid() == 0 }
+            is_root()
         }
 
         #[cfg(all(
@@ -263,10 +263,10 @@ impl TimerBackend {
             if let Ok(content) = std::fs::read_to_string("/proc/sys/kernel/perf_event_paranoid") {
                 if let Ok(level) = content.trim().parse::<i32>() {
                     // Level <= 2 allows userspace perf, but we need <= 1 for CPU cycles
-                    return level <= 1 || unsafe { libc::geteuid() == 0 };
+                    return level <= 1 || is_root();
                 }
             }
-            unsafe { libc::geteuid() == 0 }
+            is_root()
         }
 
         #[cfg(not(any(
@@ -423,6 +423,22 @@ impl CalibrationConfig {
 /// Check if running in CI environment.
 fn is_ci() -> bool {
     matches!(std::env::var("CI").as_deref(), Ok("true") | Ok("1"))
+}
+
+/// Check if running as root/superuser without libc dependency.
+fn is_root() -> bool {
+    // Cross-platform: run `id -u` and check if it returns 0
+    std::process::Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|output| {
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+                .map(|uid| uid == 0)
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
 }
 
 /// FNV-1a 64-bit hash (deterministic, no external dependencies).
