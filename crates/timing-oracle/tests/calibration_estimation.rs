@@ -286,19 +286,19 @@ fn run_estimation_test(test_name: &str, attacker_model: AttackerModel, effects: 
 
 /// Extract estimation data from an Outcome.
 ///
-/// NOTE: shift_ns can be negative (when sample is slower than baseline).
-/// We use absolute value since we're testing magnitude estimation accuracy.
+/// NOTE: shift_ns is positive when sample is slower than baseline (timing leak).
+/// We use the raw value since positive shift = detected leak = matches injected effect.
 /// The CI is already expressed as magnitude (positive values).
 fn extract_estimation_point(outcome: &Outcome, true_effect_ns: f64) -> Option<EstimationPoint> {
     match outcome {
         Outcome::Pass { effect, .. }
         | Outcome::Fail { effect, .. }
         | Outcome::Inconclusive { effect, .. } => {
-            // Use absolute shift_ns as the primary estimate (uniform shift component)
-            // shift_ns is negative when sample is slower, but we care about magnitude
+            // Use shift_ns directly as the primary estimate (uniform shift component)
+            // Positive shift_ns means sample is slower (timing leak detected)
             Some(EstimationPoint {
                 true_effect_ns,
-                estimated_effect_ns: effect.shift_ns.abs(),
+                estimated_effect_ns: effect.shift_ns,
                 ci_low_ns: effect.credible_interval_ns.0,
                 ci_high_ns: effect.credible_interval_ns.1,
             })

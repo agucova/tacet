@@ -280,14 +280,15 @@ pub enum InconclusiveReason {
 pub struct EffectEstimate {
     /// Uniform shift in nanoseconds.
     ///
-    /// Positive value means the baseline (fixed) class is slower.
+    /// Positive value means the sample class is slower (timing leak detected).
+    /// Negative value means the sample class is faster (no leak, or unusual).
     /// This captures effects like branch timing where all operations
     /// take a fixed additional time.
     pub shift_ns: f64,
 
     /// Tail effect in nanoseconds.
     ///
-    /// Positive value means the baseline class has a heavier upper tail.
+    /// Positive value means the sample class has a heavier upper tail.
     /// This captures effects like cache misses that occur probabilistically.
     pub tail_ns: f64,
 

@@ -450,9 +450,77 @@ pub fn set_max_inject_ns(ns: u64) {
     MAX_INJECT_NS.store(ns, Ordering::Relaxed);
 }
 
-/// Best-effort delay of at least `ns` nanoseconds.
+/// Get the ARM64 counter frequency in Hz.
 ///
-/// Uses `Instant`-based spinning for determinism across platforms.
+/// On macOS (Apple Silicon), the counter runs at a fixed 24MHz.
+/// On Linux ARM64, the frequency varies by platform (e.g., 1GHz on AWS Graviton).
+/// We read it from the CNTFRQ_EL0 register.
+#[cfg(target_arch = "aarch64")]
+fn get_aarch64_counter_freq_hz() -> u64 {
+    #[cfg(target_os = "macos")]
+    {
+        // Apple Silicon counter is always 24MHz
+        24_000_000
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Read counter frequency from CNTFRQ_EL0 register
+        let freq: u64;
+        unsafe {
+            core::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq);
+        }
+        freq
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    {
+        // Fallback: assume 24MHz (may be inaccurate)
+        24_000_000
+    }
+}
+
+/// Cached counter frequency for ARM64.
+#[cfg(target_arch = "aarch64")]
+static AARCH64_COUNTER_FREQ: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// Get the cached ARM64 counter frequency.
+#[cfg(target_arch = "aarch64")]
+fn aarch64_counter_freq() -> u64 {
+    *AARCH64_COUNTER_FREQ.get_or_init(|| {
+        let freq = get_aarch64_counter_freq_hz();
+        eprintln!(
+            "[calibration] ARM64 counter frequency: {} Hz ({:.1} MHz)",
+            freq,
+            freq as f64 / 1_000_000.0
+        );
+        freq
+    })
+}
+
+/// Convert nanoseconds to counter ticks for ARM64.
+#[cfg(target_arch = "aarch64")]
+#[inline]
+fn ns_to_ticks(ns: u64) -> u64 {
+    let freq = aarch64_counter_freq();
+
+    if freq == 24_000_000 {
+        // Apple Silicon fast path: ticks = ns * 24 / 1000
+        (ns * 24 + 999) / 1000
+    } else {
+        // General case: ticks = ns * freq / 1e9
+        // Use u128 to avoid overflow for large ns values
+        ((ns as u128 * freq as u128 + 999_999_999) / 1_000_000_000) as u64
+    }
+}
+
+/// On aarch64, uses direct counter register access for accuracy.
+/// The Instant::now() approach has ~40ns overhead which biases effect estimation.
+/// On other platforms, falls back to Instant-based spinning.
+///
+/// On macOS ARM64, the counter runs at 24MHz.
+/// On Linux ARM64, the frequency is read from CNTFRQ_EL0 (e.g., 1GHz on Graviton).
+///
 /// Clamps to tier-dependent MAX_INJECT_NS.
 #[inline(never)]
 pub fn busy_wait_ns(ns: u64) {
@@ -461,10 +529,35 @@ pub fn busy_wait_ns(ns: u64) {
     if clamped < ns {
         eprintln!("[WARN] busy_wait_ns clamped {} -> {}", ns, clamped);
     }
-    let start = Instant::now();
-    let target = Duration::from_nanos(clamped);
-    while start.elapsed() < target {
-        std::hint::spin_loop();
+
+    #[cfg(target_arch = "aarch64")]
+    {
+        let ticks = ns_to_ticks(clamped);
+
+        let start: u64;
+        unsafe {
+            core::arch::asm!("mrs {}, cntvct_el0", out(reg) start);
+        }
+
+        loop {
+            let now: u64;
+            unsafe {
+                core::arch::asm!("mrs {}, cntvct_el0", out(reg) now);
+            }
+            if now.wrapping_sub(start) >= ticks {
+                break;
+            }
+            std::hint::spin_loop();
+        }
+    }
+
+    #[cfg(not(target_arch = "aarch64"))]
+    {
+        let start = Instant::now();
+        let target = Duration::from_nanos(clamped);
+        while start.elapsed() < target {
+            std::hint::spin_loop();
+        }
     }
 }
 
@@ -1194,6 +1287,229 @@ pub fn wilson_ci_upper(successes: usize, trials: usize, confidence: f64) -> f64 
 }
 
 // =============================================================================
+// AR(1) SAMPLE GENERATION
+// =============================================================================
+
+/// Generate AR(1) correlated samples for autocorrelation testing.
+///
+/// Follows the SILENT paper's parameterization (Appendix A):
+///   Y_n = φ * Y_{n-1} + ε_n,  where ε_n ~ N(0, σ²)
+///
+/// The innovation variance is fixed at σ², so the stationary variance is σ²/(1-φ²).
+/// This matches SILENT's experimental setup for comparability.
+///
+/// # Arguments
+/// * `n` - Number of samples to generate
+/// * `phi` - Autocorrelation coefficient in (-1, 1)
+/// * `mean_shift` - Mean shift applied to all samples (the "effect" μ)
+/// * `sigma` - Standard deviation of the innovation term ε_n
+/// * `rng` - Random number generator
+///
+/// # Returns
+/// Vector of n correlated samples. Stationary variance is σ²/(1-φ²).
+pub fn generate_ar1_samples(
+    n: usize,
+    phi: f64,
+    mean_shift: f64,
+    sigma: f64,
+    rng: &mut StdRng,
+) -> Vec<f64> {
+    use rand_distr::{Distribution, Normal};
+
+    assert!(
+        phi.abs() < 1.0,
+        "AR(1) coefficient phi must be in (-1, 1), got {}",
+        phi
+    );
+
+    if n == 0 {
+        return Vec::new();
+    }
+
+    // SILENT's parameterization: ε_n ~ N(0, σ²) with fixed σ
+    // Stationary variance = σ² / (1 - φ²)
+    let normal = Normal::new(0.0, sigma).unwrap();
+
+    let mut samples = Vec::with_capacity(n);
+
+    // Start from stationary distribution: Y_0 ~ N(0, σ²/(1-φ²))
+    let stationary_std = sigma / (1.0 - phi * phi).sqrt();
+    let initial_normal = Normal::new(0.0, stationary_std).unwrap();
+    let mut prev = initial_normal.sample(rng);
+    samples.push(prev + mean_shift);
+
+    for _ in 1..n {
+        let eps = normal.sample(rng);
+        let y = phi * prev + eps;
+        samples.push(y + mean_shift);
+        prev = y;
+    }
+
+    samples
+}
+
+/// Generate paired AR(1) samples for two-class testing.
+///
+/// Generates baseline samples with no shift and sample-class samples with mean_shift.
+/// Both classes have the same autocorrelation structure.
+///
+/// # Returns
+/// (baseline_samples, sample_samples) tuple
+pub fn generate_ar1_paired_samples(
+    n: usize,
+    phi: f64,
+    mean_shift: f64,
+    sigma: f64,
+    rng: &mut StdRng,
+) -> (Vec<f64>, Vec<f64>) {
+    let baseline = generate_ar1_samples(n, phi, 0.0, sigma, rng);
+    let sample = generate_ar1_samples(n, phi, mean_shift, sigma, rng);
+    (baseline, sample)
+}
+
+// =============================================================================
+// POWER CURVE DATA STRUCTURES
+// =============================================================================
+
+/// A single point on a power curve.
+#[derive(Debug, Clone)]
+pub struct PowerCurvePoint {
+    /// Effect size as multiplier of θ
+    pub effect_mult: f64,
+    /// Effect size in nanoseconds
+    pub effect_ns: f64,
+    /// Number of trials run
+    pub trials: usize,
+    /// Number of detections (Fail outcomes)
+    pub detections: usize,
+    /// Detection rate (power)
+    pub detection_rate: f64,
+    /// Wilson CI lower bound
+    pub ci_low: f64,
+    /// Wilson CI upper bound
+    pub ci_high: f64,
+    /// Median samples used across trials
+    pub median_samples: usize,
+    /// Median wall time in milliseconds
+    pub median_time_ms: u64,
+}
+
+/// A single cell in an autocorrelation heatmap.
+#[derive(Debug, Clone)]
+pub struct AutocorrCell {
+    /// Effect size as multiplier of θ
+    pub mu_mult: f64,
+    /// Autocorrelation coefficient
+    pub phi: f64,
+    /// Number of trials
+    pub trials: usize,
+    /// Number of rejections
+    pub rejections: usize,
+    /// Rejection rate
+    pub rejection_rate: f64,
+    /// Wilson CI lower bound
+    pub ci_low: f64,
+    /// Wilson CI upper bound
+    pub ci_high: f64,
+}
+
+// =============================================================================
+// CSV EXPORT HELPERS
+// =============================================================================
+
+/// Export power curve data to CSV.
+pub fn export_power_curve_csv(test_name: &str, points: &[PowerCurvePoint]) {
+    let dir = match std::env::var("CALIBRATION_DATA_DIR") {
+        Ok(d) => PathBuf::from(d),
+        Err(_) => PathBuf::from("calibration_data"),
+    };
+
+    if let Err(e) = fs::create_dir_all(&dir) {
+        eprintln!("[WARN] Could not create calibration data dir: {}", e);
+        return;
+    }
+
+    let path = dir.join(format!("power_curve_{}.csv", test_name));
+    let file = match File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[WARN] Could not create {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    let mut writer = BufWriter::new(file);
+    writeln!(
+        writer,
+        "effect_mult,effect_ns,trials,detections,detection_rate,ci_low,ci_high,median_samples,median_time_ms"
+    )
+    .ok();
+
+    for p in points {
+        writeln!(
+            writer,
+            "{:.4},{:.1},{},{},{:.4},{:.4},{:.4},{},{}",
+            p.effect_mult,
+            p.effect_ns,
+            p.trials,
+            p.detections,
+            p.detection_rate,
+            p.ci_low,
+            p.ci_high,
+            p.median_samples,
+            p.median_time_ms
+        )
+        .ok();
+    }
+
+    eprintln!("[{}] Power curve exported to {}", test_name, path.display());
+}
+
+/// Export autocorrelation heatmap data to CSV.
+pub fn export_autocorr_heatmap_csv(test_name: &str, cells: &[AutocorrCell]) {
+    let dir = match std::env::var("CALIBRATION_DATA_DIR") {
+        Ok(d) => PathBuf::from(d),
+        Err(_) => PathBuf::from("calibration_data"),
+    };
+
+    if let Err(e) = fs::create_dir_all(&dir) {
+        eprintln!("[WARN] Could not create calibration data dir: {}", e);
+        return;
+    }
+
+    let path = dir.join(format!("autocorr_heatmap_{}.csv", test_name));
+    let file = match File::create(&path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[WARN] Could not create {}: {}", path.display(), e);
+            return;
+        }
+    };
+
+    let mut writer = BufWriter::new(file);
+    writeln!(
+        writer,
+        "mu_mult,phi,trials,rejections,rejection_rate,ci_low,ci_high"
+    )
+    .ok();
+
+    for c in cells {
+        writeln!(
+            writer,
+            "{:.2},{:.2},{},{},{:.4},{:.4},{:.4}",
+            c.mu_mult, c.phi, c.trials, c.rejections, c.rejection_rate, c.ci_low, c.ci_high
+        )
+        .ok();
+    }
+
+    eprintln!(
+        "[{}] Autocorrelation heatmap exported to {}",
+        test_name,
+        path.display()
+    );
+}
+
+// =============================================================================
 // BAYESIAN CALIBRATION HELPERS
 // =============================================================================
 
@@ -1237,20 +1553,40 @@ pub fn compute_calibration_bins(
         .collect()
 }
 
+/// Minimum samples required for a bin to be included in calibration metrics.
+/// Bins with fewer samples are reported but not counted toward pass/fail.
+pub const MIN_CALIBRATION_BIN_SAMPLES: usize = 10;
+
 /// Compute mean absolute calibration error.
 ///
-/// For each bin with samples, computes |stated - empirical| and averages.
+/// For each bin with sufficient samples (>= MIN_CALIBRATION_BIN_SAMPLES),
+/// computes |stated - empirical| and averages weighted by count.
+/// Sparse bins are excluded from the calculation.
 pub fn compute_calibration_error(bins: &[(f64, f64, usize)]) -> f64 {
+    compute_calibration_error_with_threshold(bins, MIN_CALIBRATION_BIN_SAMPLES)
+}
+
+/// Compute mean absolute calibration error with custom threshold.
+pub fn compute_calibration_error_with_threshold(
+    bins: &[(f64, f64, usize)],
+    min_samples: usize,
+) -> f64 {
     if bins.is_empty() {
         return 0.0;
     }
 
-    let total_weight: usize = bins.iter().map(|(_, _, count)| count).sum();
+    // Only include bins with sufficient samples
+    let valid_bins: Vec<_> = bins
+        .iter()
+        .filter(|(_, _, count)| *count >= min_samples)
+        .collect();
+
+    let total_weight: usize = valid_bins.iter().map(|(_, _, count)| *count).sum();
     if total_weight == 0 {
         return 0.0;
     }
 
-    let weighted_error: f64 = bins
+    let weighted_error: f64 = valid_bins
         .iter()
         .map(|(stated, empirical, count)| (stated - empirical).abs() * (*count as f64))
         .sum();
@@ -1260,9 +1596,19 @@ pub fn compute_calibration_error(bins: &[(f64, f64, usize)]) -> f64 {
 
 /// Compute maximum calibration deviation.
 ///
-/// Returns the largest |stated - empirical| across bins.
+/// Returns the largest |stated - empirical| across bins with sufficient samples.
+/// Sparse bins (< MIN_CALIBRATION_BIN_SAMPLES) are excluded.
 pub fn max_calibration_deviation(bins: &[(f64, f64, usize)]) -> f64 {
+    max_calibration_deviation_with_threshold(bins, MIN_CALIBRATION_BIN_SAMPLES)
+}
+
+/// Compute maximum calibration deviation with custom threshold.
+pub fn max_calibration_deviation_with_threshold(
+    bins: &[(f64, f64, usize)],
+    min_samples: usize,
+) -> f64 {
     bins.iter()
+        .filter(|(_, _, count)| *count >= min_samples)
         .map(|(stated, empirical, _)| (stated - empirical).abs())
         .fold(0.0, f64::max)
 }

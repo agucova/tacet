@@ -320,17 +320,19 @@ fn compute_posterior_from_state(
     let baseline_ns = state.baseline_ns(ns_per_tick);
     let sample_ns = state.sample_ns(ns_per_tick);
 
-    // Compute quantile differences
+    // Compute quantile differences: sample - baseline
+    // Positive values mean sample is slower (timing leak detected)
+    // Negative values mean sample is faster (no leak, or unusual)
     let observed_diff = if calibration.discrete_mode {
         let q_baseline = compute_midquantile_deciles(&baseline_ns);
         let q_sample = compute_midquantile_deciles(&sample_ns);
-        q_baseline - q_sample
+        q_sample - q_baseline
     } else {
         let mut baseline_sorted = baseline_ns;
         let mut sample_sorted = sample_ns;
         let q_baseline = compute_deciles_inplace(&mut baseline_sorted);
         let q_sample = compute_deciles_inplace(&mut sample_sorted);
-        q_baseline - q_sample
+        q_sample - q_baseline
     };
 
     // Scale covariance: Sigma_n = Sigma_rate / n

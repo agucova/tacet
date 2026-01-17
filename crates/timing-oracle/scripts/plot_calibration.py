@@ -616,8 +616,9 @@ def plot_estimation_bias(df: pd.DataFrame, output_path: Path):
     # Compute RMSE - use groupby key from index since it's excluded from group
     def compute_rmse(group):
         # The injected_effect_ns is the group key, access via group.name
+        # shift_ns is positive when sample is slower (timing leak detected)
         true_effect = group.name
-        return np.sqrt(((group["shift_ns"].abs() - true_effect) ** 2).mean())
+        return np.sqrt(((group["shift_ns"] - true_effect) ** 2).mean())
 
     rmse_df = est_df.groupby("injected_effect_ns").apply(compute_rmse, include_groups=False).reset_index()
     rmse_df.columns = ["injected_effect_ns", "rmse"]
@@ -786,7 +787,8 @@ def plot_compact_dashboard(df: pd.DataFrame, output_path: Path):
         est_df = est_df[est_df["shift_ns"].notna() & (est_df["injected_effect_ns"] > 0)].copy()
 
         if not est_df.empty:
-            est_df["estimated"] = est_df["shift_ns"].abs()
+            # shift_ns is positive when sample is slower (timing leak detected)
+            est_df["estimated"] = est_df["shift_ns"]
             est_df["true"] = est_df["injected_effect_ns"]
             est_df["bias"] = est_df["estimated"] - est_df["true"]
             est_df["bias_pct"] = est_df["bias"] / est_df["true"] * 100

@@ -10,7 +10,7 @@ mod calibration_utils;
 
 use calibration_utils::{
     busy_wait_ns, compute_calibration_bins, compute_calibration_error, max_calibration_deviation,
-    CalibrationConfig, CalibrationPoint, TimerBackend, TrialRunner,
+    CalibrationConfig, CalibrationPoint, TimerBackend, TrialRunner, MIN_CALIBRATION_BIN_SAMPLES,
 };
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{AttackerModel, Outcome, TimingOracle};
@@ -229,19 +229,33 @@ fn run_calibration_test(test_name: &str, calibration: &CalibrationEffects, _pmu_
 
     // Print calibration curve
     eprintln!("\n[{}] Calibration Curve:", test_name);
+    eprintln!(
+        "  (bins with <{} samples are excluded from metrics)",
+        MIN_CALIBRATION_BIN_SAMPLES
+    );
     eprintln!("  Stated P | Empirical P | Count | Deviation");
     eprintln!("  ---------|-------------|-------|----------");
     for (stated, empirical, count) in &bins {
         let deviation = (stated - empirical).abs();
-        let marker = if deviation > 0.20 { " !!!" } else { "" };
+        let sparse_marker = if *count < MIN_CALIBRATION_BIN_SAMPLES {
+            " (sparse, excluded)"
+        } else {
+            ""
+        };
+        let deviation_marker = if *count >= MIN_CALIBRATION_BIN_SAMPLES && deviation > 0.20 {
+            " !!!"
+        } else {
+            ""
+        };
         eprintln!(
-            "  {:.0}%-{:.0}%   | {:.1}%        | {:>5} | {:.1}%{}",
+            "  {:.0}%-{:.0}%   | {:.1}%        | {:>5} | {:.1}%{}{}",
             (stated - 0.05) * 100.0,
             (stated + 0.05) * 100.0,
             empirical * 100.0,
             count,
             deviation * 100.0,
-            marker
+            sparse_marker,
+            deviation_marker
         );
     }
 
