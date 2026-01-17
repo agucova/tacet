@@ -283,7 +283,10 @@ pub fn calibrate(
             config.seed,
         )
     } else {
-        bootstrap_difference_covariance(&interleaved, config.bootstrap_iterations, config.seed)
+        // In non-discrete mode, is_fragile is determined by uniqueness or autocorrelation.
+        // Since we're not in discrete mode, uniqueness is >= 10%. We pass false here
+        // and let the block length function handle any autocorrelation-based inflation.
+        bootstrap_difference_covariance(&interleaved, config.bootstrap_iterations, config.seed, false)
     };
 
     // Check covariance validity

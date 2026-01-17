@@ -92,7 +92,7 @@ pub fn compute_lag_autocorrelation(data: &[f64], lag: usize) -> f64 {
     lagged_cov / variance
 }
 
-/// Estimate the dependence length m using the spec's ACF heuristic (§3.2.2).
+/// Estimate the dependence length m using the spec's ACF heuristic (§3.3.2).
 ///
 /// Find the smallest h where |ρ(h)| < 2/sqrt(n).
 ///

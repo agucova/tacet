@@ -1,4 +1,4 @@
-//! Minimum Detectable Effect (MDE) estimation (spec §2.7).
+//! Minimum Detectable Effect (MDE) estimation (spec §3.3.4).
 //!
 //! The MDE answers: "given the noise level in this measurement, what's the
 //! smallest effect I could reliably detect?"
@@ -7,7 +7,7 @@
 //! concerned about 10ns effects, a passing test doesn't mean the code is safe—
 //! it means the measurement wasn't sensitive enough.
 //!
-//! Formula (spec §2.7) with 50% power:
+//! Formula with 50% power:
 //! ```text
 //! MDE_μ = z_{1-α/2} × sqrt((1ᵀ Σ₀⁻¹ 1)⁻¹)
 //! MDE_τ = z_{1-α/2} × sqrt((bᵀ Σ₀⁻¹ b)⁻¹)
@@ -49,7 +49,7 @@ impl From<MdeEstimate> for MinDetectableEffect {
     }
 }
 
-/// Compute MDE analytically using single-effect projection formulas (spec §2.7).
+/// Compute MDE analytically using single-effect projection formulas (spec §3.3.4).
 ///
 /// Formula:
 /// ```text
@@ -90,7 +90,7 @@ pub fn analytical_mde(covariance: &Matrix9, alpha: f64) -> (f64, f64) {
         1e12
     };
 
-    // MDE with 50% power: z_{1-α/2} × SE (spec §2.7)
+    // MDE with 50% power: z_{1-α/2} × SE (spec §3.3.4)
     let z = probit(1.0 - alpha / 2.0);
     let mde_shift = z * math::sqrt(var_shift);
     let mde_tail = z * math::sqrt(var_tail);
@@ -178,7 +178,7 @@ pub fn estimate_mde_monte_carlo(
     }
 }
 
-/// Estimate the minimum detectable effect (spec §2.7).
+/// Estimate the minimum detectable effect (spec §3.3.4).
 ///
 /// # Arguments
 ///

@@ -89,7 +89,7 @@ fn uniqueness_ratio_asymmetric_classes() {
 
 #[test]
 fn m_out_of_n_resample_size_formula() {
-    // Verify m = ⌊n^(2/3)⌋ formula per spec §2.4
+    // Verify m = ⌊n^(2/3)⌋ formula per spec §3.7
     // Due to floating point precision, some "exact" cube values may floor
     // to one less than expected (e.g., 8000^(2/3) = 399.999... → 399)
     let test_cases = [

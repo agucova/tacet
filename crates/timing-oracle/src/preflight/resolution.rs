@@ -45,7 +45,7 @@ impl TimerSanityWarning {
     }
 }
 
-/// Perform basic timer sanity check (spec §3.2).
+/// Perform basic timer sanity check (implementation-guide.md §2.1).
 ///
 /// Verifies monotonicity by taking 1000 consecutive timestamps.
 ///

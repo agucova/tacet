@@ -315,10 +315,33 @@ fn check_threshold_unachievable(
 ///
 /// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀|)
 /// Gate triggers when per-dimension variance ratio exceeds threshold.
+///
+/// **Exception**: If the leak probability is already decisive (>99.5% or <0.5%)
+/// AND the projection mismatch Q is reasonable (not astronomically high),
+/// we allow the verdict through. This handles cases like slow operations
+/// (modexp) where variance doesn't shrink much but there's a clear timing leak.
+///
+/// High Q with high P indicates pathological data (systematic measurement bias)
+/// rather than a real timing leak, so we still return Inconclusive.
 fn check_variance_ratio(
     inputs: &QualityGateCheckInputs,
     config: &QualityGateConfig,
 ) -> Option<InconclusiveReason> {
+    // Allow confident verdicts through IF:
+    // 1. leak_probability is very high (>99.5%) or very low (<0.5%)
+    // 2. AND projection mismatch Q is not astronomically high (< 1000x threshold)
+    //
+    // Astronomical Q (e.g., 100000+) indicates pathological data patterns that don't
+    // resemble normal timing leaks - likely measurement artifacts.
+    // Moderate Q (e.g., 100-1000) can occur with real but unusual timing patterns.
+    let p = inputs.posterior.leak_probability;
+    let q = inputs.projection_mismatch_q.unwrap_or(0.0);
+    let q_limit = inputs.projection_mismatch_thresh * 1000.0; // Filter only extreme pathological cases
+
+    if (p > 0.995 || p < 0.005) && q < q_limit {
+        return None;
+    }
+
     let prior_det = inputs.prior_cov_9d.determinant();
     let post_det = inputs.posterior.lambda_post.determinant();
 

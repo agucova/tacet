@@ -1,6 +1,6 @@
 //! Statistical analysis layers for timing leak detection.
 //!
-//! This module implements the two-layer analysis framework (spec §2):
+//! This module implements the statistical analysis framework (spec §3):
 //!
 //! - **Bayesian inference** (`bayes`): Posterior probability of timing leak
 //! - **Effect decomposition** (`effect`): Separates uniform shift from tail effects

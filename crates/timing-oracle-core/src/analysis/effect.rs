@@ -1,11 +1,11 @@
-//! Effect decomposition using Bayesian linear regression (spec §2.5).
+//! Effect decomposition using Bayesian linear regression (spec §3.4.6).
 //!
 //! This module decomposes timing differences into interpretable components:
 //!
 //! - **Uniform shift (μ)**: All quantiles move equally (e.g., branch timing)
 //! - **Tail effect (τ)**: Upper quantiles shift more than lower (e.g., cache misses)
 //!
-//! ## Design Matrix (spec §2.5)
+//! ## Design Matrix (spec §3.4.6)
 //!
 //! X = [1 | b_tail] where:
 //! - Column 0: ones = [1, 1, ..., 1] - uniform shift affects all quantiles equally
@@ -17,9 +17,9 @@
 //!
 //! Δ = Xβ + ε,  ε ~ N(0, Σ_n)
 //!
-//! With the same conjugate Gaussian model as the Bayesian layer (spec §2.5).
+//! With the same conjugate Gaussian model as the Bayesian layer (spec §3.4.6).
 //!
-//! ## Effect Pattern Classification (spec §2.5)
+//! ## Effect Pattern Classification (spec §3.4.6)
 //!
 //! An effect component is "significant" if |effect| > 2×SE:
 //! - UniformShift: Only μ is significant
@@ -54,7 +54,7 @@ pub struct EffectDecomposition {
     /// 95% credible interval for tail effect (τ).
     pub tail_ci: (f64, f64),
 
-    /// Classified effect pattern (spec §2.5).
+    /// Classified effect pattern (spec §3.4.6).
     pub pattern: EffectPattern,
 }
 
@@ -82,7 +82,7 @@ pub struct EffectEstimate {
     /// Note: May not contain point estimate when β ≈ 0.
     pub credible_interval_ns: (f64, f64),
 
-    /// Dominant effect pattern (spec §2.5).
+    /// Dominant effect pattern (spec §3.4.6).
     pub pattern: EffectPattern,
 }
 
@@ -102,7 +102,7 @@ impl EffectDecomposition {
     }
 }
 
-/// Decompose timing differences into shift and tail effects (spec §2.5).
+/// Decompose timing differences into shift and tail effects (spec §3.4.6).
 ///
 /// Uses Bayesian linear regression with the same model as the Bayesian layer:
 /// - Design matrix X = [ones | b_tail] (9×2)
@@ -141,7 +141,7 @@ pub fn decompose_effect(
     let shift_ci = compute_credible_interval(posterior_mean[0], posterior_cov[(0, 0)]);
     let tail_ci = compute_credible_interval(posterior_mean[1], posterior_cov[(1, 1)]);
 
-    // Classify the effect pattern (spec §2.5)
+    // Classify the effect pattern (spec §3.4.6)
     let pattern = classify_pattern(&posterior_mean, &posterior_cov);
 
     EffectDecomposition {
@@ -153,7 +153,7 @@ pub fn decompose_effect(
     }
 }
 
-/// Bayesian linear regression with Gaussian prior (spec §2.5).
+/// Bayesian linear regression with Gaussian prior (spec §3.4.6).
 ///
 /// Prior: β ~ N(0, Λ₀), Λ₀ = diag(σ_μ², σ_τ²)
 /// Likelihood: Δ | β ~ N(Xβ, Σ_n)
@@ -168,7 +168,7 @@ fn bayesian_linear_regression(
     sigma_n: &Matrix9,
     prior_sigmas: (f64, f64),
 ) -> (Vector2, Matrix2) {
-    // Apply variance floor regularization (spec §2.6)
+    // Apply variance floor regularization (spec §3.3.2)
     // This prevents near-zero variance quantiles from dominating the regression
     let regularized = regularize_covariance(sigma_n);
 
@@ -220,7 +220,7 @@ fn compute_credible_interval(mean: f64, variance: f64) -> (f64, f64) {
     (mean - z * std, mean + z * std)
 }
 
-/// Classify the effect pattern based on posterior estimates (spec §2.5).
+/// Classify the effect pattern based on posterior estimates (spec §3.4.6).
 ///
 /// An effect component is "significant" if its magnitude exceeds twice
 /// its posterior standard error: |effect| > 2×SE
@@ -256,7 +256,7 @@ pub fn classify_pattern(beta_mean: &Vector2, beta_cov: &Matrix2) -> EffectPatter
     }
 }
 
-/// Apply variance floor regularization for numerical stability (spec §2.6).
+/// Apply variance floor regularization for numerical stability (spec §3.3.2).
 ///
 /// When some quantiles have zero or near-zero variance (common in discrete mode
 /// with ties), the covariance matrix becomes ill-conditioned. Even if Cholesky
@@ -266,7 +266,7 @@ pub fn classify_pattern(beta_mean: &Vector2, beta_cov: &Matrix2) -> EffectPatter
 /// We regularize by ensuring a minimum diagonal value of 1% of mean variance.
 /// This bounds the condition number to ~100, preventing numerical instability.
 ///
-/// Formula (spec §2.6):
+/// Formula (spec §3.3.2):
 ///   σ²ᵢ ← max(σ²ᵢ, 0.01 × σ̄²) + ε
 /// where σ̄² = tr(Σ)/9 and ε = 10⁻¹⁰ + σ̄² × 10⁻⁸
 fn regularize_covariance(sigma: &Matrix9) -> Matrix9 {

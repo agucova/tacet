@@ -229,7 +229,7 @@ pub fn run_adaptive(
     let _kl = state.update_posterior(posterior.clone());
 
     // =========================================================================
-    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §2.6)
+    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §3.5.2)
     // =========================================================================
     // Quality gates are verdict-blocking: if any gate triggers, we cannot make
     // a confident Pass/Fail decision, even if the posterior would otherwise
@@ -338,11 +338,13 @@ fn compute_posterior_from_state(
     let sigma_n = calibration.sigma_rate / (n as f64);
 
     // Run 9D Bayesian inference with prior covariance
+    // IMPORTANT: Use theta_eff (effective threshold accounting for measurement floor),
+    // not theta_ns (raw user threshold). The prior was calibrated for theta_eff.
     let bayes_result = compute_bayes_factor(
         &observed_diff,
         &sigma_n,
         &calibration.prior_cov_9d,
-        config.theta_ns,
+        calibration.theta_eff,
         Some(config.seed),
     );
 
@@ -394,7 +396,7 @@ pub fn adaptive_step(
     let _kl = state.update_posterior(posterior.clone());
 
     // =========================================================================
-    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §2.6)
+    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §3.5.2)
     // =========================================================================
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {

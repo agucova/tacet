@@ -11,6 +11,16 @@
 //! 2. Use a flat-top kernel to estimate the long-run variance and its derivative
 //! 3. Compute optimal block lengths that minimize MSE of the bootstrap variance estimator
 //!
+//! # Class-Conditional ACF (spec §3.3.2)
+//!
+//! For interleaved timing streams, computing ACF on the pooled stream directly is
+//! anti-conservative: class alternation masks within-class autocorrelation. Instead,
+//! we compute class-conditional ACF at acquisition-stream lags:
+//!
+//! - ρ^(F)_k = corr(y_t, y_{t+k} | c_t = c_{t+k} = F)
+//! - ρ^(R)_k = corr(y_t, y_{t+k} | c_t = c_{t+k} = R)
+//! - |ρ^(max)_k| = max(|ρ^(F)_k|, |ρ^(R)_k|)
+//!
 //! # References
 //!
 //! - Politis, D. N., & White, H. (2004). Automatic Block-Length Selection for
@@ -24,6 +34,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::math;
+use crate::types::{Class, TimingSample};
 
 /// Result of optimal block length estimation.
 #[derive(Debug, Clone, Copy)]
@@ -270,6 +281,233 @@ pub fn paired_optimal_block_length(baseline: &[f64], sample: &[f64]) -> usize {
 
     // Return ceiling, with minimum of 1
     math::ceil(max_circular).max(1.0) as usize
+}
+
+/// Minimum block length floor (spec §3.3.2 Step 4).
+const BLOCK_LENGTH_FLOOR: usize = 10;
+
+/// Compute optimal block length using class-conditional acquisition-lag ACF (spec §3.3.2).
+///
+/// This is the recommended approach for interleaved timing streams. Computing ACF
+/// on the pooled stream directly is anti-conservative because class alternation
+/// masks within-class autocorrelation, leading to underestimated block lengths
+/// and inflated false positive rates.
+///
+/// # Algorithm
+///
+/// 1. For each lag k, compute autocorrelation using only same-class pairs:
+///    - ρ^(F)_k = corr(y_t, y_{t+k} | c_t = c_{t+k} = Baseline)
+///    - ρ^(R)_k = corr(y_t, y_{t+k} | c_t = c_{t+k} = Sample)
+/// 2. Combine conservatively: |ρ^(max)_k| = max(|ρ^(F)_k|, |ρ^(R)_k|)
+/// 3. Run Politis-White on the combined ACF
+/// 4. Apply safety floor: b ← max(b, 10)
+///
+/// # Arguments
+///
+/// * `stream` - Interleaved acquisition stream with class labels
+/// * `is_fragile` - If true, apply inflation factor for fragile regimes
+///
+/// # Returns
+///
+/// Optimal block length as usize, with safety floor applied.
+pub fn class_conditional_optimal_block_length(stream: &[TimingSample], is_fragile: bool) -> usize {
+    let n = stream.len();
+    if n < 20 {
+        // Not enough data for meaningful ACF estimation
+        return BLOCK_LENGTH_FLOOR;
+    }
+
+    // Compute class-conditional ACF and autocovariances
+    let (max_abs_acf, max_acv, truncation_lag) = compute_class_conditional_acf(stream);
+
+    if truncation_lag == 0 || max_acv.is_empty() {
+        return BLOCK_LENGTH_FLOOR;
+    }
+
+    // Run Politis-White on the combined ACF/autocovariances
+    let block_length = politis_white_from_acf(&max_abs_acf, &max_acv, truncation_lag, n);
+
+    // Apply safety floor (spec §3.3.2 Step 4)
+    let mut result = (block_length.ceil() as usize).max(BLOCK_LENGTH_FLOOR);
+
+    // Apply inflation factor for fragile regimes (spec §3.3.2 Step 4)
+    if is_fragile {
+        result = ((result as f64) * 1.5).ceil() as usize;
+    }
+
+    // Cap at reasonable maximum
+    let max_block = ((3.0 * math::sqrt(n as f64)).min(n as f64 / 3.0)) as usize;
+    result.min(max_block).max(BLOCK_LENGTH_FLOOR)
+}
+
+/// Compute class-conditional ACF at acquisition-stream lags.
+///
+/// Returns (max_abs_acf, max_autocovariances, truncation_lag).
+fn compute_class_conditional_acf(stream: &[TimingSample]) -> (Vec<f64>, Vec<f64>, usize) {
+    let n = stream.len();
+
+    // Compute per-class means for centering
+    let (sum_f, count_f, sum_r, count_r) = stream.iter().fold(
+        (0.0, 0usize, 0.0, 0usize),
+        |(sf, cf, sr, cr), s| match s.class {
+            Class::Baseline => (sf + s.time_ns, cf + 1, sr, cr),
+            Class::Sample => (sf, cf, sr + s.time_ns, cr + 1),
+        },
+    );
+
+    if count_f < 5 || count_r < 5 {
+        return (vec![], vec![], 0);
+    }
+
+    let mean_f = sum_f / count_f as f64;
+    let mean_r = sum_r / count_r as f64;
+
+    // Compute per-class variances
+    let var_f: f64 = stream
+        .iter()
+        .filter(|s| s.class == Class::Baseline)
+        .map(|s| math::sq(s.time_ns - mean_f))
+        .sum::<f64>()
+        / count_f as f64;
+
+    let var_r: f64 = stream
+        .iter()
+        .filter(|s| s.class == Class::Sample)
+        .map(|s| math::sq(s.time_ns - mean_r))
+        .sum::<f64>()
+        / count_r as f64;
+
+    if var_f < 1e-12 || var_r < 1e-12 {
+        return (vec![], vec![], 0);
+    }
+
+    // Tuning parameters (same as standard Politis-White)
+    let consecutive_insignificant_needed = 5.max(math::log10(n as f64) as usize);
+    let max_lag = (math::ceil(math::sqrt(n as f64)) as usize + consecutive_insignificant_needed).min(n / 2);
+    let insignificance_threshold = 2.0 * math::sqrt(math::log10(n as f64) / n as f64);
+
+    let mut max_abs_acf = vec![0.0; max_lag + 1];
+    let mut max_acv = vec![0.0; max_lag + 1];
+    let mut first_insignificant_run_start: Option<usize> = None;
+
+    // Lag 0: variance (autocorrelation = 1)
+    max_abs_acf[0] = 1.0;
+    max_acv[0] = var_f.max(var_r);
+
+    for lag in 1..=max_lag {
+        // Compute class-conditional autocorrelation at this lag
+        let (acf_f, acv_f) = compute_single_lag_acf(stream, lag, Class::Baseline, mean_f, var_f);
+        let (acf_r, acv_r) = compute_single_lag_acf(stream, lag, Class::Sample, mean_r, var_r);
+
+        // Take conservative max of absolute values
+        let abs_acf_f = acf_f.abs();
+        let abs_acf_r = acf_r.abs();
+
+        if abs_acf_f >= abs_acf_r {
+            max_abs_acf[lag] = abs_acf_f;
+            max_acv[lag] = acv_f;
+        } else {
+            max_abs_acf[lag] = abs_acf_r;
+            max_acv[lag] = acv_r;
+        }
+
+        // Check for run of insignificant autocorrelations
+        if lag >= consecutive_insignificant_needed && first_insignificant_run_start.is_none() {
+            let recent = &max_abs_acf[lag - consecutive_insignificant_needed..lag];
+            if recent.iter().all(|&r| r < insignificance_threshold) {
+                first_insignificant_run_start = Some(lag - consecutive_insignificant_needed);
+            }
+        }
+    }
+
+    let truncation_lag = match first_insignificant_run_start {
+        Some(start) => (2 * start.max(1)).min(max_lag),
+        None => max_lag,
+    };
+
+    (max_abs_acf, max_acv, truncation_lag)
+}
+
+/// Compute autocorrelation and autocovariance at a single lag for one class.
+fn compute_single_lag_acf(
+    stream: &[TimingSample],
+    lag: usize,
+    class: Class,
+    mean: f64,
+    var: f64,
+) -> (f64, f64) {
+    let n = stream.len();
+    if lag >= n {
+        return (0.0, 0.0);
+    }
+
+    // Find all pairs (t, t+lag) where both belong to the target class
+    let mut cross_sum = 0.0;
+    let mut pair_count = 0usize;
+
+    for t in 0..(n - lag) {
+        if stream[t].class == class && stream[t + lag].class == class {
+            let x_t = stream[t].time_ns - mean;
+            let x_t_lag = stream[t + lag].time_ns - mean;
+            cross_sum += x_t * x_t_lag;
+            pair_count += 1;
+        }
+    }
+
+    if pair_count < 3 {
+        // Not enough pairs for reliable estimate
+        return (0.0, 0.0);
+    }
+
+    let autocovariance = cross_sum / pair_count as f64;
+    let autocorrelation = if var > 1e-12 {
+        autocovariance / var
+    } else {
+        0.0
+    };
+
+    (autocorrelation, autocovariance)
+}
+
+/// Run Politis-White algorithm given pre-computed ACF and autocovariances.
+fn politis_white_from_acf(
+    _abs_acf: &[f64],
+    autocovariances: &[f64],
+    truncation_lag: usize,
+    n: usize,
+) -> f64 {
+    if truncation_lag == 0 || autocovariances.is_empty() {
+        return BLOCK_LENGTH_FLOOR as f64;
+    }
+
+    // Compute spectral quantities using flat-top kernel
+    let mut g = 0.0;
+    let mut long_run_variance = autocovariances[0];
+
+    for lag in 1..=truncation_lag.min(autocovariances.len() - 1) {
+        let kernel_arg = lag as f64 / truncation_lag as f64;
+        let kernel_weight = if kernel_arg <= 0.5 {
+            1.0
+        } else {
+            2.0 * (1.0 - kernel_arg)
+        };
+
+        let acv = autocovariances[lag];
+        g += 2.0 * kernel_weight * lag as f64 * acv;
+        long_run_variance += 2.0 * kernel_weight * acv;
+    }
+
+    // Compute optimal block length (circular bootstrap formula)
+    let variance_squared = math::sq(long_run_variance);
+    let d_circular = (4.0 / 3.0) * variance_squared;
+
+    if d_circular > 1e-12 {
+        let ratio = (2.0 * math::sq(g)) / d_circular;
+        let n_cuberoot = math::cbrt(n as f64);
+        math::cbrt(ratio) * n_cuberoot
+    } else {
+        BLOCK_LENGTH_FLOOR as f64
+    }
 }
 
 #[cfg(test)]

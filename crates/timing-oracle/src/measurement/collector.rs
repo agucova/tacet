@@ -169,7 +169,7 @@ impl Collector {
             let actual_ticks = ticks_per_call * k_attempt as f64;
 
             // Check if even with max batching we're still below measurability threshold
-            // Spec §8.2.4: If K*Top < 50*Tres even at K=20, it's Unmeasurable.
+            // Spec §4.5-4.6: If K*Top < 50*Tres even at K=20, it's Unmeasurable.
             if actual_ticks < self.target_ticks_per_batch {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
                 let suggestion =

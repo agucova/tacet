@@ -791,7 +791,8 @@ fn run_calibration_phase<F: Fn() -> f64>(
         })
         .collect();
 
-    let cov_estimate = bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed);
+    // C bindings don't implement discrete mode detection, so is_fragile = false
+    let cov_estimate = bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed, false);
 
     if !cov_estimate.is_stable() {
         return Err(Box::new(ToResult {

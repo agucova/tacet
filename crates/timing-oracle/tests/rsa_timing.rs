@@ -161,6 +161,8 @@ fn rsa_1024_decrypt_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
+        .warmup(100)
+        .calibration_samples(2000)
         .test(inputs, |ct| {
             let plaintext = private_key.decrypt(Pkcs1v15Encrypt, ct).unwrap();
             std::hint::black_box(plaintext[0]);
@@ -213,7 +215,12 @@ fn rsa_1024_decrypt_constant_time() {
 ///
 /// Signing uses the private key and is sensitive to timing attacks.
 /// Uses RSA-2048 because RSA-1024 shows cache-related timing artifacts.
+///
+/// This test is ignored by default because RSA-2048 key generation and
+/// signing are very slow (5+ minutes). Run with `cargo test -- --ignored`
+/// for thorough validation.
 #[test]
+#[ignore]
 fn rsa_2048_sign_constant_time() {
     let private_key = RsaPrivateKey::new(&mut OsRng, 2048).expect("failed to generate key");
     let signing_key = SigningKey::<sha2::Sha256>::new_unprefixed(private_key);
@@ -226,6 +233,8 @@ fn rsa_2048_sign_constant_time() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
+        .warmup(100)
+        .calibration_samples(2000)
         .test(inputs, |msg| {
             let signature = signing_key.sign_with_rng(&mut OsRng, msg);
             std::hint::black_box(signature.to_bytes().as_ref()[0]);
@@ -561,6 +570,8 @@ fn rsa_1024_decrypt_control_both_random() {
         .pass_threshold(0.15)
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
+        .warmup(100)
+        .calibration_samples(2000)
         .test(inputs, |ct| {
             let plaintext = private_key.decrypt(Pkcs1v15Encrypt, ct).unwrap();
             std::hint::black_box(plaintext[0]);

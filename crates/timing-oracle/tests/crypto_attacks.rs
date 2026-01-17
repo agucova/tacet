@@ -428,10 +428,11 @@ fn modexp_square_and_multiply_timing() {
                 effect.pattern
             );
 
-            // Should have significant shift
+            // Should have significant shift (either direction indicates timing leak)
+            // Negative shift means sample (low Hamming weight) is faster than baseline
             assert!(
-                effect.shift_ns > 50.0,
-                "Expected significant shift_ns (got {:.1})",
+                effect.shift_ns.abs() > 50.0,
+                "Expected significant shift_ns magnitude (got {:.1})",
                 effect.shift_ns
             );
         }

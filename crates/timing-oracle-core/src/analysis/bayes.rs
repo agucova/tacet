@@ -219,9 +219,10 @@ pub fn compute_2d_projection(
 
     // Projection covariance: Cov(β_proj | Δ) = A Λ_post A'
     // where A = (X' Σ_n⁻¹ X)⁻¹ X' Σ_n⁻¹
-    // Simplified: use (X' Σ_n⁻¹ X)⁻¹ as approximation when Λ_post is close to Σ_n
-    // Full computation: A Λ_post A'
-    let a_matrix = xt_chol.inverse() * design.transpose() * sigma_n_chol.inverse();
+    //
+    // Note: X' Σ_n⁻¹ = (Σ_n⁻¹ X)' = sigma_n_inv_x' (since Σ_n is symmetric)
+    // We already computed sigma_n_inv_x = Σ_n⁻¹ X correctly via Cholesky solve.
+    let a_matrix = xt_chol.inverse() * sigma_n_inv_x.transpose();
     let beta_proj_cov = a_matrix * lambda_post * a_matrix.transpose();
 
     // Projection mismatch: Q = r' Σ_n⁻¹ r where r = δ_post - X β_proj

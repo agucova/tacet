@@ -10,7 +10,7 @@
 //! ```
 //!
 //! This uses the inverse of the empirical distribution function with averaging
-//! at discontinuities. See spec §2.1 for theoretical justification.
+//! at discontinuities. See spec §3.1 for theoretical justification.
 //!
 //! # Reference
 //!
@@ -252,7 +252,7 @@ pub fn compute_deciles_sorted(sorted: &[f64]) -> Vector9 {
     result
 }
 
-/// Compute mid-distribution quantiles for discrete data (spec §2.4).
+/// Compute mid-distribution quantiles for discrete data (spec §3.7).
 ///
 /// Mid-distribution quantiles handle ties correctly by using:
 /// ```text

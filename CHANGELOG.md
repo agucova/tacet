@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Spec §3.3.2: Block length selection now uses class-conditional ACF**
+  - Previous: Politis-White on pooled acquisition stream (anti-conservative due to class alternation)
+  - New: Class-conditional acquisition-lag ACF with conservative combination
+  - Added safety floor (b_min = 10) and inflation factor for fragile regimes
+  - Fixes elevated FPR (5-8% → 2-5% expected) under null hypothesis
+
+- **Spec §3.8: Strengthened calibration validation requirements**
+  - Added explicit FPR metrics: FPR_gated and FPR_overall
+  - Recommended 500+ trials (up from 100) for stable estimates
+  - Added normative acceptance criteria (FPR_gated ≤ 5%, FPR_overall ≤ 10%)
+  - Added anti-conservative remediation escalation steps
+
 ### Documentation
 
 - **Major restructure (spec v4.2 → v5.0):**

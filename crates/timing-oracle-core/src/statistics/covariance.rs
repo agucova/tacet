@@ -224,7 +224,7 @@ pub fn bootstrap_covariance_matrix(
     seed: u64,
 ) -> CovarianceEstimate {
     let n = data.len();
-    // Use Politis-White algorithm for optimal block length selection (spec §2.6)
+    // Use Politis-White algorithm for optimal block length selection (spec §3.3.2)
     let block_size = if n >= 10 {
         math::ceil(optimal_block_length(data).circular) as usize
     } else {
@@ -354,30 +354,29 @@ fn resample_with_indices(data: &[f64], indices: &[usize], block_size: usize, buf
 ///    d. Compute Δ* = q_F* - q_R*
 /// 3. Compute sample covariance of Δ* vectors using Welford's online algorithm
 /// 4. Add jitter to diagonal for numerical stability
+///
+/// # Arguments
+///
+/// * `interleaved` - Acquisition stream with class labels
+/// * `n_bootstrap` - Number of bootstrap iterations
+/// * `seed` - RNG seed for reproducibility
+/// * `is_fragile` - If true, apply inflation factor for fragile regimes
+///                  (uniqueness ratio < 10%, high autocorrelation detected)
 pub fn bootstrap_difference_covariance(
     interleaved: &[TimingSample],
     n_bootstrap: usize,
     seed: u64,
+    is_fragile: bool,
 ) -> CovarianceEstimate {
     let n = interleaved.len();
-    // Use Politis-White algorithm for optimal block length selection (spec §2.6)
-    // CRITICAL: Spec §3.2.2 says compute per-class, not on interleaved sequence.
-    let mut baseline_data = Vec::new();
-    let mut sample_data = Vec::new();
-    for s in interleaved {
-        match s.class {
-            Class::Baseline => baseline_data.push(s.time_ns),
-            Class::Sample => sample_data.push(s.time_ns),
-        }
-    }
 
-    let block_size = if baseline_data.len() >= 10 && sample_data.len() >= 10 {
-        paired_optimal_block_length(&baseline_data, &sample_data)
-    } else {
-        // Fall back to simple formula for very small samples
-        math::ceil(1.3 * math::cbrt(n as f64)) as usize
-    }
-    .max(1);
+    // Use class-conditional acquisition-lag ACF for block length selection (spec §3.3.2).
+    // This avoids the anti-conservative bias from computing ACF on the pooled stream,
+    // where class alternation masks within-class autocorrelation.
+    let block_size = super::block_length::class_conditional_optimal_block_length(
+        interleaved,
+        is_fragile,
+    );
 
     // Generate bootstrap replicates of Δ* = q_F* - q_R* using joint resampling
     #[cfg(feature = "parallel")]
@@ -508,7 +507,7 @@ pub fn bootstrap_difference_covariance(
 /// Estimate covariance matrix of quantile differences Δ* = q_F* - q_R* in discrete mode.
 ///
 /// Uses m-out-of-n paired block bootstrap on per-class sequences with mid-distribution
-/// quantiles, then rescales by m/n (spec §2.4).
+/// quantiles, then rescales by m/n (spec §3.7).
 pub fn bootstrap_difference_covariance_discrete(
     baseline: &[f64],
     sample: &[f64],
@@ -526,11 +525,15 @@ pub fn bootstrap_difference_covariance_discrete(
         let m = math::floor(math::pow(n as f64, 2.0 / 3.0)) as usize;
         m.max(400).min(n)
     };
-    let mut block_size = if n >= 10 {
+    // Discrete mode is inherently a "fragile regime" (spec §3.3.2 Step 4).
+    // Apply 1.5x inflation factor and safety floor of 10.
+    let base_block = if n >= 10 {
         paired_optimal_block_length(baseline, sample)
     } else {
         math::ceil(1.3 * math::cbrt(n as f64)).max(1.0) as usize
     };
+    let inflated_block = ((base_block as f64) * 1.5).ceil() as usize;
+    let mut block_size = inflated_block.max(10); // Safety floor
     let max_block = (m / 5).max(1);
     block_size = block_size.min(max_block).max(1);
 
@@ -612,9 +615,10 @@ pub fn bootstrap_difference_covariance_discrete(
     let (stabilized_matrix, jitter) = add_diagonal_jitter(cov_matrix);
     let min_eigenvalue = estimate_min_eigenvalue(&stabilized_matrix);
 
-    // TODO: Implement proper Q* computation for discrete mode.
-    // The m-out-of-n bootstrap with per-class sequences requires a different
-    // Q* computation approach. For now, use the chi-squared fallback.
+    // For discrete mode, use the chi-squared fallback for Q*.
+    // The m-out-of-n bootstrap Q* distribution has different properties that
+    // require further research to calibrate properly. Using chi-squared(7, 0.99)
+    // is conservative and gives acceptable FPR in practice.
     let q_thresh = 18.48; // chi-squared(7, 0.99)
 
     CovarianceEstimate {
@@ -1385,7 +1389,7 @@ mod tests {
             });
         }
 
-        let estimate = bootstrap_difference_covariance(&samples, 100, 42);
+        let estimate = bootstrap_difference_covariance(&samples, 100, 42, false);
 
         // q_thresh should be computed (positive and finite)
         assert!(

@@ -402,27 +402,45 @@ Timing measurements exhibit autocorrelation—nearby samples are more similar th
 
 **Politis-White automatic block length selection:**
 
-Implementations SHOULD use the Politis-White algorithm² to select the optimal block length, computed on the **acquisition stream** (not per-class subsequences):
+Implementations SHOULD use the Politis-White algorithm² to select the optimal block length. The key challenge is that block length selection must measure the autocorrelation relevant to quantile difference estimation, while respecting acquisition-stream timing.
 
-**Step 1: Compute ACF on acquisition stream**
+**Step 1: Compute class-conditional acquisition-lag ACF**
 
-Use either:
-- The pooled stream $y_t$ directly, or
-- A residualized stream $y_t - \text{median}(\text{window}_t)$ to reduce slow drift and focus on short-range correlation
+The naive approach of computing ACF on the pooled stream $y_t$ directly is **anti-conservative**: class alternation in interleaved sampling masks within-class autocorrelation, leading to underestimated block lengths and inflated false positive rates.
+
+Instead, compute autocorrelation at acquisition-stream lag $k$ using only **same-class pairs**:
+
+$$
+\hat{\rho}^{(F)}_k = \text{corr}(y_t, y_{t+k} \mid c_t = c_{t+k} = F)
+$$
+
+$$
+\hat{\rho}^{(R)}_k = \text{corr}(y_t, y_{t+k} \mid c_t = c_{t+k} = R)
+$$
+
+Then combine conservatively:
+
+$$
+|\hat{\rho}^{(\max)}_k| = \max(|\hat{\rho}^{(F)}_k|, |\hat{\rho}^{(R)}_k|)
+$$
+
+This measures within-class dependence at acquisition-stream lags—the quantity that actually drives $\text{Var}(\Delta)$—without being masked by class alternation.
+
+**Why class-conditional ACF?** The variance of quantile estimators $\hat{q}(F)$ and $\hat{q}(R)$ depends on within-class autocorrelation. When computing ACF on the pooled interleaved stream, adjacent samples often belong to different classes, artificially reducing apparent autocorrelation. Class-conditional ACF preserves acquisition-stream timing (lag $k$ means $k$ acquisition steps apart) while measuring the relevant dependence structure.
 
 Let $k_n = \max(5, \lfloor \log_{10}(T) \rfloor)$ and $m_{\max} = \lceil \sqrt{T} \rceil + k_n$.
 
-Compute autocorrelations $\hat{\rho}_k$ for $k = 0, \ldots, m_{\max}$. Find the first lag $m^*$ where $k_n$ consecutive autocorrelations fall within the conservative band $\pm 2\sqrt{\log_{10}(T)/T}$. Set $m = \min(2 \cdot \max(m^*, 1), m_{\max})$.
+Compute $|\hat{\rho}^{(\max)}_k|$ for $k = 0, \ldots, m_{\max}$. Find the first lag $m^*$ where $k_n$ consecutive values fall within the conservative band $\pm 2\sqrt{\log_{10}(T)/T}$. Set $m = \min(2 \cdot \max(m^*, 1), m_{\max})$.
 
 **Step 2: Compute spectral quantities**
 
 Using a flat-top (trapezoidal) kernel $h(x) = \min(1, 2(1 - |x|))$:
 
 $$
-\hat{\sigma}^2 = \sum_{k=-m}^{m} h\left(\frac{k}{m}\right) \hat{\gamma}_k, \quad g = \sum_{k=-m}^{m} h\left(\frac{k}{m}\right) |k| \, \hat{\gamma}_k
+\hat{\sigma}^2 = \sum_{k=-m}^{m} h\left(\frac{k}{m}\right) \hat{\gamma}^{(\max)}_k, \quad g = \sum_{k=-m}^{m} h\left(\frac{k}{m}\right) |k| \, \hat{\gamma}^{(\max)}_k
 $$
 
-where $\hat{\gamma}_k$ is the sample autocovariance at lag $k$.
+where $\hat{\gamma}^{(\max)}_k$ is the autocovariance corresponding to $|\hat{\rho}^{(\max)}_k|$.
 
 **Step 3: Compute optimal block length**
 
@@ -431,6 +449,22 @@ $$
 $$
 
 Capped at $b_{\max} = \min(3\sqrt{T}, T/3)$ to prevent degenerate blocks.
+
+**Step 4: Apply safety bounds**
+
+Automatic block length selectors can underestimate in pathological regimes (discrete timers, periodic interference). Implementations MUST apply:
+
+$$
+\hat{b} \leftarrow \max(\hat{b}, b_{\min})
+$$
+
+where $b_{\min} = 10$ (or a platform-specific floor).
+
+In fragile regimes (discrete timer mode, uniqueness ratio < 10%, or detected high autocorrelation), implementations SHOULD apply an inflation factor:
+
+$$
+\hat{b} \leftarrow \lceil \gamma \cdot \hat{b} \rceil, \quad \gamma \in [1.2, 2.0]
+$$
 
 ² Politis, D. N. & White, H. (2004). "Automatic Block-Length Selection for the Dependent Bootstrap." Econometric Reviews 23(1):53–70.
 
@@ -791,6 +825,10 @@ If $\rho > \log(0.5)$ (posterior volume not reduced much), trigger Inconclusive 
 
 Alternative: use trace ratio $\text{tr}(\Lambda_{\text{post}})/\text{tr}(\Lambda_0) > 0.5$ if log-det is numerically unstable.
 
+**Exception for decisive probabilities**: If $P(\text{leak}) > 0.995$ or $P(\text{leak}) < 0.005$, AND the projection mismatch $Q < 1000 \times Q_{\text{thresh}}$, implementations MAY bypass this gate and allow a verdict. This handles slow operations (e.g., modular exponentiation) or unusual timing patterns (e.g., branch-dependent timing) where high autocorrelation limits effective sample size, but the effect is so large that the verdict is unambiguous.
+
+Moderate Q values (e.g., $Q \sim 100$–$1000$) can occur with real timing leaks that have unusual patterns. The Q check filters only truly pathological cases: astronomical Q values (e.g., $Q > 10000 \times Q_{\text{thresh}}$) indicate measurement artifacts rather than genuine timing differences. Such cases MUST still return Inconclusive.
+
 **Gate 2: Learning Rate Collapsed**
 
 Track KL divergence between successive posteriors. For Gaussian posteriors:
@@ -969,18 +1007,43 @@ The Gaussian likelihood is a rougher approximation with discrete data. Implement
 
 ### 3.8 Calibration Validation Requirements
 
-The Bayesian approach requires empirical validation that posteriors are well-calibrated.
+The Bayesian approach requires empirical validation that posteriors are well-calibrated. This section defines **normative, pipeline-level** calibration requirements.
 
 **Null calibration test (normative requirement):**
 
-Implementations MUST provide (or run in internal test suite) a "fixed-vs-fixed" validation:
+Implementations MUST provide (or run in internal test suite) a "fixed-vs-fixed" validation that measures **end-to-end false positive rates**:
 
 - Run the full pipeline under null (same distribution both classes)
-- Empirically verify that:
-  - The rate of `Fail` is near 0 and bounded by configured error tolerance
-  - The rate of `Pass` at the pass threshold is consistent with expectations, conditional on quality gates passing
+- Compute two distinct FPR metrics:
+  - $\widehat{\text{FPR}}_{\text{overall}} = P(\text{Fail} \mid H_0)$ — unconditional false positive rate
+  - $\widehat{\text{FPR}}_{\text{gated}} = P(\text{Fail} \mid H_0, \text{all verdict-blocking gates pass})$ — FPR conditional on conclusive results
+- Also track Inconclusive rate and reasons
 
-This is an end-to-end check that $c_{\text{floor}}$, $\Sigma$ scaling, prior calibration, and posterior computation are not systematically anti-conservative.
+**Trial count requirement:**
+
+Implementations SHOULD run **at least 500 trials** for stable FPR estimates. With 100 trials, a true 5% FPR has 95% CI of approximately [2%, 11%], which is too wide to reliably detect miscalibration.
+
+**Acceptance criteria (normative):**
+
+| Metric | Target | Acceptable | Action if Exceeded |
+|--------|--------|------------|-------------------|
+| $\widehat{\text{FPR}}_{\text{gated}}$ | 2-5% | ≤ 5% | MUST escalate conservatism |
+| $\widehat{\text{FPR}}_{\text{overall}}$ | 2-5% | ≤ 10% | SHOULD escalate conservatism |
+
+If $\widehat{\text{FPR}}_{\text{gated}} > 5\%$, implementations MUST apply remediation (see below).
+
+**Anti-conservative remediation:**
+
+When null calibration tests detect elevated FPR, implementations SHOULD apply deterministic escalation:
+
+1. **Increase block length**: Multiply $\hat{b}$ by 1.5 (or 2.0 if FPR > 8%)
+2. **Increase bootstrap iterations**: Use $B = 4000$ instead of 2000
+3. **Tighten decision thresholds**: Use $\alpha_{\text{pass}} = 0.01$ instead of 0.05
+
+Re-run calibration after each escalation step. This remediation can run:
+- In library CI (recommended)
+- In a `--self-test` mode
+- Automatically at first run on a new platform
 
 **Expected calibration results:**
 
@@ -991,6 +1054,8 @@ This is an end-to-end check that $c_{\text{floor}}$, $\Sigma$ scaling, prior cal
 | θ | ~50% | 35-65% |
 | 2θ | ~95% | 85-100% |
 | 3θ | ~99% | 95-100% |
+
+This is an end-to-end check that $c_{\text{floor}}$, $\Sigma$ scaling, block length selection, prior calibration, and posterior computation are not systematically anti-conservative.
 
 ---
 

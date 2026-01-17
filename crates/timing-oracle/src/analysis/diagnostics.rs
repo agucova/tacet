@@ -1,4 +1,4 @@
-//! Diagnostic checks for result reliability (spec §2.8).
+//! Diagnostic checks for result reliability (spec §3.5.3).
 //!
 //! This module implements three diagnostic checks:
 //! 1. Non-stationarity: Compare variance between calibration and inference sets
@@ -67,7 +67,7 @@ pub fn compute_diagnostics(
         warnings.push(warning.description());
     }
 
-    // 1. Stationarity check (spec §3.2.1)
+    // 1. Stationarity check (implementation-guide.md §2.3)
     let (stationarity_ratio, stationarity_ok) = check_stationarity_windowed(interleaved_samples);
     if !stationarity_ok {
         warnings.push(
@@ -76,7 +76,7 @@ pub fn compute_diagnostics(
         );
     }
 
-    // 2. Projection mismatch check (spec §7.2)
+    // 2. Projection mismatch check (spec §3.5.3)
     let (projection_mismatch_q, projection_mismatch_ok) =
         check_model_fit(observed_diff, calib_cov, posterior_mean);
     if !projection_mismatch_ok {
@@ -86,7 +86,7 @@ pub fn compute_diagnostics(
         ));
     }
 
-    // 3. Outlier asymmetry check (spec §3.3)
+    // 3. Outlier asymmetry check (spec §4.4)
     let outlier_rate_fixed = outlier_stats.rate_fixed();
     let outlier_rate_random = outlier_stats.rate_random();
     let outlier_asymmetry_ok = check_outlier_asymmetry(outlier_rate_fixed, outlier_rate_random);
@@ -105,7 +105,7 @@ pub fn compute_diagnostics(
         ));
     }
 
-    // 4. Per-class dependence estimation (spec §3.2.2)
+    // 4. Per-class dependence estimation (spec §3.3.2)
     let dependence_length = estimate_joint_dependence_length(interleaved_samples);
     let effective_sample_size = if dependence_length > 0 {
         extra.samples_per_class / dependence_length
@@ -162,7 +162,7 @@ pub fn compute_diagnostics(
     }
 }
 
-/// Check stationarity using windowed median/IQR (spec §3.2.1).
+/// Check stationarity using windowed median/IQR (implementation-guide.md §2.3).
 fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, bool) {
     let n = samples.len();
     if n < 100 {
@@ -228,7 +228,7 @@ fn check_stationarity_windowed(samples: &[crate::types::TimingSample]) -> (f64, 
     (ratio, median_drift_ok && var_drift_ok)
 }
 
-/// Estimate dependence length using per-class ACF (spec §3.2.2).
+/// Estimate dependence length using per-class ACF (spec §3.3.2).
 fn estimate_joint_dependence_length(samples: &[crate::types::TimingSample]) -> usize {
     use crate::types::Class;
 
