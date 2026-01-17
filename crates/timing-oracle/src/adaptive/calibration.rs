@@ -17,6 +17,7 @@ use std::time::Instant;
 
 use super::CalibrationSnapshot;
 use crate::analysis::mde::estimate_mde;
+use crate::constants::DEFAULT_SEED;
 use crate::preflight::{run_all_checks, PreflightResult};
 use crate::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
@@ -52,7 +53,8 @@ pub struct Calibration {
     /// When true, use mid-quantile estimators and m-out-of-n bootstrap.
     pub discrete_mode: bool,
 
-    /// The theta threshold being used (in nanoseconds).
+    /// The user-requested theta threshold (in nanoseconds).
+    /// This is theta_user from the spec - what the user wants to detect.
     pub theta_ns: f64,
 
     /// Number of calibration samples collected per class.
@@ -70,6 +72,36 @@ pub struct Calibration {
     /// Statistics snapshot from calibration phase for drift detection.
     /// Used to compare against post-test statistics (spec Section 2.6, Gate 6).
     pub calibration_snapshot: CalibrationSnapshot,
+
+    // === v4.1 additions ===
+
+    /// Floor-rate constant (spec Section 2.3.4).
+    /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
+    /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
+    pub c_floor: f64,
+
+    /// Model mismatch threshold (spec Section 2.3.3, 2.6 Gate 8).
+    /// 99th percentile of bootstrap Q* distribution.
+    /// When Q > q_thresh, the 2D (shift + tail) model doesn't fit the data well.
+    pub q_thresh: f64,
+
+    /// Initial measurement floor at calibration time.
+    /// theta_floor(n_cal) = max(c_floor / sqrt(n_cal), theta_tick).
+    pub theta_floor_initial: f64,
+
+    /// Effective threshold for this run (spec Section 2.3.4).
+    /// theta_eff = max(theta_user, theta_floor) or just theta_floor in research mode.
+    /// This is what we actually test against.
+    pub theta_eff: f64,
+
+    /// Timer resolution floor component (spec Section 2.3.4).
+    /// theta_tick = (1 tick in ns) / K where K is the batch size.
+    /// The floor below which timer quantization dominates.
+    pub theta_tick: f64,
+
+    /// Deterministic RNG seed used for this run.
+    /// Enables reproducibility: same seed + same data = same result.
+    pub rng_seed: u64,
 }
 
 /// Errors that can occur during calibration.
@@ -177,7 +209,7 @@ impl Default for CalibrationConfig {
             timer_resolution_ns: 1.0,
             theta_ns: 100.0,
             alpha: 0.01,
-            seed: 42,
+            seed: DEFAULT_SEED,
             baseline_gen_time_ns: None,
             sample_gen_time_ns: None,
             skip_preflight: false,
@@ -289,34 +321,6 @@ pub fn calibrate(
     // Compute MDE for prior setting (spec Section 2.7)
     let mde = estimate_mde(&cov_estimate.matrix, config.alpha);
 
-    // Set prior covariance: sigma proportional to theta (spec Section 2.5)
-    //
-    // The prior scale is calibrated so that the prior leak probability
-    // P(max_k |(Xβ)_k| > θ | prior) ≈ 62%, representing reasonable uncertainty.
-    //
-    // IMPORTANT: The leak test uses max over the 9-vector Xβ (predicted quantile
-    // differences), not just β itself. The design matrix X amplifies β, so the
-    // prior scale must account for this transformation.
-    //
-    // With β ~ N(0, σ²I₂) and X the 9×2 design matrix [1 | b_tail]:
-    //   - σ = 2θ gives P(max_k |(Xβ)_k| > θ) ≈ 85% (too high, causes FPR ~40%)
-    //   - σ = 1.12θ gives P(max_k |(Xβ)_k| > θ) ≈ 62% (matches spec intent)
-    //
-    // The 1.12 factor was determined via Monte Carlo calibration (see
-    // bayes.rs::tests::test_find_correct_prior_scale).
-    //
-    // The variance ratio quality gate (Gate 1) catches cases where
-    // posterior ≈ prior (data uninformative).
-    const PRIOR_SCALE_FACTOR: f64 = 1.12;
-    let prior_sigma_shift = config.theta_ns * PRIOR_SCALE_FACTOR;
-    let prior_sigma_tail = config.theta_ns * PRIOR_SCALE_FACTOR;
-    let prior_cov = Matrix2::new(
-        prior_sigma_shift.powi(2),
-        0.0,
-        0.0,
-        prior_sigma_tail.powi(2),
-    );
-
     // Compute throughput
     let elapsed = start.elapsed();
     let samples_per_second = if elapsed.as_secs_f64() > 0.0 {
@@ -342,6 +346,60 @@ pub fn calibrate(
     // Compute calibration statistics snapshot for drift detection (Gate 6)
     let calibration_snapshot = compute_calibration_snapshot(&baseline_ns, &sample_ns);
 
+    // v4.1: Compute floor-rate constant and model mismatch threshold
+    let c_floor = compute_floor_rate_constant(&sigma_rate, config.seed);
+
+    // TODO: Implement proper q_thresh computation from bootstrap Q* distribution
+    // Fallback: chi-squared(7, 0.99) ≈ 18.48
+    let q_thresh = 18.48;
+
+    // Timer tick floor: 1 tick / batch size (batch size = 1 for now, updated by collector)
+    // config.timer_resolution_ns is already in ns
+    let theta_tick = config.timer_resolution_ns;
+
+    // Initial measurement floor at calibration sample count
+    let theta_floor_initial = (c_floor / (n as f64).sqrt()).max(theta_tick);
+
+    // Effective threshold: max(user threshold, measurement floor)
+    // In research mode (theta_ns = 0), just use the floor
+    let theta_eff = if config.theta_ns > 0.0 {
+        config.theta_ns.max(theta_floor_initial)
+    } else {
+        theta_floor_initial
+    };
+
+    // Set prior covariance: sigma proportional to theta_eff (spec Section 2.5)
+    //
+    // The prior scale is calibrated so that the prior leak probability
+    // P(max_k |(Xβ)_k| > θ_eff | prior) ≈ 62%, representing reasonable uncertainty.
+    //
+    // IMPORTANT: We use theta_eff (not theta_user) because:
+    // 1. If theta_user < theta_floor, we can't detect effects that small anyway
+    // 2. The prior should represent uncertainty about effects exceeding what we can measure
+    //
+    // The leak test uses max over the 9-vector Xβ (predicted quantile
+    // differences), not just β itself. The design matrix X amplifies β, so the
+    // prior scale must account for this transformation.
+    //
+    // With β ~ N(0, σ²I₂) and X the 9×2 design matrix [1 | b_tail]:
+    //   - σ = 2θ gives P(max_k |(Xβ)_k| > θ) ≈ 85% (too high, causes FPR ~40%)
+    //   - σ = 1.12θ gives P(max_k |(Xβ)_k| > θ) ≈ 62% (matches spec intent)
+    //
+    // The 1.12 factor was determined via Monte Carlo calibration (see
+    // bayes.rs::tests::test_find_correct_prior_scale).
+    //
+    // The variance ratio quality gate (Gate 1) catches cases where
+    // posterior ≈ prior (data uninformative).
+    const PRIOR_SCALE_FACTOR: f64 = 1.12;
+    let prior_sigma_shift = theta_eff * PRIOR_SCALE_FACTOR;
+    let prior_sigma_tail = theta_eff * PRIOR_SCALE_FACTOR;
+    let prior_cov = Matrix2::new(
+        prior_sigma_shift.powi(2),
+        0.0,
+        0.0,
+        prior_sigma_tail.powi(2),
+    );
+
     Ok(Calibration {
         sigma_rate,
         block_length,
@@ -355,7 +413,101 @@ pub fn calibrate(
         mde_tail_ns: mde.tail_ns,
         preflight_result,
         calibration_snapshot,
+        // v4.1 fields
+        c_floor,
+        q_thresh,
+        theta_floor_initial,
+        theta_eff,
+        theta_tick,
+        rng_seed: config.seed,
     })
+}
+
+/// Compute the floor-rate constant c_floor (spec Section 2.3.4).
+///
+/// This is the 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
+/// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
+///
+/// The prediction covariance in rate form is:
+/// Σ_pred,rate = X (X' Σ_rate^{-1} X)^{-1} X'
+///
+/// We draw 50,000 Monte Carlo samples from N(0, Σ_pred,rate) and compute
+/// the 95th percentile of the max absolute value across the 9 quantile positions.
+fn compute_floor_rate_constant(sigma_rate: &Matrix9, seed: u64) -> f64 {
+    use rand::SeedableRng;
+    use rand_distr::{Distribution, Normal};
+
+    // Design matrix X: 9x2 for [uniform_shift, tail_effect]
+    // Column 1: all 1s (uniform shift)
+    // Column 2: centered linear (-0.5 to 0.5 in steps of 0.125)
+    let x_data = [
+        1.0, -0.5, 1.0, -0.375, 1.0, -0.25, 1.0, -0.125, 1.0, 0.0, 1.0, 0.125, 1.0, 0.25, 1.0,
+        0.375, 1.0, 0.5,
+    ];
+    let x = nalgebra::SMatrix::<f64, 9, 2>::from_row_slice(&x_data);
+
+    // Compute Σ_rate^{-1}
+    let sigma_rate_inv = match sigma_rate.try_inverse() {
+        Some(inv) => inv,
+        None => {
+            // If inversion fails, return a conservative fallback
+            // Based on typical values: ~50-100 ns * sqrt(n)
+            return 50.0 * (5000.0_f64).sqrt(); // ~3500 ns for n=1
+        }
+    };
+
+    // Compute (X' Σ_rate^{-1} X)^{-1}
+    let xt_sigma_inv_x = x.transpose() * sigma_rate_inv * x;
+    let xt_sigma_inv_x_inv = match xt_sigma_inv_x.try_inverse() {
+        Some(inv) => inv,
+        None => {
+            // Conservative fallback
+            return 50.0 * (5000.0_f64).sqrt();
+        }
+    };
+
+    // Compute Σ_pred,rate = X (X' Σ_rate^{-1} X)^{-1} X'
+    let sigma_pred_rate = x * xt_sigma_inv_x_inv * x.transpose();
+
+    // Cholesky decomposition for sampling
+    let chol = match nalgebra::linalg::Cholesky::new(sigma_pred_rate) {
+        Some(c) => c,
+        None => {
+            // Try with regularization
+            let eps = 1e-6 * sigma_pred_rate.diagonal().sum() / 9.0;
+            let regularized = sigma_pred_rate + Matrix9::identity() * eps;
+            match nalgebra::linalg::Cholesky::new(regularized) {
+                Some(c) => c,
+                None => return 50.0 * (5000.0_f64).sqrt(), // Conservative fallback
+            }
+        }
+    };
+
+    // Monte Carlo: sample Z ~ N(0, Σ_pred,rate), compute max|Z_k|
+    const MC_SAMPLES: usize = 50_000;
+    // Use StdRng which is deterministic given a seed (uses ChaCha12 internally)
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+    let normal = Normal::new(0.0, 1.0).unwrap();
+
+    let mut max_abs_values: Vec<f64> = Vec::with_capacity(MC_SAMPLES);
+
+    for _ in 0..MC_SAMPLES {
+        // Sample standard normal Z_0
+        let z0: nalgebra::SVector<f64, 9> =
+            nalgebra::SVector::from_fn(|_, _| normal.sample(&mut rng));
+
+        // Transform: Z = L * Z_0 where L is Cholesky lower triangle
+        let z = chol.l() * z0;
+
+        // Compute max|Z_k|
+        let max_abs = z.iter().map(|v| v.abs()).fold(0.0_f64, f64::max);
+        max_abs_values.push(max_abs);
+    }
+
+    // Sort and get 95th percentile
+    max_abs_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let p95_idx = ((MC_SAMPLES as f64) * 0.95) as usize;
+    max_abs_values[p95_idx.min(MC_SAMPLES - 1)]
 }
 
 /// Count unique values in a slice (for discrete mode detection).

@@ -316,6 +316,7 @@ mod tests {
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             1000,
+            5.0, // model_fit_q
         );
 
         // First update - no previous posterior
@@ -329,6 +330,7 @@ mod tests {
             Matrix2::new(3.5, 0.0, 0.0, 0.9),
             0.80,
             2000,
+            6.0, // model_fit_q
         );
         let kl2 = state.update_posterior(posterior2);
         assert!(kl2 > 0.0); // Should have some divergence
@@ -392,6 +394,7 @@ mod tests {
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             100,
+            5.0, // model_fit_q
         );
         state.update_posterior(posterior);
 

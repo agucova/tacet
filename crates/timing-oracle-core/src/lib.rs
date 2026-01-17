@@ -31,6 +31,8 @@ pub mod adaptive;
 pub mod analysis;
 pub mod constants;
 pub mod math;
+pub mod orchestration;
+pub mod preflight;
 pub mod result;
 pub mod statistics;
 pub mod types;
@@ -38,6 +40,6 @@ pub mod types;
 // Re-export commonly used items at crate root
 pub use result::{
     EffectEstimate, EffectPattern, Exploitability, MeasurementQuality, MinDetectableEffect,
-    Outcome, UnreliablePolicy,
+    Outcome, ResearchOutcome, ResearchStatus, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, Matrix9, TimingSample, Vector9};

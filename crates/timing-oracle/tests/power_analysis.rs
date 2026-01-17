@@ -65,6 +65,7 @@ fn mde_calibrated_power_curve() {
                     recommendation
                 );
             }
+            Outcome::Research(_) => {}
         }
 
         if (trial + 1) % 25 == 0 {
@@ -139,6 +140,7 @@ fn mde_calibrated_power_curve() {
                         recommendation
                     );
                 }
+                Outcome::Research(_) => {}
             }
 
             if (trial + 1) % 20 == 0 {
@@ -284,6 +286,7 @@ fn mde_scaling_validation() {
                         recommendation
                     );
                 }
+                Outcome::Research(_) => {}
             }
 
             if (trial + 1) % 10 == 0 {
@@ -406,6 +409,7 @@ fn large_effect_detection() {
                     recommendation
                 );
             }
+            Outcome::Research(_) => {}
         }
 
         if (trial + 1) % 10 == 0 && !leak_probs.is_empty() {
@@ -512,6 +516,7 @@ fn negligible_effect_fpr() {
                     recommendation
                 );
             }
+            Outcome::Research(_) => {}
         }
 
         if (trial + 1) % 25 == 0 {

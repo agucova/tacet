@@ -383,7 +383,7 @@ To ensure reproducible results, all random number generation is deterministic by
 
 - All Monte Carlo RNG seeds (leak probability, floor constant) are similarly deterministic
 
-- The chosen seeds are reported in `Diagnostics.rng_seed`
+- The chosen seeds are reported in `Diagnostics.seed` (and `Calibration.rng_seed`)
 
 **Rationale:** For CI gating, the decision function must be well-defined given the data:
 
@@ -1562,25 +1562,37 @@ pub enum MeasurementQuality {
 }
 
 pub struct Diagnostics {
+    // Core statistical checks
     pub dependence_length: usize,
     pub effective_sample_size: usize,
     pub stationarity_ratio: f64,
     pub stationarity_ok: bool,
-    pub model_fit_q: f64,
-    pub model_fit_threshold: f64,
+    pub model_fit_chi2: f64,       // Chi-squared statistic for model fit (Q = r'Σ⁻¹r)
+    pub model_fit_threshold: f64,  // Bootstrap-calibrated threshold or χ²₇(0.99) = 18.48 fallback
     pub model_fit_ok: bool,
     pub outlier_rate_baseline: f64,
     pub outlier_rate_sample: f64,
     pub outlier_asymmetry_ok: bool,
+
+    // Timer info
     pub discrete_mode: bool,
     pub timer_resolution_ns: f64,
     pub duplicate_fraction: f64,
+
+    // Measurement summary
     pub preflight_ok: bool,
     pub calibration_samples: usize,
     pub total_time_secs: f64,
-    pub rng_seed: u64,
     pub warnings: Vec<String>,
     pub quality_issues: Vec<QualityIssue>,
+    pub preflight_warnings: Vec<PreflightWarningInfo>,
+
+    // Reproduction info (for verbose/debug output)
+    pub seed: Option<u64>,           // RNG seed used for reproducibility
+    pub attacker_model: Option<String>,
+    pub threshold_ns: f64,
+    pub timer_name: String,
+    pub platform: String,
 }
 
 pub struct QualityIssue {
@@ -1593,6 +1605,32 @@ pub enum IssueCode {
     HighDependence, LowEffectiveSamples, StationaritySuspect, DiscreteTimer,
     SmallSampleDiscrete, HighGeneratorCost, LowUniqueInputs, QuantilesFiltered,
     ThresholdElevated, ThresholdClamped, HighWinsorRate, ModelMismatch,
+}
+
+/// Preflight warning with severity and category for structured handling.
+pub struct PreflightWarningInfo {
+    pub category: PreflightCategory,
+    pub severity: PreflightSeverity,
+    pub message: String,
+    pub guidance: Option<String>,
+}
+
+/// Severity of preflight warnings.
+pub enum PreflightSeverity {
+    /// Sampling efficiency issue - results still valid but may need more samples.
+    Informational,
+    /// Statistical assumption violation - undermines result confidence.
+    ResultUndermining,
+}
+
+/// Category of preflight check that generated the warning.
+pub enum PreflightCategory {
+    TimerSanity,    // Timer sanity checks
+    Sanity,         // Fixed-vs-Fixed consistency
+    Generator,      // Generator cost comparison
+    Autocorrelation,// Serial dependence check
+    System,         // System configuration (CPU governor, etc.)
+    Resolution,     // Timer resolution check
 }
 ```
 

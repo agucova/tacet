@@ -110,6 +110,7 @@ fn chacha20poly1305_encrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     // Check exploitability and quality if conclusive
@@ -193,6 +194,7 @@ fn chacha20poly1305_decrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -257,6 +259,7 @@ fn chacha20poly1305_nonce_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -336,6 +339,7 @@ fn aes_256_gcm_encrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -430,6 +434,7 @@ fn aes_256_gcm_decrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -500,6 +505,7 @@ fn ring_chacha20poly1305_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -571,6 +577,7 @@ fn chacha20poly1305_hamming_weight_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {
@@ -642,6 +649,7 @@ fn aes_gcm_hamming_weight_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(exp) = get_exploitability(&outcome) {

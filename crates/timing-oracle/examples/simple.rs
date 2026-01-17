@@ -74,6 +74,12 @@ fn main() {
             println!("Could not measure: {}", recommendation);
             return;
         }
+        Outcome::Research(research) => {
+            println!("Result: RESEARCH MODE");
+            println!("Status: {:?}", research.status);
+            println!("Max effect: {:.1}ns", research.max_effect_ns);
+            return;
+        }
     }
 
     // Using timing_test_checked! macro with custom config

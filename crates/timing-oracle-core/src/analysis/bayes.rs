@@ -102,6 +102,14 @@ pub struct BayesResult {
     /// This is the input Σ_n after applying variance floor regularization
     /// for numerical stability.
     pub sigma_n: Matrix9,
+
+    /// Model fit Q statistic (spec §2.3.3, §2.6 Gate 8).
+    ///
+    /// Q = r' Σ_n^{-1} r where r = Δ - Xβ_post is the residual.
+    /// Under the 2D model, Q ~ chi-squared(7).
+    /// High Q indicates the 2D (shift + tail) model doesn't fit the data.
+    /// Compare against q_thresh from calibration for model mismatch detection.
+    pub model_fit_q: f64,
 }
 
 /// Compute Bayesian posterior for timing leak analysis (spec §2.5).
@@ -194,9 +202,15 @@ pub fn compute_posterior_monte_carlo(
     // Posterior mean: β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
     let beta_mean = beta_cov * design.transpose() * sigma_n_inv * delta;
 
+    // Compute model fit Q statistic: Q = r' Σ_n^{-1} r
+    // where r = Δ - Xβ_post is the residual
+    let predicted = &design * &beta_mean;
+    let residual = delta - predicted;
+    let model_fit_q = residual.dot(&(sigma_n_inv * &residual));
+
     // Monte Carlo integration for leak probability and effect CI
     let (leak_probability, effect_magnitude_ci) =
-        run_monte_carlo(&design, &beta_mean, &beta_cov, theta, seed.unwrap_or(42));
+        run_monte_carlo(&design, &beta_mean, &beta_cov, theta, seed.unwrap_or(crate::constants::DEFAULT_SEED));
 
     BayesResult {
         leak_probability,
@@ -205,6 +219,7 @@ pub fn compute_posterior_monte_carlo(
         beta_cov,
         is_clamped: false,
         sigma_n: regularized,
+        model_fit_q,
     }
 }
 
@@ -272,6 +287,84 @@ fn sample_standard_normal<R: Rng>(rng: &mut R) -> f64 {
     math::sqrt(-2.0 * math::ln(u1)) * math::cos(2.0 * PI * u2)
 }
 
+/// Result from max effect CI computation for Research mode.
+#[derive(Debug, Clone)]
+pub struct MaxEffectCI {
+    /// Posterior mean of max_k |(Xβ)_k|.
+    pub mean: f64,
+    /// 95% credible interval for max_k |(Xβ)_k|: (2.5th, 97.5th percentile).
+    pub ci: (f64, f64),
+}
+
+/// Compute 95% CI for max effect: max_k |(Xβ)_k| (spec v4.1 research mode).
+///
+/// This is used by Research mode to determine stopping conditions:
+/// - `CI.lower > 1.1 * theta_floor` → EffectDetected
+/// - `CI.upper < 0.9 * theta_floor` → NoEffectDetected
+///
+/// # Arguments
+///
+/// * `beta_mean` - Posterior mean of β = (μ, τ)
+/// * `beta_cov` - Posterior covariance of β
+/// * `seed` - Random seed for Monte Carlo reproducibility
+///
+/// # Returns
+///
+/// `MaxEffectCI` with mean and 95% credible interval.
+pub fn compute_max_effect_ci(
+    beta_mean: &Vector2,
+    beta_cov: &Matrix2,
+    seed: u64,
+) -> MaxEffectCI {
+    let design = build_design_matrix();
+
+    // Cholesky decomposition of posterior covariance for sampling
+    let chol = match Cholesky::new(*beta_cov) {
+        Some(c) => c,
+        None => {
+            // If Cholesky fails, return degenerate result
+            return MaxEffectCI {
+                mean: 0.0,
+                ci: (0.0, 0.0),
+            };
+        }
+    };
+    let l = chol.l();
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let mut max_effects = Vec::with_capacity(N_MONTE_CARLO);
+    let mut sum = 0.0;
+
+    for _ in 0..N_MONTE_CARLO {
+        // Sample z ~ N(0, I_2)
+        let z = Vector2::new(
+            sample_standard_normal(&mut rng),
+            sample_standard_normal(&mut rng),
+        );
+
+        // Transform to β ~ N(β_post, Λ_post)
+        let beta = beta_mean + l * z;
+
+        // Compute max_k |(Xβ)_k|
+        let pred = &design * beta;
+        let max_effect = pred.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        max_effects.push(max_effect);
+        sum += max_effect;
+    }
+
+    let mean = sum / N_MONTE_CARLO as f64;
+
+    max_effects.sort_by(|a, b| a.total_cmp(b));
+    let lo_idx = math::round((N_MONTE_CARLO as f64) * 0.025) as usize;
+    let hi_idx = math::round((N_MONTE_CARLO as f64) * 0.975) as usize;
+    let ci = (
+        max_effects[lo_idx.min(N_MONTE_CARLO - 1)],
+        max_effects[hi_idx.min(N_MONTE_CARLO - 1)],
+    );
+
+    MaxEffectCI { mean, ci }
+}
+
 /// Return a neutral result when computation fails (maximally uncertain).
 ///
 /// Sets leak_probability = 0.5 (no information) and posterior = prior.
@@ -284,6 +377,8 @@ fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix2, _design: &Matrix9x2) -> 
         beta_cov: *lambda0,
         is_clamped: true,
         sigma_n: *sigma_n,
+        // Model fit undefined when posterior computation fails
+        model_fit_q: f64::NAN,
     }
 }
 

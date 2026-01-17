@@ -26,6 +26,7 @@ pub fn format_outcome(outcome: &Outcome) -> String {
             samples_used,
             quality,
             diagnostics,
+            ..
         } => {
             output.push_str(&format!("  Samples: {} per class\n", samples_used));
             output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
@@ -80,6 +81,7 @@ pub fn format_outcome(outcome: &Outcome) -> String {
             samples_used,
             quality,
             diagnostics,
+            ..
         } => {
             output.push_str(&format!("  Samples: {} per class\n", samples_used));
             output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
@@ -140,6 +142,7 @@ pub fn format_outcome(outcome: &Outcome) -> String {
             samples_used,
             quality,
             diagnostics,
+            ..
         } => {
             output.push_str(&format!("  Samples: {} per class\n", samples_used));
             output.push_str(&format!("  Quality: {}\n", format_quality(*quality)));
@@ -210,6 +213,82 @@ pub fn format_outcome(outcome: &Outcome) -> String {
             );
             return output;
         }
+
+        Outcome::Research(research) => {
+            output.push_str(&format!("  Samples: {} per class\n", research.samples_used));
+            output.push_str(&format!("  Quality: {}\n", format_quality(research.quality)));
+            output.push('\n');
+
+            // Status-based header
+            let status_line = match &research.status {
+                timing_oracle_core::result::ResearchStatus::EffectDetected => {
+                    "\u{1F50D} Effect Detected".green().bold()
+                }
+                timing_oracle_core::result::ResearchStatus::NoEffectDetected => {
+                    "\u{2713} No Effect Detected".cyan().bold()
+                }
+                timing_oracle_core::result::ResearchStatus::ResolutionLimitReached => {
+                    "\u{26A0} Resolution Limit Reached".yellow().bold()
+                }
+                timing_oracle_core::result::ResearchStatus::QualityIssue(_) => {
+                    "? Quality Issue".yellow().bold()
+                }
+                timing_oracle_core::result::ResearchStatus::BudgetExhausted => {
+                    "? Budget Exhausted".cyan().bold()
+                }
+            };
+            output.push_str(&format!("  {}\n\n", status_line));
+
+            // Max effect and CI
+            output.push_str(&format!(
+                "    Max effect: {:.1} ns\n",
+                research.max_effect_ns
+            ));
+            output.push_str(&format!(
+                "    95% CI: [{:.1}, {:.1}] ns\n",
+                research.max_effect_ci.0, research.max_effect_ci.1
+            ));
+            output.push_str(&format!(
+                "    Measurement floor: {:.1} ns\n",
+                research.theta_floor
+            ));
+            output.push_str(&format!(
+                "    Detectable: {}\n",
+                if research.detectable { "yes" } else { "no" }
+            ));
+
+            // Effect decomposition
+            output.push('\n');
+            output.push_str(&format!(
+                "    Effect: {:.1} ns {}\n",
+                research.effect.total_effect_ns(),
+                format_pattern(research.effect.pattern),
+            ));
+            output.push_str(&format!("      Shift: {:.1} ns\n", research.effect.shift_ns));
+            output.push_str(&format!("      Tail:  {:.1} ns\n", research.effect.tail_ns));
+
+            // Model mismatch warning
+            if research.model_mismatch {
+                output.push('\n');
+                output.push_str(&format!(
+                    "    {}\n",
+                    "\u{26A0} Model mismatch detected - interpret with caution".yellow()
+                ));
+                if let Some(ref caveat) = research.effect.interpretation_caveat {
+                    output.push_str(&format!("      {}\n", caveat));
+                }
+            }
+
+            // Diagnostics
+            if is_verbose() || is_debug() {
+                output.push_str(&format_diagnostics_section(&research.diagnostics));
+                output.push_str(&format_reproduction_line(&research.diagnostics));
+            }
+
+            if is_debug() {
+                output.push_str(&format_debug_environment(&research.diagnostics));
+            }
+        }
     }
 
     output.push('\n');
@@ -262,6 +341,7 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
             quality,
             samples_used,
             diagnostics,
+            ..
         }
         | Outcome::Fail {
             leak_probability,
@@ -390,6 +470,99 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
             out.push_str(&format!("\u{2502}   Threshold: ~{:.1}ns\n", threshold_ns));
             out.push_str(&format!("\u{2502}   Platform: {}\n", platform));
             out.push_str(&format!("\u{2502}   Tip: {}\n", recommendation));
+        }
+
+        Outcome::Research(research) => {
+            // Status line
+            let status_str = match &research.status {
+                timing_oracle_core::result::ResearchStatus::EffectDetected => "Effect Detected",
+                timing_oracle_core::result::ResearchStatus::NoEffectDetected => "No Effect Detected",
+                timing_oracle_core::result::ResearchStatus::ResolutionLimitReached => {
+                    "Resolution Limit"
+                }
+                timing_oracle_core::result::ResearchStatus::QualityIssue(_) => "Quality Issue",
+                timing_oracle_core::result::ResearchStatus::BudgetExhausted => "Budget Exhausted",
+            };
+            out.push_str(&format!("\u{2502} Status = {}\n", status_str));
+
+            // Max effect and CI
+            out.push_str(&format!(
+                "\u{2502} Max Effect = {:.1}ns (CI: [{:.1}, {:.1}])\n",
+                research.max_effect_ns, research.max_effect_ci.0, research.max_effect_ci.1
+            ));
+            out.push_str(&format!(
+                "\u{2502} Floor = {:.1}ns, Detectable = {}\n",
+                research.theta_floor,
+                if research.detectable { "yes" } else { "no" }
+            ));
+
+            // Effect decomposition
+            out.push_str(&format!(
+                "\u{2502} Effect  = {:.1}ns shift + {:.1}ns tail ({})\n",
+                research.effect.shift_ns,
+                research.effect.tail_ns,
+                format_pattern(research.effect.pattern)
+            ));
+
+            // Quality with ESS context
+            let ess = research.diagnostics.effective_sample_size;
+            let raw = research.samples_used;
+            let efficiency = if raw > 0 {
+                (ess as f64 / raw as f64 * 100.0).round() as usize
+            } else {
+                0
+            };
+            out.push_str(&format!(
+                "\u{2502} Quality = {} (ESS: {} / {} raw, {}%)\n",
+                format_quality_plain(research.quality),
+                ess,
+                raw,
+                efficiency
+            ));
+
+            // Model mismatch warning
+            if research.model_mismatch {
+                out.push_str("\u{2502}\n");
+                out.push_str(&format!(
+                    "\u{2502} {} Model mismatch detected\n",
+                    "\u{26A0}".yellow()
+                ));
+            }
+
+            // Warnings section (if any)
+            if !research.diagnostics.warnings.is_empty()
+                || !research.diagnostics.quality_issues.is_empty()
+            {
+                out.push_str("\u{2502}\n");
+                out.push_str(&format!("\u{2502} {} Warnings:\n", "\u{26A0}".yellow()));
+
+                for warning in &research.diagnostics.warnings {
+                    out.push_str(&format!("\u{2502}   \u{2022} {}\n", warning));
+                }
+                for issue in &research.diagnostics.quality_issues {
+                    out.push_str(&format!(
+                        "\u{2502}   \u{2022} {:?}: {}\n",
+                        issue.code, issue.message
+                    ));
+                }
+            }
+
+            // Key diagnostics
+            out.push_str("\u{2502}\n");
+            out.push_str("\u{2502} Diagnostics:\n");
+            out.push_str(&format!(
+                "\u{2502}   Timer: {:.1}ns resolution{}\n",
+                research.diagnostics.timer_resolution_ns,
+                if research.diagnostics.discrete_mode {
+                    " (discrete)"
+                } else {
+                    ""
+                }
+            ));
+            out.push_str(&format!(
+                "\u{2502}   Runtime: {:.1}s\n",
+                research.diagnostics.total_time_secs
+            ));
         }
     }
 
@@ -657,6 +830,8 @@ fn format_issue_code(code: IssueCode) -> &'static str {
         IssueCode::QuantilesFiltered => "QuantilesFiltered",
         IssueCode::ThresholdClamped => "ThresholdClamped",
         IssueCode::HighWinsorRate => "HighWinsorRate",
+        IssueCode::ModelMismatch => "ModelMismatch",
+        IssueCode::ThresholdElevated => "ThresholdElevated",
     }
 }
 
@@ -960,10 +1135,14 @@ mod tests {
                 tail_ns: 2.0,
                 credible_interval_ns: (0.0, 10.0),
                 pattern: EffectPattern::Indeterminate,
+                interpretation_caveat: None,
             },
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),
+            theta_user: 100.0,
+            theta_eff: 100.0,
+            theta_floor: 0.0,
         }
     }
 
@@ -975,11 +1154,15 @@ mod tests {
                 tail_ns: 25.0,
                 credible_interval_ns: (100.0, 200.0),
                 pattern: EffectPattern::UniformShift,
+                interpretation_caveat: None,
             },
             exploitability: Exploitability::PossibleLAN,
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),
+            theta_user: 100.0,
+            theta_eff: 100.0,
+            theta_floor: 0.0,
         }
     }
 

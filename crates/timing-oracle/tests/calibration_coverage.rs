@@ -84,6 +84,7 @@ impl CoverageRunner {
             Outcome::Unmeasurable { .. } => {
                 self.unmeasurable += 1;
             }
+        Outcome::Research(_) => {}
         }
     }
 

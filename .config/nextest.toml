@@ -4,7 +4,7 @@ status-level = "pass"
 final-status-level = "pass"
 retries = 0
 # Exclude slow statistical tests from default runs
-default-filter = "not (binary(power_analysis) | test(/^fpr_alpha/) | test(/^bayesian_prior/))"
+default-filter = "not (binary(power_analysis) | binary(/^calibration_/) | test(/^fpr_alpha/) | test(/^bayesian_prior/))"
 
 [profile.timing]
 test-threads = 1
@@ -33,7 +33,7 @@ status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "600s", terminate-after = 2 }
 retries = 0
-default-filter = "binary(power_analysis) | binary(calibration)"
+default-filter = "binary(power_analysis) | binary(/^calibration_/)"
 
 # Calibration suite only
 # Usage: cargo nextest run --profile calibration
@@ -43,7 +43,7 @@ status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "300s", terminate-after = 2 }
 retries = 0
-default-filter = "binary(calibration)"
+default-filter = "binary(/^calibration_/)"
 
 # Quick smoke tests - runs in ~5s (333 tests)
 # Includes lib tests + fast integration tests (config, types, helpers, macros, crypto samples)

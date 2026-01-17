@@ -117,6 +117,7 @@ mod tests {
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
             100,
+            5.0, // model_fit_q
         );
         let q = p.clone();
 
@@ -137,12 +138,14 @@ mod tests {
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
             100,
+            5.0, // model_fit_q
         );
         let q = Posterior::new(
             Vector2::new(0.0, 0.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
             100,
+            5.0, // model_fit_q
         );
 
         let kl = kl_divergence_gaussian(&p, &q);
@@ -163,12 +166,14 @@ mod tests {
             Matrix2::new(2.0, 0.0, 0.0, 2.0), // Wider
             0.5,
             100,
+            5.0, // model_fit_q
         );
         let q = Posterior::new(
             Vector2::new(0.0, 0.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
             100,
+            5.0, // model_fit_q
         );
 
         let kl = kl_divergence_gaussian(&p, &q);

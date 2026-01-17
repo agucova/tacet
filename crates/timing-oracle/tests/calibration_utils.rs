@@ -590,6 +590,7 @@ impl TrialRunner {
             Outcome::Unmeasurable { .. } => {
                 self.unmeasurable += 1;
             }
+        Outcome::Research(_) => {}
         }
 
         // Export to CSV if enabled
@@ -994,6 +995,9 @@ impl TrialRecord {
                 ),
                 Outcome::Unmeasurable { .. } => {
                     ("unmeasurable", None, None, None, None, None, None)
+                }
+                Outcome::Research(_) => {
+                    ("research", None, None, None, None, None, None)
                 }
             };
 

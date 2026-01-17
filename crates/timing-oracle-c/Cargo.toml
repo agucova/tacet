@@ -9,14 +9,20 @@ documentation = "https://docs.rs/timing-oracle-c"
 readme = "README.md"
 
 [lib]
-crate-type = ["staticlib", "cdylib"]
+# rlib is needed for integration tests to import the crate
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-timing-oracle-core = { path = "../timing-oracle-core" }
-libc = "0.2"
+timing-oracle-core = { path = "../timing-oracle-core", default-features = false }
+libc = { version = "0.2", default-features = false }
+libm = "0.2"
 
 [build-dependencies]
 cc = "1.0"
 
 [features]
-default = []
+default = ["std"]
+std = ["timing-oracle-core/std", "libc/std"]
+
+[dev-dependencies]
+rand = "0.8"

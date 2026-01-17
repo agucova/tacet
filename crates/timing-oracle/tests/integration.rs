@@ -44,7 +44,8 @@ fn smoke_test() {
             assert!((0.0..=1.0).contains(&leak_probability));
             assert!(samples_used > 0);
         }
-        Outcome::Unmeasurable { .. } => (), // Skip if unmeasurable
+        Outcome::Unmeasurable { .. } => (),
+        Outcome::Research(_) => (), // Skip if unmeasurable
     }
 }
 
@@ -100,6 +101,7 @@ fn convenience_function() {
             assert!(samples_used > 0);
         }
         Outcome::Unmeasurable { .. } => (),
+        Outcome::Research(_) => (),
     }
 }
 
@@ -143,6 +145,7 @@ fn macro_api() {
             assert!(samples_used > 0);
         }
         Outcome::Unmeasurable { .. } => (),
+        Outcome::Research(_) => (),
     }
 }
 

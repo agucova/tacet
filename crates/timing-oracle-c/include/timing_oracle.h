@@ -210,7 +210,11 @@ typedef enum {
     /** Sample limit reached. */
     TO_INCONCLUSIVE_SAMPLE_BUDGET_EXCEEDED = 4,
     /** Measurement conditions changed during test. */
-    TO_INCONCLUSIVE_CONDITIONS_CHANGED = 5
+    TO_INCONCLUSIVE_CONDITIONS_CHANGED = 5,
+    /** Requested threshold is below measurement floor (v4.1). */
+    TO_INCONCLUSIVE_THRESHOLD_UNACHIEVABLE = 6,
+    /** Model doesn't fit the data - 2D model insufficient (v4.1). */
+    TO_INCONCLUSIVE_MODEL_MISMATCH = 7
 } to_inconclusive_reason_t;
 
 /**
@@ -360,6 +364,37 @@ to_result_t to_test(
     to_input_generator_fn generator,
     to_operation_fn operation,
     void *context
+);
+
+/**
+ * @brief Run a timing test with caller-provided time tracking (no_std compatible).
+ *
+ * This API is available in both standard and no_std builds. The caller is
+ * responsible for tracking elapsed time and providing it via the `elapsed_secs`
+ * pointer. The library will read this value whenever it needs the current time.
+ *
+ * For most use cases, prefer `to_test()` which handles time tracking automatically.
+ * Use this function in environments without std (e.g., SGX enclaves, embedded).
+ *
+ * @param config Test configuration (NULL for defaults)
+ * @param input_size Size of input data in bytes
+ * @param generator Callback to generate input data
+ * @param operation Callback for the operation to time
+ * @param context User context passed to callbacks (can be NULL)
+ * @param elapsed_secs Pointer to elapsed time in seconds (must remain valid during call)
+ * @return Test result (must be freed with to_result_free)
+ *
+ * @note For the adaptive loop to work correctly, `elapsed_secs` should be updated
+ *       before calling. In practice, since this is a single blocking call, providing
+ *       the initial elapsed time (usually 0.0) is typically sufficient.
+ */
+to_result_t to_test_with_time(
+    const to_config_t *config,
+    size_t input_size,
+    to_input_generator_fn generator,
+    to_operation_fn operation,
+    void *context,
+    const double *elapsed_secs
 );
 
 /**

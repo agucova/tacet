@@ -26,6 +26,8 @@
 use alloc::string::String;
 
 use crate::analysis::bayes::compute_bayes_factor;
+use crate::constants::DEFAULT_SEED;
+use crate::math::sqrt;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 
 use super::{
@@ -68,7 +70,7 @@ impl Default for AdaptiveStepConfig {
             time_budget_secs: 30.0,
             max_samples: 1_000_000,
             theta_ns: 100.0,
-            seed: 42,
+            seed: DEFAULT_SEED,
             quality_gates: QualityGateConfig::default(),
         }
     }
@@ -339,6 +341,15 @@ pub fn adaptive_step(
         samples_per_second: calibration.samples_per_second,
         calibration_snapshot: Some(&calibration.calibration_snapshot),
         current_stats_snapshot: current_stats.as_ref(),
+        // v4.1 fields for new quality gates
+        c_floor: calibration.c_floor,
+        theta_tick: calibration.theta_tick,
+        q_fit: if posterior.model_fit_q.is_nan() {
+            None
+        } else {
+            Some(posterior.model_fit_q)
+        },
+        q_thresh: calibration.q_thresh,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -390,8 +401,8 @@ fn compute_posterior(
     let sigma_n = calibration.covariance_for_n(n);
 
     // Compute prior sigmas from prior covariance
-    let prior_sigma_shift = calibration.prior_cov[(0, 0)].sqrt();
-    let prior_sigma_tail = calibration.prior_cov[(1, 1)].sqrt();
+    let prior_sigma_shift = sqrt(calibration.prior_cov[(0, 0)]);
+    let prior_sigma_tail = sqrt(calibration.prior_cov[(1, 1)]);
 
     // Run Bayesian inference
     let bayes_result = compute_bayes_factor(
@@ -407,6 +418,7 @@ fn compute_posterior(
         bayes_result.beta_cov,
         bayes_result.leak_probability,
         n,
+        bayes_result.model_fit_q,
     ))
 }
 
@@ -446,6 +458,13 @@ mod tests {
             snapshot,                     // calibration_snapshot
             1.0,                          // timer_resolution_ns
             100_000.0,                    // samples_per_second
+            // v4.1 fields
+            10.0,                         // c_floor
+            18.48,                        // q_thresh (chi-squared(7, 0.99) fallback)
+            0.001,                        // theta_tick
+            100.0,                        // theta_eff
+            0.1,                          // theta_floor_initial
+            42,                           // rng_seed
         )
     }
 
@@ -479,6 +498,7 @@ mod tests {
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.95,
             1000,
+            5.0, // model_fit_q
         );
 
         let outcome = AdaptiveOutcome::LeakDetected {
@@ -511,6 +531,7 @@ mod tests {
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.5,
             1000,
+            5.0, // model_fit_q
         );
 
         let result = StepResult::Continue {

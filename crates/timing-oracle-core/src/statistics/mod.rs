@@ -7,7 +7,9 @@
 //! - Autocorrelation function computation
 //! - Optimal block length estimation using Politis-White algorithm
 //! - Online statistics for condition drift detection
+//! - Acquisition stream model for correct dependence estimation
 
+mod acquisition;
 mod autocorrelation;
 mod block_length;
 mod bootstrap;
@@ -15,6 +17,7 @@ mod covariance;
 mod online_stats;
 mod quantile;
 
+pub use acquisition::{AcquisitionStream, SampleClass};
 pub use autocorrelation::{estimate_dependence_length, lag1_autocorrelation, lag2_autocorrelation};
 pub use block_length::{optimal_block_length, paired_optimal_block_length, OptimalBlockLength};
 pub use bootstrap::{

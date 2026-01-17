@@ -25,11 +25,13 @@ use crate::adaptive::{
 };
 use crate::analysis::classify_pattern;
 use crate::config::Config;
+use crate::constants::DEFAULT_SEED;
 use crate::helpers::InputPair;
 use crate::measurement::{BoxedTimer, TimerSpec};
+use crate::analysis::compute_max_effect_ci;
 use crate::result::{
-    BatchingInfo, Diagnostics, EffectEstimate, Exploitability, InconclusiveReason,
-    MeasurementQuality, Outcome,
+    BatchingInfo, Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, IssueCode,
+    MeasurementQuality, Outcome, QualityIssue, ResearchOutcome, ResearchStatus,
 };
 use crate::types::{AttackerModel, Class};
 
@@ -712,7 +714,7 @@ impl TimingOracle {
             timer_resolution_ns: ns_per_tick,
             theta_ns,
             alpha: 0.01,
-            seed: self.config.measurement_seed.unwrap_or(42),
+            seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
             baseline_gen_time_ns: Some(baseline_gen_time_ns),
             sample_gen_time_ns: Some(sample_gen_time_ns),
             skip_preflight,
@@ -744,11 +746,33 @@ impl TimingOracle {
                     samples_used: n_cal,
                     quality: MeasurementQuality::TooNoisy,
                     diagnostics,
+                    theta_user: theta_ns,
+                    theta_eff: theta_ns,
+                    theta_floor: 0.0, // Unknown during calibration failure
                 };
             }
         };
 
-        // Step 6: ADAPTIVE PHASE - Collect samples until decision
+        // Step 6: RESEARCH MODE CHECK
+        // If using AttackerModel::Research, run research-specific loop
+        if matches!(self.config.attacker_model, Some(AttackerModel::Research)) {
+            return self.run_research_mode(
+                calibration,
+                &calibration_baseline_cycles,
+                &calibration_sample_cycles,
+                &baseline_inputs,
+                &sample_inputs,
+                n_cal,
+                k,
+                &mut timer,
+                &mut operation,
+                &mut rng,
+                total_samples_needed,
+                start_time,
+            );
+        }
+
+        // Step 7: ADAPTIVE PHASE - Collect samples until decision
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
             pass_threshold: self.config.pass_threshold,
@@ -756,7 +780,7 @@ impl TimingOracle {
             time_budget: self.config.time_budget,
             max_samples: self.config.max_samples,
             theta_ns,
-            seed: self.config.measurement_seed.unwrap_or(42),
+            seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
             ..AdaptiveConfig::default()
         };
 
@@ -947,6 +971,10 @@ impl TimingOracle {
             samples_used,
             quality,
             diagnostics,
+            theta_user: theta_ns,
+            theta_eff: calibration.theta_eff,
+            theta_floor: (calibration.c_floor / (samples_used as f64).sqrt())
+                .max(calibration.theta_tick),
         }
     }
 
@@ -971,6 +999,10 @@ impl TimingOracle {
             samples_used,
             quality,
             diagnostics,
+            theta_user: theta_ns,
+            theta_eff: calibration.theta_eff,
+            theta_floor: (calibration.c_floor / (samples_used as f64).sqrt())
+                .max(calibration.theta_tick),
         }
     }
 
@@ -998,7 +1030,275 @@ impl TimingOracle {
             samples_used: state.n_total(),
             quality,
             diagnostics,
+            theta_user: theta_ns,
+            theta_eff: calibration.theta_eff,
+            theta_floor: (calibration.c_floor / (state.n_total() as f64).sqrt())
+                .max(calibration.theta_tick),
         }
+    }
+
+    // =========================================================================
+    // Research mode implementation
+    // =========================================================================
+
+    /// Run research mode loop (spec v4.1).
+    ///
+    /// Research mode uses CI-based stopping conditions instead of Bayesian thresholds:
+    /// - `CI.lower > 1.1 * theta_floor` → EffectDetected
+    /// - `CI.upper < 0.9 * theta_floor` → NoEffectDetected
+    /// - `theta_floor <= theta_tick * 1.01` → ResolutionLimitReached
+    /// - Quality gates → QualityIssue
+    /// - Budget exhausted → BudgetExhausted
+    #[allow(clippy::too_many_arguments)]
+    fn run_research_mode<T, F, R>(
+        &self,
+        calibration: Calibration,
+        calibration_baseline_cycles: &[u64],
+        calibration_sample_cycles: &[u64],
+        baseline_inputs: &[T],
+        sample_inputs: &[T],
+        n_cal: usize,
+        k: u32,
+        timer: &mut BoxedTimer,
+        operation: &mut F,
+        rng: &mut R,
+        total_samples_needed: usize,
+        start_time: Instant,
+    ) -> Outcome
+    where
+        T: Clone + Hash,
+        F: FnMut(&T),
+        R: rand::Rng,
+    {
+        use crate::adaptive::{run_adaptive, AdaptiveConfig, AdaptiveOutcome};
+
+        // Set up state with calibration samples
+        let mut adaptive_state = AdaptiveState::with_capacity(self.config.max_samples);
+        adaptive_state.add_batch(
+            calibration_baseline_cycles.to_vec(),
+            calibration_sample_cycles.to_vec(),
+        );
+
+        // Use a minimal theta for the adaptive machinery (we don't use thresholds in Research mode)
+        let theta_ns = timer.resolution_ns();
+
+        let adaptive_config = AdaptiveConfig {
+            batch_size: self.config.batch_size,
+            pass_threshold: 0.0,  // Not used in research mode
+            fail_threshold: 1.0,  // Not used in research mode
+            time_budget: self.config.time_budget,
+            max_samples: self.config.max_samples,
+            theta_ns,
+            seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            ..AdaptiveConfig::default()
+        };
+
+        let mut input_idx = n_cal;
+
+        loop {
+            // Check time budget
+            if adaptive_state.elapsed() > self.config.time_budget {
+                return self.build_research_outcome(
+                    ResearchStatus::BudgetExhausted,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            // Check sample budget
+            if adaptive_state.n_total() >= self.config.max_samples {
+                return self.build_research_outcome(
+                    ResearchStatus::BudgetExhausted,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            // Collect a batch
+            let batch_size = self.config.batch_size.min(total_samples_needed - input_idx);
+            if batch_size == 0 {
+                return self.build_research_outcome(
+                    ResearchStatus::BudgetExhausted,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            let mut batch_baseline = Vec::with_capacity(batch_size);
+            let mut batch_sample = Vec::with_capacity(batch_size);
+
+            // Create interleaved schedule for batch
+            let mut batch_schedule: Vec<(Class, usize)> = Vec::with_capacity(batch_size * 2);
+            for i in 0..batch_size {
+                let global_idx = input_idx + i;
+                batch_schedule.push((Class::Baseline, global_idx));
+                batch_schedule.push((Class::Sample, global_idx));
+            }
+            batch_schedule.shuffle(rng);
+
+            for (class, idx) in batch_schedule {
+                match class {
+                    Class::Baseline => {
+                        let cycles = timer.measure_cycles(|| {
+                            for _ in 0..k {
+                                operation(&baseline_inputs[idx]);
+                                std::hint::black_box(());
+                            }
+                        });
+                        batch_baseline.push(cycles);
+                    }
+                    Class::Sample => {
+                        let cycles = timer.measure_cycles(|| {
+                            for _ in 0..k {
+                                operation(&sample_inputs[idx]);
+                                std::hint::black_box(());
+                            }
+                        });
+                        batch_sample.push(cycles);
+                    }
+                }
+            }
+
+            input_idx += batch_size;
+            adaptive_state.add_batch(batch_baseline, batch_sample);
+
+            // Run one step of adaptive analysis to get posterior
+            let outcome = run_adaptive(
+                &calibration,
+                &mut adaptive_state,
+                1.0 / timer.cycles_per_ns(),
+                &adaptive_config,
+            );
+
+            // Extract posterior from outcome
+            let posterior = match &outcome {
+                AdaptiveOutcome::Continue { posterior, .. } => posterior,
+                AdaptiveOutcome::LeakDetected { posterior, .. } => posterior,
+                AdaptiveOutcome::NoLeakDetected { posterior, .. } => posterior,
+                AdaptiveOutcome::Inconclusive { reason, .. } => {
+                    // Quality gate failed - return with QualityIssue
+                    // Convert adaptive reason to our InconclusiveReason
+                    let inconclusive_reason = convert_adaptive_reason(&reason);
+                    return self.build_research_outcome(
+                        ResearchStatus::QualityIssue(inconclusive_reason),
+                        &adaptive_state,
+                        &calibration,
+                        timer,
+                        start_time,
+                    );
+                }
+            };
+
+            // Compute theta_floor at current sample size
+            let n = adaptive_state.n_total() as f64;
+            let theta_floor = (calibration.c_floor / n.sqrt()).max(calibration.theta_tick);
+
+            // Check resolution limit: theta_floor <= theta_tick * 1.01
+            if theta_floor <= calibration.theta_tick * 1.01 {
+                return self.build_research_outcome(
+                    ResearchStatus::ResolutionLimitReached,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            // Compute max effect CI
+            let max_effect_ci = compute_max_effect_ci(
+                &posterior.beta_mean,
+                &posterior.beta_cov,
+                self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            );
+
+            // Check stopping conditions
+            // EffectDetected: CI.lower > 1.1 * theta_floor
+            if max_effect_ci.ci.0 > 1.1 * theta_floor {
+                return self.build_research_outcome(
+                    ResearchStatus::EffectDetected,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            // NoEffectDetected: CI.upper < 0.9 * theta_floor
+            if max_effect_ci.ci.1 < 0.9 * theta_floor {
+                return self.build_research_outcome(
+                    ResearchStatus::NoEffectDetected,
+                    &adaptive_state,
+                    &calibration,
+                    timer,
+                    start_time,
+                );
+            }
+
+            // Continue collecting samples
+            adaptive_state.update_posterior(posterior.clone());
+        }
+    }
+
+    /// Build a ResearchOutcome from current state.
+    fn build_research_outcome(
+        &self,
+        status: ResearchStatus,
+        state: &AdaptiveState,
+        calibration: &Calibration,
+        timer: &BoxedTimer,
+        start_time: Instant,
+    ) -> Outcome {
+        let posterior = state.current_posterior();
+        let theta_ns = timer.resolution_ns();
+
+        // Compute theta_floor at final sample size
+        let n = state.n_total() as f64;
+        let theta_floor = (calibration.c_floor / n.sqrt()).max(calibration.theta_tick);
+
+        // Compute max effect CI
+        let (max_effect_ns, max_effect_ci, detectable) = if let Some(p) = posterior {
+            let ci = compute_max_effect_ci(
+                &p.beta_mean,
+                &p.beta_cov,
+                self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            );
+            let detectable = ci.ci.0 > theta_floor;
+            (ci.mean, ci.ci, detectable)
+        } else {
+            (0.0, (0.0, 0.0), false)
+        };
+
+        // Check model mismatch (non-blocking in research mode)
+        let model_mismatch = posterior
+            .map(|p| p.model_fit_q > calibration.q_thresh)
+            .unwrap_or(false);
+
+        // Build effect estimate
+        let effect = posterior
+            .map(|p| build_effect_estimate(p, theta_ns))
+            .unwrap_or_default();
+
+        let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
+        let diagnostics = build_diagnostics(calibration, timer, start_time, &self.config, theta_ns);
+
+        Outcome::Research(ResearchOutcome {
+            status,
+            max_effect_ns,
+            max_effect_ci,
+            theta_floor,
+            detectable,
+            model_mismatch,
+            effect,
+            samples_used: state.n_total(),
+            quality,
+            diagnostics,
+        })
     }
 }
 
@@ -1026,6 +1326,7 @@ fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64) -> EffectEstimat
         tail_ns: posterior.tail_ns(),
         credible_interval_ns: (ci_low, ci_high),
         pattern,
+        interpretation_caveat: None, // Set when model fit is poor
     }
 }
 
@@ -1063,12 +1364,31 @@ fn build_diagnostics(
     // Build platform string
     let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
 
+    // Check for ThresholdElevated: user requested threshold lower than measurement floor
+    let mut quality_issues = Vec::new();
+    if calibration.theta_ns > 0.0 && calibration.theta_eff > calibration.theta_ns {
+        quality_issues.push(QualityIssue {
+            code: IssueCode::ThresholdElevated,
+            message: format!(
+                "Requested threshold {} ns elevated to {} ns due to measurement floor",
+                calibration.theta_ns, calibration.theta_eff
+            ),
+            guidance: format!(
+                "Reporting probabilities for theta_eff = {:.1} ns. \
+                 For better resolution, use a cycle counter (PmuTimer on macOS, LinuxPerfTimer on Linux) \
+                 or increase sample count.",
+                calibration.theta_eff
+            ),
+        });
+    }
+
     Diagnostics {
         dependence_length: calibration.block_length,
         effective_sample_size: calibration.calibration_samples / calibration.block_length.max(1),
         stationarity_ratio: 1.0, // TODO: compute from calibration vs inference variance
         stationarity_ok: true,
         model_fit_chi2: 0.0, // TODO: compute residual chi-squared
+        model_fit_threshold: 18.48, // chi-squared(7, 0.99), TODO: use calibration.q_thresh
         model_fit_ok: true,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
@@ -1080,7 +1400,7 @@ fn build_diagnostics(
         calibration_samples: calibration.calibration_samples,
         total_time_secs: start_time.elapsed().as_secs_f64(),
         warnings: Vec::new(),
-        quality_issues: Vec::new(),
+        quality_issues,
         preflight_warnings,
         seed: config.measurement_seed,
         attacker_model,
@@ -1132,6 +1452,28 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
         AdaptiveInconclusiveReason::ConditionsChanged {
             message, guidance, ..
         } => InconclusiveReason::ConditionsChanged {
+            message: message.clone(),
+            guidance: guidance.clone(),
+        },
+        AdaptiveInconclusiveReason::ThresholdUnachievable {
+            theta_user,
+            best_achievable,
+            message,
+            guidance,
+        } => InconclusiveReason::ThresholdUnachievable {
+            theta_user: *theta_user,
+            best_achievable: *best_achievable,
+            message: message.clone(),
+            guidance: guidance.clone(),
+        },
+        AdaptiveInconclusiveReason::ModelMismatch {
+            q_statistic,
+            q_threshold,
+            message,
+            guidance,
+        } => InconclusiveReason::ModelMismatch {
+            q_statistic: *q_statistic,
+            q_threshold: *q_threshold,
             message: message.clone(),
             guidance: guidance.clone(),
         },

@@ -104,6 +104,7 @@ fn rsa_1024_encrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -200,6 +201,7 @@ fn rsa_1024_decrypt_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -263,6 +265,7 @@ fn rsa_2048_sign_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -363,6 +366,7 @@ fn rsa_1024_verify_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -423,6 +427,7 @@ fn rsa_1024_hamming_weight_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -499,6 +504,7 @@ fn rsa_key_size_timing_difference() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 

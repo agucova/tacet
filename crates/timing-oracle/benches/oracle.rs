@@ -24,7 +24,7 @@ fn bench_oracle_simple(c: &mut Criterion) {
                 | Outcome::Inconclusive {
                     leak_probability, ..
                 } => black_box(leak_probability),
-                Outcome::Unmeasurable { .. } => 0.0,
+                Outcome::Unmeasurable { .. } | Outcome::Research(_) => 0.0,
             }
         });
     });
@@ -40,7 +40,7 @@ fn bench_oracle_simple(c: &mut Criterion) {
             match result {
                 Outcome::Pass { .. } => black_box(true),
                 Outcome::Fail { .. } | Outcome::Inconclusive { .. } => black_box(false),
-                Outcome::Unmeasurable { .. } => true,
+                Outcome::Unmeasurable { .. } | Outcome::Research(_) => true,
             }
         });
     });

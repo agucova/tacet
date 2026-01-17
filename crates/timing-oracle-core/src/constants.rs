@@ -1,5 +1,11 @@
 //! Mathematical constants used throughout the crate.
 
+/// Default deterministic seed for RNG operations.
+///
+/// This seed ensures reproducibility: same seed + same data = same result.
+/// The value `0x74696D696E67` is "timing" encoded in ASCII.
+pub const DEFAULT_SEED: u64 = 0x74696D696E67;
+
 /// Decile percentiles for quantile computation.
 pub const DECILES: [f64; 9] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 

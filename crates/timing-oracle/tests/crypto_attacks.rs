@@ -161,6 +161,7 @@ fn aes_sbox_timing_fast() {
             ..
         } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
@@ -229,6 +230,7 @@ fn aes_sbox_timing_thorough() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -281,6 +283,7 @@ fn cache_line_boundary_effects() {
             ..
         } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     let has_tail_effect = matches!(
@@ -354,6 +357,7 @@ fn memory_access_pattern_leak() {
             ..
         } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     let has_leak_signal = leak_probability > 0.2;
@@ -452,6 +456,7 @@ fn modexp_square_and_multiply_timing() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -510,6 +515,7 @@ fn modexp_bit_pattern_timing() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -561,6 +567,7 @@ fn table_lookup_small_l1() {
         Outcome::Unmeasurable { .. } => {
             // Operation too fast - acceptable
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -610,6 +617,7 @@ fn table_lookup_medium_l2() {
         Outcome::Unmeasurable { .. } => {
             // Operation too fast - acceptable
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -656,6 +664,7 @@ fn table_lookup_large_cache_thrash() {
             ..
         } => (*leak_probability, effect),
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
@@ -708,6 +717,7 @@ fn effect_pattern_pure_uniform_shift() {
         Outcome::Fail { effect, .. } => effect,
         Outcome::Inconclusive { effect, .. } => effect,
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     // Should classify as UniformShift (or Mixed with dominant shift)
@@ -797,6 +807,7 @@ fn effect_pattern_pure_tail() {
         Outcome::Fail { effect, .. } => effect,
         Outcome::Inconclusive { effect, .. } => effect,
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     // When neither effect is statistically significant, pattern is Indeterminate - this is valid
@@ -888,6 +899,7 @@ fn effect_pattern_mixed() {
         Outcome::Fail { effect, .. } => effect,
         Outcome::Inconclusive { effect, .. } => effect,
         Outcome::Unmeasurable { .. } => return,
+        Outcome::Research(_) => return,
     };
 
     // Should classify as Mixed
@@ -1001,6 +1013,7 @@ fn exploitability_negligible() {
         Outcome::Unmeasurable { .. } => {
             // Operation too fast - acceptable for XOR
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -1078,6 +1091,7 @@ fn exploitability_possible_lan() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -1153,6 +1167,7 @@ fn exploitability_likely_lan() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }
 
@@ -1228,5 +1243,6 @@ fn exploitability_possible_remote() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 }

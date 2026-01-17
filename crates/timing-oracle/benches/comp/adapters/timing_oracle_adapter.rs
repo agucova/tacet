@@ -164,6 +164,13 @@ impl Detector for TimingOracleDetector {
                 duration,
                 raw_data: None,
             },
+            Outcome::Research(_) => DetectionResult {
+                detected_leak: false,
+                confidence_metric: 0.0,
+                samples_used: 0,
+                duration,
+                raw_data: None,
+            },
         }
     }
 

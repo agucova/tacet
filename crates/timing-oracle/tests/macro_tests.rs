@@ -387,6 +387,7 @@ fn macro_result_access() {
             // Unmeasurable is also valid, just verify we can access fields
             assert!(!recommendation.is_empty());
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -605,6 +606,7 @@ fn timing_test_checked_returns_outcome() {
         Outcome::Unmeasurable { .. } => {
             // Test passes - this is a valid outcome
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -636,6 +638,7 @@ fn timing_test_checked_explicit_unmeasurable_handling() {
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     };
 }
 

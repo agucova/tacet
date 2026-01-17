@@ -83,6 +83,7 @@ fn x25519_scalar_mult_constant_time() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -142,6 +143,7 @@ fn x25519_different_basepoints_constant_time() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -216,6 +218,7 @@ fn x25519_multiple_operations_constant_time() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -291,6 +294,7 @@ fn x25519_scalar_clamping_constant_time() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -345,6 +349,7 @@ fn x25519_hamming_weight_independence() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -410,6 +415,7 @@ fn x25519_byte_pattern_independence() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -468,5 +474,6 @@ fn x25519_ecdh_exchange_constant_time() {
             eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }

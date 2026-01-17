@@ -485,6 +485,7 @@ fn effect_estimate_total_effect() {
         tail_ns: 4.0,
         credible_interval_ns: (0.0, 10.0),
         pattern: EffectPattern::Mixed,
+        interpretation_caveat: None,
     };
     // sqrt(3^2 + 4^2) = 5
     assert!((effect.total_effect_ns() - 5.0).abs() < 0.001);
@@ -497,6 +498,7 @@ fn effect_estimate_is_negligible() {
         tail_ns: 5.0,
         credible_interval_ns: (0.0, 15.0),
         pattern: EffectPattern::Mixed,
+        interpretation_caveat: None,
     };
 
     assert!(!effect.is_negligible(4.0)); // Both components > 4
@@ -522,6 +524,9 @@ fn make_pass(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 
@@ -533,6 +538,9 @@ fn make_fail(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 
@@ -547,6 +555,9 @@ fn make_inconclusive(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
         samples_used: 5000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 
@@ -682,6 +693,7 @@ fn effect_estimate_json_roundtrip() {
         tail_ns: 3.2,
         credible_interval_ns: (10.0, 20.0),
         pattern: EffectPattern::UniformShift,
+        interpretation_caveat: None,
     };
     let json = serde_json::to_string(&effect).unwrap();
     let deserialized: EffectEstimate = serde_json::from_str(&json).unwrap();

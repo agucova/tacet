@@ -120,6 +120,7 @@ pub fn compute_diagnostics(
         stationarity_ok,
         model_fit_chi2,
         model_fit_ok,
+        model_fit_threshold: 18.48, // chi-squared(7, 0.99), TODO: use calibration.q_thresh
         outlier_rate_baseline: outlier_rate_fixed,
         outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,

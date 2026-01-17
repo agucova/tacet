@@ -300,6 +300,6 @@ fn extract_estimation_point(outcome: &Outcome, true_effect_ns: f64) -> Option<Es
                 ci_high_ns: effect.credible_interval_ns.1,
             })
         }
-        Outcome::Unmeasurable { .. } => None,
+        Outcome::Unmeasurable { .. } | Outcome::Research(_) => None,
     }
 }

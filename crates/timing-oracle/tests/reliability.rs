@@ -14,10 +14,14 @@ fn make_pass(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
             tail_ns: 2.0,
             credible_interval_ns: (0.0, 10.0),
             pattern: EffectPattern::Indeterminate,
+            interpretation_caveat: None,
         },
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 
@@ -30,11 +34,15 @@ fn make_fail(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
             tail_ns: 50.0,
             credible_interval_ns: (80.0, 120.0),
             pattern: EffectPattern::Mixed,
+            interpretation_caveat: None,
         },
         exploitability: Exploitability::PossibleLAN,
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 
@@ -50,6 +58,9 @@ fn make_inconclusive(leak_probability: f64, quality: MeasurementQuality) -> Outc
         samples_used: 5000,
         quality,
         diagnostics: Diagnostics::all_ok(),
+        theta_user: 100.0,
+        theta_eff: 100.0,
+        theta_floor: 0.0,
     }
 }
 

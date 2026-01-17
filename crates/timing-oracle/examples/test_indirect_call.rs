@@ -97,5 +97,8 @@ fn main() {
         timing_oracle::Outcome::Unmeasurable { recommendation, .. } => {
             println!("UNMEASURABLE: {}", recommendation);
         }
+        timing_oracle::Outcome::Research(research) => {
+            println!("RESEARCH: {:?}", research.status);
+        }
     }
 }

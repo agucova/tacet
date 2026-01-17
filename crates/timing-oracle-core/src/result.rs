@@ -45,6 +45,15 @@ pub enum Outcome {
 
         /// Diagnostic information for debugging.
         diagnostics: Diagnostics,
+
+        /// User's requested threshold in nanoseconds.
+        theta_user: f64,
+
+        /// Effective threshold used for inference (may be elevated due to measurement floor).
+        theta_eff: f64,
+
+        /// Measurement floor at final sample count.
+        theta_floor: f64,
     },
 
     /// Timing leak confirmed.
@@ -70,6 +79,15 @@ pub enum Outcome {
 
         /// Diagnostic information for debugging.
         diagnostics: Diagnostics,
+
+        /// User's requested threshold in nanoseconds.
+        theta_user: f64,
+
+        /// Effective threshold used for inference (may be elevated due to measurement floor).
+        theta_eff: f64,
+
+        /// Measurement floor at final sample count.
+        theta_floor: f64,
     },
 
     /// Cannot reach a definitive conclusion.
@@ -94,6 +112,15 @@ pub enum Outcome {
 
         /// Diagnostic information for debugging.
         diagnostics: Diagnostics,
+
+        /// User's requested threshold in nanoseconds.
+        theta_user: f64,
+
+        /// Effective threshold used for inference (may be elevated due to measurement floor).
+        theta_eff: f64,
+
+        /// Measurement floor at final sample count.
+        theta_floor: f64,
     },
 
     /// Operation too fast to measure reliably on this platform.
@@ -113,6 +140,15 @@ pub enum Outcome {
         /// Suggested actions to make the operation measurable.
         recommendation: String,
     },
+
+    /// Research mode result.
+    ///
+    /// Returned when using `AttackerModel::Research`. Unlike Pass/Fail/Inconclusive
+    /// which make threshold-based decisions, research mode characterizes the
+    /// timing behavior relative to the measurement floor using CI-based semantics.
+    ///
+    /// See `ResearchOutcome` for details on the stopping conditions.
+    Research(ResearchOutcome),
 }
 
 // ============================================================================
@@ -193,6 +229,40 @@ pub enum InconclusiveReason {
         /// Suggested actions.
         guidance: String,
     },
+
+    /// Requested threshold cannot be achieved with available resources.
+    ///
+    /// Even at maximum sample budget, the measurement floor would exceed the
+    /// user's requested threshold. This indicates the timer resolution or
+    /// noise level is too high for the requested sensitivity.
+    /// See spec Section 2.6, Gate 4.
+    ThresholdUnachievable {
+        /// User's requested threshold in nanoseconds.
+        theta_user: f64,
+        /// Best achievable threshold at max samples.
+        best_achievable: f64,
+        /// Human-readable explanation.
+        message: String,
+        /// Suggested actions.
+        guidance: String,
+    },
+
+    /// Model fit is poor; quantile pattern not well-explained by shift+tail basis.
+    ///
+    /// The 2D effect model (uniform shift + tail effect) does not adequately
+    /// capture the observed quantile differences. This can occur with asymmetric
+    /// or multi-modal timing patterns.
+    /// See spec Section 2.6, Gate 8.
+    ModelMismatch {
+        /// Observed Q statistic (residual quadratic form).
+        q_statistic: f64,
+        /// Bootstrap-calibrated threshold for Q.
+        q_threshold: f64,
+        /// Human-readable explanation.
+        message: String,
+        /// Suggested actions.
+        guidance: String,
+    },
 }
 
 // ============================================================================
@@ -229,6 +299,14 @@ pub struct EffectEstimate {
 
     /// Classification of the dominant effect pattern.
     pub pattern: EffectPattern,
+
+    /// When Some, the (μ, τ) decomposition may be unreliable.
+    ///
+    /// This is set when model fit is poor (Q > q_thresh), indicating that the
+    /// observed quantile pattern is not well-explained by the shift+tail basis.
+    /// The shift_ns and tail_ns values should be interpreted with caution.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interpretation_caveat: Option<String>,
 }
 
 impl EffectEstimate {
@@ -257,6 +335,7 @@ impl Default for EffectEstimate {
             tail_ns: 0.0,
             credible_interval_ns: (0.0, 0.0),
             pattern: EffectPattern::Indeterminate,
+            interpretation_caveat: None,
         }
     }
 }
@@ -401,6 +480,167 @@ impl MeasurementQuality {
 }
 
 // ============================================================================
+// ResearchOutcome - Result type for research mode
+// ============================================================================
+
+/// Status of a research mode run.
+///
+/// Research mode (AttackerModel::Research) doesn't make Pass/Fail decisions.
+/// Instead, it characterizes the timing behavior with respect to the measurement floor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ResearchStatus {
+    /// CI clearly above θ_floor — timing difference detected.
+    ///
+    /// The 95% credible interval lower bound is clearly above the measurement
+    /// floor (> 1.1 × θ_floor), indicating a confidently detectable effect.
+    EffectDetected,
+
+    /// CI clearly below θ_floor — no timing difference above noise.
+    ///
+    /// The 95% credible interval upper bound is clearly below the measurement
+    /// floor (< 0.9 × θ_floor), indicating no detectable effect.
+    NoEffectDetected,
+
+    /// Hit timer resolution limit; θ_floor is as good as it gets.
+    ///
+    /// Further sampling won't improve the measurement floor because we've
+    /// hit the fundamental timer tick resolution.
+    ResolutionLimitReached,
+
+    /// Data quality issue detected.
+    ///
+    /// A quality gate triggered during research mode. Unlike standard mode,
+    /// this doesn't block the result but is reported for transparency.
+    QualityIssue(InconclusiveReason),
+
+    /// Ran out of time/samples before reaching conclusion.
+    ///
+    /// The budget was exhausted before the CI could confidently settle
+    /// above or below the measurement floor.
+    BudgetExhausted,
+}
+
+/// Research mode outcome (spec v4.1 research mode).
+///
+/// This struct is returned when using `AttackerModel::Research`. Unlike the
+/// standard `Outcome` which makes Pass/Fail decisions, research mode characterizes
+/// the timing behavior relative to the measurement floor.
+///
+/// Key differences from standard mode:
+/// - No Pass/Fail verdict (no threshold comparison)
+/// - Reports measurement floor (`theta_floor`) at final sample size
+/// - `detectable` field indicates if CI lower bound > floor
+/// - `model_mismatch` is non-blocking (tracked but doesn't stop analysis)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResearchOutcome {
+    /// Research outcome status.
+    pub status: ResearchStatus,
+
+    /// Maximum effect across quantiles: max_k |(Xβ)_k| in nanoseconds.
+    /// This is the posterior mean of the maximum absolute predicted effect.
+    pub max_effect_ns: f64,
+
+    /// 95% credible interval for maximum effect: (2.5th, 97.5th percentile).
+    pub max_effect_ci: (f64, f64),
+
+    /// Measurement floor at final sample size.
+    /// This is the minimum detectable effect given measurement noise.
+    pub theta_floor: f64,
+
+    /// True if the effect is detectable: CI lower bound > theta_floor.
+    pub detectable: bool,
+
+    /// True if model mismatch was detected (Q > q_thresh).
+    /// In research mode, this is non-blocking but adds a caveat to interpretation.
+    pub model_mismatch: bool,
+
+    /// Effect size estimate with decomposition.
+    /// If `model_mismatch` is true, `interpretation_caveat` will be set.
+    pub effect: EffectEstimate,
+
+    /// Number of samples used.
+    pub samples_used: usize,
+
+    /// Measurement quality assessment.
+    pub quality: MeasurementQuality,
+
+    /// Diagnostic information.
+    pub diagnostics: Diagnostics,
+}
+
+impl ResearchOutcome {
+    /// Check if a timing effect was confidently detected.
+    pub fn is_effect_detected(&self) -> bool {
+        matches!(self.status, ResearchStatus::EffectDetected)
+    }
+
+    /// Check if no effect was confidently detected.
+    pub fn is_no_effect_detected(&self) -> bool {
+        matches!(self.status, ResearchStatus::NoEffectDetected)
+    }
+
+    /// Check if the resolution limit was reached.
+    pub fn is_resolution_limit_reached(&self) -> bool {
+        matches!(self.status, ResearchStatus::ResolutionLimitReached)
+    }
+
+    /// Check if there was a quality issue.
+    pub fn has_quality_issue(&self) -> bool {
+        matches!(self.status, ResearchStatus::QualityIssue(_))
+    }
+
+    /// Get the effect estimate.
+    pub fn effect(&self) -> &EffectEstimate {
+        &self.effect
+    }
+
+    /// Get the measurement quality.
+    pub fn quality(&self) -> MeasurementQuality {
+        self.quality
+    }
+
+    /// Get the diagnostics.
+    pub fn diagnostics(&self) -> &Diagnostics {
+        &self.diagnostics
+    }
+}
+
+impl fmt::Display for ResearchStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ResearchStatus::EffectDetected => write!(f, "effect detected"),
+            ResearchStatus::NoEffectDetected => write!(f, "no effect detected"),
+            ResearchStatus::ResolutionLimitReached => write!(f, "resolution limit reached"),
+            ResearchStatus::QualityIssue(reason) => write!(f, "quality issue: {}", reason),
+            ResearchStatus::BudgetExhausted => write!(f, "budget exhausted"),
+        }
+    }
+}
+
+impl fmt::Display for ResearchOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Research Mode: {}", self.status)?;
+        writeln!(
+            f,
+            "  Max effect: {:.2}ns (CI: {:.2}-{:.2}ns)",
+            self.max_effect_ns, self.max_effect_ci.0, self.max_effect_ci.1
+        )?;
+        writeln!(f, "  Measurement floor: {:.2}ns", self.theta_floor)?;
+        writeln!(
+            f,
+            "  Detectable: {}",
+            if self.detectable { "yes" } else { "no" }
+        )?;
+        if self.model_mismatch {
+            writeln!(f, "  Warning: model mismatch detected")?;
+        }
+        writeln!(f, "  Samples: {}", self.samples_used)?;
+        writeln!(f, "  Quality: {}", self.quality)?;
+        Ok(())
+    }
+}
+
+// ============================================================================
 // Diagnostics - Detailed diagnostic information
 // ============================================================================
 
@@ -426,7 +666,11 @@ pub struct Diagnostics {
     /// Should be approximately chi-squared with 7 degrees of freedom under correct model.
     pub model_fit_chi2: f64,
 
-    /// True if chi-squared is within acceptable bounds (p > 0.01 under chi-squared with 7 df).
+    /// Bootstrap-calibrated threshold for model fit Q statistic.
+    /// Q > model_fit_threshold indicates poor model fit.
+    pub model_fit_threshold: f64,
+
+    /// True if chi-squared is within acceptable bounds (Q <= model_fit_threshold).
     pub model_fit_ok: bool,
 
     /// Outlier rate for baseline class (fraction trimmed).
@@ -500,6 +744,7 @@ impl Diagnostics {
             stationarity_ratio: 1.0,
             stationarity_ok: true,
             model_fit_chi2: 0.0,
+            model_fit_threshold: 18.48, // chi-squared(7, 0.99) as default
             model_fit_ok: true,
             outlier_rate_baseline: 0.0,
             outlier_rate_sample: 0.0,
@@ -582,6 +827,12 @@ pub enum IssueCode {
 
     /// High fraction of samples were winsorized.
     HighWinsorRate,
+
+    /// Model fit is poor; quantile pattern not well-explained by shift+tail basis.
+    ModelMismatch,
+
+    /// User's threshold was elevated due to measurement floor.
+    ThresholdElevated,
 }
 
 // ============================================================================
@@ -898,6 +1149,8 @@ impl Outcome {
     }
 
     /// Get the leak probability if available.
+    ///
+    /// Returns `None` for `Unmeasurable` and `Research` (research mode uses CI, not probability).
     pub fn leak_probability(&self) -> Option<f64> {
         match self {
             Outcome::Pass {
@@ -910,6 +1163,7 @@ impl Outcome {
                 leak_probability, ..
             } => Some(*leak_probability),
             Outcome::Unmeasurable { .. } => None,
+            Outcome::Research(_) => None, // Research mode uses CI-based semantics
         }
     }
 
@@ -920,6 +1174,7 @@ impl Outcome {
             Outcome::Fail { effect, .. } => Some(effect),
             Outcome::Inconclusive { effect, .. } => Some(effect),
             Outcome::Unmeasurable { .. } => None,
+            Outcome::Research(res) => Some(&res.effect),
         }
     }
 
@@ -930,6 +1185,7 @@ impl Outcome {
             Outcome::Fail { quality, .. } => Some(*quality),
             Outcome::Inconclusive { quality, .. } => Some(*quality),
             Outcome::Unmeasurable { .. } => None,
+            Outcome::Research(res) => Some(res.quality),
         }
     }
 
@@ -940,6 +1196,7 @@ impl Outcome {
             Outcome::Fail { diagnostics, .. } => Some(diagnostics),
             Outcome::Inconclusive { diagnostics, .. } => Some(diagnostics),
             Outcome::Unmeasurable { .. } => None,
+            Outcome::Research(res) => Some(&res.diagnostics),
         }
     }
 
@@ -950,6 +1207,7 @@ impl Outcome {
             Outcome::Fail { samples_used, .. } => Some(*samples_used),
             Outcome::Inconclusive { samples_used, .. } => Some(*samples_used),
             Outcome::Unmeasurable { .. } => None,
+            Outcome::Research(res) => Some(res.samples_used),
         }
     }
 
@@ -961,6 +1219,9 @@ impl Outcome {
     ///
     /// The key insight: a very conclusive posterior is trustworthy even with noisy
     /// measurements - the signal overcame the noise.
+    ///
+    /// For Research mode, reliability is based on whether the CI is clearly above
+    /// or below the measurement floor.
     pub fn is_reliable(&self) -> bool {
         match self {
             Outcome::Unmeasurable { .. } => false,
@@ -975,6 +1236,13 @@ impl Outcome {
                 leak_probability,
                 ..
             } => *quality != MeasurementQuality::TooNoisy || *leak_probability > 0.99,
+            Outcome::Research(res) => {
+                // Research mode is reliable if we reached a confident conclusion
+                matches!(
+                    res.status,
+                    ResearchStatus::EffectDetected | ResearchStatus::NoEffectDetected
+                )
+            }
         }
     }
 
@@ -1051,6 +1319,9 @@ impl Outcome {
             }
             Outcome::Pass { quality, .. } | Outcome::Fail { quality, .. } => {
                 format!("unreliable quality: {:?}", quality)
+            }
+            Outcome::Research(research) => {
+                format!("research mode: {:?}", research.status)
             }
         };
 
@@ -1136,6 +1407,8 @@ impl fmt::Display for Outcome {
                     InconclusiveReason::TimeBudgetExceeded { .. } => "time budget exceeded",
                     InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
                     InconclusiveReason::ConditionsChanged { .. } => "conditions changed",
+                    InconclusiveReason::ThresholdUnachievable { .. } => "threshold unachievable",
+                    InconclusiveReason::ModelMismatch { .. } => "model mismatch",
                 };
                 write!(
                     f,
@@ -1155,6 +1428,18 @@ impl fmt::Display for Outcome {
                     f,
                     "UNMEASURABLE: {:.1}ns operation < {:.1}ns threshold ({})",
                     operation_ns, threshold_ns, platform
+                )
+            }
+            Outcome::Research(research) => {
+                write!(
+                    f,
+                    "RESEARCH: {:?}, max_effect={:.1}ns, CI=[{:.1}, {:.1}]ns, floor={:.1}ns, {} samples",
+                    research.status,
+                    research.max_effect_ns,
+                    research.max_effect_ci.0,
+                    research.max_effect_ci.1,
+                    research.theta_floor,
+                    research.samples_used
                 )
             }
         }
@@ -1241,6 +1526,30 @@ impl fmt::Display for InconclusiveReason {
                     f,
                     "Conditions changed: {}\n  \u{2192} {}",
                     message, guidance
+                )
+            }
+            InconclusiveReason::ThresholdUnachievable {
+                theta_user,
+                best_achievable,
+                guidance,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Threshold unachievable: requested {:.1}ns, best achievable {:.1}ns\n  \u{2192} {}",
+                    theta_user, best_achievable, guidance
+                )
+            }
+            InconclusiveReason::ModelMismatch {
+                q_statistic,
+                q_threshold,
+                guidance,
+                ..
+            } => {
+                write!(
+                    f,
+                    "Model mismatch: Q={:.1} > threshold {:.1}\n  \u{2192} {}",
+                    q_statistic, q_threshold, guidance
                 )
             }
         }

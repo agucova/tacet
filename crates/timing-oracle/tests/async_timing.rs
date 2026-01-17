@@ -111,6 +111,7 @@ fn async_executor_overhead_no_false_positive() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -168,6 +169,7 @@ fn async_block_on_overhead_symmetric() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -234,6 +236,7 @@ fn detects_conditional_await_timing() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -392,6 +395,7 @@ fn concurrent_tasks_no_crosstalk() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Skipping: unmeasurable - {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 

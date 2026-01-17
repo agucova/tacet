@@ -19,6 +19,7 @@ use crate::adaptive::{
     QualityGateConfig, QualityGateResult,
 };
 use crate::analysis::bayes::compute_bayes_factor;
+use crate::constants::DEFAULT_SEED;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 use timing_oracle_core::adaptive::check_quality_gates;
 
@@ -59,7 +60,7 @@ impl Default for AdaptiveConfig {
             time_budget: Duration::from_secs(30),
             max_samples: 1_000_000,
             theta_ns: 100.0,
-            seed: 42,
+            seed: DEFAULT_SEED,
             quality_gates: QualityGateConfig::default(),
         }
     }
@@ -227,7 +228,56 @@ pub fn run_adaptive(
     // Track KL divergence
     let _kl = state.update_posterior(posterior.clone());
 
-    // Check decision boundaries
+    // =========================================================================
+    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §2.6)
+    // =========================================================================
+    // Quality gates are verdict-blocking: if any gate triggers, we cannot make
+    // a confident Pass/Fail decision, even if the posterior would otherwise
+    // cross the threshold.
+    let current_stats = state.get_stats_snapshot();
+    let gate_inputs = QualityGateCheckInputs {
+        posterior: &posterior,
+        prior_cov: &calibration.prior_cov,
+        theta_ns: config.theta_ns,
+        n_total: state.n_total(),
+        elapsed_secs: state.elapsed().as_secs_f64(),
+        recent_kl_sum: if state.has_kl_history() {
+            Some(state.recent_kl_sum())
+        } else {
+            None
+        },
+        samples_per_second: calibration.samples_per_second,
+        calibration_snapshot: Some(&calibration.calibration_snapshot),
+        current_stats_snapshot: current_stats.as_ref(),
+        // v4.1 fields for new quality gates
+        c_floor: calibration.c_floor,
+        theta_tick: calibration.theta_tick,
+        q_fit: if posterior.model_fit_q.is_nan() {
+            None
+        } else {
+            Some(posterior.model_fit_q)
+        },
+        q_thresh: calibration.q_thresh,
+    };
+
+    match check_quality_gates(&gate_inputs, &config.quality_gates) {
+        QualityGateResult::Stop(reason) => {
+            // Quality gate triggered - cannot make confident verdict
+            return AdaptiveOutcome::Inconclusive {
+                reason,
+                posterior: Some(posterior),
+                samples_per_class: state.n_total(),
+                elapsed: state.elapsed(),
+            };
+        }
+        QualityGateResult::Continue => {
+            // All gates passed - now check decision boundaries
+        }
+    }
+
+    // =========================================================================
+    // Decision boundaries (only reached if ALL quality gates passed)
+    // =========================================================================
     if posterior.leak_probability > config.fail_threshold {
         return AdaptiveOutcome::LeakDetected {
             posterior,
@@ -244,39 +294,11 @@ pub fn run_adaptive(
         };
     }
 
-    // Check quality gates
-    let current_stats = state.get_stats_snapshot();
-    let gate_inputs = QualityGateCheckInputs {
-        posterior: &posterior,
-        prior_cov: &calibration.prior_cov,
-        theta_ns: config.theta_ns,
-        n_total: state.n_total(),
-        elapsed_secs: state.elapsed().as_secs_f64(),
-        recent_kl_sum: if state.has_kl_history() {
-            Some(state.recent_kl_sum())
-        } else {
-            None
-        },
-        samples_per_second: calibration.samples_per_second,
-        calibration_snapshot: Some(&calibration.calibration_snapshot),
-        current_stats_snapshot: current_stats.as_ref(),
-    };
-
-    match check_quality_gates(&gate_inputs, &config.quality_gates) {
-        QualityGateResult::Continue => {
-            // Caller should add more samples and call again
-            AdaptiveOutcome::Continue {
-                posterior,
-                samples_per_class: state.n_total(),
-                elapsed: state.elapsed(),
-            }
-        }
-        QualityGateResult::Stop(reason) => AdaptiveOutcome::Inconclusive {
-            reason,
-            posterior: Some(posterior),
-            samples_per_class: state.n_total(),
-            elapsed: state.elapsed(),
-        },
+    // Not yet decisive - continue sampling
+    AdaptiveOutcome::Continue {
+        posterior,
+        samples_per_class: state.n_total(),
+        elapsed: state.elapsed(),
     }
 }
 
@@ -332,6 +354,7 @@ fn compute_posterior_from_state(
         bayes_result.beta_cov,
         bayes_result.leak_probability,
         n,
+        bayes_result.model_fit_q,
     ))
 }
 
@@ -371,7 +394,52 @@ pub fn adaptive_step(
     // Track KL divergence
     let _kl = state.update_posterior(posterior.clone());
 
-    // Check decision boundaries
+    // =========================================================================
+    // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §2.6)
+    // =========================================================================
+    let current_stats = state.get_stats_snapshot();
+    let gate_inputs = QualityGateCheckInputs {
+        posterior: &posterior,
+        prior_cov: &calibration.prior_cov,
+        theta_ns: config.theta_ns,
+        n_total: state.n_total(),
+        elapsed_secs: state.elapsed().as_secs_f64(),
+        recent_kl_sum: if state.has_kl_history() {
+            Some(state.recent_kl_sum())
+        } else {
+            None
+        },
+        samples_per_second: calibration.samples_per_second,
+        calibration_snapshot: Some(&calibration.calibration_snapshot),
+        current_stats_snapshot: current_stats.as_ref(),
+        // v4.1 fields for new quality gates
+        c_floor: calibration.c_floor,
+        theta_tick: calibration.theta_tick,
+        q_fit: if posterior.model_fit_q.is_nan() {
+            None
+        } else {
+            Some(posterior.model_fit_q)
+        },
+        q_thresh: calibration.q_thresh,
+    };
+
+    match check_quality_gates(&gate_inputs, &config.quality_gates) {
+        QualityGateResult::Stop(reason) => {
+            return Ok(Some(AdaptiveOutcome::Inconclusive {
+                reason,
+                posterior: Some(posterior),
+                samples_per_class: state.n_total(),
+                elapsed: state.elapsed(),
+            }));
+        }
+        QualityGateResult::Continue => {
+            // All gates passed - proceed to decision boundaries
+        }
+    }
+
+    // =========================================================================
+    // Decision boundaries (only reached if ALL quality gates passed)
+    // =========================================================================
     if posterior.leak_probability > config.fail_threshold {
         return Ok(Some(AdaptiveOutcome::LeakDetected {
             posterior,
@@ -388,33 +456,8 @@ pub fn adaptive_step(
         }));
     }
 
-    // Check quality gates
-    let current_stats = state.get_stats_snapshot();
-    let gate_inputs = QualityGateCheckInputs {
-        posterior: &posterior,
-        prior_cov: &calibration.prior_cov,
-        theta_ns: config.theta_ns,
-        n_total: state.n_total(),
-        elapsed_secs: state.elapsed().as_secs_f64(),
-        recent_kl_sum: if state.has_kl_history() {
-            Some(state.recent_kl_sum())
-        } else {
-            None
-        },
-        samples_per_second: calibration.samples_per_second,
-        calibration_snapshot: Some(&calibration.calibration_snapshot),
-        current_stats_snapshot: current_stats.as_ref(),
-    };
-
-    match check_quality_gates(&gate_inputs, &config.quality_gates) {
-        QualityGateResult::Continue => Ok(None),
-        QualityGateResult::Stop(reason) => Ok(Some(AdaptiveOutcome::Inconclusive {
-            reason,
-            posterior: Some(posterior),
-            samples_per_class: state.n_total(),
-            elapsed: state.elapsed(),
-        })),
-    }
+    // Not yet decisive - continue sampling
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -449,6 +492,13 @@ mod tests {
             mde_tail_ns: 10.0,
             preflight_result: crate::preflight::PreflightResult::new(),
             calibration_snapshot,
+            // v4.1 fields
+            c_floor: 3535.5,          // ~50 * sqrt(5000) - conservative floor-rate constant
+            q_thresh: 18.48,          // chi-squared(7, 0.99) fallback
+            theta_floor_initial: 50.0, // c_floor / sqrt(5000) = 50
+            theta_eff: 100.0,         // max(theta_ns, theta_floor_initial)
+            theta_tick: 1.0,          // Timer resolution
+            rng_seed: 42,             // Test seed
         }
     }
 
@@ -474,6 +524,7 @@ mod tests {
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
             0.95,
             1000,
+            5.0, // model_fit_q
         );
 
         let outcome = AdaptiveOutcome::LeakDetected {

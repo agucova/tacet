@@ -92,6 +92,37 @@ pub enum InconclusiveReason {
         /// The specific drift metrics that were detected.
         drift_description: String,
     },
+
+    /// Requested threshold is unachievable given maximum sample budget (Gate 7).
+    ///
+    /// The measurement floor at max_samples exceeds the user's requested threshold.
+    /// Even with the maximum allowed samples, we cannot resolve the requested precision.
+    ThresholdUnachievable {
+        /// User's requested threshold in nanoseconds.
+        theta_user: f64,
+        /// Best achievable threshold at max_samples.
+        best_achievable: f64,
+        /// Human-readable message.
+        message: String,
+        /// Suggested remediation.
+        guidance: String,
+    },
+
+    /// Model mismatch detected - the 2D shift+tail model doesn't fit (Gate 8, verdict-blocking).
+    ///
+    /// The residual Q statistic exceeds the bootstrap-calibrated threshold,
+    /// indicating the observed quantile differences don't match the expected
+    /// shift + tail pattern. This is a verdict-blocking condition.
+    ModelMismatch {
+        /// The Q statistic (residual^T Σ^{-1} residual).
+        q_statistic: f64,
+        /// The threshold from bootstrap calibration.
+        q_threshold: f64,
+        /// Human-readable message.
+        message: String,
+        /// Suggested remediation.
+        guidance: String,
+    },
 }
 
 /// Configuration for quality gate thresholds.
@@ -157,7 +188,7 @@ pub struct QualityGateCheckInputs<'a> {
     /// Prior covariance matrix (from calibration).
     pub prior_cov: &'a Matrix2,
 
-    /// Effect threshold θ in nanoseconds.
+    /// Effect threshold θ in nanoseconds (user's requested threshold).
     pub theta_ns: f64,
 
     /// Total samples per class collected so far.
@@ -180,12 +211,43 @@ pub struct QualityGateCheckInputs<'a> {
     /// Current stats snapshot for drift detection.
     /// Pass `None` to skip drift detection.
     pub current_stats_snapshot: Option<&'a CalibrationSnapshot>,
+
+    // === v4.1 additions for new quality gates ===
+
+    /// Floor-rate constant (c_floor) from calibration.
+    /// Used to compute theta_floor(n) = c_floor / sqrt(n).
+    pub c_floor: f64,
+
+    /// Timer tick floor (theta_tick) from calibration.
+    /// The floor below which timer quantization dominates.
+    pub theta_tick: f64,
+
+    /// Model fit Q statistic (residual^T Σ^{-1} residual).
+    /// Pass `None` if not yet computed.
+    pub q_fit: Option<f64>,
+
+    /// Model mismatch threshold from bootstrap calibration.
+    /// Q > q_thresh indicates model mismatch.
+    pub q_thresh: f64,
 }
 
 /// Check all quality gates and return result.
 ///
 /// Gates are checked in priority order. Returns `Continue` if all pass,
 /// or `Stop` with the reason if any gate triggers.
+///
+/// **Gate order (spec Section 2.6):**
+/// 1. Posterior too close to prior (data not informative)
+/// 2. Learning rate collapsed
+/// 3. Would take too long
+/// 4. Threshold unachievable (v4.1)
+/// 5. Time budget exceeded
+/// 6. Sample budget exceeded
+/// 7. Condition drift detected
+/// 8. Model mismatch (v4.1, verdict-blocking)
+///
+/// Gates 1-7 are checked before any Pass/Fail decision.
+/// Gate 8 (ModelMismatch) is verdict-blocking and prevents confident verdicts.
 ///
 /// # Arguments
 ///
@@ -210,22 +272,104 @@ pub fn check_quality_gates(
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 4: Time budget exceeded
+    // Gate 4 (v4.1): Threshold unachievable
+    if let Some(reason) = check_threshold_unachievable(inputs, config) {
+        return QualityGateResult::Stop(reason);
+    }
+
+    // Gate 5: Time budget exceeded
     if let Some(reason) = check_time_budget(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 5: Sample budget exceeded
+    // Gate 6: Sample budget exceeded
     if let Some(reason) = check_sample_budget(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 6: Condition drift detected
+    // Gate 7: Condition drift detected
     if let Some(reason) = check_condition_drift(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
+    // Gate 8 (v4.1): Model mismatch (verdict-blocking)
+    // This gate prevents Pass/Fail verdicts when the model doesn't fit
+    if let Some(reason) = check_model_mismatch(inputs, config) {
+        return QualityGateResult::Stop(reason);
+    }
+
     QualityGateResult::Continue
+}
+
+/// Gate 4 (v4.1): Check if the requested threshold is unachievable.
+///
+/// If theta_floor at max_samples exceeds theta_user, we can never resolve
+/// the requested precision even with the maximum sample budget.
+fn check_threshold_unachievable(
+    inputs: &QualityGateCheckInputs,
+    config: &QualityGateConfig,
+) -> Option<InconclusiveReason> {
+    // Only check if user specified a threshold (not research mode)
+    if inputs.theta_ns <= 0.0 {
+        return None;
+    }
+
+    // Compute theta_floor at max_samples
+    let theta_floor_at_max = libm::fmax(
+        inputs.c_floor / libm::sqrt(config.max_samples as f64),
+        inputs.theta_tick,
+    );
+
+    // If floor at max_samples exceeds user's threshold, it's unachievable
+    if theta_floor_at_max > inputs.theta_ns {
+        return Some(InconclusiveReason::ThresholdUnachievable {
+            theta_user: inputs.theta_ns,
+            best_achievable: theta_floor_at_max,
+            message: alloc::format!(
+                "Requested θ = {:.1} ns, but measurement floor is {:.1} ns",
+                inputs.theta_ns,
+                theta_floor_at_max
+            ),
+            guidance: String::from(
+                "Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution, \
+                increase max_samples, or use a higher threshold",
+            ),
+        });
+    }
+
+    None
+}
+
+/// Gate 8 (v4.1): Check if the model doesn't fit the data (verdict-blocking).
+///
+/// If Q > q_thresh, the 2D (shift + tail) model doesn't explain the observed
+/// quantile differences well. This is a verdict-blocking condition that
+/// prevents confident Pass/Fail verdicts.
+fn check_model_mismatch(
+    inputs: &QualityGateCheckInputs,
+    _config: &QualityGateConfig,
+) -> Option<InconclusiveReason> {
+    // Need Q statistic to check
+    let q_fit = inputs.q_fit?;
+
+    if q_fit > inputs.q_thresh {
+        return Some(InconclusiveReason::ModelMismatch {
+            q_statistic: q_fit,
+            q_threshold: inputs.q_thresh,
+            message: alloc::format!(
+                "Model mismatch: Q = {:.2} > threshold {:.2}",
+                q_fit,
+                inputs.q_thresh
+            ),
+            guidance: String::from(
+                "The observed timing pattern doesn't fit the shift+tail model. \
+                This could indicate: non-standard timing patterns, measurement artifacts, \
+                or genuine but unusual side-channel behavior. Interpret results with caution.",
+            ),
+        });
+    }
+
+    None
 }
 
 /// Gate 1: Check if posterior variance is too close to prior variance.
@@ -443,6 +587,7 @@ mod tests {
             Matrix2::new(variance, 0.0, 0.0, variance),
             leak_prob,
             1000,
+            5.0, // model_fit_q
         )
     }
 
@@ -464,6 +609,11 @@ mod tests {
             samples_per_second: 100_000.0,
             calibration_snapshot: None,
             current_stats_snapshot: None,
+            // v4.1 fields
+            c_floor: 3535.5, // ~50 * sqrt(5000)
+            theta_tick: 1.0,
+            q_fit: None,     // No model fit check in basic tests
+            q_thresh: 18.48, // chi-squared(7, 0.99) fallback
         }
     }
 

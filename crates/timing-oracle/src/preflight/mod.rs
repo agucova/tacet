@@ -9,18 +9,30 @@
 //! - **Sanity Check**: Fixed-vs-Fixed comparison to detect broken harness
 //! - **Generator Cost**: Ensures input generators have similar overhead
 //! - **Autocorrelation**: Detects periodic interference patterns
+//! - **Resolution**: Detects timer resolution issues
 //! - **System**: Platform-specific checks (e.g., CPU governor on Linux)
+//!
+//! # Core vs Platform-specific Checks
+//!
+//! Most preflight checks are no_std compatible and live in `timing-oracle-core`.
+//! This module re-exports them and adds platform-specific checks:
+//!
+//! - **From core (no_std)**: sanity_check, autocorrelation_check, resolution_check, generator_cost_check
+//! - **Platform-specific (std)**: system_check, timer_sanity_check, measure_generator_cost
 
-mod autocorr;
+// Re-export core preflight checks (no_std compatible)
+pub use timing_oracle_core::preflight::{
+    autocorrelation_check, compute_acf, generator_cost_check, resolution_check, sanity_check,
+    AutocorrWarning, GeneratorClass, GeneratorWarning, ResolutionWarning, SanityWarning,
+};
+
+// Platform-specific checks that require std
 mod generator;
 mod resolution;
-mod sanity;
 mod system;
 
-pub use autocorr::{autocorrelation_check, AutocorrWarning};
-pub use generator::{generator_cost_check, measure_generator_cost, GeneratorWarning};
-pub use resolution::{resolution_check, timer_sanity_check, ResolutionWarning};
-pub use sanity::{sanity_check, SanityWarning};
+pub use generator::measure_generator_cost;
+pub use resolution::timer_sanity_check;
 pub use system::{system_check, SystemWarning};
 
 use serde::{Deserialize, Serialize};
@@ -200,7 +212,7 @@ pub fn run_timer_sanity_check(timer: &crate::measurement::BoxedTimer) -> Preflig
     let mut result = PreflightResult::new();
 
     if let Some(warning) = timer_sanity_check(timer) {
-        result.add_resolution_warning(warning);
+        result.add_resolution_warning(warning.to_resolution_warning());
     }
 
     result

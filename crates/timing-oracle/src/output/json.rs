@@ -36,10 +36,14 @@ mod tests {
                 tail_ns: 2.0,
                 credible_interval_ns: (0.0, 10.0),
                 pattern: EffectPattern::Indeterminate,
+                interpretation_caveat: None,
             },
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),
+            theta_user: 100.0,
+            theta_eff: 100.0,
+            theta_floor: 0.0,
         }
     }
 
@@ -51,11 +55,15 @@ mod tests {
                 tail_ns: 25.0,
                 credible_interval_ns: (100.0, 200.0),
                 pattern: EffectPattern::UniformShift,
+                interpretation_caveat: None,
             },
             exploitability: Exploitability::PossibleLAN,
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),
+            theta_user: 100.0,
+            theta_eff: 100.0,
+            theta_floor: 0.0,
         }
     }
 
@@ -70,6 +78,9 @@ mod tests {
             samples_used: 50000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),
+            theta_user: 100.0,
+            theta_eff: 100.0,
+            theta_floor: 0.0,
         }
     }
 

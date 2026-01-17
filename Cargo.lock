@@ -1836,6 +1836,8 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "libc",
+ "libm",
+ "rand 0.8.5",
  "timing-oracle-core",
 ]
 

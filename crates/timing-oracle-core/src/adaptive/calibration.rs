@@ -9,6 +9,7 @@
 //! - No preflight checks (those require std features)
 //! - Uses only `alloc` for heap allocation
 
+use crate::constants::DEFAULT_SEED;
 use crate::types::{Matrix2, Matrix9};
 
 use super::CalibrationSnapshot;
@@ -60,6 +61,31 @@ pub struct Calibration {
     /// Measured throughput for time estimation (samples per second).
     /// The caller is responsible for measuring this during calibration.
     pub samples_per_second: f64,
+
+    // === v4.1 additions ===
+
+    /// Floor-rate constant (spec Section 2.3.4).
+    /// Computed once at calibration: 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
+    /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
+    pub c_floor: f64,
+
+    /// Model mismatch threshold (spec Section 2.3.3, 2.6 Gate 8).
+    /// 99th percentile of bootstrap Q* distribution, or chi-squared(7, 0.99) ≈ 18.48 fallback.
+    pub q_thresh: f64,
+
+    /// Timer resolution floor component (spec Section 2.3.4).
+    /// theta_tick = (1 tick in ns) / K where K is the batch size.
+    pub theta_tick: f64,
+
+    /// Effective threshold for this run (spec Section 2.3.4).
+    /// theta_eff = max(theta_user, theta_floor) or just theta_floor in research mode.
+    pub theta_eff: f64,
+
+    /// Initial measurement floor at calibration time.
+    pub theta_floor_initial: f64,
+
+    /// Deterministic RNG seed used for this run.
+    pub rng_seed: u64,
 }
 
 impl Calibration {
@@ -77,6 +103,13 @@ impl Calibration {
         calibration_snapshot: CalibrationSnapshot,
         timer_resolution_ns: f64,
         samples_per_second: f64,
+        // v4.1 fields
+        c_floor: f64,
+        q_thresh: f64,
+        theta_tick: f64,
+        theta_eff: f64,
+        theta_floor_initial: f64,
+        rng_seed: u64,
     ) -> Self {
         Self {
             sigma_rate,
@@ -90,6 +123,13 @@ impl Calibration {
             calibration_snapshot,
             timer_resolution_ns,
             samples_per_second,
+            // v4.1 fields
+            c_floor,
+            q_thresh,
+            theta_tick,
+            theta_eff,
+            theta_floor_initial,
+            rng_seed,
         }
     }
 
@@ -143,7 +183,7 @@ impl Default for CalibrationConfig {
             bootstrap_iterations: 2000, // Full bootstrap for accurate covariance
             theta_ns: 100.0,
             alpha: 0.01,
-            seed: 42,
+            seed: DEFAULT_SEED,
         }
     }
 }
@@ -155,12 +195,16 @@ impl Default for CalibrationConfig {
 /// See bayes.rs for derivation.
 pub const PRIOR_SCALE_FACTOR: f64 = 1.12;
 
-/// Compute prior covariance from theta threshold.
+/// Compute prior covariance from effective theta threshold.
+///
+/// **Important:** Pass `theta_eff` (effective threshold), not `theta_user`.
+/// Per spec §2.3.4, the prior should be based on the effective threshold
+/// which accounts for the measurement floor.
 ///
 /// Returns a 2x2 diagonal matrix with variance = (1.12 * theta)² for both
 /// the shift (mu) and tail (tau) components.
-pub fn compute_prior_cov(theta_ns: f64) -> Matrix2 {
-    let sigma = theta_ns * PRIOR_SCALE_FACTOR;
+pub fn compute_prior_cov(theta_eff_ns: f64) -> Matrix2 {
+    let sigma = theta_eff_ns * PRIOR_SCALE_FACTOR;
     Matrix2::new(sigma * sigma, 0.0, 0.0, sigma * sigma)
 }
 
@@ -197,6 +241,13 @@ mod tests {
             snapshot,                     // calibration_snapshot
             1.0,                          // timer_resolution_ns
             10000.0,                      // samples_per_second
+            // v4.1 fields
+            10.0,                         // c_floor
+            18.48,                        // q_thresh (chi-squared(7, 0.99) fallback)
+            0.001,                        // theta_tick
+            100.0,                        // theta_eff
+            0.1,                          // theta_floor_initial
+            42,                           // rng_seed
         )
     }
 

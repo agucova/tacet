@@ -6,6 +6,8 @@
 //! Used for condition drift detection (spec Section 2.6, Gate 6) to compare
 //! measurement statistics from calibration vs the full test run.
 
+use crate::math::sqrt;
+
 /// Online statistics accumulator using Welford's algorithm.
 ///
 /// Tracks mean, variance, and lag-1 autocorrelation incrementally with
@@ -167,7 +169,7 @@ pub struct StatsSnapshot {
 impl StatsSnapshot {
     /// Get the standard deviation.
     pub fn std_dev(&self) -> f64 {
-        self.variance.sqrt()
+        sqrt(self.variance)
     }
 }
 

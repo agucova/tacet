@@ -86,6 +86,7 @@ fn kyber768_keypair_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -155,6 +156,7 @@ fn kyber768_encapsulate_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -232,6 +234,7 @@ fn kyber768_decapsulate_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -281,6 +284,7 @@ fn dilithium3_keypair_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -342,6 +346,7 @@ fn dilithium3_sign_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -418,6 +423,7 @@ fn dilithium3_verify_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -481,6 +487,7 @@ fn falcon512_sign_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -573,6 +580,7 @@ fn falcon512_verify_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -629,6 +637,7 @@ fn sphincs_sha2_128f_sign_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -708,6 +717,7 @@ fn sphincs_sha2_128f_verify_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -789,6 +799,7 @@ fn kyber768_ciphertext_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -852,5 +863,6 @@ fn dilithium3_message_hamming_weight() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        Outcome::Research(_) => {}
     }
 }

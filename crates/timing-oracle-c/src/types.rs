@@ -2,7 +2,8 @@
 //!
 //! All types in this module are #[repr(C)] for ABI compatibility.
 
-use std::ffi::c_char;
+use core::ffi::c_char;
+use core::ptr;
 
 /// Attacker model determines the minimum effect threshold (θ) for leak detection.
 #[repr(C)]
@@ -101,6 +102,10 @@ pub enum ToInconclusiveReason {
     SampleBudgetExceeded,
     /// Measurement conditions changed during test.
     ConditionsChanged,
+    /// Requested threshold is below measurement floor (v4.1).
+    ThresholdUnachievable,
+    /// Model doesn't fit the data - 2D model insufficient (v4.1).
+    ModelMismatch,
 }
 
 /// Pattern of timing effect.
@@ -226,10 +231,50 @@ impl Default for ToResult {
             inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
             operation_ns: 0.0,
             timer_resolution_ns: 0.0,
-            recommendation: std::ptr::null(),
-            timer_name: std::ptr::null(),
-            platform: std::ptr::null(),
+            recommendation: ptr::null(),
+            timer_name: ptr::null(),
+            platform: ptr::null(),
             adaptive_batching_used: false,
+        }
+    }
+}
+
+// =============================================================================
+// Conversions from timing-oracle-core types to FFI types
+// =============================================================================
+
+impl From<timing_oracle_core::result::EffectPattern> for ToEffectPattern {
+    fn from(pattern: timing_oracle_core::result::EffectPattern) -> Self {
+        use timing_oracle_core::result::EffectPattern;
+        match pattern {
+            EffectPattern::UniformShift => ToEffectPattern::UniformShift,
+            EffectPattern::TailEffect => ToEffectPattern::TailEffect,
+            EffectPattern::Mixed => ToEffectPattern::Mixed,
+            EffectPattern::Indeterminate => ToEffectPattern::Indeterminate,
+        }
+    }
+}
+
+impl From<timing_oracle_core::result::MeasurementQuality> for ToQuality {
+    fn from(quality: timing_oracle_core::result::MeasurementQuality) -> Self {
+        use timing_oracle_core::result::MeasurementQuality;
+        match quality {
+            MeasurementQuality::Excellent => ToQuality::Excellent,
+            MeasurementQuality::Good => ToQuality::Good,
+            MeasurementQuality::Poor => ToQuality::Poor,
+            MeasurementQuality::TooNoisy => ToQuality::TooNoisy,
+        }
+    }
+}
+
+impl From<timing_oracle_core::result::EffectEstimate> for ToEffect {
+    fn from(estimate: timing_oracle_core::result::EffectEstimate) -> Self {
+        ToEffect {
+            shift_ns: estimate.shift_ns,
+            tail_ns: estimate.tail_ns,
+            ci_low_ns: estimate.credible_interval_ns.0,
+            ci_high_ns: estimate.credible_interval_ns.1,
+            pattern: estimate.pattern.into(),
         }
     }
 }

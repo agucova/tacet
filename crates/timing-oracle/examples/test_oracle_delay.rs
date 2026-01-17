@@ -72,5 +72,8 @@ fn main() {
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("UNMEASURABLE: {}", recommendation);
         }
+        Outcome::Research(research) => {
+            println!("RESEARCH: {:?}", research.status);
+        }
     }
 }

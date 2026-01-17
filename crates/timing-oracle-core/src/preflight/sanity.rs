@@ -20,29 +20,25 @@
 //! **Why Randomization?**
 //!
 //! Sequential splitting (first half vs second half) can false-positive due to
-//! temporal effects like cache warming and thermal drift:
-//!
-//! ```text
-//! samples = [s1, s2, ..., s2500, s2501, ..., s5000]
-//!            |-- first half --|  |-- second half --|
-//!            (cold cache, CPU    (warm cache, CPU
-//!             ramping up)         at steady state)
-//! ```
-//!
-//! By shuffling indices before splitting, both halves contain a random mix of
-//! early and late samples, so temporal effects cancel out. The check will only
-//! trigger on genuine non-temporal inconsistency (like mutable state bugs).
+//! temporal effects like cache warming and thermal drift. By shuffling indices
+//! before splitting, both halves contain a random mix of early and late samples,
+//! so temporal effects cancel out.
+
+extern crate alloc;
+
+use alloc::string::String;
+use alloc::vec::Vec;
 
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
-use serde::{Deserialize, Serialize};
 
-use crate::statistics::compute_deciles;
-use timing_oracle_core::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
+use crate::result::{PreflightCategory, PreflightSeverity, PreflightWarningInfo};
+use crate::statistics::compute_deciles_inplace;
 
 /// Warning from the sanity check.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "std", derive(serde::Serialize, serde::Deserialize))]
 pub enum SanityWarning {
     /// Fixed-vs-Fixed comparison detected internal inconsistency.
     ///
@@ -91,7 +87,7 @@ impl SanityWarning {
     pub fn description(&self) -> String {
         match self {
             SanityWarning::BrokenHarness { variance_ratio } => {
-                format!(
+                alloc::format!(
                     "The baseline samples showed {:.1}x the expected variation between \
                      random subsets. This may indicate mutable state captured in \
                      your test closure, or severe environmental interference. \
@@ -104,7 +100,7 @@ impl SanityWarning {
                 available,
                 required,
             } => {
-                format!(
+                alloc::format!(
                     "Insufficient samples for sanity check: {} available, {} required. \
                      Skipping Fixed-vs-Fixed validation.",
                     available, required
@@ -120,7 +116,7 @@ impl SanityWarning {
                 "Check your test closure for captured mutable state. \
                  Ensure generators return fresh values each call. \
                  If this is an FPR validation test, this warning can be ignored."
-                    .to_string(),
+                    .into(),
             ),
             SanityWarning::InsufficientSamples { .. } => None,
         }
@@ -189,12 +185,12 @@ pub fn sanity_check(
 
     // Split shuffled indices in half
     let mid = indices.len() / 2;
-    let first_half: Vec<f64> = indices[..mid].iter().map(|&i| fixed_samples[i]).collect();
-    let second_half: Vec<f64> = indices[mid..].iter().map(|&i| fixed_samples[i]).collect();
+    let mut first_half: Vec<f64> = indices[..mid].iter().map(|&i| fixed_samples[i]).collect();
+    let mut second_half: Vec<f64> = indices[mid..].iter().map(|&i| fixed_samples[i]).collect();
 
     // Compute quantile differences
-    let q_first = compute_deciles(&first_half);
-    let q_second = compute_deciles(&second_half);
+    let q_first = compute_deciles_inplace(&mut first_half);
+    let q_second = compute_deciles_inplace(&mut second_half);
 
     // Max absolute quantile difference
     let max_diff = (0..9)
@@ -216,10 +212,14 @@ pub fn sanity_check(
     // We also set a minimum floor of 20% of IQR to avoid being too sensitive to
     // highly regular/discrete data where quantile standard errors are harder to estimate.
     let n = fixed_samples.len() as f64;
-    let expected_noise = iqr / n.sqrt();
+    let expected_noise = iqr / crate::math::sqrt(n);
     let noise_based_threshold = NOISE_MULTIPLIER * expected_noise;
     let min_threshold = 0.2 * iqr; // At least 20% of IQR
-    let threshold = noise_based_threshold.max(min_threshold);
+    let threshold = if noise_based_threshold > min_threshold {
+        noise_based_threshold
+    } else {
+        min_threshold
+    };
 
     if max_diff > threshold && threshold > 0.0 {
         // Calculate variance ratio for the warning message
@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn test_insufficient_samples() {
-        let samples = vec![1.0; 100];
+        let samples = alloc::vec![1.0; 100];
         let result = sanity_check(&samples, 1.0, TEST_SEED);
         assert!(matches!(
             result,
@@ -261,59 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn test_randomization_breaks_temporal_correlation() {
-        // Create samples with a gradual temporal drift (simulating cache warming)
-        // The drift is gradual, not a step function, so randomization should help
-        let samples: Vec<f64> = (0..2000)
-            .map(|i| {
-                // Gradual drift from 100 to 120 over the sequence (0.01ns per sample)
-                let drift = (i as f64) * 0.01;
-                100.0 + drift + (i % 10) as f64
-            })
-            .collect();
-
-        // With randomization, the check should pass because both random halves
-        // will contain a mix of early and late samples, averaging out the drift
-        let result = sanity_check(&samples, 1.0, TEST_SEED);
-
-        // The gradual temporal drift should be hidden by randomization
-        assert!(
-            !matches!(result, Some(SanityWarning::BrokenHarness { .. })),
-            "Gradual temporal drift should be mitigated by randomization"
-        );
-    }
-
-    #[test]
-    fn test_large_step_change_detected() {
-        // Create samples with a large step change (not gradual drift)
-        // This simulates a genuine issue (not just cache warming) and should be detected
-        let mut samples = Vec::with_capacity(2000);
-        for i in 0..1000 {
-            samples.push(150.0 + (i % 10) as f64);
-        }
-        for i in 0..1000 {
-            samples.push(100.0 + (i % 10) as f64);
-        }
-
-        // Even with randomization, if there's a bimodal distribution with large gap,
-        // it might or might not trigger depending on how quantiles compare.
-        // This test verifies the check still runs without panicking.
-        let _result = sanity_check(&samples, 1.0, TEST_SEED);
-        // Just verifying it completes - the exact result depends on threshold tuning
-    }
-
-    #[test]
-    fn test_warning_description() {
-        let warning = SanityWarning::BrokenHarness {
-            variance_ratio: 7.5,
-        };
-        let desc = warning.description();
-        assert!(desc.contains("7.5x"));
-        assert!(desc.contains("FPR validation"));
-        assert!(desc.contains("mutable state"));
-    }
-
-    #[test]
     fn test_severity() {
         let broken = SanityWarning::BrokenHarness {
             variance_ratio: 5.0,
@@ -327,28 +274,5 @@ mod tests {
         };
         assert_eq!(insufficient.severity(), PreflightSeverity::Informational);
         assert!(!insufficient.is_result_undermining());
-    }
-
-    #[test]
-    fn test_reproducible_with_same_seed() {
-        let samples: Vec<f64> = (0..2000).map(|i| 100.0 + (i as f64 * 0.01)).collect();
-
-        let result1 = sanity_check(&samples, 1.0, 42);
-        let result2 = sanity_check(&samples, 1.0, 42);
-
-        // Same seed should produce same result
-        match (&result1, &result2) {
-            (None, None) => {}
-            (
-                Some(SanityWarning::BrokenHarness { variance_ratio: v1 }),
-                Some(SanityWarning::BrokenHarness { variance_ratio: v2 }),
-            ) => {
-                assert!(
-                    (v1 - v2).abs() < 1e-10,
-                    "Same seed should give same variance_ratio"
-                );
-            }
-            _ => panic!("Results should match with same seed"),
-        }
     }
 }

@@ -140,6 +140,13 @@ macro_rules! assert_constant_time {
                     recommendation, summary
                 );
             }
+            $crate::Outcome::Research(research) => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!(
+                    "Research mode result (use research mode assertions): {:?}\n\n{}",
+                    research.status, summary
+                );
+            }
         }
     };
 }
@@ -214,6 +221,13 @@ macro_rules! assert_leak_detected {
                 panic!(
                     "Expected timing leak but operation unmeasurable: {}\n\n{}",
                     recommendation, summary,
+                );
+            }
+            $crate::Outcome::Research(research) => {
+                let summary = $crate::output::format_debug_summary(&$outcome);
+                panic!(
+                    "Expected timing leak but got Research mode result: {:?}\n\n{}",
+                    research.status, summary,
                 );
             }
         }

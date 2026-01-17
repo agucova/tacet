@@ -53,6 +53,10 @@ fn main() {
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("  Could not measure: {}\n", recommendation);
         }
+        Outcome::Research(research) => {
+            println!("  Result: RESEARCH MODE");
+            println!("  Status: {:?}\n", research.status);
+        }
     }
 
     // Test 2: Constant-time comparison (should not detect leak)
@@ -89,6 +93,10 @@ fn main() {
         }
         Outcome::Unmeasurable { recommendation, .. } => {
             println!("  Could not measure: {}", recommendation);
+        }
+        Outcome::Research(research) => {
+            println!("  Result: RESEARCH MODE");
+            println!("  Status: {:?}", research.status);
         }
     }
 }

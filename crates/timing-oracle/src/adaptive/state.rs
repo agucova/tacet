@@ -231,6 +231,7 @@ mod tests {
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             1000,
+            5.0, // model_fit_q
         );
 
         let kl = state.update_posterior(posterior.clone());
@@ -286,6 +287,7 @@ mod tests {
             Matrix2::new(4.0, 0.0, 0.0, 1.0),
             0.75,
             100,
+            5.0, // model_fit_q
         );
         state.update_posterior(posterior);
 

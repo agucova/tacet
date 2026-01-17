@@ -95,6 +95,7 @@ fn sha3_256_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     // If we got a conclusive result, verify exploitability is low
@@ -151,6 +152,7 @@ fn sha3_384_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -206,6 +208,7 @@ fn sha3_512_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -265,6 +268,7 @@ fn sha3_256_data_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -326,6 +330,7 @@ fn blake2b_512_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -383,6 +388,7 @@ fn blake2s_256_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -444,6 +450,7 @@ fn sha3_256_hamming_weight_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     // Secondary check: exploitability should be low
@@ -500,6 +507,7 @@ fn blake2b_hamming_weight_independence() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     // Secondary check: exploitability should be low
@@ -569,6 +577,7 @@ fn sha3_256_incremental_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
@@ -630,6 +639,7 @@ fn blake2b_incremental_constant_time() {
         Outcome::Unmeasurable { recommendation, .. } => {
             eprintln!("Unmeasurable: {}", recommendation);
         }
+        &Outcome::Research(_) => {}
     }
 
     if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =

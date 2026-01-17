@@ -304,6 +304,6 @@ fn extract_leak_probability(outcome: &Outcome) -> Option<f64> {
         Outcome::Pass { leak_probability, .. }
         | Outcome::Fail { leak_probability, .. }
         | Outcome::Inconclusive { leak_probability, .. } => Some(*leak_probability),
-        Outcome::Unmeasurable { .. } => None,
+        Outcome::Unmeasurable { .. } | Outcome::Research(_) => None,
     }
 }

@@ -99,6 +99,7 @@ fn aes128_block_encrypt_constant_time() {
         Outcome::Unmeasurable { .. } => {
             // Handled by skip_if_unreliable
         }
+        Outcome::Research(_) => {}
     }
 }
 
@@ -175,6 +176,7 @@ fn aes128_different_keys_constant_time() {
             );
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -291,6 +293,7 @@ fn aes128_multiple_blocks_constant_time() {
             );
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -354,6 +357,7 @@ fn aes128_key_init_constant_time() {
             );
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -418,6 +422,7 @@ fn aes128_hamming_weight_independence() {
             );
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }
 
@@ -482,5 +487,6 @@ fn aes128_byte_pattern_independence() {
             );
         }
         Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
     }
 }

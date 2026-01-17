@@ -28,16 +28,47 @@
 //!
 //! # Safety
 //!
-//! All public functions use `catch_unwind` to prevent Rust panics from
-//! propagating across the FFI boundary.
+//! When built with the `std` feature (default), all public functions use
+//! `catch_unwind` to prevent Rust panics from propagating across the FFI
+//! boundary. In `no_std` mode, panics will abort.
+//!
+//! # Features
+//!
+//! - `std` (default): Enables `std::time::Instant` for time tracking and
+//!   `catch_unwind` for panic safety. Use `to_test()` for automatic time tracking.
+//! - Without `std`: Use `to_test_with_time()` and provide elapsed time externally.
 
-use std::ffi::{c_char, c_void, CString};
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+use core::ffi::{c_char, c_void};
+use core::ptr;
+
+#[cfg(feature = "std")]
+use std::ffi::CString;
+
+#[cfg(feature = "std")]
 use std::panic::catch_unwind;
-use std::ptr;
+
+use alloc::format;
+use alloc::string::String;
+use alloc::vec;
+use alloc::vec::Vec;
+
+// Math helper for no_std - use libm directly
+fn sqrt(x: f64) -> f64 {
+    libm::sqrt(x)
+}
+
+fn sq(x: f64) -> f64 {
+    x * x
+}
 
 pub mod types;
 
-use types::*;
+// Re-export all types at crate root for convenience
+pub use types::*;
 
 // Link to the C measurement loop
 extern "C" {
@@ -87,7 +118,10 @@ pub extern "C" fn to_config_default(model: ToAttackerModel) -> ToConfig {
     }
 }
 
-/// Run a timing test.
+/// Run a timing test with automatic time tracking (requires `std` feature).
+///
+/// This is the standard API for most use cases. For `no_std` environments,
+/// use `to_test_with_time()` instead.
 ///
 /// # Safety
 ///
@@ -95,6 +129,7 @@ pub extern "C" fn to_config_default(model: ToAttackerModel) -> ToConfig {
 /// - `generator` and `operation` must be valid function pointers
 /// - `ctx` can be null if not needed by callbacks
 /// - `input_size` must match the buffer size expected by callbacks
+#[cfg(feature = "std")]
 #[no_mangle]
 pub unsafe extern "C" fn to_test(
     config: *const ToConfig,
@@ -110,7 +145,10 @@ pub unsafe extern "C" fn to_test(
             (*config).clone()
         };
 
-        run_test_impl(&config, input_size, generator, operation, ctx)
+        let start_time = std::time::Instant::now();
+        run_test_impl(&config, input_size, generator, operation, ctx, || {
+            start_time.elapsed().as_secs_f64()
+        })
     });
 
     match result {
@@ -124,6 +162,93 @@ pub unsafe extern "C" fn to_test(
                 ..ToResult::default()
             }
         }
+    }
+}
+
+/// Run a timing test with caller-provided time tracking (no_std compatible).
+///
+/// This API is available in both `std` and `no_std` builds. The caller is
+/// responsible for tracking elapsed time and providing it via the `elapsed_secs`
+/// pointer. The library will read this value whenever it needs the current time.
+///
+/// # Usage
+///
+/// ```c
+/// double elapsed = 0.0;
+/// // ... start your timer ...
+///
+/// // Before calling, update elapsed_secs to current elapsed time
+/// elapsed = get_elapsed_time(); // Your time function
+/// ToResult result = to_test_with_time(&config, size, gen, op, ctx, &elapsed);
+/// ```
+///
+/// Note: For the adaptive loop to work correctly, you should update `elapsed_secs`
+/// before each call. In practice, since this is a single blocking call, you only
+/// need to provide the initial elapsed time (usually 0.0).
+///
+/// # Safety
+///
+/// - `config` must be a valid pointer or null (uses defaults if null)
+/// - `generator` and `operation` must be valid function pointers
+/// - `ctx` can be null if not needed by callbacks
+/// - `input_size` must match the buffer size expected by callbacks
+/// - `elapsed_secs` must be a valid pointer to a f64
+#[no_mangle]
+pub unsafe extern "C" fn to_test_with_time(
+    config: *const ToConfig,
+    input_size: usize,
+    generator: GeneratorFn,
+    operation: OperationFn,
+    ctx: *mut c_void,
+    elapsed_secs: *const f64,
+) -> ToResult {
+    #[cfg(feature = "std")]
+    {
+        let result = catch_unwind(|| {
+            let config = if config.is_null() {
+                ToConfig::default()
+            } else {
+                (*config).clone()
+            };
+
+            run_test_impl(&config, input_size, generator, operation, ctx, || {
+                if elapsed_secs.is_null() {
+                    0.0
+                } else {
+                    *elapsed_secs
+                }
+            })
+        });
+
+        match result {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                let msg = CString::new("Internal error: panic in timing-oracle").unwrap();
+                ToResult {
+                    outcome: ToOutcome::Inconclusive,
+                    recommendation: msg.into_raw(),
+                    ..ToResult::default()
+                }
+            }
+        }
+    }
+
+    #[cfg(not(feature = "std"))]
+    {
+        // No panic catching in no_std - panics will abort
+        let config = if config.is_null() {
+            ToConfig::default()
+        } else {
+            (*config).clone()
+        };
+
+        run_test_impl(&config, input_size, generator, operation, ctx, || {
+            if elapsed_secs.is_null() {
+                0.0
+            } else {
+                *elapsed_secs
+            }
+        })
     }
 }
 
@@ -141,8 +266,16 @@ pub unsafe extern "C" fn to_result_free(result: *mut ToResult) {
 
     let r = &mut *result;
     if !r.recommendation.is_null() {
-        // Reconstruct and drop the CString to free memory
-        drop(CString::from_raw(r.recommendation as *mut c_char));
+        #[cfg(feature = "std")]
+        {
+            // Reconstruct and drop the CString to free memory
+            drop(CString::from_raw(r.recommendation as *mut c_char));
+        }
+        #[cfg(not(feature = "std"))]
+        {
+            // In no_std mode, recommendation points to static strings, so nothing to free
+            // Just null it out for safety
+        }
         r.recommendation = ptr::null();
     }
 }
@@ -201,6 +334,8 @@ pub extern "C" fn to_inconclusive_reason_str(reason: ToInconclusiveReason) -> *c
         ToInconclusiveReason::TimeBudgetExceeded => c"TimeBudgetExceeded".as_ptr(),
         ToInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
         ToInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
+        ToInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
+        ToInconclusiveReason::ModelMismatch => c"ModelMismatch".as_ptr(),
     }
 }
 
@@ -227,6 +362,41 @@ pub extern "C" fn to_timer_frequency() -> u64 {
 // Internal implementation
 // ============================================================================
 
+/// Create a recommendation string.
+///
+/// In std mode, returns a CString that must be freed by the caller.
+/// In no_std mode, returns a static string.
+#[cfg(feature = "std")]
+fn make_recommendation(msg: &str) -> *const c_char {
+    CString::new(msg).unwrap().into_raw()
+}
+
+#[cfg(not(feature = "std"))]
+fn make_recommendation(_msg: &str) -> *const c_char {
+    // In no_std mode, return a generic static string
+    // The specific message is lost, but the caller gets a valid pointer
+    c"See documentation for recommendations".as_ptr()
+}
+
+/// Create a recommendation from an optional String.
+///
+/// In std mode, converts the string to CString.
+/// In no_std mode, returns a static string or null.
+#[cfg(feature = "std")]
+fn make_recommendation_from_option(msg: Option<String>) -> *const c_char {
+    msg.map(|s| CString::new(s).unwrap().into_raw() as *const c_char)
+        .unwrap_or(ptr::null())
+}
+
+#[cfg(not(feature = "std"))]
+fn make_recommendation_from_option(msg: Option<String>) -> *const c_char {
+    if msg.is_some() {
+        c"See documentation for recommendations".as_ptr()
+    } else {
+        ptr::null()
+    }
+}
+
 /// Batch size for adaptive loop.
 const BATCH_SIZE: usize = 1000;
 
@@ -242,12 +412,13 @@ const MIN_TICKS_PER_MEASUREMENT: u64 = 50;
 /// Maximum batch K for adaptive batching.
 const MAX_BATCH_K: usize = 20;
 
-fn run_test_impl(
+fn run_test_impl<F: Fn() -> f64>(
     config: &ToConfig,
     input_size: usize,
     generator: GeneratorFn,
     operation: OperationFn,
     ctx: *mut c_void,
+    get_elapsed_secs: F,
 ) -> ToResult {
     use timing_oracle_core::adaptive::{
         adaptive_step, AdaptiveOutcome, AdaptiveStepConfig, InconclusiveReason, StepResult,
@@ -277,8 +448,6 @@ fn run_test_impl(
     // Allocate input buffer
     let mut input_buffer = vec![0u8; input_size];
 
-    let start_time = std::time::Instant::now();
-
     // ==========================================================================
     // Phase 0: Pilot phase - detect unmeasurable operations and select batch_k
     // ==========================================================================
@@ -296,16 +465,14 @@ fn run_test_impl(
     let batch_k = match batch_k {
         Some(k) => k,
         None => {
-            let msg = CString::new(
-                "Operation completes faster than timer resolution. \
-                 Consider using a higher-precision timer or batching operations.",
-            )
-            .unwrap();
             return ToResult {
                 outcome: ToOutcome::Unmeasurable,
                 operation_ns: 0.0, // Too fast to measure
                 timer_resolution_ns,
-                recommendation: msg.into_raw(),
+                recommendation: make_recommendation(
+                    "Operation completes faster than timer resolution. \
+                     Consider using a higher-precision timer or batching operations."
+                ),
                 timer_name: unsafe { to_get_timer_name() },
                 platform: c"".as_ptr(),
                 ..ToResult::default()
@@ -327,7 +494,7 @@ fn run_test_impl(
         ns_per_tick,
         theta_ns,
         config.seed,
-        start_time,
+        &get_elapsed_secs,
     ) {
         Ok(result) => result,
         Err(result) => return result,
@@ -345,7 +512,7 @@ fn run_test_impl(
         .max_samples(max_samples);
 
     loop {
-        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        let elapsed_secs = get_elapsed_secs();
 
         // Check if we've exceeded time budget before collecting more
         if elapsed_secs > time_budget_secs {
@@ -465,7 +632,7 @@ fn run_pilot_phase(
 }
 
 /// Run calibration phase to estimate covariance and set priors.
-fn run_calibration_phase(
+fn run_calibration_phase<F: Fn() -> f64>(
     generator: GeneratorFn,
     operation: OperationFn,
     ctx: *mut c_void,
@@ -475,7 +642,7 @@ fn run_calibration_phase(
     ns_per_tick: f64,
     theta_ns: f64,
     seed: u64,
-    start_time: std::time::Instant,
+    get_elapsed_secs: &F,
 ) -> Result<
     (
         timing_oracle_core::adaptive::Calibration,
@@ -562,14 +729,15 @@ fn run_calibration_phase(
     let cov_estimate = bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed);
 
     if !cov_estimate.is_stable() {
-        let msg = CString::new("Covariance matrix is not stable; try more samples").unwrap();
         return Err(ToResult {
             outcome: ToOutcome::Inconclusive,
             inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
-            recommendation: msg.into_raw(),
+            recommendation: make_recommendation(
+                "Covariance matrix is not stable; try more samples"
+            ),
             timer_resolution_ns: ns_per_tick,
             timer_name: unsafe { to_get_timer_name() },
-            elapsed_secs: start_time.elapsed().as_secs_f64(),
+            elapsed_secs: get_elapsed_secs(),
             samples_used: CALIBRATION_SAMPLES,
             ..ToResult::default()
         });
@@ -578,16 +746,35 @@ fn run_calibration_phase(
     // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
     let sigma_rate = cov_estimate.matrix * (CALIBRATION_SAMPLES as f64);
 
-    // Compute prior covariance
-    let prior_sigma = theta_ns * PRIOR_SCALE_FACTOR;
-    let prior_cov = Matrix2::new(prior_sigma.powi(2), 0.0, 0.0, prior_sigma.powi(2));
-
     // Estimate MDE from calibration data (simplified)
-    let mde_shift_ns = 2.0 * cov_estimate.matrix[(0, 0)].sqrt() / (CALIBRATION_SAMPLES as f64).sqrt();
-    let mde_tail_ns = 2.0 * cov_estimate.matrix[(8, 8)].sqrt() / (CALIBRATION_SAMPLES as f64).sqrt();
+    let n_sqrt = sqrt(CALIBRATION_SAMPLES as f64);
+    let mde_shift_ns = 2.0 * sqrt(cov_estimate.matrix[(0, 0)]) / n_sqrt;
+    let mde_tail_ns = 2.0 * sqrt(cov_estimate.matrix[(8, 8)]) / n_sqrt;
 
-    let elapsed_secs = start_time.elapsed().as_secs_f64();
+    let elapsed_secs = get_elapsed_secs();
     let samples_per_second = CALIBRATION_SAMPLES as f64 / elapsed_secs;
+
+    // v4.1: Compute floor-rate constant and effective threshold
+    // For C API, use simplified defaults since we don't have full bootstrap
+    let c_floor = 10.0; // Conservative default
+    let q_thresh = 18.48; // chi-squared(7, 0.99) fallback
+    let theta_tick = ns_per_tick / 20.0; // Assume batch size of 20
+    let theta_floor_initial = if c_floor / n_sqrt > theta_tick {
+        c_floor / n_sqrt
+    } else {
+        theta_tick
+    };
+    let theta_eff = if theta_ns > theta_floor_initial {
+        theta_ns
+    } else {
+        theta_floor_initial
+    };
+    let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
+
+    // Compute prior covariance using theta_eff (not theta_user)
+    // Per spec §2.3.4: prior should be based on effective threshold
+    let prior_sigma = theta_eff * PRIOR_SCALE_FACTOR;
+    let prior_cov = Matrix2::new(sq(prior_sigma), 0.0, 0.0, sq(prior_sigma));
 
     let calibration = Calibration::new(
         sigma_rate,
@@ -601,6 +788,13 @@ fn run_calibration_phase(
         calibration_snapshot,
         ns_per_tick,
         samples_per_second,
+        // v4.1 fields
+        c_floor,
+        q_thresh,
+        theta_tick,
+        theta_eff,
+        theta_floor_initial,
+        rng_seed,
     );
 
     // Initialize adaptive state with calibration samples
@@ -754,9 +948,7 @@ fn build_result(
                 )
             };
 
-            let recommendation_ptr = recommendation
-                .map(|s| CString::new(s).unwrap().into_raw() as *const c_char)
-                .unwrap_or(ptr::null());
+            let recommendation_ptr = make_recommendation_from_option(recommendation);
 
             ToResult {
                 outcome: ToOutcome::Inconclusive,
@@ -779,40 +971,13 @@ fn build_result(
 }
 
 fn build_effect(posterior: &timing_oracle_core::adaptive::Posterior) -> ToEffect {
-    let shift = posterior.beta_mean[0];
-    let tail = posterior.beta_mean[1];
-    let shift_se = posterior.beta_cov[(0, 0)].sqrt();
-
-    let pattern = if shift.abs() > 2.0 * tail.abs() {
-        ToEffectPattern::UniformShift
-    } else if tail.abs() > 2.0 * shift.abs() {
-        ToEffectPattern::TailEffect
-    } else if shift.abs() > 1.0 || tail.abs() > 1.0 {
-        ToEffectPattern::Mixed
-    } else {
-        ToEffectPattern::Indeterminate
-    };
-
-    ToEffect {
-        shift_ns: shift,
-        tail_ns: tail,
-        ci_low_ns: shift - 1.96 * shift_se,
-        ci_high_ns: shift + 1.96 * shift_se,
-        pattern,
-    }
+    // Use core's method and convert to FFI type
+    posterior.to_effect_estimate().into()
 }
 
 fn build_quality(posterior: &timing_oracle_core::adaptive::Posterior) -> ToQuality {
-    let effect_se = posterior.beta_cov[(0, 0)].sqrt();
-    if effect_se < 5.0 {
-        ToQuality::Excellent
-    } else if effect_se < 20.0 {
-        ToQuality::Good
-    } else if effect_se < 100.0 {
-        ToQuality::Poor
-    } else {
-        ToQuality::TooNoisy
-    }
+    // Use core's method and convert to FFI type
+    posterior.measurement_quality().into()
 }
 
 fn convert_reason(
@@ -839,34 +1004,322 @@ fn convert_reason(
         InconclusiveReason::ConditionsChanged { message, guidance, .. } => {
             (ToInconclusiveReason::ConditionsChanged, Some(format!("{} {}", message, guidance)))
         }
+        InconclusiveReason::ThresholdUnachievable { message, guidance, .. } => {
+            (ToInconclusiveReason::ThresholdUnachievable, Some(format!("{} {}", message, guidance)))
+        }
+        InconclusiveReason::ModelMismatch { message, guidance, .. } => {
+            (ToInconclusiveReason::ModelMismatch, Some(format!("{} {}", message, guidance)))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use core::ffi::CStr;
+
+    // =========================================================================
+    // Group 1: String Conversion Functions
+    // =========================================================================
 
     #[test]
-    fn test_config_default() {
+    fn test_outcome_str_all_variants() {
+        // Test all ToOutcome variants return valid C strings
+        let variants = [
+            (ToOutcome::Pass, "Pass"),
+            (ToOutcome::Fail, "Fail"),
+            (ToOutcome::Inconclusive, "Inconclusive"),
+            (ToOutcome::Unmeasurable, "Unmeasurable"),
+        ];
+
+        for (variant, expected) in variants {
+            let ptr = to_outcome_str(variant);
+            assert!(!ptr.is_null(), "to_outcome_str returned null for {:?}", variant);
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            assert_eq!(cstr.to_str().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_effect_pattern_str_all() {
+        let variants = [
+            (ToEffectPattern::UniformShift, "UniformShift"),
+            (ToEffectPattern::TailEffect, "TailEffect"),
+            (ToEffectPattern::Mixed, "Mixed"),
+            (ToEffectPattern::Indeterminate, "Indeterminate"),
+        ];
+
+        for (variant, expected) in variants {
+            let ptr = to_effect_pattern_str(variant);
+            assert!(!ptr.is_null(), "to_effect_pattern_str returned null for {:?}", variant);
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            assert_eq!(cstr.to_str().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_exploitability_str_all() {
+        let variants = [
+            (ToExploitability::Negligible, "Negligible"),
+            (ToExploitability::PossibleLan, "PossibleLAN"),
+            (ToExploitability::LikelyLan, "LikelyLAN"),
+            (ToExploitability::PossibleRemote, "PossibleRemote"),
+        ];
+
+        for (variant, expected) in variants {
+            let ptr = to_exploitability_str(variant);
+            assert!(!ptr.is_null(), "to_exploitability_str returned null for {:?}", variant);
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            assert_eq!(cstr.to_str().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_quality_str_all() {
+        let variants = [
+            (ToQuality::Excellent, "Excellent"),
+            (ToQuality::Good, "Good"),
+            (ToQuality::Poor, "Poor"),
+            (ToQuality::TooNoisy, "TooNoisy"),
+        ];
+
+        for (variant, expected) in variants {
+            let ptr = to_quality_str(variant);
+            assert!(!ptr.is_null(), "to_quality_str returned null for {:?}", variant);
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            assert_eq!(cstr.to_str().unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn test_inconclusive_reason_str_all() {
+        let variants = [
+            (ToInconclusiveReason::DataTooNoisy, "DataTooNoisy"),
+            (ToInconclusiveReason::NotLearning, "NotLearning"),
+            (ToInconclusiveReason::WouldTakeTooLong, "WouldTakeTooLong"),
+            (ToInconclusiveReason::TimeBudgetExceeded, "TimeBudgetExceeded"),
+            (ToInconclusiveReason::SampleBudgetExceeded, "SampleBudgetExceeded"),
+            (ToInconclusiveReason::ConditionsChanged, "ConditionsChanged"),
+            (ToInconclusiveReason::ThresholdUnachievable, "ThresholdUnachievable"),
+            (ToInconclusiveReason::ModelMismatch, "ModelMismatch"),
+        ];
+
+        for (variant, expected) in variants {
+            let ptr = to_inconclusive_reason_str(variant);
+            assert!(!ptr.is_null(), "to_inconclusive_reason_str returned null for {:?}", variant);
+            let cstr = unsafe { CStr::from_ptr(ptr) };
+            assert_eq!(cstr.to_str().unwrap(), expected);
+        }
+    }
+
+    // =========================================================================
+    // Group 2: Type Conversions (From implementations)
+    // =========================================================================
+
+    #[test]
+    fn test_effect_pattern_from_core() {
+        use timing_oracle_core::result::EffectPattern;
+
+        let conversions = [
+            (EffectPattern::UniformShift, ToEffectPattern::UniformShift),
+            (EffectPattern::TailEffect, ToEffectPattern::TailEffect),
+            (EffectPattern::Mixed, ToEffectPattern::Mixed),
+            (EffectPattern::Indeterminate, ToEffectPattern::Indeterminate),
+        ];
+
+        for (core_val, expected) in conversions {
+            let ffi_val: ToEffectPattern = core_val.into();
+            assert_eq!(ffi_val, expected, "Conversion failed for {:?}", core_val);
+        }
+    }
+
+    #[test]
+    fn test_quality_from_core() {
+        use timing_oracle_core::result::MeasurementQuality;
+
+        let conversions = [
+            (MeasurementQuality::Excellent, ToQuality::Excellent),
+            (MeasurementQuality::Good, ToQuality::Good),
+            (MeasurementQuality::Poor, ToQuality::Poor),
+            (MeasurementQuality::TooNoisy, ToQuality::TooNoisy),
+        ];
+
+        for (core_val, expected) in conversions {
+            let ffi_val: ToQuality = core_val.into();
+            assert_eq!(ffi_val, expected, "Conversion failed for {:?}", core_val);
+        }
+    }
+
+    #[test]
+    fn test_effect_from_core() {
+        use timing_oracle_core::result::{EffectEstimate, EffectPattern};
+
+        let core_effect = EffectEstimate {
+            shift_ns: 10.5,
+            tail_ns: 5.2,
+            credible_interval_ns: (2.0, 18.0),
+            pattern: EffectPattern::Mixed,
+            interpretation_caveat: None,
+        };
+
+        let ffi_effect: ToEffect = core_effect.into();
+        assert!((ffi_effect.shift_ns - 10.5).abs() < 1e-10);
+        assert!((ffi_effect.tail_ns - 5.2).abs() < 1e-10);
+        assert!((ffi_effect.ci_low_ns - 2.0).abs() < 1e-10);
+        assert!((ffi_effect.ci_high_ns - 18.0).abs() < 1e-10);
+        assert_eq!(ffi_effect.pattern, ToEffectPattern::Mixed);
+    }
+
+    #[test]
+    fn test_attacker_model_all_thresholds() {
+        // Test all attacker model threshold values
+        let models = [
+            (ToAttackerModel::SharedHardware, 0.6),
+            (ToAttackerModel::PostQuantum, 3.3),
+            (ToAttackerModel::AdjacentNetwork, 100.0),
+            (ToAttackerModel::RemoteNetwork, 50_000.0),
+            (ToAttackerModel::Research, 0.0),
+        ];
+
+        for (model, expected) in models {
+            let threshold = model.to_threshold_ns(0.0);
+            assert!(
+                (threshold - expected).abs() < 1e-10,
+                "Threshold mismatch for {:?}: got {}, expected {}",
+                model, threshold, expected
+            );
+        }
+
+        // Test custom threshold
+        assert!((ToAttackerModel::Custom.to_threshold_ns(123.45) - 123.45).abs() < 1e-10);
+    }
+
+    // =========================================================================
+    // Group 3: Default Values & Config
+    // =========================================================================
+
+    #[test]
+    fn test_config_default_all_models() {
+        let models = [
+            ToAttackerModel::SharedHardware,
+            ToAttackerModel::PostQuantum,
+            ToAttackerModel::AdjacentNetwork,
+            ToAttackerModel::RemoteNetwork,
+            ToAttackerModel::Research,
+        ];
+
+        for model in models {
+            let config = to_config_default(model);
+            assert_eq!(config.attacker_model, model);
+            // Default thresholds should be 0.05 and 0.95
+            assert!((config.pass_threshold - 0.05).abs() < 1e-10);
+            assert!((config.fail_threshold - 0.95).abs() < 1e-10);
+            // Default max_samples should be 0 (meaning use default 100,000)
+            assert_eq!(config.max_samples, 0);
+            // Default time_budget_secs is 0.0 (meaning use internal default of 30s)
+            assert!((config.time_budget_secs - 0.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn test_result_default() {
+        let result = ToResult::default();
+        assert_eq!(result.outcome, ToOutcome::Pass);
+        assert!((result.leak_probability - 0.0).abs() < 1e-10);
+        assert_eq!(result.samples_used, 0);
+        assert!((result.elapsed_secs - 0.0).abs() < 1e-10);
+        assert_eq!(result.exploitability, ToExploitability::Negligible);
+        assert!(result.recommendation.is_null());
+        assert!(!result.adaptive_batching_used);
+    }
+
+    #[test]
+    fn test_config_values_reasonable() {
         let config = to_config_default(ToAttackerModel::AdjacentNetwork);
-        assert_eq!(config.attacker_model, ToAttackerModel::AdjacentNetwork);
-        assert!((config.pass_threshold - 0.05).abs() < 1e-10);
-        assert!((config.fail_threshold - 0.95).abs() < 1e-10);
+
+        // Thresholds should be in [0, 1]
+        assert!(config.pass_threshold >= 0.0 && config.pass_threshold <= 1.0);
+        assert!(config.fail_threshold >= 0.0 && config.fail_threshold <= 1.0);
+
+        // Pass threshold should be less than fail threshold
+        assert!(config.pass_threshold < config.fail_threshold);
+
+        // Time budget can be 0.0 (meaning "use internal default")
+        // or any non-negative value
+        assert!(config.time_budget_secs >= 0.0);
+
+        // Seed can be any value (0 is valid, means use random seed)
+        let _seed = config.seed;
+    }
+
+    // =========================================================================
+    // Group 4: Metadata Functions
+    // =========================================================================
+
+    #[test]
+    fn test_version_format() {
+        let ptr = to_version();
+        assert!(!ptr.is_null(), "to_version returned null");
+
+        let cstr = unsafe { CStr::from_ptr(ptr) };
+        let version = cstr.to_str().expect("Invalid UTF-8 in version string");
+
+        // Should be a valid semver format (x.y.z)
+        let parts: Vec<&str> = version.split('.').collect();
+        assert!(parts.len() >= 2, "Version should have at least major.minor: {}", version);
+
+        // Each part should be a valid number
+        for (i, part) in parts.iter().enumerate() {
+            // Handle pre-release suffixes like "0.1.0-alpha"
+            let num_part = part.split('-').next().unwrap();
+            assert!(
+                num_part.parse::<u32>().is_ok(),
+                "Version part {} is not a number: {}",
+                i, part
+            );
+        }
     }
 
     #[test]
-    fn test_outcome_str() {
-        let s = to_outcome_str(ToOutcome::Pass);
-        assert!(!s.is_null());
-        let s = to_outcome_str(ToOutcome::Fail);
-        assert!(!s.is_null());
+    fn test_timer_name_non_null() {
+        let ptr = to_timer_name();
+        assert!(!ptr.is_null(), "to_timer_name returned null");
+
+        let cstr = unsafe { CStr::from_ptr(ptr) };
+        let name = cstr.to_str().expect("Invalid UTF-8 in timer name");
+
+        // Should be a non-empty string
+        assert!(!name.is_empty(), "Timer name should not be empty");
+
+        // Should be one of the known timer names
+        let known_timers = ["rdtsc", "cntvct_el0", "clock_gettime"];
+        assert!(
+            known_timers.iter().any(|&t| name.contains(t)),
+            "Unknown timer name: {}",
+            name
+        );
     }
 
     #[test]
-    fn test_attacker_model_thresholds() {
-        assert!((ToAttackerModel::SharedHardware.to_threshold_ns(0.0) - 0.6).abs() < 1e-10);
-        assert!((ToAttackerModel::AdjacentNetwork.to_threshold_ns(0.0) - 100.0).abs() < 1e-10);
-        assert!((ToAttackerModel::RemoteNetwork.to_threshold_ns(0.0) - 50_000.0).abs() < 1e-10);
-        assert!((ToAttackerModel::Custom.to_threshold_ns(42.0) - 42.0).abs() < 1e-10);
+    fn test_timer_frequency_reasonable() {
+        let freq = to_timer_frequency();
+
+        // Timer frequency varies by platform:
+        // - x86_64 TSC: ~1-5 GHz (CPU frequency)
+        // - ARM64 CNTVCT_EL0: ~24 MHz (system timer)
+        // - clock_gettime fallback: 1 GHz (nanoseconds)
+        // Minimum reasonable is 1 MHz
+        assert!(
+            freq >= 1_000_000,
+            "Timer frequency too low: {} Hz (expected >= 1 MHz)",
+            freq
+        );
+
+        // Should be less than 10 GHz (sanity check)
+        assert!(
+            freq <= 10_000_000_000,
+            "Timer frequency unreasonably high: {} Hz",
+            freq
+        );
     }
 }

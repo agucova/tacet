@@ -104,6 +104,7 @@ fn test_no_false_positive_with_helpers() {
         Outcome::Unmeasurable { .. } => {
             // Skip if unmeasurable
         }
+        Outcome::Research(_) => {}
     }
 }
 
