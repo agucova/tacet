@@ -246,23 +246,6 @@ pub enum InconclusiveReason {
         /// Suggested actions.
         guidance: String,
     },
-
-    /// Model fit is poor; quantile pattern not well-explained by shift+tail basis.
-    ///
-    /// The 2D effect model (uniform shift + tail effect) does not adequately
-    /// capture the observed quantile differences. This can occur with asymmetric
-    /// or multi-modal timing patterns.
-    /// See spec Section 2.6, Gate 8.
-    ModelMismatch {
-        /// Observed Q statistic (residual quadratic form).
-        q_statistic: f64,
-        /// Bootstrap-calibrated threshold for Q.
-        q_threshold: f64,
-        /// Human-readable explanation.
-        message: String,
-        /// Suggested actions.
-        guidance: String,
-    },
 }
 
 // ============================================================================
@@ -659,6 +642,48 @@ impl fmt::Display for ResearchOutcome {
 }
 
 // ============================================================================
+// TopQuantile - Information about significant quantiles
+// ============================================================================
+
+/// Information about a significant quantile (for projection mismatch reporting).
+///
+/// When the 2D (shift, tail) projection doesn't fit the data well, this struct
+/// provides information about which individual quantiles are driving the leak
+/// detection. This helps diagnose effects that don't fit the shift+tail model
+/// (e.g., effects concentrated at a single quantile).
+///
+/// See spec Section 7.5 (Per-Quantile Exceedance).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TopQuantile {
+    /// Quantile probability (e.g., 0.9 for 90th percentile).
+    pub quantile_p: f64,
+
+    /// Posterior mean δ_k in nanoseconds.
+    pub mean_ns: f64,
+
+    /// 95% marginal credible interval (lower, upper) in nanoseconds.
+    pub ci95_ns: (f64, f64),
+
+    /// P(|δ_k| > θ_eff | Δ) - per-quantile exceedance probability.
+    ///
+    /// This is the probability that this individual quantile's effect
+    /// exceeds the threshold, computed from the marginal posterior.
+    pub exceed_prob: f64,
+}
+
+impl TopQuantile {
+    /// Create a new TopQuantile entry.
+    pub fn new(quantile_p: f64, mean_ns: f64, ci95_ns: (f64, f64), exceed_prob: f64) -> Self {
+        Self {
+            quantile_p,
+            mean_ns,
+            ci95_ns,
+            exceed_prob,
+        }
+    }
+}
+
+// ============================================================================
 // Diagnostics - Detailed diagnostic information
 // ============================================================================
 
@@ -776,9 +801,10 @@ impl Diagnostics {
             effective_sample_size: 0,
             stationarity_ratio: 1.0,
             stationarity_ok: true,
-            model_fit_chi2: 0.0,
-            model_fit_threshold: 18.48, // chi-squared(7, 0.99) as default
-            model_fit_ok: true,
+            projection_mismatch_q: 0.0,
+            projection_mismatch_threshold: 18.48, // chi-squared(7, 0.99) as default
+            projection_mismatch_ok: true,
+            top_quantiles: None,
             outlier_rate_baseline: 0.0,
             outlier_rate_sample: 0.0,
             outlier_asymmetry_ok: true,
@@ -801,7 +827,10 @@ impl Diagnostics {
 
     /// Check if all diagnostics are OK.
     pub fn all_checks_passed(&self) -> bool {
-        self.stationarity_ok && self.model_fit_ok && self.outlier_asymmetry_ok && self.preflight_ok
+        self.stationarity_ok
+            && self.projection_mismatch_ok
+            && self.outlier_asymmetry_ok
+            && self.preflight_ok
     }
 }
 
@@ -860,9 +889,6 @@ pub enum IssueCode {
 
     /// High fraction of samples were winsorized.
     HighWinsorRate,
-
-    /// Model fit is poor; quantile pattern not well-explained by shift+tail basis.
-    ModelMismatch,
 
     /// User's threshold was elevated due to measurement floor.
     ThresholdElevated,
@@ -1435,7 +1461,6 @@ impl fmt::Display for Outcome {
                     InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
                     InconclusiveReason::ConditionsChanged { .. } => "conditions changed",
                     InconclusiveReason::ThresholdUnachievable { .. } => "threshold unachievable",
-                    InconclusiveReason::ModelMismatch { .. } => "model mismatch",
                 };
                 write!(
                     f,
@@ -1549,18 +1574,6 @@ impl fmt::Display for InconclusiveReason {
                     f,
                     "Threshold unachievable: requested {:.1}ns, best achievable {:.1}ns\n  \u{2192} {}",
                     theta_user, best_achievable, guidance
-                )
-            }
-            InconclusiveReason::ModelMismatch {
-                q_statistic,
-                q_threshold,
-                guidance,
-                ..
-            } => {
-                write!(
-                    f,
-                    "Model mismatch: Q={:.1} > threshold {:.1}\n  \u{2192} {}",
-                    q_statistic, q_threshold, guidance
                 )
             }
         }

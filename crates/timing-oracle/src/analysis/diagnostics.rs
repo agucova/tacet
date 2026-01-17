@@ -76,12 +76,13 @@ pub fn compute_diagnostics(
         );
     }
 
-    // 2. Model fit check (spec §4.1)
-    let (model_fit_chi2, model_fit_ok) = check_model_fit(observed_diff, calib_cov, posterior_mean);
-    if !model_fit_ok {
+    // 2. Projection mismatch check (spec §7.2)
+    let (projection_mismatch_q, projection_mismatch_ok) =
+        check_model_fit(observed_diff, calib_cov, posterior_mean);
+    if !projection_mismatch_ok {
         warnings.push(format!(
-            "Model fit issue: χ² = {:.1} (expected < 18.5). Effect decomposition may be misleading.",
-            model_fit_chi2
+            "Projection mismatch: Q = {:.1} (expected < 18.5). Effect decomposition may be misleading.",
+            projection_mismatch_q
         ));
     }
 
@@ -117,13 +118,14 @@ pub fn compute_diagnostics(
         effective_sample_size,
         stationarity_ratio,
         stationarity_ok,
-        model_fit_chi2,
-        model_fit_ok,
-        model_fit_threshold: if extra.q_thresh > 0.0 {
+        projection_mismatch_q,
+        projection_mismatch_ok,
+        projection_mismatch_threshold: if extra.q_thresh > 0.0 {
             extra.q_thresh
         } else {
             18.48
         },
+        top_quantiles: None,
         outlier_rate_baseline: outlier_rate_fixed,
         outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,

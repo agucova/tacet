@@ -479,15 +479,15 @@ pub fn format_debug_summary(outcome: &Outcome) -> String {
                 }
             ));
 
-            // Model fit with pass/fail indicator
-            let model_fit_status = if diagnostics.model_fit_ok {
+            // Projection fit with pass/fail indicator
+            let projection_status = if diagnostics.projection_mismatch_ok {
                 "OK".green().to_string()
             } else {
-                "FAIL".red().to_string()
+                "MISMATCH".red().to_string()
             };
             out.push_str(&format!(
-                "\u{2502}   Model fit: \u{03C7}\u{00B2} = {:.1} ({})\n",
-                diagnostics.model_fit_chi2, model_fit_status
+                "\u{2502}   Projection: Q = {:.1} ({})\n",
+                diagnostics.projection_mismatch_q, projection_status
             ));
 
             // Stationarity
@@ -659,15 +659,15 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
         diagnostics.calibration_samples
     ));
 
-    // Model fit
-    let model_fit_status = if diagnostics.model_fit_ok {
+    // Projection fit
+    let projection_status = if diagnostics.projection_mismatch_ok {
         "OK".green().to_string()
     } else {
-        "Fail".red().to_string()
+        "Mismatch".red().to_string()
     };
     out.push_str(&format!(
-        "    Model fit:    \u{03C7}\u{00B2} = {:.1} ({})\n",
-        diagnostics.model_fit_chi2, model_fit_status
+        "    Projection:   Q = {:.1} ({})\n",
+        diagnostics.projection_mismatch_q, projection_status
     ));
 
     // Outliers
@@ -834,12 +834,12 @@ fn format_debug_environment(diagnostics: &Diagnostics) -> String {
         }
     ));
     out.push_str(&format!(
-        "      Model fit:      \u{03C7}\u{00B2}={:.1} {}\n",
-        diagnostics.model_fit_chi2,
-        if diagnostics.model_fit_ok {
+        "      Projection:     Q={:.1} {}\n",
+        diagnostics.projection_mismatch_q,
+        if diagnostics.projection_mismatch_ok {
             "OK"
         } else {
-            "Fail"
+            "Mismatch"
         }
     ));
 
@@ -908,7 +908,6 @@ fn format_issue_code(code: IssueCode) -> &'static str {
         IssueCode::QuantilesFiltered => "QuantilesFiltered",
         IssueCode::ThresholdClamped => "ThresholdClamped",
         IssueCode::HighWinsorRate => "HighWinsorRate",
-        IssueCode::ModelMismatch => "ModelMismatch",
         IssueCode::ThresholdElevated => "ThresholdElevated",
     }
 }

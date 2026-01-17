@@ -350,7 +350,7 @@ fn quality_special_values() {
 fn diagnostics_all_ok_constructor() {
     let diag = Diagnostics::all_ok();
     assert!(diag.stationarity_ok);
-    assert!(diag.model_fit_ok);
+    assert!(diag.projection_mismatch_ok);
     assert!(diag.outlier_asymmetry_ok);
     assert!(diag.preflight_ok);
     assert!(diag.warnings.is_empty());
@@ -364,8 +364,8 @@ fn diagnostics_all_checks_passed_all_true() {
         effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        model_fit_chi2: 5.0,
-        model_fit_ok: true,
+        projection_mismatch_q: 5.0,
+        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.001,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
@@ -391,8 +391,8 @@ fn diagnostics_all_checks_passed_one_false() {
         effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
-        model_fit_chi2: 5.0,
-        model_fit_ok: true,
+        projection_mismatch_q: 5.0,
+        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.001,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
@@ -409,14 +409,14 @@ fn diagnostics_all_checks_passed_one_false() {
     };
     assert!(!diag1.all_checks_passed());
 
-    // model_fit_ok = false
+    // projection_mismatch_ok = false
     let diag2 = Diagnostics {
         dependence_length: 1,
         effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        model_fit_chi2: 50.0,
-        model_fit_ok: false,
+        projection_mismatch_q: 50.0,
+        projection_mismatch_ok: false,
         outlier_rate_baseline: 0.001,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
@@ -439,8 +439,8 @@ fn diagnostics_all_checks_passed_one_false() {
         effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        model_fit_chi2: 5.0,
-        model_fit_ok: true,
+        projection_mismatch_q: 5.0,
+        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.1,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,
@@ -465,8 +465,8 @@ fn diagnostics_all_checks_passed_all_false() {
         effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
-        model_fit_chi2: 50.0,
-        model_fit_ok: false,
+        projection_mismatch_q: 50.0,
+        projection_mismatch_ok: false,
         outlier_rate_baseline: 0.1,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,

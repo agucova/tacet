@@ -1473,9 +1473,10 @@ fn build_diagnostics(
         // Use stationarity result if available, otherwise assume no drift
         stationarity_ratio: stationarity.map(|s| s.ratio).unwrap_or(1.0),
         stationarity_ok: stationarity.map(|s| s.ok).unwrap_or(true),
-        model_fit_chi2: projection_mismatch_q,
-        model_fit_threshold: calibration.projection_mismatch_thresh,
-        model_fit_ok: projection_mismatch_q <= calibration.projection_mismatch_thresh,
+        projection_mismatch_q,
+        projection_mismatch_threshold: calibration.projection_mismatch_thresh,
+        projection_mismatch_ok: projection_mismatch_q <= calibration.projection_mismatch_thresh,
+        top_quantiles: None,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,

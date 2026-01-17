@@ -461,7 +461,7 @@ pub fn adaptive_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Matrix2, Matrix9, Vector2};
+    use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
 
     fn make_calibration() -> Calibration {
         use crate::adaptive::CalibrationSnapshot;
@@ -479,7 +479,7 @@ mod tests {
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
             block_length: 10,
-            prior_cov: Matrix2::new(10000.0, 0.0, 0.0, 10000.0),
+            prior_cov_9d: Matrix9::identity() * 10000.0, // 9D prior covariance
             timer_resolution_ns: 1.0,
             samples_per_second: 100_000.0,
             discrete_mode: false,
@@ -489,9 +489,8 @@ mod tests {
             mde_tail_ns: 10.0,
             preflight_result: crate::preflight::PreflightResult::new(),
             calibration_snapshot,
-            // v4.1 fields
             c_floor: 3535.5, // ~50 * sqrt(5000) - conservative floor-rate constant
-            q_thresh: 18.48, // chi-squared(7, 0.99) fallback
+            projection_mismatch_thresh: 18.48, // chi-squared(7, 0.99) fallback
             theta_floor_initial: 50.0, // c_floor / sqrt(5000) = 50
             theta_eff: 100.0, // max(theta_ns, theta_floor_initial)
             theta_tick: 1.0, // Timer resolution
@@ -517,11 +516,13 @@ mod tests {
     #[test]
     fn test_adaptive_outcome_accessors() {
         let posterior = Posterior::new(
-            Vector2::new(10.0, 5.0),
-            Matrix2::new(1.0, 0.0, 0.0, 1.0),
-            0.95,
-            1000,
-            5.0, // model_fit_q
+            Vector9::zeros(),           // delta_post (dummy 9D)
+            Matrix9::identity(),        // lambda_post (dummy 9D)
+            Vector2::new(10.0, 5.0),    // beta_proj
+            Matrix2::new(1.0, 0.0, 0.0, 1.0), // beta_proj_cov
+            0.95,                       // leak_probability
+            5.0,                        // projection_mismatch_q
+            1000,                       // n
         );
 
         let outcome = AdaptiveOutcome::LeakDetected {
