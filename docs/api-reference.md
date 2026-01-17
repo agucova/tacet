@@ -298,30 +298,30 @@ impl EffectEstimate {
 
 ### Exploitability
 
-Risk assessment based on effect magnitude (Crosby et al. 2009):
+Risk assessment based on effect magnitude (Timeless Timing Attacks, Van Goethem et al. 2020):
 
 ```rust
 pub enum Exploitability {
-    /// < 100 ns - Requires impractical measurement count
-    Negligible,
+    /// < 10 ns - Requires shared hardware (SGX, containers)
+    SharedHardwareOnly,
 
-    /// 100-500 ns - Exploitable on LAN with ~100k queries
-    PossibleLAN,
+    /// 10-100 ns - Exploitable via HTTP/2 request multiplexing
+    Http2Multiplexing,
 
-    /// 500 ns - 20 us - Likely exploitable on LAN
-    LikelyLAN,
+    /// 100 ns - 10 μs - Exploitable with standard remote timing
+    StandardRemote,
 
-    /// > 20 us - Possibly exploitable over internet
-    PossibleRemote,
+    /// > 10 μs - Obvious leak, trivially exploitable
+    ObviousLeak,
 }
 ```
 
-| Effect Size | Assessment | Implications |
-|------------|------------|--------------|
-| < 100 ns | `Negligible` | Requires millions of measurements |
-| 100-500 ns | `PossibleLAN` | Exploitable on LAN (~100k queries) |
-| 500 ns - 20 us | `LikelyLAN` | Readily exploitable on LAN |
-| > 20 us | `PossibleRemote` | Possibly exploitable over internet |
+| Effect Size | Assessment | Attack Vector |
+|------------|------------|---------------|
+| < 10 ns | `SharedHardwareOnly` | ~1k queries on same core (SGX, containers) |
+| 10-100 ns | `Http2Multiplexing` | ~100k concurrent HTTP/2 requests |
+| 100 ns - 10 μs | `StandardRemote` | ~1k-10k queries with standard timing |
+| > 10 μs | `ObviousLeak` | <100 queries, trivially observable |
 
 ### MeasurementQuality
 

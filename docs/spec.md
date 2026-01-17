@@ -1546,10 +1546,10 @@ pub enum EffectPattern {
 }
 
 pub enum Exploitability {
-    Negligible,     // < 100 ns
-    PossibleLAN,    // 100–500 ns
-    LikelyLAN,      // 500 ns – 20 μs
-    PossibleRemote, // > 20 μs
+    SharedHardwareOnly, // < 10 ns
+    Http2Multiplexing,  // 10–100 ns
+    StandardRemote,     // 100 ns – 10 μs
+    ObviousLeak,        // > 10 μs
 }
 
 pub enum MeasurementQuality {
@@ -1944,16 +1944,16 @@ Both reported in nanoseconds with 95% credible intervals.
 
 ### 5.4 Exploitability
 
-Rough risk assessment based on effect size:
+Risk assessment based on effect size (updated for Timeless Timing Attacks, Van Goethem et al. 2020):
 
-| Level | Effect Size | Practical Impact |
-|-------|-------------|------------------|
-| Negligible | < 100 ns | Requires ~10k+ queries to exploit over LAN |
-| PossibleLAN | 100–500 ns | Exploitable on LAN with statistical methods |
-| LikelyLAN | 500 ns – 20 μs | Readily exploitable on local network |
-| PossibleRemote | > 20 μs | Potentially exploitable over internet |
+| Level | Effect Size | Attack Vector |
+|-------|-------------|---------------|
+| SharedHardwareOnly | < 10 ns | ~1k queries on same core (SGX, containers) |
+| Http2Multiplexing | 10–100 ns | ~100k concurrent HTTP/2 requests |
+| StandardRemote | 100 ns – 10 μs | ~1k-10k queries with standard timing |
+| ObviousLeak | > 10 μs | <100 queries, trivially observable |
 
-**Caveat**: Based on Crosby et al. (2009). Modern attacks may achieve better resolution.
+**Note**: Thresholds updated based on Timeless Timing Attacks (Van Goethem et al., USENIX Security 2020), which demonstrated that HTTP/2 request multiplexing enables LAN-like timing precision over the internet.
 
 ### 5.5 Inconclusive Results
 

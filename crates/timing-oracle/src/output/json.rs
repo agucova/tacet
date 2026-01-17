@@ -57,7 +57,7 @@ mod tests {
                 pattern: EffectPattern::UniformShift,
                 interpretation_caveat: None,
             },
-            exploitability: Exploitability::PossibleLAN,
+            exploitability: Exploitability::Http2Multiplexing,
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),

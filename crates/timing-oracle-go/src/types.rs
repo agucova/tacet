@@ -145,17 +145,19 @@ pub enum ToGoEffectPattern {
 }
 
 /// Exploitability assessment (for Fail outcomes).
+///
+/// Based on Timeless Timing Attacks (Van Goethem et al., 2020) research.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToGoExploitability {
-    /// < 100 ns - Negligible practical impact.
-    Negligible = 0,
-    /// 100-500 ns - Possible on LAN with many measurements.
-    PossibleLan = 1,
-    /// 500 ns - 20 us - Likely exploitable on LAN.
-    LikelyLan = 2,
-    /// > 20 us - Potentially exploitable remotely.
-    PossibleRemote = 3,
+    /// < 10 ns - Requires shared hardware (SGX, containers) to exploit.
+    SharedHardwareOnly = 0,
+    /// 10-100 ns - Exploitable via HTTP/2 request multiplexing.
+    Http2Multiplexing = 1,
+    /// 100 ns - 10 us - Exploitable with standard remote timing.
+    StandardRemote = 2,
+    /// > 10 us - Obvious leak, trivially exploitable.
+    ObviousLeak = 3,
 }
 
 /// Measurement quality assessment.
@@ -255,7 +257,7 @@ impl Default for ToGoResult {
             quality: ToGoQuality::Excellent,
             samples_used: 0,
             elapsed_secs: 0.0,
-            exploitability: ToGoExploitability::Negligible,
+            exploitability: ToGoExploitability::SharedHardwareOnly,
             inconclusive_reason: ToGoInconclusiveReason::None,
             mde_shift_ns: 0.0,
             mde_tail_ns: 0.0,
@@ -342,24 +344,31 @@ impl From<timing_oracle_core::result::Exploitability> for ToGoExploitability {
     fn from(exploit: timing_oracle_core::result::Exploitability) -> Self {
         use timing_oracle_core::result::Exploitability;
         match exploit {
-            Exploitability::Negligible => ToGoExploitability::Negligible,
-            Exploitability::PossibleLAN => ToGoExploitability::PossibleLan,
-            Exploitability::LikelyLAN => ToGoExploitability::LikelyLan,
-            Exploitability::PossibleRemote => ToGoExploitability::PossibleRemote,
+            Exploitability::SharedHardwareOnly => ToGoExploitability::SharedHardwareOnly,
+            Exploitability::Http2Multiplexing => ToGoExploitability::Http2Multiplexing,
+            Exploitability::StandardRemote => ToGoExploitability::StandardRemote,
+            Exploitability::ObviousLeak => ToGoExploitability::ObviousLeak,
         }
     }
 }
 
 /// Compute exploitability from effect magnitude.
+///
+/// Thresholds based on Timeless Timing Attacks (Van Goethem et al., 2020):
+/// - < 10 ns: SharedHardwareOnly (SGX, containers, shared cache)
+/// - 10-100 ns: Http2Multiplexing (concurrent request timing)
+/// - 100 ns - 10 μs: StandardRemote (traditional remote timing)
+/// - > 10 μs: ObviousLeak (trivially exploitable)
 pub fn exploitability_from_effect_ns(effect_ns: f64) -> ToGoExploitability {
-    if effect_ns < 100.0 {
-        ToGoExploitability::Negligible
-    } else if effect_ns < 500.0 {
-        ToGoExploitability::PossibleLan
-    } else if effect_ns < 20_000.0 {
-        ToGoExploitability::LikelyLan
+    let effect_ns = effect_ns.abs();
+    if effect_ns < 10.0 {
+        ToGoExploitability::SharedHardwareOnly
+    } else if effect_ns < 100.0 {
+        ToGoExploitability::Http2Multiplexing
+    } else if effect_ns < 10_000.0 {
+        ToGoExploitability::StandardRemote
     } else {
-        ToGoExploitability::PossibleRemote
+        ToGoExploitability::ObviousLeak
     }
 }
 

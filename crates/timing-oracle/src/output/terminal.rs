@@ -167,9 +167,9 @@ pub fn format_outcome(outcome: &Outcome) -> String {
 
             output.push('\n');
             output.push_str("    Exploitability (heuristic):\n");
-            let (lan, internet) = exploitability_lines(*exploitability);
-            output.push_str(&format!("      Local network:  {}\n", lan));
-            output.push_str(&format!("      Internet:       {}\n", internet));
+            let (vector, queries) = exploitability_lines(*exploitability);
+            output.push_str(&format!("      Attack vector:  {}\n", vector));
+            output.push_str(&format!("      Queries needed: {}\n", queries));
 
             // Show preflight warnings (Measurement Notes)
             if !diagnostics.preflight_warnings.is_empty() {
@@ -1174,21 +1174,21 @@ fn format_severity_indicator(severity: PreflightSeverity) -> String {
 
 fn exploitability_lines(exploit: Exploitability) -> (String, String) {
     match exploit {
-        Exploitability::Negligible => (
-            "Negligible".green().to_string(),
-            "Unlikely".green().to_string(),
+        Exploitability::SharedHardwareOnly => (
+            "Shared hardware (SGX, containers)".green().to_string(),
+            "~1k on same core".green().to_string(),
         ),
-        Exploitability::PossibleLAN => (
-            "Possible (~10\u{2075} queries)".yellow().to_string(),
-            "Unlikely".green().to_string(),
+        Exploitability::Http2Multiplexing => (
+            "HTTP/2 multiplexing".yellow().to_string(),
+            "~100k concurrent".yellow().to_string(),
         ),
-        Exploitability::LikelyLAN => (
-            "Likely (~10\u{2074} queries)".red().to_string(),
-            "Unlikely".yellow().to_string(),
+        Exploitability::StandardRemote => (
+            "Standard remote timing".red().to_string(),
+            "~1k-10k".red().to_string(),
         ),
-        Exploitability::PossibleRemote => (
-            "Likely".red().to_string(),
-            "Possible".red().bold().to_string(),
+        Exploitability::ObviousLeak => (
+            "Any (trivially observable)".red().bold().to_string(),
+            "<100".red().bold().to_string(),
         ),
     }
 }
@@ -1260,7 +1260,7 @@ mod tests {
                 pattern: EffectPattern::UniformShift,
                 interpretation_caveat: None,
             },
-            exploitability: Exploitability::PossibleLAN,
+            exploitability: Exploitability::Http2Multiplexing,
             samples_used: 10000,
             quality: MeasurementQuality::Good,
             diagnostics: Diagnostics::all_ok(),

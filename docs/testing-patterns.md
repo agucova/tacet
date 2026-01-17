@@ -1366,11 +1366,11 @@ fn test_nonce_independence() {
 
     // For nonce independence:
     // - CI gate should pass (no statistically significant difference)
-    // - Exploitability should be Negligible (any difference is tiny)
+    // - Exploitability should be SharedHardwareOnly (any difference is tiny)
     assert!(outcome.passed());
     assert!(matches!(
         result.exploitability,
-        timing_oracle::Exploitability::Negligible
+        timing_oracle::Exploitability::SharedHardwareOnly
     ));
 }
 ```
@@ -2353,7 +2353,7 @@ if let timing_oracle::Outcome::Completed(ref r) = outcome {
     eprintln!("{}", timing_oracle::output::format_result(r));
     // Check:
     // - Effect size (is it tiny? <5ns)
-    // - Exploitability (is it Negligible?)
+    // - Exploitability (is it SharedHardwareOnly?)
     // - Pattern (UniformShift suggests measurement artifact)
 }
 

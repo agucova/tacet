@@ -16,120 +16,130 @@ use timing_oracle::{
 
 // ============================================================================
 // Exploitability::from_effect_ns() tests
+//
+// New thresholds based on:
+// - < 10 ns: SharedHardwareOnly (KyberSlash, Flush+Reload)
+// - 10-100 ns: Http2Multiplexing (Timeless Timing Attacks, USENIX 2020)
+// - 100 ns - 10 μs: StandardRemote (Crosby et al. 2009)
+// - > 10 μs: ObviousLeak
 // ============================================================================
 
 #[test]
-fn exploitability_negligible_zero() {
+fn exploitability_shared_hardware_zero() {
     assert_eq!(
         Exploitability::from_effect_ns(0.0),
-        Exploitability::Negligible
+        Exploitability::SharedHardwareOnly
     );
 }
 
 #[test]
-fn exploitability_negligible_small() {
+fn exploitability_shared_hardware_small() {
+    assert_eq!(
+        Exploitability::from_effect_ns(5.0),
+        Exploitability::SharedHardwareOnly
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(9.0),
+        Exploitability::SharedHardwareOnly
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(9.9),
+        Exploitability::SharedHardwareOnly
+    );
+}
+
+#[test]
+fn exploitability_boundary_10ns() {
+    // < 10 is SharedHardwareOnly, >= 10 is Http2Multiplexing
+    assert_eq!(
+        Exploitability::from_effect_ns(9.99),
+        Exploitability::SharedHardwareOnly
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(10.0),
+        Exploitability::Http2Multiplexing
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(10.01),
+        Exploitability::Http2Multiplexing
+    );
+}
+
+#[test]
+fn exploitability_http2_multiplexing() {
     assert_eq!(
         Exploitability::from_effect_ns(50.0),
-        Exploitability::Negligible
+        Exploitability::Http2Multiplexing
     );
     assert_eq!(
         Exploitability::from_effect_ns(99.0),
-        Exploitability::Negligible
-    );
-    assert_eq!(
-        Exploitability::from_effect_ns(99.9),
-        Exploitability::Negligible
+        Exploitability::Http2Multiplexing
     );
 }
 
 #[test]
 fn exploitability_boundary_100ns() {
-    // < 100 is Negligible, >= 100 is PossibleLAN
+    // < 100 is Http2Multiplexing, >= 100 is StandardRemote
     assert_eq!(
         Exploitability::from_effect_ns(99.99),
-        Exploitability::Negligible
+        Exploitability::Http2Multiplexing
     );
     assert_eq!(
         Exploitability::from_effect_ns(100.0),
-        Exploitability::PossibleLAN
+        Exploitability::StandardRemote
     );
     assert_eq!(
         Exploitability::from_effect_ns(100.01),
-        Exploitability::PossibleLAN
+        Exploitability::StandardRemote
     );
 }
 
 #[test]
-fn exploitability_possible_lan() {
-    assert_eq!(
-        Exploitability::from_effect_ns(200.0),
-        Exploitability::PossibleLAN
-    );
-    assert_eq!(
-        Exploitability::from_effect_ns(499.0),
-        Exploitability::PossibleLAN
-    );
-}
-
-#[test]
-fn exploitability_boundary_500ns() {
-    // < 500 is PossibleLAN, >= 500 is LikelyLAN
-    assert_eq!(
-        Exploitability::from_effect_ns(499.99),
-        Exploitability::PossibleLAN
-    );
+fn exploitability_standard_remote() {
     assert_eq!(
         Exploitability::from_effect_ns(500.0),
-        Exploitability::LikelyLAN
+        Exploitability::StandardRemote
     );
     assert_eq!(
-        Exploitability::from_effect_ns(500.01),
-        Exploitability::LikelyLAN
+        Exploitability::from_effect_ns(1_000.0),
+        Exploitability::StandardRemote
+    );
+    assert_eq!(
+        Exploitability::from_effect_ns(9_999.0),
+        Exploitability::StandardRemote
     );
 }
 
 #[test]
-fn exploitability_likely_lan() {
+fn exploitability_boundary_10us() {
+    // < 10000 is StandardRemote, >= 10000 is ObviousLeak
     assert_eq!(
-        Exploitability::from_effect_ns(1_000.0),
-        Exploitability::LikelyLAN
+        Exploitability::from_effect_ns(9_999.99),
+        Exploitability::StandardRemote
     );
     assert_eq!(
         Exploitability::from_effect_ns(10_000.0),
-        Exploitability::LikelyLAN
+        Exploitability::ObviousLeak
     );
     assert_eq!(
-        Exploitability::from_effect_ns(19_999.0),
-        Exploitability::LikelyLAN
+        Exploitability::from_effect_ns(10_000.01),
+        Exploitability::ObviousLeak
     );
 }
 
 #[test]
-fn exploitability_boundary_20us() {
-    // < 20000 is LikelyLAN, >= 20000 is PossibleRemote
-    assert_eq!(
-        Exploitability::from_effect_ns(19_999.99),
-        Exploitability::LikelyLAN
-    );
+fn exploitability_obvious_leak() {
     assert_eq!(
         Exploitability::from_effect_ns(20_000.0),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
-    assert_eq!(
-        Exploitability::from_effect_ns(20_000.01),
-        Exploitability::PossibleRemote
-    );
-}
-
-#[test]
-fn exploitability_possible_remote() {
     assert_eq!(
         Exploitability::from_effect_ns(50_000.0),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
     assert_eq!(
         Exploitability::from_effect_ns(1_000_000.0),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
 }
 
@@ -137,40 +147,40 @@ fn exploitability_possible_remote() {
 fn exploitability_negative_uses_abs() {
     // Negative values should use absolute value
     assert_eq!(
-        Exploitability::from_effect_ns(-50.0),
-        Exploitability::Negligible
+        Exploitability::from_effect_ns(-5.0),
+        Exploitability::SharedHardwareOnly
     );
     assert_eq!(
-        Exploitability::from_effect_ns(-100.0),
-        Exploitability::PossibleLAN
+        Exploitability::from_effect_ns(-50.0),
+        Exploitability::Http2Multiplexing
     );
     assert_eq!(
         Exploitability::from_effect_ns(-500.0),
-        Exploitability::LikelyLAN
+        Exploitability::StandardRemote
     );
     assert_eq!(
-        Exploitability::from_effect_ns(-20_000.0),
-        Exploitability::PossibleRemote
+        Exploitability::from_effect_ns(-10_000.0),
+        Exploitability::ObviousLeak
     );
 }
 
 #[test]
 fn exploitability_special_values() {
-    // NaN abs() is NaN, which is not < 100, not < 500, not < 20000
-    // So NaN should fall through to PossibleRemote
+    // NaN abs() is NaN, which fails all < comparisons
+    // So NaN should fall through to ObviousLeak
     assert_eq!(
         Exploitability::from_effect_ns(f64::NAN),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
 
-    // Infinity is > 20000
+    // Infinity is > 10000
     assert_eq!(
         Exploitability::from_effect_ns(f64::INFINITY),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
     assert_eq!(
         Exploitability::from_effect_ns(f64::NEG_INFINITY),
-        Exploitability::PossibleRemote
+        Exploitability::ObviousLeak
     );
 }
 
@@ -534,7 +544,7 @@ fn make_fail(leak_prob: f64, quality: MeasurementQuality) -> Outcome {
     Outcome::Fail {
         leak_probability: leak_prob,
         effect: EffectEstimate::default(),
-        exploitability: Exploitability::Negligible,
+        exploitability: Exploitability::SharedHardwareOnly,
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),
@@ -706,10 +716,10 @@ fn effect_estimate_json_roundtrip() {
 #[test]
 fn exploitability_json_roundtrip() {
     for variant in [
-        Exploitability::Negligible,
-        Exploitability::PossibleLAN,
-        Exploitability::LikelyLAN,
-        Exploitability::PossibleRemote,
+        Exploitability::SharedHardwareOnly,
+        Exploitability::Http2Multiplexing,
+        Exploitability::StandardRemote,
+        Exploitability::ObviousLeak,
     ] {
         let json = serde_json::to_string(&variant).unwrap();
         let deserialized: Exploitability = serde_json::from_str(&json).unwrap();

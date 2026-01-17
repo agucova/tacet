@@ -382,48 +382,65 @@ pub enum EffectPattern {
 /// Exploitability assessment based on effect magnitude.
 ///
 /// Based on Crosby et al. (2009) thresholds for timing attack feasibility.
-/// These thresholds are heuristics for risk prioritization, not guarantees.
+/// These thresholds are heuristics based on academic research for risk
+/// prioritization, not guarantees. The thresholds reflect modern attack
+/// techniques including HTTP/2 multiplexing (Timeless Timing Attacks) and
+/// shared-hardware attacks (KyberSlash, Flush+Reload).
 ///
 /// See spec Section 5.4 (Exploitability).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Exploitability {
-    /// Effect < 100 ns: Would require impractical number of measurements.
+    /// Effect < 10 ns: Requires shared hardware to exploit.
     ///
-    /// Exploiting this leak over a network would require millions of
-    /// measurements, making it impractical for most attackers.
-    Negligible,
+    /// Only exploitable by attackers with physical co-location: SGX enclaves,
+    /// hyperthreading on same core, containers on same host, or cross-VM on
+    /// shared cache. Remote exploitation is impractical.
+    ///
+    /// References: KyberSlash (2024), Flush+Reload, Prime+Probe literature
+    SharedHardwareOnly,
 
-    /// 100-500 ns: Possible on local network with ~100k measurements.
+    /// 10-100 ns: Exploitable via HTTP/2 request multiplexing.
     ///
-    /// An attacker on the same LAN could potentially exploit this
-    /// leak with sufficient measurement time.
-    PossibleLAN,
+    /// Requires ~100k concurrent HTTP/2 requests to exploit. The "Timeless
+    /// Timing Attacks" technique eliminates network jitter by sending requests
+    /// that arrive simultaneously, making response order reveal timing differences.
+    ///
+    /// Reference: Van Goethem et al., "Timeless Timing Attacks" (USENIX Security 2020)
+    Http2Multiplexing,
 
-    /// 500 ns - 20 us: Likely exploitable on local network.
+    /// 100 ns - 10 μs: Exploitable with standard remote timing.
     ///
-    /// This leak is readily exploitable by an attacker on the local
-    /// network with moderate effort.
-    LikelyLAN,
+    /// Requires ~1k-10k requests using traditional timing techniques.
+    /// Exploitable on LAN with any protocol, or over internet with HTTP/2.
+    ///
+    /// References: Crosby et al. (2009), Brumley & Boneh (2005)
+    StandardRemote,
 
-    /// > 20 us: Possibly exploitable over internet.
+    /// > 10 μs: Obvious timing leak, trivially exploitable.
     ///
-    /// This leak is large enough that it may be exploitable even
-    /// across the internet, depending on network conditions.
-    PossibleRemote,
+    /// Detectable with < 100 requests. Exploitable over the internet even
+    /// with high-jitter connections using traditional timing techniques.
+    ObviousLeak,
 }
 
 impl Exploitability {
     /// Determine exploitability from effect size in nanoseconds.
+    ///
+    /// Thresholds are based on:
+    /// - < 10 ns: Below HTTP/2 timing precision, requires shared hardware
+    /// - 10-100 ns: Within HTTP/2 "Timeless Timing Attacks" range
+    /// - 100 ns - 10 μs: Standard remote timing attack range
+    /// - > 10 μs: Trivially observable
     pub fn from_effect_ns(effect_ns: f64) -> Self {
         let effect_ns = effect_ns.abs();
-        if effect_ns < 100.0 {
-            Exploitability::Negligible
-        } else if effect_ns < 500.0 {
-            Exploitability::PossibleLAN
-        } else if effect_ns < 20_000.0 {
-            Exploitability::LikelyLAN
+        if effect_ns < 10.0 {
+            Exploitability::SharedHardwareOnly
+        } else if effect_ns < 100.0 {
+            Exploitability::Http2Multiplexing
+        } else if effect_ns < 10_000.0 {
+            Exploitability::StandardRemote
         } else {
-            Exploitability::PossibleRemote
+            Exploitability::ObviousLeak
         }
     }
 }
@@ -1454,10 +1471,10 @@ impl fmt::Display for EffectPattern {
 impl fmt::Display for Exploitability {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Exploitability::Negligible => write!(f, "negligible"),
-            Exploitability::PossibleLAN => write!(f, "possible LAN"),
-            Exploitability::LikelyLAN => write!(f, "likely LAN"),
-            Exploitability::PossibleRemote => write!(f, "possible remote"),
+            Exploitability::SharedHardwareOnly => write!(f, "shared hardware only"),
+            Exploitability::Http2Multiplexing => write!(f, "HTTP/2 multiplexing"),
+            Exploitability::StandardRemote => write!(f, "standard remote"),
+            Exploitability::ObviousLeak => write!(f, "obvious leak"),
         }
     }
 }

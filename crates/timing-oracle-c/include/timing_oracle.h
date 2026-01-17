@@ -263,17 +263,17 @@ typedef enum {
 /**
  * @brief Exploitability assessment (for Fail outcomes).
  *
- * Based on the magnitude of the detected timing difference.
+ * Based on Timeless Timing Attacks (Van Goethem et al., 2020) research.
  */
 typedef enum {
-    /** < 100 ns - Negligible practical impact. */
-    TO_EXPLOIT_NEGLIGIBLE = 0,
-    /** 100-500 ns - Possible on LAN with many measurements. */
-    TO_EXPLOIT_POSSIBLE_LAN = 1,
-    /** 500 ns - 20 us - Likely exploitable on LAN. */
-    TO_EXPLOIT_LIKELY_LAN = 2,
-    /** > 20 us - Potentially exploitable remotely. */
-    TO_EXPLOIT_POSSIBLE_REMOTE = 3
+    /** < 10 ns - Requires shared hardware (SGX, containers) to exploit. */
+    TO_EXPLOIT_SHARED_HARDWARE_ONLY = 0,
+    /** 10-100 ns - Exploitable via HTTP/2 request multiplexing. */
+    TO_EXPLOIT_HTTP2_MULTIPLEXING = 1,
+    /** 100 ns - 10 us - Exploitable with standard remote timing. */
+    TO_EXPLOIT_STANDARD_REMOTE = 2,
+    /** > 10 us - Obvious leak, trivially exploitable. */
+    TO_EXPLOIT_OBVIOUS_LEAK = 3
 } to_exploitability_t;
 
 /**

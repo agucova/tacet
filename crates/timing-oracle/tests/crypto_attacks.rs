@@ -556,8 +556,8 @@ fn table_lookup_small_l1() {
         }
         Outcome::Fail { exploitability, .. } => {
             assert!(
-                matches!(exploitability, Exploitability::Negligible),
-                "Expected Negligible exploitability for L1-resident table (got {:?})",
+                matches!(exploitability, Exploitability::SharedHardwareOnly),
+                "Expected SharedHardwareOnly exploitability for L1-resident table (got {:?})",
                 exploitability
             );
         }
@@ -605,7 +605,7 @@ fn table_lookup_medium_l2() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "Expected low exploitability for medium table (got {:?})",
                 exploitability
@@ -991,8 +991,8 @@ fn exploitability_negligible() {
             );
             assert_eq!(
                 *exploitability,
-                Exploitability::Negligible,
-                "XOR comparison should have Negligible exploitability. leak_prob: {:.4}, effect: shift={:.1}ns, tail={:.1}ns",
+                Exploitability::SharedHardwareOnly,
+                "XOR comparison should have SharedHardwareOnly exploitability. leak_prob: {:.4}, effect: shift={:.1}ns, tail={:.1}ns",
                 leak_probability,
                 effect.shift_ns,
                 effect.tail_ns
@@ -1017,10 +1017,10 @@ fn exploitability_negligible() {
     }
 }
 
-/// 5.2 PossibleLAN (100-500ns) - Should classify appropriately
+/// 5.2 StandardRemote (100ns-10μs) - Should classify appropriately
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn exploitability_possible_lan() {
+fn exploitability_standard_remote() {
     // Medium delay targeting ~200-300ns
     // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~700-900 cycles
     // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~5-7 ticks
@@ -1044,7 +1044,7 @@ fn exploitability_possible_lan() {
             }
         });
 
-    eprintln!("\n[exploitability_possible_lan]");
+    eprintln!("\n[exploitability_standard_remote]");
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
@@ -1054,11 +1054,8 @@ fn exploitability_possible_lan() {
             ..
         } => {
             assert!(
-                matches!(
-                    exploitability,
-                    Exploitability::PossibleLAN | Exploitability::LikelyLAN
-                ),
-                "Expected PossibleLAN or LikelyLAN exploitability (got {:?})",
+                matches!(exploitability, Exploitability::StandardRemote),
+                "Expected StandardRemote exploitability for 200-300ns delay (got {:?})",
                 exploitability
             );
 
@@ -1095,10 +1092,10 @@ fn exploitability_possible_lan() {
     }
 }
 
-/// 5.3 LikelyLAN (500ns - 20μs) - Should classify appropriately
+/// 5.3 StandardRemote large (100ns-10μs) - Should classify appropriately
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn exploitability_likely_lan() {
+fn exploitability_standard_remote_large() {
     // Large delay targeting ~2μs
     // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~6000 cycles
     // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~48 ticks
@@ -1122,7 +1119,7 @@ fn exploitability_likely_lan() {
             }
         });
 
-    eprintln!("\n[exploitability_likely_lan]");
+    eprintln!("\n[exploitability_standard_remote_large]");
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
@@ -1132,17 +1129,17 @@ fn exploitability_likely_lan() {
             ..
         } => {
             assert!(
-                matches!(exploitability, Exploitability::LikelyLAN),
-                "Expected LikelyLAN exploitability (got {:?})",
+                matches!(exploitability, Exploitability::StandardRemote),
+                "Expected StandardRemote exploitability for ~2μs delay (got {:?})",
                 exploitability
             );
 
-            // Verify effect magnitude is in the 500ns-20μs range (with reasonable margins)
+            // Verify effect magnitude is in the 100ns-10μs range (with reasonable margins)
             // Target was ~2μs, so expect 400ns-25μs with platform variance
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
                 (400.0..=25_000.0).contains(&total_effect),
-                "Expected total effect in 400ns-25μs range for LikelyLAN classification (got {:.1}ns)",
+                "Expected total effect in 400ns-25μs range for StandardRemote classification (got {:.1}ns)",
                 total_effect
             );
         }
@@ -1171,10 +1168,10 @@ fn exploitability_likely_lan() {
     }
 }
 
-/// 5.4 PossibleRemote (>20μs) - Should classify appropriately
+/// 5.4 ObviousLeak (>10μs) - Should classify appropriately
 #[test]
 #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
-fn exploitability_possible_remote() {
+fn exploitability_obvious_leak() {
     // Very large delay targeting ~50μs
     // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~150000 cycles
     // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~1200 ticks
@@ -1198,7 +1195,7 @@ fn exploitability_possible_remote() {
             }
         });
 
-    eprintln!("\n[exploitability_possible_remote]");
+    eprintln!("\n[exploitability_obvious_leak]");
     eprintln!("{}", timing_oracle::output::format_outcome(&outcome));
 
     match &outcome {
@@ -1208,17 +1205,17 @@ fn exploitability_possible_remote() {
             ..
         } => {
             assert!(
-                matches!(exploitability, Exploitability::PossibleRemote),
-                "Expected PossibleRemote exploitability (got {:?})",
+                matches!(exploitability, Exploitability::ObviousLeak),
+                "Expected ObviousLeak exploitability for ~50μs delay (got {:?})",
                 exploitability
             );
 
-            // Verify effect magnitude is > 20μs (with reasonable margin)
-            // Target was ~50μs, so expect > 15μs with platform variance
+            // Verify effect magnitude is > 10μs (with reasonable margin)
+            // Target was ~50μs, so expect > 8μs with platform variance
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                total_effect >= 15_000.0,
-                "Expected total effect > 15μs for PossibleRemote classification (got {:.1}ns)",
+                total_effect >= 8_000.0,
+                "Expected total effect > 8μs for ObviousLeak classification (got {:.1}ns)",
                 total_effect
             );
         }

@@ -362,10 +362,10 @@ pub extern "C" fn to_effect_pattern_str(pattern: ToEffectPattern) -> *const c_ch
 #[no_mangle]
 pub extern "C" fn to_exploitability_str(exploitability: ToExploitability) -> *const c_char {
     match exploitability {
-        ToExploitability::Negligible => c"Negligible".as_ptr(),
-        ToExploitability::PossibleLan => c"PossibleLAN".as_ptr(),
-        ToExploitability::LikelyLan => c"LikelyLAN".as_ptr(),
-        ToExploitability::PossibleRemote => c"PossibleRemote".as_ptr(),
+        ToExploitability::SharedHardwareOnly => c"SharedHardwareOnly".as_ptr(),
+        ToExploitability::Http2Multiplexing => c"Http2Multiplexing".as_ptr(),
+        ToExploitability::StandardRemote => c"StandardRemote".as_ptr(),
+        ToExploitability::ObviousLeak => c"ObviousLeak".as_ptr(),
     }
 }
 
@@ -941,18 +941,18 @@ fn build_result(
             samples_per_class,
             elapsed_secs,
         } => {
-            // Determine exploitability
+            // Determine exploitability based on new thresholds from Timeless Timing Attacks
             let max_effect = posterior.beta_mean[0]
                 .abs()
                 .max(posterior.beta_mean[1].abs());
-            let exploitability = if max_effect < 100.0 {
-                ToExploitability::Negligible
-            } else if max_effect < 500.0 {
-                ToExploitability::PossibleLan
-            } else if max_effect < 20_000.0 {
-                ToExploitability::LikelyLan
+            let exploitability = if max_effect < 10.0 {
+                ToExploitability::SharedHardwareOnly
+            } else if max_effect < 100.0 {
+                ToExploitability::Http2Multiplexing
+            } else if max_effect < 10_000.0 {
+                ToExploitability::StandardRemote
             } else {
-                ToExploitability::PossibleRemote
+                ToExploitability::ObviousLeak
             };
 
             ToResult {
@@ -984,7 +984,7 @@ fn build_result(
             quality: build_quality(&posterior),
             samples_used: samples_per_class,
             elapsed_secs,
-            exploitability: ToExploitability::Negligible,
+            exploitability: ToExploitability::SharedHardwareOnly,
             inconclusive_reason: ToInconclusiveReason::DataTooNoisy, // Not used
             operation_ns: 0.0,
             timer_resolution_ns,
@@ -1027,7 +1027,7 @@ fn build_result(
                 quality,
                 samples_used: samples_per_class,
                 elapsed_secs,
-                exploitability: ToExploitability::Negligible,
+                exploitability: ToExploitability::SharedHardwareOnly,
                 inconclusive_reason: c_reason,
                 operation_ns: 0.0,
                 timer_resolution_ns,
@@ -1148,10 +1148,10 @@ mod tests {
     #[test]
     fn test_exploitability_str_all() {
         let variants = [
-            (ToExploitability::Negligible, "Negligible"),
-            (ToExploitability::PossibleLan, "PossibleLAN"),
-            (ToExploitability::LikelyLan, "LikelyLAN"),
-            (ToExploitability::PossibleRemote, "PossibleRemote"),
+            (ToExploitability::SharedHardwareOnly, "SharedHardwareOnly"),
+            (ToExploitability::Http2Multiplexing, "Http2Multiplexing"),
+            (ToExploitability::StandardRemote, "StandardRemote"),
+            (ToExploitability::ObviousLeak, "ObviousLeak"),
         ];
 
         for (variant, expected) in variants {
@@ -1339,7 +1339,7 @@ mod tests {
         assert!((result.leak_probability - 0.0).abs() < 1e-10);
         assert_eq!(result.samples_used, 0);
         assert!((result.elapsed_secs - 0.0).abs() < 1e-10);
-        assert_eq!(result.exploitability, ToExploitability::Negligible);
+        assert_eq!(result.exploitability, ToExploitability::SharedHardwareOnly);
         assert!(result.recommendation.is_null());
         assert!(!result.adaptive_batching_used);
     }

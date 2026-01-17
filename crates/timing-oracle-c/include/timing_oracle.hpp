@@ -109,12 +109,14 @@ enum class EffectPattern {
 
 /**
  * @brief Exploitability assessment for detected leaks.
+ *
+ * Based on Timeless Timing Attacks (Van Goethem et al., 2020) research.
  */
 enum class Exploitability {
-    Negligible,     ///< < 100 ns
-    PossibleLAN,    ///< 100-500 ns
-    LikelyLAN,      ///< 500 ns - 20 us
-    PossibleRemote  ///< > 20 us
+    SharedHardwareOnly, ///< < 10 ns - Requires shared hardware (SGX, containers)
+    Http2Multiplexing,  ///< 10-100 ns - Exploitable via HTTP/2 request multiplexing
+    StandardRemote,     ///< 100 ns - 10 us - Exploitable with standard remote timing
+    ObviousLeak         ///< > 10 us - Obvious leak, trivially exploitable
 };
 
 /**
@@ -166,10 +168,10 @@ inline std::string_view to_string(EffectPattern pattern) {
 
 inline std::string_view to_string(Exploitability exploit) {
     switch (exploit) {
-        case Exploitability::Negligible: return "Negligible";
-        case Exploitability::PossibleLAN: return "PossibleLAN";
-        case Exploitability::LikelyLAN: return "LikelyLAN";
-        case Exploitability::PossibleRemote: return "PossibleRemote";
+        case Exploitability::SharedHardwareOnly: return "SharedHardwareOnly";
+        case Exploitability::Http2Multiplexing: return "Http2Multiplexing";
+        case Exploitability::StandardRemote: return "StandardRemote";
+        case Exploitability::ObviousLeak: return "ObviousLeak";
     }
     return "Unknown";
 }
@@ -345,10 +347,10 @@ inline EffectPattern from_c_pattern(to_effect_pattern_t pattern) {
 
 inline Exploitability from_c_exploit(to_exploitability_t exploit) {
     switch (exploit) {
-        case TO_EXPLOIT_NEGLIGIBLE: return Exploitability::Negligible;
-        case TO_EXPLOIT_POSSIBLE_LAN: return Exploitability::PossibleLAN;
-        case TO_EXPLOIT_LIKELY_LAN: return Exploitability::LikelyLAN;
-        default: return Exploitability::PossibleRemote;
+        case TO_EXPLOIT_SHARED_HARDWARE_ONLY: return Exploitability::SharedHardwareOnly;
+        case TO_EXPLOIT_HTTP2_MULTIPLEXING: return Exploitability::Http2Multiplexing;
+        case TO_EXPLOIT_STANDARD_REMOTE: return Exploitability::StandardRemote;
+        default: return Exploitability::ObviousLeak;
     }
 }
 

@@ -283,16 +283,16 @@ match outcome {
                  effect.credible_interval_ns.0,
                  effect.credible_interval_ns.1);
 
-        // Check exploitability
+        // Check exploitability (based on Timeless Timing Attacks research)
         match exploitability {
-            Exploitability::Negligible =>
-                println!("Not practically exploitable"),
-            Exploitability::PossibleLAN =>
-                println!("Might be exploitable on LAN (~100k queries)"),
-            Exploitability::LikelyLAN =>
-                println!("Likely exploitable on LAN (~10k queries)"),
-            Exploitability::PossibleRemote =>
-                println!("Possibly exploitable remotely"),
+            Exploitability::SharedHardwareOnly =>
+                println!("Only exploitable with shared hardware (SGX, containers)"),
+            Exploitability::Http2Multiplexing =>
+                println!("Exploitable via HTTP/2 request multiplexing (~100k queries)"),
+            Exploitability::StandardRemote =>
+                println!("Exploitable with standard remote timing (~1k-10k queries)"),
+            Exploitability::ObviousLeak =>
+                println!("Obvious leak, trivially exploitable (<100 queries)"),
         }
     }
 

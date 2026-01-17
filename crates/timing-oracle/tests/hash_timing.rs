@@ -99,7 +99,7 @@ fn sha3_256_constant_time() {
     }
 
     // If we got a conclusive result, verify exploitability is low
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -155,7 +155,7 @@ fn sha3_384_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -211,7 +211,7 @@ fn sha3_512_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -271,7 +271,7 @@ fn sha3_256_data_independence() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -333,7 +333,7 @@ fn blake2b_512_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -391,7 +391,7 @@ fn blake2s_256_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -454,7 +454,7 @@ fn sha3_256_hamming_weight_independence() {
     }
 
     // Secondary check: exploitability should be low
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -511,7 +511,7 @@ fn blake2b_hamming_weight_independence() {
     }
 
     // Secondary check: exploitability should be low
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -580,7 +580,7 @@ fn sha3_256_incremental_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(
@@ -642,7 +642,7 @@ fn blake2b_incremental_constant_time() {
         &Outcome::Research(_) => {}
     }
 
-    if let Some(Exploitability::LikelyLAN) | Some(Exploitability::PossibleRemote) =
+    if let Some(Exploitability::StandardRemote) | Some(Exploitability::ObviousLeak) =
         get_exploitability(&outcome)
     {
         panic!(

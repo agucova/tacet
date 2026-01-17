@@ -212,31 +212,6 @@ fn test_pmu_error_handling() {
     }
 }
 
-/// Test that multiple PmuTimer creations are consistent (warmup investigation).
-#[test]
-fn test_aaa_warmup_investigation() {
-    // Named "aaa" to run first alphabetically
-    eprintln!("\n=== PMU Warmup Investigation ===\n");
-
-    for i in 1..=5 {
-        match PmuTimer::new() {
-            Ok(timer) => {
-                let cpns = timer.cycles_per_ns();
-                let status = if (1.5..=5.0).contains(&cpns) {
-                    "OK"
-                } else {
-                    "BAD"
-                };
-                eprintln!("  Timer {}: {:.2} cycles/ns [{}]", i, cpns, status);
-            }
-            Err(e) => {
-                eprintln!("  Timer {}: Error - {}", i, e);
-            }
-        }
-    }
-    eprintln!();
-}
-
 /// Comparison test between PMU and standard timer (informational).
 #[test]
 fn test_pmu_vs_standard_timer() {

@@ -36,7 +36,7 @@ fn make_fail(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
             pattern: EffectPattern::Mixed,
             interpretation_caveat: None,
         },
-        exploitability: Exploitability::PossibleLAN,
+        exploitability: Exploitability::Http2Multiplexing,
         samples_used: 10000,
         quality,
         diagnostics: Diagnostics::all_ok(),

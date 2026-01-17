@@ -554,10 +554,10 @@ pub extern "C" fn togo_effect_pattern_str(pattern: ToGoEffectPattern) -> *const 
 #[no_mangle]
 pub extern "C" fn togo_exploitability_str(exploit: ToGoExploitability) -> *const c_char {
     match exploit {
-        ToGoExploitability::Negligible => c"Negligible".as_ptr(),
-        ToGoExploitability::PossibleLan => c"PossibleLAN".as_ptr(),
-        ToGoExploitability::LikelyLan => c"LikelyLAN".as_ptr(),
-        ToGoExploitability::PossibleRemote => c"PossibleRemote".as_ptr(),
+        ToGoExploitability::SharedHardwareOnly => c"SharedHardwareOnly".as_ptr(),
+        ToGoExploitability::Http2Multiplexing => c"Http2Multiplexing".as_ptr(),
+        ToGoExploitability::StandardRemote => c"StandardRemote".as_ptr(),
+        ToGoExploitability::ObviousLeak => c"ObviousLeak".as_ptr(),
     }
 }
 
@@ -773,21 +773,25 @@ mod tests {
 
     #[test]
     fn test_exploitability_thresholds() {
+        // < 10 ns: SharedHardwareOnly
+        assert_eq!(
+            exploitability_from_effect_ns(5.0),
+            ToGoExploitability::SharedHardwareOnly
+        );
+        // 10-100 ns: Http2Multiplexing
         assert_eq!(
             exploitability_from_effect_ns(50.0),
-            ToGoExploitability::Negligible
+            ToGoExploitability::Http2Multiplexing
         );
-        assert_eq!(
-            exploitability_from_effect_ns(200.0),
-            ToGoExploitability::PossibleLan
-        );
+        // 100 ns - 10 μs: StandardRemote
         assert_eq!(
             exploitability_from_effect_ns(1000.0),
-            ToGoExploitability::LikelyLan
+            ToGoExploitability::StandardRemote
         );
+        // > 10 μs: ObviousLeak
         assert_eq!(
             exploitability_from_effect_ns(50_000.0),
-            ToGoExploitability::PossibleRemote
+            ToGoExploitability::ObviousLeak
         );
     }
 }

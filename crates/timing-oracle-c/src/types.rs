@@ -147,14 +147,14 @@ pub enum ToEffectPattern {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToExploitability {
-    /// < 100 ns - Negligible practical impact.
-    Negligible,
-    /// 100-500 ns - Possible on LAN with many measurements.
-    PossibleLan,
-    /// 500 ns - 20 μs - Likely exploitable on LAN.
-    LikelyLan,
-    /// > 20 μs - Potentially exploitable remotely.
-    PossibleRemote,
+    /// < 10 ns - Requires shared hardware (SGX, containers) to exploit.
+    SharedHardwareOnly,
+    /// 10-100 ns - Exploitable via HTTP/2 request multiplexing.
+    Http2Multiplexing,
+    /// 100 ns - 10 μs - Exploitable with standard remote timing.
+    StandardRemote,
+    /// > 10 μs - Obvious leak, trivially exploitable.
+    ObviousLeak,
 }
 
 /// Measurement quality assessment.
@@ -248,7 +248,7 @@ impl Default for ToResult {
             quality: ToQuality::Excellent,
             samples_used: 0,
             elapsed_secs: 0.0,
-            exploitability: ToExploitability::Negligible,
+            exploitability: ToExploitability::SharedHardwareOnly,
             inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
             operation_ns: 0.0,
             timer_resolution_ns: 0.0,

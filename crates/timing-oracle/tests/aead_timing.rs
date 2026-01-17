@@ -118,7 +118,7 @@ fn chacha20poly1305_encrypt_constant_time() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
@@ -201,7 +201,7 @@ fn chacha20poly1305_decrypt_constant_time() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "ChaCha20-Poly1305 decryption should have low exploitability (got {:?})",
             exp
@@ -266,7 +266,7 @@ fn chacha20poly1305_nonce_independence() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "ChaCha20-Poly1305 nonce independence should have low exploitability (got {:?})",
             exp
@@ -346,7 +346,7 @@ fn aes_256_gcm_encrypt_constant_time() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "AES-256-GCM encryption should have low exploitability (got {:?})",
             exp
@@ -441,7 +441,7 @@ fn aes_256_gcm_decrypt_constant_time() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "AES-256-GCM decryption should have low exploitability (got {:?})",
             exp
@@ -512,7 +512,7 @@ fn ring_chacha20poly1305_constant_time() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "ring ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
@@ -584,7 +584,7 @@ fn chacha20poly1305_hamming_weight_independence() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "ChaCha20-Poly1305 Hamming weight should not affect timing (got {:?})",
             exp
@@ -656,7 +656,7 @@ fn aes_gcm_hamming_weight_independence() {
         assert!(
             matches!(
                 exp,
-                Exploitability::Negligible | Exploitability::PossibleLAN
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
             ),
             "AES-GCM Hamming weight should not affect timing (got {:?})",
             exp

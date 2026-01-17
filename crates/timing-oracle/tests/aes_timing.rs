@@ -78,7 +78,7 @@ fn aes128_block_encrypt_constant_time() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "AES-128 should have negligible exploitability (got {:?})",
                 exploitability
@@ -157,7 +157,7 @@ fn aes128_different_keys_constant_time() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "AES with different keys should have low exploitability (got {:?})",
                 exploitability
@@ -274,7 +274,7 @@ fn aes128_multiple_blocks_constant_time() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "AES-128 multiple blocks should have low exploitability (got {:?})",
                 exploitability
@@ -338,7 +338,7 @@ fn aes128_key_init_constant_time() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "AES-128 key init should have low exploitability (got {:?})",
                 exploitability
@@ -403,7 +403,7 @@ fn aes128_hamming_weight_independence() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "Hamming weight should not affect timing (got {:?})",
                 exploitability
@@ -468,7 +468,7 @@ fn aes128_byte_pattern_independence() {
             assert!(
                 matches!(
                     exploitability,
-                    Exploitability::Negligible | Exploitability::PossibleLAN
+                    Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
                 ),
                 "Byte patterns should not affect timing (got {:?})",
                 exploitability
