@@ -81,7 +81,7 @@ mod tests {
         let ratio = compute_min_uniqueness_ratio(&baseline, &sample);
         // Should be exactly at or just above 0.10
         assert!(
-            ratio >= 0.09 && ratio <= 0.11,
+            (0.09..=0.11).contains(&ratio),
             "10% unique should be near threshold, got {}",
             ratio
         );

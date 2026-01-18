@@ -338,7 +338,7 @@ fn check_variance_ratio(
     let q = inputs.projection_mismatch_q.unwrap_or(0.0);
     let q_limit = inputs.projection_mismatch_thresh * 1000.0; // Filter only extreme pathological cases
 
-    if (p > 0.995 || p < 0.005) && q < q_limit {
+    if !(0.005..=0.995).contains(&p) && q < q_limit {
         return None;
     }
 

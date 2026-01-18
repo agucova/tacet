@@ -361,7 +361,7 @@ fn resample_with_indices(data: &[f64], indices: &[usize], block_size: usize, buf
 /// * `n_bootstrap` - Number of bootstrap iterations
 /// * `seed` - RNG seed for reproducibility
 /// * `is_fragile` - If true, apply inflation factor for fragile regimes
-///                  (uniqueness ratio < 10%, high autocorrelation detected)
+///   (uniqueness ratio < 10%, high autocorrelation detected)
 pub fn bootstrap_difference_covariance(
     interleaved: &[TimingSample],
     n_bootstrap: usize,

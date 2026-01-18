@@ -487,7 +487,12 @@ fn politis_white_from_acf(
     let mut g = 0.0;
     let mut long_run_variance = autocovariances[0];
 
-    for lag in 1..=truncation_lag.min(autocovariances.len() - 1) {
+    for (lag, &acv) in autocovariances
+        .iter()
+        .enumerate()
+        .skip(1)
+        .take(truncation_lag.min(autocovariances.len() - 1))
+    {
         let kernel_arg = lag as f64 / truncation_lag as f64;
         let kernel_weight = if kernel_arg <= 0.5 {
             1.0
@@ -495,7 +500,6 @@ fn politis_white_from_acf(
             2.0 * (1.0 - kernel_arg)
         };
 
-        let acv = autocovariances[lag];
         g += 2.0 * kernel_weight * lag as f64 * acv;
         long_run_variance += 2.0 * kernel_weight * acv;
     }

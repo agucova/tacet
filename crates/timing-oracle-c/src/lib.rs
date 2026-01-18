@@ -517,6 +517,9 @@ fn run_test_impl<F: Fn() -> f64>(
         config.bootstrap_iterations
     };
 
+    // Check if we're in Research mode (spec §3.6)
+    let research_mode = config.attacker_model == ToAttackerModel::Research;
+
     // Get timer info
     let timer_freq = unsafe { to_get_timer_frequency() };
     let ns_per_tick = if timer_freq > 0 {
@@ -640,6 +643,7 @@ fn run_test_impl<F: Fn() -> f64>(
                     batch_k,
                     last_stationarity_ratio,
                     last_stationarity_ok,
+                    research_mode,
                 );
             }
         }
@@ -667,6 +671,7 @@ fn run_test_impl<F: Fn() -> f64>(
                 batch_k,
                 last_stationarity_ratio,
                 last_stationarity_ok,
+                research_mode,
             );
         }
 
@@ -692,6 +697,7 @@ fn run_test_impl<F: Fn() -> f64>(
                 batch_k,
                 last_stationarity_ratio,
                 last_stationarity_ok,
+                research_mode,
             );
         }
 
@@ -713,6 +719,7 @@ fn run_test_impl<F: Fn() -> f64>(
                     batch_k,
                     last_stationarity_ratio,
                     last_stationarity_ok,
+                    research_mode,
                 );
             }
             StepResult::Continue { .. } => {
@@ -1100,6 +1107,9 @@ fn build_effect_with_mismatch(
 }
 
 /// Convert AdaptiveOutcome to ToResult.
+///
+/// When `research_mode` is true, returns a Research outcome instead of Pass/Fail/Inconclusive.
+#[allow(clippy::too_many_arguments)]
 fn build_result(
     outcome: timing_oracle_core::adaptive::AdaptiveOutcome,
     calibration: &timing_oracle_core::adaptive::Calibration,
@@ -1107,11 +1117,135 @@ fn build_result(
     batch_k: usize,
     stationarity_ratio: f64,
     stationarity_ok: bool,
+    research_mode: bool,
 ) -> ToResult {
     use timing_oracle_core::adaptive::AdaptiveOutcome;
+    use timing_oracle_core::analysis::compute_max_effect_ci;
 
     let timer_name = unsafe { to_get_timer_name() };
 
+    // Extract common fields from outcome
+    let (posterior_opt, samples_per_class, elapsed_secs, is_inconclusive, inconclusive_reason_opt) =
+        match &outcome {
+            AdaptiveOutcome::LeakDetected {
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => (Some(posterior.clone()), *samples_per_class, *elapsed_secs, false, None),
+            AdaptiveOutcome::NoLeakDetected {
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => (Some(posterior.clone()), *samples_per_class, *elapsed_secs, false, None),
+            AdaptiveOutcome::Inconclusive {
+                reason,
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => (posterior.clone(), *samples_per_class, *elapsed_secs, true, Some(reason.clone())),
+            AdaptiveOutcome::Continue { .. } => {
+                // Should not happen, but handle gracefully
+                (None, 0, 0.0, true, None)
+            }
+        };
+
+    // Research mode: convert to Research outcome
+    if research_mode {
+        // Compute theta_floor at final sample count
+        let n = samples_per_class as f64;
+        let theta_floor = (calibration.c_floor / n.sqrt()).max(calibration.theta_tick);
+
+        // Compute max effect CI from posterior
+        let (max_effect_ns, max_effect_ci_low, max_effect_ci_high, research_detectable) =
+            if let Some(ref posterior) = posterior_opt {
+                let ci = compute_max_effect_ci(
+                    &posterior.delta_post,
+                    &posterior.lambda_post,
+                    calibration.rng_seed,
+                );
+                let detectable = ci.ci.0 > theta_floor;
+                (ci.mean, ci.ci.0, ci.ci.1, detectable)
+            } else {
+                (0.0, 0.0, 0.0, false)
+            };
+
+        // Determine research status based on CI and theta_floor
+        let research_status = if is_inconclusive {
+            // Quality issue - map inconclusive reason to research status
+            ToResearchStatus::QualityIssue
+        } else if theta_floor <= calibration.theta_tick * 1.01 {
+            // Resolution limit reached
+            ToResearchStatus::ResolutionLimitReached
+        } else if max_effect_ci_low > 1.1 * theta_floor {
+            // Effect detected: CI lower bound clearly above floor
+            ToResearchStatus::EffectDetected
+        } else if max_effect_ci_high < 0.9 * theta_floor {
+            // No effect detected: CI upper bound clearly below floor
+            ToResearchStatus::NoEffectDetected
+        } else {
+            // Budget exhausted without conclusive result
+            ToResearchStatus::BudgetExhausted
+        };
+
+        // Check model mismatch
+        let research_model_mismatch = posterior_opt
+            .as_ref()
+            .map(|p| p.projection_mismatch_q > calibration.projection_mismatch_thresh)
+            .unwrap_or(false);
+
+        let (leak_probability, effect, quality) = if let Some(ref p) = posterior_opt {
+            (
+                p.leak_probability,
+                build_effect_with_mismatch(p, calibration),
+                build_quality(p),
+            )
+        } else {
+            (0.5, ToEffect::default(), ToQuality::TooNoisy)
+        };
+
+        let diagnostics = build_diagnostics(
+            calibration,
+            posterior_opt.as_ref(),
+            elapsed_secs,
+            stationarity_ratio,
+            stationarity_ok,
+        );
+
+        // Also set the inconclusive_reason if we had a quality issue
+        let (c_reason, recommendation_opt) = if let Some(ref reason) = inconclusive_reason_opt {
+            let (r, rec) = convert_reason(reason);
+            (r, rec)
+        } else {
+            (ToInconclusiveReason::DataTooNoisy, None)
+        };
+
+        return ToResult {
+            outcome: ToOutcome::Research,
+            leak_probability,
+            effect,
+            quality,
+            samples_used: samples_per_class,
+            elapsed_secs,
+            exploitability: ToExploitability::SharedHardwareOnly,
+            inconclusive_reason: c_reason,
+            operation_ns: 0.0,
+            timer_resolution_ns,
+            recommendation: make_recommendation_from_option(recommendation_opt),
+            timer_name,
+            platform: c"".as_ptr(),
+            adaptive_batching_used: batch_k > 1,
+            diagnostics,
+            // Research-specific fields
+            research_status,
+            max_effect_ns,
+            max_effect_ci_low,
+            max_effect_ci_high,
+            research_detectable,
+            research_model_mismatch,
+        };
+    }
+
+    // Standard mode: return Pass/Fail/Inconclusive
     match outcome {
         AdaptiveOutcome::LeakDetected {
             posterior,
@@ -1236,6 +1370,17 @@ fn build_result(
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
                 diagnostics,
+                ..ToResult::default()
+            }
+        }
+
+        AdaptiveOutcome::Continue { .. } => {
+            // Should not happen in normal flow
+            ToResult {
+                outcome: ToOutcome::Inconclusive,
+                inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
+                timer_resolution_ns,
+                timer_name,
                 ..ToResult::default()
             }
         }
