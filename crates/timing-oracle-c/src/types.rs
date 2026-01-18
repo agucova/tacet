@@ -82,6 +82,12 @@ pub struct ToConfig {
     pub seed: u64,
     /// Timer preference. Default: Auto.
     pub timer_preference: ToTimerPref,
+    /// Calibration samples per class. 0 = default (5,000).
+    pub calibration_samples: usize,
+    /// Batch size for adaptive sampling. 0 = default (1,000).
+    pub batch_size: usize,
+    /// Bootstrap iterations for covariance estimation. 0 = default (2,000).
+    pub bootstrap_iterations: usize,
 }
 
 impl Default for ToConfig {
@@ -95,6 +101,9 @@ impl Default for ToConfig {
             fail_threshold: 0.95,
             seed: 0,
             timer_preference: ToTimerPref::default(),
+            calibration_samples: 0,
+            batch_size: 0,
+            bootstrap_iterations: 0,
         }
     }
 }
@@ -111,6 +120,27 @@ pub enum ToOutcome {
     Inconclusive,
     /// Operation too fast to measure reliably.
     Unmeasurable,
+    /// Research mode result (spec §3.6) - returned when attacker_model is Research.
+    Research,
+}
+
+/// Status of a research mode run (spec §3.6).
+///
+/// Research mode (AttackerModel::Research) doesn't make Pass/Fail decisions.
+/// Instead, it characterizes the timing behavior with respect to the measurement floor.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ToResearchStatus {
+    /// CI clearly above θ_floor — timing difference detected.
+    EffectDetected,
+    /// CI clearly below θ_floor — no timing difference above noise.
+    NoEffectDetected,
+    /// Hit timer resolution limit; θ_floor is as good as it gets.
+    ResolutionLimitReached,
+    /// Data quality issue detected (see inconclusive_reason for details).
+    QualityIssue,
+    /// Ran out of time/samples before reaching conclusion.
+    BudgetExhausted,
 }
 
 /// Reason for inconclusive result.
@@ -320,6 +350,25 @@ pub struct ToResult {
 
     /// Detailed diagnostics (spec §2.8).
     pub diagnostics: ToDiagnostics,
+
+    // Research mode fields (only valid if outcome == Research)
+    /// Research mode status (only valid if outcome == Research).
+    pub research_status: ToResearchStatus,
+
+    /// Maximum effect across quantiles in nanoseconds (only valid if outcome == Research).
+    pub max_effect_ns: f64,
+
+    /// 95% CI lower bound for maximum effect (only valid if outcome == Research).
+    pub max_effect_ci_low: f64,
+
+    /// 95% CI upper bound for maximum effect (only valid if outcome == Research).
+    pub max_effect_ci_high: f64,
+
+    /// Whether the effect is detectable: CI lower bound > theta_floor (only valid if outcome == Research).
+    pub research_detectable: bool,
+
+    /// Whether model mismatch was detected in research mode (only valid if outcome == Research).
+    pub research_model_mismatch: bool,
 }
 
 impl Default for ToDiagnostics {
@@ -382,6 +431,13 @@ impl Default for ToResult {
             platform: ptr::null(),
             adaptive_batching_used: false,
             diagnostics: ToDiagnostics::default(),
+            // Research mode defaults
+            research_status: ToResearchStatus::BudgetExhausted,
+            max_effect_ns: 0.0,
+            max_effect_ci_low: 0.0,
+            max_effect_ci_high: 0.0,
+            research_detectable: false,
+            research_model_mismatch: false,
         }
     }
 }

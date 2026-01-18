@@ -14,7 +14,7 @@ exclude = [
 # Shared settings for all workspace members
 [workspace.package]
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.85"
 license = "MPL-2.0"
 repository = "https://github.com/agucova/timing-oracle"
 

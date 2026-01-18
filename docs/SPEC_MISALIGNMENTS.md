@@ -18,6 +18,48 @@ The following items were identified as gaps in the C library but have since been
 
 ## Resolved Misalignments
 
+### 4. C Library Missing Diagnostics Struct (Spec §2.8)
+
+**Resolved:** 2025-01-17
+
+**Location:** `crates/timing-oracle-c/src/types.rs`, `crates/timing-oracle-c/include/timing_oracle.h`
+
+**Issue:** The C library did not expose the full diagnostics required by spec §2.8, including:
+- `dependence_length`, `effective_sample_size`
+- `stationarity_ratio`, `stationarity_ok`
+- `projection_mismatch_q`, `projection_mismatch_ok`
+- `outlier_rate_baseline`, `outlier_rate_sample`
+- `discrete_mode`, `duplicate_fraction`, `preflight_ok`
+- `theta_user`, `theta_eff`, `theta_floor`
+- `seed`, `warning_count`, `warnings`
+
+**Fix:** Added `to_diagnostics_t` struct with all required fields and embedded it in `to_result_t`.
+
+### 5. C Library Missing interpretation_caveat (Spec §2.3)
+
+**Resolved:** 2025-01-17
+
+**Location:** `crates/timing-oracle-c/src/types.rs`, `crates/timing-oracle-c/include/timing_oracle.h`
+
+**Issue:** The `to_effect_t` struct did not include `interpretation_caveat` or `top_quantiles` fields required when projection mismatch occurs.
+
+**Fix:** Added `has_interpretation_caveat` bool and `top_quantiles[3]` array to `to_effect_t`. The adaptive loop now computes top contributing quantiles when mismatch is detected.
+
+### 6. C Library Missing Drift Detection (Spec §3.5.2 Gate 7)
+
+**Resolved:** 2025-01-17
+
+**Location:** `crates/timing-oracle-c/src/lib.rs`
+
+**Issue:** The C library captured `CalibrationSnapshot` but never used it for drift detection during the adaptive loop.
+
+**Fix:** Added drift detection check at the start of each adaptive loop iteration. Uses `ConditionDrift::compute()` and `DriftThresholds::default()` from timing-oracle-core to detect:
+- Variance ratio outside [0.5, 2.0]
+- Autocorrelation change > 0.3
+- Mean drift > 3σ
+
+Returns `Inconclusive(ConditionsChanged)` when drift is significant.
+
 ### 1. Block Length Computation Method (Non-Discrete Mode)
 
 **Resolved:** 2025-01-17

@@ -140,6 +140,12 @@ typedef struct {
     uint64_t seed;
     /** Timer preference. Default: TO_TIMER_AUTO. */
     to_timer_pref_t timer_preference;
+    /** Calibration samples per class. 0 = default (5,000). */
+    size_t calibration_samples;
+    /** Batch size for adaptive sampling. 0 = default (1,000). */
+    size_t batch_size;
+    /** Bootstrap iterations for covariance estimation. 0 = default (2,000). */
+    size_t bootstrap_iterations;
 } to_config_t;
 
 /**
@@ -214,8 +220,30 @@ typedef enum {
     /** Could not reach a decision (quality gate triggered). */
     TO_OUTCOME_INCONCLUSIVE = 2,
     /** Operation too fast to measure reliably. */
-    TO_OUTCOME_UNMEASURABLE = 3
+    TO_OUTCOME_UNMEASURABLE = 3,
+    /** Research mode result (spec Section 3.6) - returned when attacker_model is Research. */
+    TO_OUTCOME_RESEARCH = 4
 } to_outcome_t;
+
+/**
+ * @brief Research mode status (spec Section 3.6).
+ *
+ * Research mode (AttackerModel::Research) doesn't make Pass/Fail decisions.
+ * Instead, it characterizes the timing behavior with respect to the measurement floor.
+ * Only valid when outcome == TO_OUTCOME_RESEARCH.
+ */
+typedef enum {
+    /** CI clearly above theta_floor - timing difference detected. */
+    TO_RESEARCH_EFFECT_DETECTED = 0,
+    /** CI clearly below theta_floor - no timing difference above noise. */
+    TO_RESEARCH_NO_EFFECT_DETECTED = 1,
+    /** Hit timer resolution limit; theta_floor is as good as it gets. */
+    TO_RESEARCH_RESOLUTION_LIMIT_REACHED = 2,
+    /** Data quality issue detected (see inconclusive_reason for details). */
+    TO_RESEARCH_QUALITY_ISSUE = 3,
+    /** Ran out of time/samples before reaching conclusion. */
+    TO_RESEARCH_BUDGET_EXHAUSTED = 4
+} to_research_status_t;
 
 /**
  * @brief Reason for inconclusive result.
@@ -425,6 +453,26 @@ typedef struct {
 
     /** Detailed diagnostics (spec Section 2.8). */
     to_diagnostics_t diagnostics;
+
+    /* Research mode fields (only valid if outcome == TO_OUTCOME_RESEARCH) */
+
+    /** Research mode status (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    to_research_status_t research_status;
+
+    /** Maximum effect across quantiles in nanoseconds (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    double max_effect_ns;
+
+    /** 95% CI lower bound for maximum effect (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    double max_effect_ci_low;
+
+    /** 95% CI upper bound for maximum effect (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    double max_effect_ci_high;
+
+    /** Whether the effect is detectable: CI lower bound > theta_floor (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    bool research_detectable;
+
+    /** Whether model mismatch was detected in research mode (only valid if outcome == TO_OUTCOME_RESEARCH). */
+    bool research_model_mismatch;
 } to_result_t;
 
 /* ============================================================================
@@ -508,6 +556,13 @@ void to_result_free(to_result_t *result);
  * @return Static string (do not free)
  */
 const char *to_outcome_str(to_outcome_t outcome);
+
+/**
+ * @brief Get string representation of research status.
+ * @param status The research status value
+ * @return Static string (do not free)
+ */
+const char *to_research_status_str(to_research_status_t status);
 
 /**
  * @brief Get string representation of effect pattern.

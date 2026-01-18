@@ -340,6 +340,19 @@ pub extern "C" fn to_outcome_str(outcome: ToOutcome) -> *const c_char {
         ToOutcome::Fail => c"Fail".as_ptr(),
         ToOutcome::Inconclusive => c"Inconclusive".as_ptr(),
         ToOutcome::Unmeasurable => c"Unmeasurable".as_ptr(),
+        ToOutcome::Research => c"Research".as_ptr(),
+    }
+}
+
+/// Get string representation of research status.
+#[no_mangle]
+pub extern "C" fn to_research_status_str(status: ToResearchStatus) -> *const c_char {
+    match status {
+        ToResearchStatus::EffectDetected => c"EffectDetected".as_ptr(),
+        ToResearchStatus::NoEffectDetected => c"NoEffectDetected".as_ptr(),
+        ToResearchStatus::ResolutionLimitReached => c"ResolutionLimitReached".as_ptr(),
+        ToResearchStatus::QualityIssue => c"QualityIssue".as_ptr(),
+        ToResearchStatus::BudgetExhausted => c"BudgetExhausted".as_ptr(),
     }
 }
 
@@ -448,14 +461,14 @@ fn make_recommendation_from_option(msg: Option<String>) -> *const c_char {
     }
 }
 
-/// Batch size for adaptive loop.
-const BATCH_SIZE: usize = 1000;
+/// Default batch size for adaptive loop.
+const DEFAULT_BATCH_SIZE: usize = 1000;
 
-/// Calibration samples.
-const CALIBRATION_SAMPLES: usize = 5000;
+/// Default calibration samples.
+const DEFAULT_CALIBRATION_SAMPLES: usize = 5000;
 
-/// Bootstrap iterations for covariance estimation.
-const BOOTSTRAP_ITERATIONS: usize = 2000;
+/// Default bootstrap iterations for covariance estimation.
+const DEFAULT_BOOTSTRAP_ITERATIONS: usize = 2000;
 
 /// Minimum timer ticks per measurement for reliable timing.
 const MIN_TICKS_PER_MEASUREMENT: u64 = 50;
@@ -487,6 +500,21 @@ fn run_test_impl<F: Fn() -> f64>(
         30.0
     } else {
         config.time_budget_secs
+    };
+    let calibration_samples = if config.calibration_samples == 0 {
+        DEFAULT_CALIBRATION_SAMPLES
+    } else {
+        config.calibration_samples
+    };
+    let batch_size = if config.batch_size == 0 {
+        DEFAULT_BATCH_SIZE
+    } else {
+        config.batch_size
+    };
+    let bootstrap_iterations = if config.bootstrap_iterations == 0 {
+        DEFAULT_BOOTSTRAP_ITERATIONS
+    } else {
+        config.bootstrap_iterations
     };
 
     // Get timer info
@@ -547,6 +575,8 @@ fn run_test_impl<F: Fn() -> f64>(
         ns_per_tick,
         theta_ns,
         config.seed,
+        calibration_samples,
+        bootstrap_iterations,
         &get_elapsed_secs,
     ) {
         Ok(result) => result,
@@ -696,7 +726,7 @@ fn run_test_impl<F: Fn() -> f64>(
                     input_size,
                     batch_k,
                     ns_per_tick,
-                    BATCH_SIZE,
+                    batch_size,
                 );
             }
         }
@@ -766,6 +796,8 @@ fn run_calibration_phase<F: Fn() -> f64>(
     ns_per_tick: f64,
     theta_ns: f64,
     seed: u64,
+    calibration_samples: usize,
+    bootstrap_iterations: usize,
     get_elapsed_secs: &F,
 ) -> Result<
     (
@@ -785,14 +817,14 @@ fn run_calibration_phase<F: Fn() -> f64>(
     use timing_oracle_core::types::{Class, TimingSample};
 
     // Create interleaved schedule
-    let mut schedule = vec![false; CALIBRATION_SAMPLES * 2];
-    for i in 0..CALIBRATION_SAMPLES {
+    let mut schedule = vec![false; calibration_samples * 2];
+    for i in 0..calibration_samples {
         schedule[i * 2] = true;
         schedule[i * 2 + 1] = false;
     }
 
     // Collect calibration samples
-    let mut raw_timings = vec![0u64; CALIBRATION_SAMPLES * 2];
+    let mut raw_timings = vec![0u64; calibration_samples * 2];
 
     unsafe {
         to_collect_batch(
@@ -802,17 +834,17 @@ fn run_calibration_phase<F: Fn() -> f64>(
             input_buffer.as_mut_ptr(),
             input_size,
             schedule.as_ptr(),
-            CALIBRATION_SAMPLES * 2,
+            calibration_samples * 2,
             raw_timings.as_mut_ptr(),
             batch_k,
         );
     }
 
     // Separate baseline and sample timings
-    let mut baseline_timings_raw = Vec::with_capacity(CALIBRATION_SAMPLES);
-    let mut sample_timings_raw = Vec::with_capacity(CALIBRATION_SAMPLES);
-    let mut baseline_timings_ns = Vec::with_capacity(CALIBRATION_SAMPLES);
-    let mut sample_timings_ns = Vec::with_capacity(CALIBRATION_SAMPLES);
+    let mut baseline_timings_raw = Vec::with_capacity(calibration_samples);
+    let mut sample_timings_raw = Vec::with_capacity(calibration_samples);
+    let mut baseline_timings_ns = Vec::with_capacity(calibration_samples);
+    let mut sample_timings_ns = Vec::with_capacity(calibration_samples);
 
     let mut baseline_stats = OnlineStats::new();
     let mut sample_stats = OnlineStats::new();
@@ -844,7 +876,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
         bootstrap_difference_covariance_discrete(
             &baseline_timings_ns,
             &sample_timings_ns,
-            BOOTSTRAP_ITERATIONS,
+            bootstrap_iterations,
             seed,
         )
     } else {
@@ -865,7 +897,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
                 ]
             })
             .collect();
-        bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed, false)
+        bootstrap_difference_covariance(&interleaved, bootstrap_iterations, seed, false)
     };
 
     if !cov_estimate.is_stable() {
@@ -878,21 +910,21 @@ fn run_calibration_phase<F: Fn() -> f64>(
             timer_resolution_ns: ns_per_tick,
             timer_name: unsafe { to_get_timer_name() },
             elapsed_secs: get_elapsed_secs(),
-            samples_used: CALIBRATION_SAMPLES,
+            samples_used: calibration_samples,
             ..ToResult::default()
         }));
     }
 
     // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
-    let sigma_rate = cov_estimate.matrix * (CALIBRATION_SAMPLES as f64);
+    let sigma_rate = cov_estimate.matrix * (calibration_samples as f64);
 
     // Estimate MDE from calibration data (simplified)
-    let n_sqrt = sqrt(CALIBRATION_SAMPLES as f64);
+    let n_sqrt = sqrt(calibration_samples as f64);
     let mde_shift_ns = 2.0 * sqrt(cov_estimate.matrix[(0, 0)]) / n_sqrt;
     let mde_tail_ns = 2.0 * sqrt(cov_estimate.matrix[(8, 8)]) / n_sqrt;
 
     let elapsed_secs = get_elapsed_secs();
-    let samples_per_second = CALIBRATION_SAMPLES as f64 / elapsed_secs;
+    let samples_per_second = calibration_samples as f64 / elapsed_secs;
 
     // v4.1: Compute floor-rate constant and effective threshold
     // For C API, use simplified defaults since we don't have full bootstrap
@@ -920,7 +952,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
         10, // block_length (default)
         prior_cov_9d,
         theta_ns,
-        CALIBRATION_SAMPLES,
+        calibration_samples,
         discrete_mode, // Detected from uniqueness ratio
         mde_shift_ns,
         mde_tail_ns,
@@ -1119,6 +1151,7 @@ fn build_result(
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
                 diagnostics,
+                ..ToResult::default()
             }
         }
 
@@ -1146,6 +1179,7 @@ fn build_result(
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
                 diagnostics,
+                ..ToResult::default()
             }
         }
 
@@ -1187,6 +1221,7 @@ fn build_result(
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
                 diagnostics,
+                ..ToResult::default()
             }
         }
     }
