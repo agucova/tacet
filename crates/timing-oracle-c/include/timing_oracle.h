@@ -308,7 +308,71 @@ typedef struct {
     double ci_high_ns;
     /** Pattern of the effect. */
     to_effect_pattern_t pattern;
+    /** Whether there is a projection mismatch caveat. When true, the 2D effect
+     * summary may not fully capture the timing difference. */
+    bool has_interpretation_caveat;
+    /** Top quantile indices (0-8) that contribute most to mismatch.
+     * Only valid when has_interpretation_caveat is true. Set to 255 for unused. */
+    uint8_t top_quantiles[3];
 } to_effect_t;
+
+/** Maximum number of warnings in diagnostics. */
+#define TO_MAX_WARNINGS 8
+/** Maximum warning message length. */
+#define TO_MAX_WARNING_LEN 128
+
+/**
+ * @brief Detailed diagnostics for the test result (spec Section 2.8).
+ *
+ * Contains measurement quality metrics, calibration info, and diagnostic flags.
+ */
+typedef struct {
+    /** Block length used for bootstrap resampling. */
+    size_t dependence_length;
+    /** Effective sample size accounting for autocorrelation. */
+    size_t effective_sample_size;
+    /** Ratio of post-test variance to calibration variance.
+     * Values outside [0.5, 2.0] indicate drift. */
+    double stationarity_ratio;
+    /** Whether stationarity check passed. */
+    bool stationarity_ok;
+    /** Projection mismatch Q statistic. High values indicate 2D summary is approximate. */
+    double projection_mismatch_q;
+    /** Threshold for projection mismatch (calibrated at 99th percentile). */
+    double projection_mismatch_threshold;
+    /** Whether projection mismatch is acceptable. */
+    bool projection_mismatch_ok;
+    /** Outlier rate for baseline class (fraction filtered). */
+    double outlier_rate_baseline;
+    /** Outlier rate for sample class (fraction filtered). */
+    double outlier_rate_sample;
+    /** Whether outlier rates are balanced between classes. */
+    bool outlier_asymmetry_ok;
+    /** Whether discrete mode was used (low timer resolution). */
+    bool discrete_mode;
+    /** Fraction of duplicate timing values. */
+    double duplicate_fraction;
+    /** Whether preflight checks passed. */
+    bool preflight_ok;
+    /** Number of samples used in calibration phase. */
+    size_t calibration_samples;
+    /** Total time spent in seconds. */
+    double total_time_secs;
+    /** RNG seed used for bootstrap (0 if random). */
+    uint64_t seed;
+    /** User-specified threshold (theta_user) in nanoseconds. */
+    double theta_user;
+    /** Effective threshold (theta_eff) in nanoseconds.
+     * May be higher than theta_user due to measurement floor. */
+    double theta_eff;
+    /** Measurement floor (theta_floor) in nanoseconds.
+     * Minimum detectable effect given current noise. */
+    double theta_floor;
+    /** Number of warnings. */
+    size_t warning_count;
+    /** Warning messages (null-terminated strings). */
+    char warnings[TO_MAX_WARNINGS][TO_MAX_WARNING_LEN];
+} to_diagnostics_t;
 
 /**
  * @brief Test result.
@@ -358,6 +422,9 @@ typedef struct {
 
     /** Whether adaptive batching was used. */
     bool adaptive_batching_used;
+
+    /** Detailed diagnostics (spec Section 2.8). */
+    to_diagnostics_t diagnostics;
 } to_result_t;
 
 /* ============================================================================

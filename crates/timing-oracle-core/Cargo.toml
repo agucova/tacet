@@ -31,6 +31,7 @@ libm = "0.2"
 
 # Parallel bootstrap (optional, requires std)
 rayon = { version = "1.11", optional = true }
+hashbrown = "0.16.1"
 
 [features]
 default = ["std"]

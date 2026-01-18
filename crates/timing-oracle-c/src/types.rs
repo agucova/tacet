@@ -5,6 +5,12 @@
 use core::ffi::c_char;
 use core::ptr;
 
+/// Maximum number of warnings that can be stored in diagnostics.
+pub const TO_MAX_WARNINGS: usize = 8;
+
+/// Maximum length of a warning message.
+pub const TO_MAX_WARNING_LEN: usize = 128;
+
 /// Attacker model determines the minimum effect threshold (θ) for leak detection.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -183,6 +189,88 @@ pub struct ToEffect {
     pub ci_high_ns: f64,
     /// Pattern of the effect.
     pub pattern: ToEffectPattern,
+    /// Whether there is a projection mismatch caveat.
+    /// When true, the 2D effect summary may not fully capture the timing difference.
+    pub has_interpretation_caveat: bool,
+    /// Top quantile indices that contribute most to mismatch (0-8 for deciles 1-9).
+    /// Only valid when has_interpretation_caveat is true.
+    /// Set to 255 for unused slots.
+    pub top_quantiles: [u8; 3],
+}
+
+/// Diagnostics information for the test result.
+///
+/// Contains detailed information about the measurement process for debugging
+/// and quality assessment (spec §2.8).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ToDiagnostics {
+    /// Block length used for bootstrap resampling.
+    pub dependence_length: usize,
+
+    /// Effective sample size accounting for autocorrelation.
+    pub effective_sample_size: usize,
+
+    /// Ratio of post-test variance to calibration variance.
+    /// Values outside [0.5, 2.0] indicate drift.
+    pub stationarity_ratio: f64,
+
+    /// Whether stationarity check passed.
+    pub stationarity_ok: bool,
+
+    /// Projection mismatch Q statistic.
+    /// High values indicate 2D summary is approximate.
+    pub projection_mismatch_q: f64,
+
+    /// Threshold for projection mismatch (calibrated at 99th percentile).
+    pub projection_mismatch_threshold: f64,
+
+    /// Whether projection mismatch is acceptable.
+    pub projection_mismatch_ok: bool,
+
+    /// Outlier rate for baseline class (fraction filtered).
+    pub outlier_rate_baseline: f64,
+
+    /// Outlier rate for sample class (fraction filtered).
+    pub outlier_rate_sample: f64,
+
+    /// Whether outlier rates are balanced between classes.
+    pub outlier_asymmetry_ok: bool,
+
+    /// Whether discrete mode was used (low timer resolution).
+    pub discrete_mode: bool,
+
+    /// Fraction of duplicate timing values.
+    pub duplicate_fraction: f64,
+
+    /// Whether preflight checks passed.
+    pub preflight_ok: bool,
+
+    /// Number of samples used in calibration phase.
+    pub calibration_samples: usize,
+
+    /// Total time spent in seconds.
+    pub total_time_secs: f64,
+
+    /// RNG seed used for bootstrap (0 if random).
+    pub seed: u64,
+
+    /// User-specified threshold (theta_user) in nanoseconds.
+    pub theta_user: f64,
+
+    /// Effective threshold (theta_eff) in nanoseconds.
+    /// May be higher than theta_user due to measurement floor.
+    pub theta_eff: f64,
+
+    /// Measurement floor (theta_floor) in nanoseconds.
+    /// Minimum detectable effect given current noise.
+    pub theta_floor: f64,
+
+    /// Number of warnings.
+    pub warning_count: usize,
+
+    /// Warning messages (null-terminated, fixed-size buffers).
+    pub warnings: [[c_char; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
 }
 
 /// Test result.
@@ -229,6 +317,51 @@ pub struct ToResult {
 
     /// Whether adaptive batching was used.
     pub adaptive_batching_used: bool,
+
+    /// Detailed diagnostics (spec §2.8).
+    pub diagnostics: ToDiagnostics,
+}
+
+impl Default for ToDiagnostics {
+    fn default() -> Self {
+        Self {
+            dependence_length: 0,
+            effective_sample_size: 0,
+            stationarity_ratio: 1.0,
+            stationarity_ok: true,
+            projection_mismatch_q: 0.0,
+            projection_mismatch_threshold: 18.48, // chi-squared(7, 0.99)
+            projection_mismatch_ok: true,
+            outlier_rate_baseline: 0.0,
+            outlier_rate_sample: 0.0,
+            outlier_asymmetry_ok: true,
+            discrete_mode: false,
+            duplicate_fraction: 0.0,
+            preflight_ok: true,
+            calibration_samples: 0,
+            total_time_secs: 0.0,
+            seed: 0,
+            theta_user: 0.0,
+            theta_eff: 0.0,
+            theta_floor: 0.0,
+            warning_count: 0,
+            warnings: [[0; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
+        }
+    }
+}
+
+impl Default for ToEffect {
+    fn default() -> Self {
+        Self {
+            shift_ns: 0.0,
+            tail_ns: 0.0,
+            ci_low_ns: 0.0,
+            ci_high_ns: 0.0,
+            pattern: ToEffectPattern::Indeterminate,
+            has_interpretation_caveat: false,
+            top_quantiles: [255, 255, 255],
+        }
+    }
 }
 
 impl Default for ToResult {
@@ -236,13 +369,7 @@ impl Default for ToResult {
         Self {
             outcome: ToOutcome::Pass,
             leak_probability: 0.0,
-            effect: ToEffect {
-                shift_ns: 0.0,
-                tail_ns: 0.0,
-                ci_low_ns: 0.0,
-                ci_high_ns: 0.0,
-                pattern: ToEffectPattern::Indeterminate,
-            },
+            effect: ToEffect::default(),
             quality: ToQuality::Excellent,
             samples_used: 0,
             elapsed_secs: 0.0,
@@ -254,6 +381,7 @@ impl Default for ToResult {
             timer_name: ptr::null(),
             platform: ptr::null(),
             adaptive_batching_used: false,
+            diagnostics: ToDiagnostics::default(),
         }
     }
 }
@@ -294,6 +422,8 @@ impl From<timing_oracle_core::result::EffectEstimate> for ToEffect {
             ci_low_ns: estimate.credible_interval_ns.0,
             ci_high_ns: estimate.credible_interval_ns.1,
             pattern: estimate.pattern.into(),
+            has_interpretation_caveat: estimate.interpretation_caveat.is_some(),
+            top_quantiles: [255, 255, 255], // Will be populated by caller if needed
         }
     }
 }

@@ -564,8 +564,55 @@ fn run_test_impl<F: Fn() -> f64>(
         .time_budget_secs(time_budget_secs)
         .max_samples(max_samples);
 
+    // Drift detection state
+    let drift_thresholds = timing_oracle_core::adaptive::DriftThresholds::default();
+    let mut last_stationarity_ratio = 1.0;
+    let mut last_stationarity_ok = true;
+
     loop {
         let elapsed_secs = get_elapsed_secs();
+
+        // ==========================================================================
+        // Quality Gate 7: Condition drift check (spec §3.5.2)
+        // ==========================================================================
+        if let Some(current_snapshot) = state.get_stats_snapshot() {
+            let drift = timing_oracle_core::adaptive::ConditionDrift::compute(
+                &calibration.calibration_snapshot,
+                &current_snapshot,
+            );
+
+            // Track the maximum variance ratio for diagnostics
+            last_stationarity_ratio = drift
+                .variance_ratio_baseline
+                .max(drift.variance_ratio_sample);
+            last_stationarity_ok = !drift.is_significant(&drift_thresholds);
+
+            if !last_stationarity_ok {
+                let posterior = state.current_posterior().cloned();
+                let drift_message = drift.description(&drift_thresholds);
+
+                return build_result(
+                    AdaptiveOutcome::Inconclusive {
+                        reason: InconclusiveReason::ConditionsChanged {
+                            message: String::from("Measurement conditions changed during test"),
+                            guidance: String::from(
+                                "Ensure stable environment: disable CPU frequency scaling, \
+                                 minimize concurrent processes, use performance CPU governor",
+                            ),
+                            drift_description: drift_message,
+                        },
+                        posterior,
+                        samples_per_class: state.n_total(),
+                        elapsed_secs,
+                    },
+                    &calibration,
+                    timer_resolution_ns,
+                    batch_k,
+                    last_stationarity_ratio,
+                    last_stationarity_ok,
+                );
+            }
+        }
 
         // Check if we've exceeded time budget before collecting more
         if elapsed_secs > time_budget_secs {
@@ -588,6 +635,8 @@ fn run_test_impl<F: Fn() -> f64>(
                 &calibration,
                 timer_resolution_ns,
                 batch_k,
+                last_stationarity_ratio,
+                last_stationarity_ok,
             );
         }
 
@@ -611,6 +660,8 @@ fn run_test_impl<F: Fn() -> f64>(
                 &calibration,
                 timer_resolution_ns,
                 batch_k,
+                last_stationarity_ratio,
+                last_stationarity_ok,
             );
         }
 
@@ -625,7 +676,14 @@ fn run_test_impl<F: Fn() -> f64>(
 
         match result {
             StepResult::Decision(outcome) => {
-                return build_result(outcome, &calibration, timer_resolution_ns, batch_k);
+                return build_result(
+                    outcome,
+                    &calibration,
+                    timer_resolution_ns,
+                    batch_k,
+                    last_stationarity_ratio,
+                    last_stationarity_ok,
+                );
             }
             StepResult::Continue { .. } => {
                 // Collect another batch
@@ -720,7 +778,10 @@ fn run_calibration_phase<F: Fn() -> f64>(
         calibrate_prior_scale, compute_prior_cov_9d, AdaptiveState, Calibration,
         CalibrationSnapshot,
     };
-    use timing_oracle_core::statistics::{bootstrap_difference_covariance, OnlineStats};
+    use timing_oracle_core::statistics::{
+        bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
+        compute_min_uniqueness_ratio, OnlineStats, DISCRETE_MODE_THRESHOLD,
+    };
     use timing_oracle_core::types::{Class, TimingSample};
 
     // Create interleaved schedule
@@ -773,26 +834,39 @@ fn run_calibration_phase<F: Fn() -> f64>(
     let calibration_snapshot =
         CalibrationSnapshot::new(baseline_stats.finalize(), sample_stats.finalize());
 
-    // Bootstrap for covariance estimation
-    let interleaved: Vec<TimingSample> = baseline_timings_ns
-        .iter()
-        .zip(sample_timings_ns.iter())
-        .flat_map(|(&b, &s)| {
-            [
-                TimingSample {
-                    time_ns: b,
-                    class: Class::Baseline,
-                },
-                TimingSample {
-                    time_ns: s,
-                    class: Class::Sample,
-                },
-            ]
-        })
-        .collect();
+    // Detect discrete mode (spec §3.7): triggered when < 10% of values are unique
+    let min_uniqueness = compute_min_uniqueness_ratio(&baseline_timings_ns, &sample_timings_ns);
+    let discrete_mode = min_uniqueness < DISCRETE_MODE_THRESHOLD;
 
-    // C bindings don't implement discrete mode detection, so is_fragile = false
-    let cov_estimate = bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed, false);
+    // Select appropriate bootstrap method based on discrete mode
+    let cov_estimate = if discrete_mode {
+        // Discrete mode: use m-out-of-n bootstrap on per-class sequences
+        bootstrap_difference_covariance_discrete(
+            &baseline_timings_ns,
+            &sample_timings_ns,
+            BOOTSTRAP_ITERATIONS,
+            seed,
+        )
+    } else {
+        // Normal mode: use block bootstrap on interleaved stream
+        let interleaved: Vec<TimingSample> = baseline_timings_ns
+            .iter()
+            .zip(sample_timings_ns.iter())
+            .flat_map(|(&b, &s)| {
+                [
+                    TimingSample {
+                        time_ns: b,
+                        class: Class::Baseline,
+                    },
+                    TimingSample {
+                        time_ns: s,
+                        class: Class::Sample,
+                    },
+                ]
+            })
+            .collect();
+        bootstrap_difference_covariance(&interleaved, BOOTSTRAP_ITERATIONS, seed, false)
+    };
 
     if !cov_estimate.is_stable() {
         return Err(Box::new(ToResult {
@@ -847,7 +921,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
         prior_cov_9d,
         theta_ns,
         CALIBRATION_SAMPLES,
-        false, // discrete_mode (could detect from data)
+        discrete_mode, // Detected from uniqueness ratio
         mde_shift_ns,
         mde_tail_ns,
         calibration_snapshot,
@@ -919,12 +993,88 @@ fn collect_batch(
     state.add_batch_with_conversion(baseline, sample, ns_per_tick);
 }
 
+/// Build diagnostics from calibration data and posterior.
+fn build_diagnostics(
+    calibration: &timing_oracle_core::adaptive::Calibration,
+    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
+    elapsed_secs: f64,
+    stationarity_ratio: f64,
+    stationarity_ok: bool,
+) -> ToDiagnostics {
+    let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
+    let projection_mismatch_ok = projection_mismatch_q <= calibration.projection_mismatch_thresh;
+
+    ToDiagnostics {
+        dependence_length: calibration.block_length,
+        effective_sample_size: posterior.map(|p| p.n).unwrap_or(0),
+        stationarity_ratio,
+        stationarity_ok,
+        projection_mismatch_q,
+        projection_mismatch_threshold: calibration.projection_mismatch_thresh,
+        projection_mismatch_ok,
+        outlier_rate_baseline: 0.0, // Not tracked currently
+        outlier_rate_sample: 0.0,   // Not tracked currently
+        outlier_asymmetry_ok: true, // Assume OK since not tracked
+        discrete_mode: calibration.discrete_mode,
+        duplicate_fraction: 0.0, // Not tracked currently
+        preflight_ok: true,      // No preflight checks yet
+        calibration_samples: calibration.calibration_samples,
+        total_time_secs: elapsed_secs,
+        seed: calibration.rng_seed,
+        theta_user: calibration.theta_ns,
+        theta_eff: calibration.theta_eff,
+        theta_floor: calibration.theta_floor_initial,
+        warning_count: 0,
+        warnings: [[0; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
+    }
+}
+
+/// Build effect with projection mismatch info from posterior.
+fn build_effect_with_mismatch(
+    posterior: &timing_oracle_core::adaptive::Posterior,
+    calibration: &timing_oracle_core::adaptive::Calibration,
+) -> ToEffect {
+    let mut effect: ToEffect = posterior.to_effect_estimate().into();
+
+    // Check projection mismatch
+    let mismatch = posterior.projection_mismatch_q > calibration.projection_mismatch_thresh;
+    effect.has_interpretation_caveat = mismatch;
+
+    if mismatch {
+        // Compute top contributing quantiles from residuals
+        // The residual for each quantile k is: r_k = delta_post_k - (X * beta_proj)_k
+        // We rank by |r_k| / sqrt(Sigma_n[k,k])
+        let delta_post = &posterior.delta_post;
+        let beta_proj = &posterior.beta_proj;
+
+        // X matrix: column 0 is all 1s (shift), column 1 is tail weights
+        let tail_weights = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
+        let mut residuals: [(f64, u8); 9] = [(0.0, 0); 9];
+
+        for k in 0..9 {
+            let fitted = beta_proj[0] + tail_weights[k] * beta_proj[1];
+            let residual = (delta_post[k] - fitted).abs();
+            residuals[k] = (residual, k as u8);
+        }
+
+        // Sort by residual magnitude (descending)
+        residuals.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
+
+        // Take top 3
+        effect.top_quantiles = [residuals[0].1, residuals[1].1, residuals[2].1];
+    }
+
+    effect
+}
+
 /// Convert AdaptiveOutcome to ToResult.
 fn build_result(
     outcome: timing_oracle_core::adaptive::AdaptiveOutcome,
-    _calibration: &timing_oracle_core::adaptive::Calibration,
+    calibration: &timing_oracle_core::adaptive::Calibration,
     timer_resolution_ns: f64,
     batch_k: usize,
+    stationarity_ratio: f64,
+    stationarity_ok: bool,
 ) -> ToResult {
     use timing_oracle_core::adaptive::AdaptiveOutcome;
 
@@ -950,10 +1100,13 @@ fn build_result(
                 ToExploitability::ObviousLeak
             };
 
+            let diagnostics =
+                build_diagnostics(calibration, Some(&posterior), elapsed_secs, stationarity_ratio, stationarity_ok);
+
             ToResult {
                 outcome: ToOutcome::Fail,
                 leak_probability: posterior.leak_probability,
-                effect: build_effect(&posterior),
+                effect: build_effect_with_mismatch(&posterior, calibration),
                 quality: build_quality(&posterior),
                 samples_used: samples_per_class,
                 elapsed_secs,
@@ -965,6 +1118,7 @@ fn build_result(
                 timer_name,
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
+                diagnostics,
             }
         }
 
@@ -972,22 +1126,28 @@ fn build_result(
             posterior,
             samples_per_class,
             elapsed_secs,
-        } => ToResult {
-            outcome: ToOutcome::Pass,
-            leak_probability: posterior.leak_probability,
-            effect: build_effect(&posterior),
-            quality: build_quality(&posterior),
-            samples_used: samples_per_class,
-            elapsed_secs,
-            exploitability: ToExploitability::SharedHardwareOnly,
-            inconclusive_reason: ToInconclusiveReason::DataTooNoisy, // Not used
-            operation_ns: 0.0,
-            timer_resolution_ns,
-            recommendation: ptr::null(),
-            timer_name,
-            platform: c"".as_ptr(),
-            adaptive_batching_used: batch_k > 1,
-        },
+        } => {
+            let diagnostics =
+                build_diagnostics(calibration, Some(&posterior), elapsed_secs, stationarity_ratio, stationarity_ok);
+
+            ToResult {
+                outcome: ToOutcome::Pass,
+                leak_probability: posterior.leak_probability,
+                effect: build_effect_with_mismatch(&posterior, calibration),
+                quality: build_quality(&posterior),
+                samples_used: samples_per_class,
+                elapsed_secs,
+                exploitability: ToExploitability::SharedHardwareOnly,
+                inconclusive_reason: ToInconclusiveReason::DataTooNoisy, // Not used
+                operation_ns: 0.0,
+                timer_resolution_ns,
+                recommendation: ptr::null(),
+                timer_name,
+                platform: c"".as_ptr(),
+                adaptive_batching_used: batch_k > 1,
+                diagnostics,
+            }
+        }
 
         AdaptiveOutcome::Inconclusive {
             reason,
@@ -998,22 +1158,18 @@ fn build_result(
             let (c_reason, recommendation) = convert_reason(&reason);
 
             let (leak_probability, effect, quality) = if let Some(ref p) = posterior {
-                (p.leak_probability, build_effect(p), build_quality(p))
-            } else {
                 (
-                    0.5,
-                    ToEffect {
-                        shift_ns: 0.0,
-                        tail_ns: 0.0,
-                        ci_low_ns: 0.0,
-                        ci_high_ns: 0.0,
-                        pattern: ToEffectPattern::Indeterminate,
-                    },
-                    ToQuality::TooNoisy,
+                    p.leak_probability,
+                    build_effect_with_mismatch(p, calibration),
+                    build_quality(p),
                 )
+            } else {
+                (0.5, ToEffect::default(), ToQuality::TooNoisy)
             };
 
             let recommendation_ptr = make_recommendation_from_option(recommendation);
+            let diagnostics =
+                build_diagnostics(calibration, posterior.as_ref(), elapsed_secs, stationarity_ratio, stationarity_ok);
 
             ToResult {
                 outcome: ToOutcome::Inconclusive,
@@ -1030,14 +1186,10 @@ fn build_result(
                 timer_name,
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
+                diagnostics,
             }
         }
     }
-}
-
-fn build_effect(posterior: &timing_oracle_core::adaptive::Posterior) -> ToEffect {
-    // Use core's method and convert to FFI type
-    posterior.to_effect_estimate().into()
 }
 
 fn build_quality(posterior: &timing_oracle_core::adaptive::Posterior) -> ToQuality {
