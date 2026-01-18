@@ -4,15 +4,44 @@ This document tracks discrepancies between the specification (`docs/spec.md`) an
 
 ## Active Misalignments
 
-None currently.
+### C Library: Preflight Checks (Spec §4.7 SHOULD)
 
-### Previously Active (C Library)
+**Status:** Not yet implemented
+
+**Location:** Would be in `crates/timing-oracle-c/src/lib.rs`
+
+**Issue:** The C library does not implement preflight checks from spec §4.7:
+- Timer sanity check (monotonicity verification)
+- Harness sanity check (fixed-vs-fixed internal consistency)
+- Autocorrelation check (periodic interference detection)
+- Resolution check (timer quantization detection)
+- System check (CPU governor, turbo boost, etc.)
+
+**Impact:** Low - These are SHOULD requirements (not MUST). The core Bayesian pipeline works correctly without them. Preflight checks help catch setup issues early.
+
+**Mitigation:** Users can manually verify their test setup. The `diagnostics.preflight_ok` field is currently always true.
+
+### C Library: Research Mode Behavior (Spec §3.6)
+
+**Status:** Types added, behavior pending
+
+**Location:** `crates/timing-oracle-c/src/types.rs`, `crates/timing-oracle-c/include/timing_oracle.h`
+
+**Issue:** The C library has Research mode types (`ToResearchStatus`, `ToOutcome::Research`) but the adaptive loop doesn't yet return `Research` outcome - it uses standard Pass/Fail/Inconclusive with θ=0.
+
+**Impact:** Low - Users can still use Research mode (θ=0), but get standard outcomes instead of Research-specific outcomes with `max_effect_ns` and `detectable` fields.
+
+---
+
+### Previously Active (C Library) - Resolved
 
 The following items were identified as gaps in the C library but have since been resolved:
 
 1. **Diagnostics struct** - C library now exposes full `to_diagnostics_t` (spec §2.8)
 2. **interpretation_caveat** - Effect struct includes projection mismatch info (spec §2.3)
 3. **Condition drift check** - Gate 7 now implemented in adaptive loop (spec §3.5.2)
+4. **Configurable constants** - Config now supports `calibration_samples`, `batch_size`, `bootstrap_iterations`
+5. **Research mode types** - Added `ToResearchStatus` enum and research fields in `ToResult`
 
 ---
 

@@ -55,13 +55,13 @@ mod cycle_timer;
 mod outlier;
 mod timer;
 
-#[cfg(feature = "kperf")]
+#[cfg(all(feature = "kperf", target_os = "macos"))]
 mod kperf_lock;
 
-#[cfg(feature = "kperf")]
+#[cfg(all(feature = "kperf", target_os = "macos"))]
 pub mod kperf;
 
-#[cfg(feature = "perf")]
+#[cfg(all(feature = "perf", target_os = "linux"))]
 pub mod perf;
 
 pub use collector::{

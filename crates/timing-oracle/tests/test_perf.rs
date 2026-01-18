@@ -4,7 +4,7 @@
 //!
 //! Note: These tests may require elevated permissions (sudo) on some systems.
 
-#![cfg(feature = "perf")]
+#![cfg(all(feature = "perf", target_os = "linux"))]
 
 use timing_oracle::measurement::perf::{LinuxPerfTimer, PerfError};
 

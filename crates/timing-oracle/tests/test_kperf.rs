@@ -11,7 +11,7 @@
 //! Running tests in parallel can cause kperf counter interference, leading to
 //! incorrect calibration values (e.g., 0.03 cycles/ns instead of ~3 cycles/ns).
 
-#![cfg(feature = "kperf")]
+#![cfg(all(feature = "kperf", target_os = "macos"))]
 
 use timing_oracle::measurement::kperf::{PmuError, PmuTimer};
 use timing_oracle::measurement::Timer;

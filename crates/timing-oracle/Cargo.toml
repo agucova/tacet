@@ -98,4 +98,4 @@ progress-bars = ["dep:indicatif"]
 
 # Internal features - use default features instead
 kperf = ["dep:kperf-rs", "dep:libc"]
-perf = []
+perf = ["dep:perf_event2"]
