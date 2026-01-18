@@ -518,13 +518,13 @@ mod tests {
     #[test]
     fn test_adaptive_outcome_accessors() {
         let posterior = Posterior::new(
-            Vector9::zeros(),           // delta_post (dummy 9D)
-            Matrix9::identity(),        // lambda_post (dummy 9D)
-            Vector2::new(10.0, 5.0),    // beta_proj
+            Vector9::zeros(),                 // delta_post (dummy 9D)
+            Matrix9::identity(),              // lambda_post (dummy 9D)
+            Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(1.0, 0.0, 0.0, 1.0), // beta_proj_cov
-            0.95,                       // leak_probability
-            5.0,                        // projection_mismatch_q
-            1000,                       // n
+            0.95,                             // leak_probability
+            5.0,                              // projection_mismatch_q
+            1000,                             // n
         );
 
         let outcome = AdaptiveOutcome::LeakDetected {

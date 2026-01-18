@@ -95,7 +95,10 @@ impl Posterior {
 
     /// Get the max absolute effect across all deciles.
     pub fn max_effect_ns(&self) -> f64 {
-        self.delta_post.iter().map(|x| x.abs()).fold(0.0_f64, f64::max)
+        self.delta_post
+            .iter()
+            .map(|x| x.abs())
+            .fold(0.0_f64, f64::max)
     }
 
     /// Build an EffectEstimate from this posterior.
@@ -140,7 +143,8 @@ mod tests {
 
     #[test]
     fn test_posterior_accessors() {
-        let delta_post = Vector9::from_row_slice(&[10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]);
+        let delta_post =
+            Vector9::from_row_slice(&[10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]);
         let lambda_post = Matrix9::identity();
         let beta_proj = Vector2::new(10.0, 0.0);
         let beta_proj_cov = Matrix2::new(4.0, 0.0, 0.0, 1.0);

@@ -261,14 +261,10 @@ fn apply_prior_shrinkage(s: &Matrix9) -> Matrix9 {
 ///
 /// # Returns
 /// The calibrated σ_prior value.
-pub fn calibrate_prior_scale(
-    sigma_rate: &Matrix9,
-    theta_eff: f64,
-    seed: u64,
-) -> f64 {
+pub fn calibrate_prior_scale(sigma_rate: &Matrix9, theta_eff: f64, seed: u64) -> f64 {
     // Binary search for sigma_prior
-    let mut lo = theta_eff * 0.1;  // Lower bound
-    let mut hi = theta_eff * 5.0;  // Upper bound
+    let mut lo = theta_eff * 0.1; // Lower bound
+    let mut hi = theta_eff * 5.0; // Upper bound
 
     for _ in 0..MAX_CALIBRATION_ITERATIONS {
         let mid = (lo + hi) / 2.0;
@@ -391,23 +387,8 @@ mod tests {
         let prior_cov = compute_prior_cov_9d(&sigma_rate, 100.0 * 1.12);
 
         Calibration::new(
-            sigma_rate,
-            10,
-            prior_cov,
-            100.0,
-            5000,
-            false,
-            5.0,
-            10.0,
-            snapshot,
-            1.0,
-            10000.0,
-            10.0,
-            18.48,
-            0.001,
-            100.0,
-            0.1,
-            42,
+            sigma_rate, 10, prior_cov, 100.0, 5000, false, 5.0, 10.0, snapshot, 1.0, 10000.0, 10.0,
+            18.48, 0.001, 100.0, 0.1, 42,
         )
     }
 
@@ -470,14 +451,24 @@ mod tests {
         let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, 42);
 
         // Check that calibration gives reasonable value
-        assert!(sigma_prior > theta_eff * 0.5, "sigma_prior should be > theta_eff/2");
-        assert!(sigma_prior < theta_eff * 3.0, "sigma_prior should be < 3*theta_eff");
+        assert!(
+            sigma_prior > theta_eff * 0.5,
+            "sigma_prior should be > theta_eff/2"
+        );
+        assert!(
+            sigma_prior < theta_eff * 3.0,
+            "sigma_prior should be < 3*theta_eff"
+        );
 
         // Verify exceedance is near target
         let lambda0 = compute_prior_cov_9d(&sigma_rate, sigma_prior);
         let exceedance = compute_prior_exceedance(&lambda0, theta_eff, 42);
-        assert!((exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
-               "Exceedance {} should be near {}", exceedance, TARGET_EXCEEDANCE);
+        assert!(
+            (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
+            "Exceedance {} should be near {}",
+            exceedance,
+            TARGET_EXCEEDANCE
+        );
     }
 
     #[test]

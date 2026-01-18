@@ -709,8 +709,13 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
             // First line: "    • Code: message" - calculate used width for first line
             let first_used = 6 + code_str.len(); // "    • " + "Code: "
             let cont_indent = format!("      {}", " ".repeat(code_str.len()));
-            let wrapped_msg = wrap_text(&issue.message, DEFAULT_WRAP_WIDTH, first_used, &cont_indent);
-            out.push_str(&format!("    \u{2022} {}{}\n", code_str.bold(), wrapped_msg));
+            let wrapped_msg =
+                wrap_text(&issue.message, DEFAULT_WRAP_WIDTH, first_used, &cont_indent);
+            out.push_str(&format!(
+                "    \u{2022} {}{}\n",
+                code_str.bold(),
+                wrapped_msg
+            ));
             // Guidance: "      → tip" (8 chars used on first line)
             let wrapped_guidance = wrap_text(&issue.guidance, DEFAULT_WRAP_WIDTH, 8, "        ");
             out.push_str(&format!("      \u{2192} {}\n", wrapped_guidance.dimmed()));
@@ -1226,7 +1231,11 @@ mod tests {
         let lines: Vec<&str> = result.lines().collect();
         // Continuation lines should all start with the indent
         for line in lines.iter().skip(1) {
-            assert!(line.starts_with("        "), "Line missing indent: '{}'", line);
+            assert!(
+                line.starts_with("        "),
+                "Line missing indent: '{}'",
+                line
+            );
         }
     }
 

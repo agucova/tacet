@@ -112,7 +112,11 @@ mod tests {
     use super::*;
     use crate::types::{Matrix9, Vector2, Vector9};
 
-    fn make_test_posterior(beta_proj: Vector2, beta_proj_cov: Matrix2, leak_prob: f64) -> Posterior {
+    fn make_test_posterior(
+        beta_proj: Vector2,
+        beta_proj_cov: Matrix2,
+        leak_prob: f64,
+    ) -> Posterior {
         Posterior::new(
             Vector9::zeros(),
             Matrix9::identity(),

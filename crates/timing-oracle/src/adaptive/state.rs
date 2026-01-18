@@ -227,13 +227,13 @@ mod tests {
         let mut state = AdaptiveState::new();
 
         let posterior = Posterior::new(
-            Vector9::zeros(),           // delta_post (dummy 9D)
-            Matrix9::identity(),        // lambda_post (dummy 9D)
-            Vector2::new(10.0, 5.0),    // beta_proj
+            Vector9::zeros(),                 // delta_post (dummy 9D)
+            Matrix9::identity(),              // lambda_post (dummy 9D)
+            Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(4.0, 0.0, 0.0, 1.0), // beta_proj_cov
-            0.75,                       // leak_probability
-            5.0,                        // projection_mismatch_q
-            1000,                       // n
+            0.75,                             // leak_probability
+            5.0,                              // projection_mismatch_q
+            1000,                             // n
         );
 
         let kl = state.update_posterior(posterior.clone());
@@ -285,13 +285,13 @@ mod tests {
         state.update_kl(0.5);
 
         let posterior = Posterior::new(
-            Vector9::zeros(),           // delta_post (dummy 9D)
-            Matrix9::identity(),        // lambda_post (dummy 9D)
-            Vector2::new(10.0, 5.0),    // beta_proj
+            Vector9::zeros(),                 // delta_post (dummy 9D)
+            Matrix9::identity(),              // lambda_post (dummy 9D)
+            Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(4.0, 0.0, 0.0, 1.0), // beta_proj_cov
-            0.75,                       // leak_probability
-            5.0,                        // projection_mismatch_q
-            100,                        // n
+            0.75,                             // leak_probability
+            5.0,                              // projection_mismatch_q
+            100,                              // n
         );
         state.update_posterior(posterior);
 

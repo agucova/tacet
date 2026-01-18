@@ -113,10 +113,9 @@ impl SanityWarning {
     /// Get guidance for addressing this warning.
     pub fn guidance(&self) -> Option<String> {
         match self {
-            SanityWarning::BrokenHarness { .. } => Some(
-                "Ensure baseline/sample closures don't share mutable state."
-                    .into(),
-            ),
+            SanityWarning::BrokenHarness { .. } => {
+                Some("Ensure baseline/sample closures don't share mutable state.".into())
+            }
             SanityWarning::InsufficientSamples { .. } => None,
         }
     }

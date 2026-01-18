@@ -122,7 +122,9 @@ fn no_false_positive_xor_fold() {
         Outcome::Pass { .. } => {
             // Expected - no timing leak in constant-time code
         }
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "FALSE POSITIVE: XOR fold should be constant-time (leak_probability={:.3})",
                 leak_probability
@@ -166,7 +168,9 @@ fn no_false_positive_ct_compare() {
 
     match &outcome {
         Outcome::Pass { .. } => {}
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "FALSE POSITIVE: CT compare should be constant-time (leak_probability={:.3})",
                 leak_probability
@@ -207,7 +211,9 @@ fn no_false_positive_wrapping_sum() {
 
     match &outcome {
         Outcome::Pass { .. } => {}
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "FALSE POSITIVE: Wrapping sum should be constant-time (leak_probability={:.3})",
                 leak_probability
@@ -250,7 +256,9 @@ fn no_false_positive_combined_ops() {
 
     match &outcome {
         Outcome::Pass { .. } => {}
-        Outcome::Fail { leak_probability, .. } => {
+        Outcome::Fail {
+            leak_probability, ..
+        } => {
             panic!(
                 "FALSE POSITIVE: Combined ops should be constant-time (leak_probability={:.3})",
                 leak_probability

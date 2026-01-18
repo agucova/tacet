@@ -1132,8 +1132,13 @@ fn build_result(
                 ToExploitability::ObviousLeak
             };
 
-            let diagnostics =
-                build_diagnostics(calibration, Some(&posterior), elapsed_secs, stationarity_ratio, stationarity_ok);
+            let diagnostics = build_diagnostics(
+                calibration,
+                Some(&posterior),
+                elapsed_secs,
+                stationarity_ratio,
+                stationarity_ok,
+            );
 
             ToResult {
                 outcome: ToOutcome::Fail,
@@ -1160,8 +1165,13 @@ fn build_result(
             samples_per_class,
             elapsed_secs,
         } => {
-            let diagnostics =
-                build_diagnostics(calibration, Some(&posterior), elapsed_secs, stationarity_ratio, stationarity_ok);
+            let diagnostics = build_diagnostics(
+                calibration,
+                Some(&posterior),
+                elapsed_secs,
+                stationarity_ratio,
+                stationarity_ok,
+            );
 
             ToResult {
                 outcome: ToOutcome::Pass,
@@ -1202,8 +1212,13 @@ fn build_result(
             };
 
             let recommendation_ptr = make_recommendation_from_option(recommendation);
-            let diagnostics =
-                build_diagnostics(calibration, posterior.as_ref(), elapsed_secs, stationarity_ratio, stationarity_ok);
+            let diagnostics = build_diagnostics(
+                calibration,
+                posterior.as_ref(),
+                elapsed_secs,
+                stationarity_ratio,
+                stationarity_ok,
+            );
 
             ToResult {
                 outcome: ToOutcome::Inconclusive,

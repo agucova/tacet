@@ -21,6 +21,10 @@ mod quality
 # TOP-LEVEL COMMANDS
 # ============================================================================
 
+# Format all code in workspace
+fmt:
+    cargo fmt --all
+
 # Check compilation without building
 check:
     cargo check --workspace --all-targets

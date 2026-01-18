@@ -347,13 +347,15 @@ fn compute_class_conditional_acf(stream: &[TimingSample]) -> (Vec<f64>, Vec<f64>
     let n = stream.len();
 
     // Compute per-class means for centering
-    let (sum_f, count_f, sum_r, count_r) = stream.iter().fold(
-        (0.0, 0usize, 0.0, 0usize),
-        |(sf, cf, sr, cr), s| match s.class {
-            Class::Baseline => (sf + s.time_ns, cf + 1, sr, cr),
-            Class::Sample => (sf, cf, sr + s.time_ns, cr + 1),
-        },
-    );
+    let (sum_f, count_f, sum_r, count_r) =
+        stream
+            .iter()
+            .fold((0.0, 0usize, 0.0, 0usize), |(sf, cf, sr, cr), s| {
+                match s.class {
+                    Class::Baseline => (sf + s.time_ns, cf + 1, sr, cr),
+                    Class::Sample => (sf, cf, sr + s.time_ns, cr + 1),
+                }
+            });
 
     if count_f < 5 || count_r < 5 {
         return (vec![], vec![], 0);
@@ -383,7 +385,8 @@ fn compute_class_conditional_acf(stream: &[TimingSample]) -> (Vec<f64>, Vec<f64>
 
     // Tuning parameters (same as standard Politis-White)
     let consecutive_insignificant_needed = 5.max(math::log10(n as f64) as usize);
-    let max_lag = (math::ceil(math::sqrt(n as f64)) as usize + consecutive_insignificant_needed).min(n / 2);
+    let max_lag =
+        (math::ceil(math::sqrt(n as f64)) as usize + consecutive_insignificant_needed).min(n / 2);
     let insignificance_threshold = 2.0 * math::sqrt(math::log10(n as f64) / n as f64);
 
     let mut max_abs_acf = vec![0.0; max_lag + 1];

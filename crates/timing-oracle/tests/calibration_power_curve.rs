@@ -24,9 +24,7 @@ use timing_oracle::{AttackerModel, Outcome, TimingOracle};
 // =============================================================================
 
 /// Fine-grained effect multipliers for publication-quality curves.
-const FINE_MULTIPLIERS: [f64; 11] = [
-    0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0,
-];
+const FINE_MULTIPLIERS: [f64; 11] = [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 5.0, 10.0];
 
 /// Quick multipliers for iteration/PR checks.
 const QUICK_MULTIPLIERS: [f64; 6] = [0.0, 0.5, 1.0, 1.5, 2.0, 5.0];
@@ -143,10 +141,7 @@ fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipl
     for &mult in multipliers {
         let effect_ns = (theta_ns * mult) as u64;
 
-        eprintln!(
-            "\n[{}] Testing {:.2}×θ = {}ns",
-            test_name, mult, effect_ns
-        );
+        eprintln!("\n[{}] Testing {:.2}×θ = {}ns", test_name, mult, effect_ns);
 
         let mut detections = 0;
         let mut samples_used: Vec<usize> = Vec::new();
@@ -173,7 +168,9 @@ fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipl
             times_ms.push(elapsed_ms);
 
             match &outcome {
-                Outcome::Fail { samples_used: n, .. } => {
+                Outcome::Fail {
+                    samples_used: n, ..
+                } => {
                     detections += 1;
                     samples_used.push(*n);
                 }
@@ -187,8 +184,12 @@ fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipl
                     detections += 1;
                     samples_used.push(*n);
                 }
-                Outcome::Pass { samples_used: n, .. }
-                | Outcome::Inconclusive { samples_used: n, .. } => {
+                Outcome::Pass {
+                    samples_used: n, ..
+                }
+                | Outcome::Inconclusive {
+                    samples_used: n, ..
+                } => {
                     samples_used.push(*n);
                 }
                 Outcome::Unmeasurable { .. } | Outcome::Research(_) => {

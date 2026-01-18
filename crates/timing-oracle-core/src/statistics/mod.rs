@@ -34,8 +34,8 @@ pub use covariance::{
     bootstrap_difference_covariance_discrete, compute_covariance_rate,
     scale_covariance_for_inference, scale_covariance_rate, CovarianceEstimate,
 };
-pub use online_stats::{OnlineStats, StatsSnapshot};
 pub use detection::{compute_min_uniqueness_ratio, DISCRETE_MODE_THRESHOLD};
+pub use online_stats::{OnlineStats, StatsSnapshot};
 pub use quantile::{
     compute_deciles, compute_deciles_fast, compute_deciles_inplace, compute_deciles_sorted,
     compute_deciles_with_buffer, compute_midquantile, compute_midquantile_deciles,

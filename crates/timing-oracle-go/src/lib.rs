@@ -618,7 +618,8 @@ unsafe fn fill_result_from_outcome(
             (*result).effect.pattern = classify_effect_pattern(shift_ns, tail_ns);
 
             // CI from posterior covariance (simplified)
-            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
+            let ci_width =
+                1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
             (*result).effect.ci_low_ns = total_effect - ci_width;
             (*result).effect.ci_high_ns = total_effect + ci_width;
 
@@ -644,7 +645,8 @@ unsafe fn fill_result_from_outcome(
             (*result).effect.pattern = classify_effect_pattern(shift_ns, tail_ns);
 
             let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
+            let ci_width =
+                1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
             (*result).effect.ci_low_ns = total_effect - ci_width;
             (*result).effect.ci_high_ns = total_effect + ci_width;
 

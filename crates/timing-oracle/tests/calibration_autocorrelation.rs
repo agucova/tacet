@@ -214,8 +214,9 @@ fn run_autocorr_grid(
                             *noise
                         } else {
                             let mut idx = baseline_idx.borrow_mut();
-                            let noise =
-                                baseline_noise.get(*idx % baseline_noise.len()).unwrap_or(&0.0);
+                            let noise = baseline_noise
+                                .get(*idx % baseline_noise.len())
+                                .unwrap_or(&0.0);
                             *idx += 1;
                             *noise
                         };
@@ -233,7 +234,9 @@ fn run_autocorr_grid(
                 // Count rejections (Fail or Inconclusive with high leak probability)
                 let is_rejection = match &outcome {
                     Outcome::Fail { .. } => true,
-                    Outcome::Inconclusive { leak_probability, .. } => *leak_probability >= 0.95,
+                    Outcome::Inconclusive {
+                        leak_probability, ..
+                    } => *leak_probability >= 0.95,
                     _ => false,
                 };
                 if is_rejection {

@@ -373,10 +373,8 @@ pub fn bootstrap_difference_covariance(
     // Use class-conditional acquisition-lag ACF for block length selection (spec §3.3.2).
     // This avoids the anti-conservative bias from computing ACF on the pooled stream,
     // where class alternation masks within-class autocorrelation.
-    let block_size = super::block_length::class_conditional_optimal_block_length(
-        interleaved,
-        is_fragile,
-    );
+    let block_size =
+        super::block_length::class_conditional_optimal_block_length(interleaved, is_fragile);
 
     // Generate bootstrap replicates of Δ* = q_F* - q_R* using joint resampling
     #[cfg(feature = "parallel")]

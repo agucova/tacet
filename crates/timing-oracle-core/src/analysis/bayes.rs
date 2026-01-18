@@ -152,8 +152,12 @@ pub fn compute_bayes_factor(
         compute_2d_projection(&delta_post, &lambda_post, &regularized);
 
     // Monte Carlo for leak probability and effect CI
-    let (leak_probability, effect_magnitude_ci) =
-        run_monte_carlo(&delta_post, &lambda_post, theta, seed.unwrap_or(crate::constants::DEFAULT_SEED));
+    let (leak_probability, effect_magnitude_ci) = run_monte_carlo(
+        &delta_post,
+        &lambda_post,
+        theta,
+        seed.unwrap_or(crate::constants::DEFAULT_SEED),
+    );
 
     BayesResult {
         leak_probability,
@@ -313,7 +317,11 @@ pub struct MaxEffectCI {
 /// Compute 95% CI for max effect: max_k |δ_k|.
 ///
 /// Used by Research mode for stopping conditions.
-pub fn compute_max_effect_ci(delta_post: &Vector9, lambda_post: &Matrix9, seed: u64) -> MaxEffectCI {
+pub fn compute_max_effect_ci(
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
+    seed: u64,
+) -> MaxEffectCI {
     let chol = match Cholesky::new(*lambda_post) {
         Some(c) => c,
         None => {
@@ -446,7 +454,10 @@ mod tests {
         let result = compute_bayes_factor(&delta, &sigma_n, &lambda0, 10.0, Some(42));
 
         // With zero observation, posterior should be pulled toward zero
-        assert!(result.delta_post.norm() < 1.0, "Posterior should be near zero");
+        assert!(
+            result.delta_post.norm() < 1.0,
+            "Posterior should be near zero"
+        );
         assert!(!result.is_clamped);
     }
 
@@ -507,7 +518,11 @@ mod tests {
             "Tail should be ~0, got {}",
             beta_proj[1]
         );
-        assert!(q_proj < 1.0, "Uniform shift should have low Q, got {}", q_proj);
+        assert!(
+            q_proj < 1.0,
+            "Uniform shift should have low Q, got {}",
+            q_proj
+        );
     }
 
     #[test]

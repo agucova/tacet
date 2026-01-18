@@ -52,7 +52,10 @@ mod tests {
         let baseline = vec![100.0; 1000];
         let sample = vec![100.0; 1000];
         let ratio = compute_min_uniqueness_ratio(&baseline, &sample);
-        assert!(ratio < 0.01, "All identical values should give very low ratio");
+        assert!(
+            ratio < 0.01,
+            "All identical values should give very low ratio"
+        );
     }
 
     #[test]
@@ -99,6 +102,9 @@ mod tests {
         let sample = vec![200.0, 200.0001, 200.0002];
         let ratio = compute_min_uniqueness_ratio(&baseline, &sample);
         // All should be quantized to same bucket
-        assert!(ratio < 0.5, "Sub-0.001ns differences should be treated as identical");
+        assert!(
+            ratio < 0.5,
+            "Sub-0.001ns differences should be treated as identical"
+        );
     }
 }
