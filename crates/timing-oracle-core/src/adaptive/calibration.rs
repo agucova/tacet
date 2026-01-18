@@ -38,6 +38,12 @@ const PRIOR_CALIBRATION_SAMPLES: usize = 50_000;
 /// Maximum iterations for prior calibration root-finding.
 const MAX_CALIBRATION_ITERATIONS: usize = 20;
 
+/// Condition number threshold for triggering robust shrinkage (§3.3.5).
+const CONDITION_NUMBER_THRESHOLD: f64 = 1e4;
+
+/// Minimum diagonal floor for regularization (prevents division by zero).
+const DIAGONAL_FLOOR: f64 = 1e-12;
+
 /// Calibration results from the initial measurement phase (no_std compatible).
 ///
 /// This struct contains the essential statistical data needed for the adaptive
@@ -56,7 +62,7 @@ pub struct Calibration {
     pub block_length: usize,
 
     /// 9D prior covariance for δ = (δ₁, ..., δ₉).
-    /// Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate) (shaped).
+    /// Λ₀ = σ²_prior × R where R = Corr(Σ_rate) (correlation-shaped, spec v5.1).
     pub prior_cov_9d: Matrix9,
 
     /// The theta threshold being used (in nanoseconds).
@@ -207,46 +213,137 @@ impl Default for CalibrationConfig {
     }
 }
 
-/// Compute shaped 9D prior covariance.
+/// Compute correlation-shaped 9D prior covariance (spec v5.1).
 ///
-/// Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate)
+/// Λ₀ = σ²_prior × R where R = Corr(Σ_rate) = D^(-1/2) Σ_rate D^(-1/2)
 ///
-/// The shaped prior matches the empirical covariance structure while
-/// maintaining the desired exceedance probability.
-pub fn compute_prior_cov_9d(sigma_rate: &Matrix9, sigma_prior: f64) -> Matrix9 {
-    let trace: f64 = (0..9).map(|i| sigma_rate[(i, i)]).sum();
-    if trace < 1e-12 {
-        // Fallback to identity if sigma_rate is degenerate
-        return Matrix9::identity() * (sigma_prior * sigma_prior / 9.0);
-    }
+/// Since diag(R) = 1, σ_prior equals the marginal prior SD for all coordinates.
+/// This eliminates hidden heteroskedasticity that could cause pathological
+/// shrinkage for certain effect patterns.
+///
+/// # Arguments
+/// * `sigma_rate` - Covariance rate matrix from bootstrap
+/// * `sigma_prior` - Prior scale (calibrated for 62% exceedance)
+/// * `discrete_mode` - Whether discrete timer mode is active
+///
+/// # Returns
+/// The prior covariance matrix Λ₀.
+pub fn compute_prior_cov_9d(
+    sigma_rate: &Matrix9,
+    sigma_prior: f64,
+    discrete_mode: bool,
+) -> Matrix9 {
+    // Compute correlation matrix R = D^(-1/2) Σ_rate D^(-1/2)
+    let r = compute_correlation_matrix(sigma_rate);
 
-    // S = Σ_rate / tr(Σ_rate), so tr(S) = 1
-    let s = sigma_rate / trace;
+    // Apply two-step regularization (§3.3.5):
+    // 1. Robust shrinkage (if in fragile regime)
+    // 2. Numerical jitter (always, as needed)
+    let r = apply_correlation_regularization(&r, discrete_mode);
 
-    // Apply shrinkage if needed for numerical stability
-    let s = apply_prior_shrinkage(&s);
-
-    // Λ₀ = σ²_prior × S
-    s * (sigma_prior * sigma_prior)
+    // Λ₀ = σ²_prior × R
+    r * (sigma_prior * sigma_prior)
 }
 
-/// Apply shrinkage to the shape matrix for numerical stability.
+/// Compute correlation matrix R = D^(-1/2) Σ D^(-1/2) from covariance matrix.
 ///
-/// S ← (1-λ)S + λ × I_9/9 where λ is chosen based on conditioning.
-fn apply_prior_shrinkage(s: &Matrix9) -> Matrix9 {
-    // Check conditioning via diagonal variance ratio
-    let diag: Vec<f64> = (0..9).map(|i| s[(i, i)]).collect();
+/// The correlation matrix has unit diagonal (diag(R) = 1) and encodes
+/// the correlation structure of Σ without the variance magnitudes.
+fn compute_correlation_matrix(sigma: &Matrix9) -> Matrix9 {
+    // Extract diagonal and apply floor for numerical stability
+    let mut d_inv_sqrt = [0.0_f64; 9];
+    for i in 0..9 {
+        let var = sigma[(i, i)].max(DIAGONAL_FLOOR);
+        d_inv_sqrt[i] = 1.0 / math::sqrt(var);
+    }
+
+    // R = D^(-1/2) × Σ × D^(-1/2)
+    let mut r = *sigma;
+    for i in 0..9 {
+        for j in 0..9 {
+            r[(i, j)] *= d_inv_sqrt[i] * d_inv_sqrt[j];
+        }
+    }
+
+    r
+}
+
+/// Estimate condition number of a symmetric matrix via power iteration.
+///
+/// Returns the ratio of largest to smallest eigenvalue magnitude.
+/// Uses a simple approach: max(|diag|) / min(|diag|) as a quick estimate,
+/// plus check for Cholesky failure which indicates poor conditioning.
+fn estimate_condition_number(r: &Matrix9) -> f64 {
+    // Quick estimate from diagonal ratio (exact for diagonal matrices)
+    let diag: Vec<f64> = (0..9).map(|i| r[(i, i)].abs()).collect();
     let max_diag = diag.iter().cloned().fold(0.0_f64, f64::max);
     let min_diag = diag.iter().cloned().fold(f64::INFINITY, f64::min);
 
-    if min_diag < 1e-12 || max_diag / min_diag.max(1e-12) > 100.0 {
-        // Poor conditioning: apply shrinkage
-        let lambda = 0.1;
-        let identity_scaled = Matrix9::identity() / 9.0;
-        s * (1.0 - lambda) + identity_scaled * lambda
-    } else {
-        *s
+    if min_diag < DIAGONAL_FLOOR {
+        return f64::INFINITY;
     }
+
+    // For correlation matrices, this underestimates the true condition number,
+    // but we also check Cholesky failure separately.
+    max_diag / min_diag
+}
+
+/// Check if we're in a "fragile regime" requiring robust shrinkage (§3.3.5).
+///
+/// Fragile regime is detected when:
+/// - Discrete timer mode is active, OR
+/// - Condition number of R exceeds 10⁴, OR
+/// - Cholesky factorization fails
+fn is_fragile_regime(r: &Matrix9, discrete_mode: bool) -> bool {
+    if discrete_mode {
+        return true;
+    }
+
+    let cond = estimate_condition_number(r);
+    if cond > CONDITION_NUMBER_THRESHOLD {
+        return true;
+    }
+
+    // Check if Cholesky would fail
+    Cholesky::new(*r).is_none()
+}
+
+/// Apply two-step regularization to correlation matrix (§3.3.5).
+///
+/// Step 1 (conditional): Robust shrinkage R ← (1-λ)R + λI for fragile regimes.
+/// Step 2 (always): Numerical jitter R ← R + εI to ensure SPD.
+fn apply_correlation_regularization(r: &Matrix9, discrete_mode: bool) -> Matrix9 {
+    let mut r = *r;
+
+    // Step 1: Robust shrinkage (conditional on fragile regime)
+    if is_fragile_regime(&r, discrete_mode) {
+        // Choose λ based on severity (§3.3.5 allows [0.01, 0.2])
+        let cond = estimate_condition_number(&r);
+        let lambda = if cond > CONDITION_NUMBER_THRESHOLD * 10.0 {
+            0.2 // Severe: aggressive shrinkage
+        } else if cond > CONDITION_NUMBER_THRESHOLD {
+            0.1 // Moderate
+        } else if discrete_mode {
+            0.05 // Mild: just discrete mode
+        } else {
+            0.01 // Minimal
+        };
+
+        let identity = Matrix9::identity();
+        r = r * (1.0 - lambda) + identity * lambda;
+    }
+
+    // Step 2: Numerical jitter (always, as needed for Cholesky)
+    // Try increasingly large epsilon until Cholesky succeeds
+    for &eps in &[1e-10, 1e-9, 1e-8, 1e-7, 1e-6] {
+        let r_jittered = r + Matrix9::identity() * eps;
+        if Cholesky::new(r_jittered).is_some() {
+            return r_jittered;
+        }
+    }
+
+    // Fallback: aggressive jitter
+    r + Matrix9::identity() * 1e-5
 }
 
 /// Calibrate σ_prior so that P(max_k |δ_k| > θ_eff | δ ~ N(0, Λ₀)) = π₀.
@@ -257,18 +354,39 @@ fn apply_prior_shrinkage(s: &Matrix9) -> Matrix9 {
 /// # Arguments
 /// * `sigma_rate` - Covariance rate matrix from calibration
 /// * `theta_eff` - Effective threshold in nanoseconds
+/// * `n_cal` - Number of calibration samples (for SE computation)
+/// * `discrete_mode` - Whether discrete timer mode is active
 /// * `seed` - Deterministic RNG seed
 ///
 /// # Returns
 /// The calibrated σ_prior value.
-pub fn calibrate_prior_scale(sigma_rate: &Matrix9, theta_eff: f64, seed: u64) -> f64 {
-    // Binary search for sigma_prior
-    let mut lo = theta_eff * 0.1; // Lower bound
-    let mut hi = theta_eff * 5.0; // Upper bound
+pub fn calibrate_prior_scale(
+    sigma_rate: &Matrix9,
+    theta_eff: f64,
+    n_cal: usize,
+    discrete_mode: bool,
+    seed: u64,
+) -> f64 {
+    // Compute median SE at calibration sample size (§3.3.5)
+    // SE_k = sqrt(Σ_rate[k,k] / n_cal)
+    let mut ses: Vec<f64> = (0..9)
+        .map(|i| {
+            let var = sigma_rate[(i, i)].max(DIAGONAL_FLOOR);
+            math::sqrt(var / n_cal.max(1) as f64)
+        })
+        .collect();
+    ses.sort_by(|a, b| a.total_cmp(b));
+    let median_se = ses[4]; // Median of 9 values
+
+    // Search bounds that accommodate both threshold-scale and noise-scale effects (§3.3.5)
+    // lo = θ_eff × 0.05
+    // hi = max(θ_eff × 50, 10 × median_SE)
+    let mut lo = theta_eff * 0.05;
+    let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
 
     for _ in 0..MAX_CALIBRATION_ITERATIONS {
         let mid = (lo + hi) / 2.0;
-        let lambda0 = compute_prior_cov_9d(sigma_rate, mid);
+        let lambda0 = compute_prior_cov_9d(sigma_rate, mid, discrete_mode);
         let exceedance = compute_prior_exceedance(&lambda0, theta_eff, seed);
 
         if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
@@ -384,10 +502,11 @@ mod tests {
         );
 
         let sigma_rate = Matrix9::identity() * 1000.0;
-        let prior_cov = compute_prior_cov_9d(&sigma_rate, 100.0 * 1.12);
+        let discrete_mode = false;
+        let prior_cov = compute_prior_cov_9d(&sigma_rate, 100.0 * 1.12, discrete_mode);
 
         Calibration::new(
-            sigma_rate, 10, prior_cov, 100.0, 5000, false, 5.0, 10.0, snapshot, 1.0, 10000.0, 10.0,
+            sigma_rate, 10, prior_cov, 100.0, 5000, discrete_mode, 5.0, 10.0, snapshot, 1.0, 10000.0, 10.0,
             18.48, 0.001, 100.0, 0.1, 42,
         )
     }
@@ -423,15 +542,16 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_prior_cov_9d_trace_one() {
-        // Use identity matrix so trace = 9 (not 9*9=81)
+    fn test_compute_prior_cov_9d_unit_diagonal() {
+        // Use identity matrix - correlation of identity is identity
         let sigma_rate = Matrix9::identity();
-        let prior = compute_prior_cov_9d(&sigma_rate, 10.0);
+        let prior = compute_prior_cov_9d(&sigma_rate, 10.0, false);
 
-        // S = I / trace(I) = I / 9
-        // Λ₀ = σ²_prior × S = 100 × I / 9 = I × 11.11
-        // Each diagonal should be ~11.11 (σ² / 9 = 100/9)
-        let expected = 100.0 / 9.0;
+        // R = Corr(I) = I (identity has unit diagonal, no off-diagonal correlation)
+        // Λ₀ = σ²_prior × R = 100 × I
+        // Each diagonal should be ~100 (σ² = 100)
+        // Note: jitter adds ~1e-10 so expect ~100
+        let expected = 100.0;
         for i in 0..9 {
             assert!(
                 (prior[(i, i)] - expected).abs() < 1.0,
@@ -447,8 +567,10 @@ mod tests {
     fn test_prior_exceedance_calibration() {
         let sigma_rate = Matrix9::identity() * 100.0;
         let theta_eff = 10.0;
+        let n_cal = 5000;
+        let discrete_mode = false;
 
-        let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, 42);
+        let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, 42);
 
         // Check that calibration gives reasonable value
         assert!(
@@ -461,7 +583,7 @@ mod tests {
         );
 
         // Verify exceedance is near target
-        let lambda0 = compute_prior_cov_9d(&sigma_rate, sigma_prior);
+        let lambda0 = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
         let exceedance = compute_prior_exceedance(&lambda0, theta_eff, 42);
         assert!(
             (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,

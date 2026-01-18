@@ -518,13 +518,150 @@ fn test_research_mode() {
         )
     };
 
-    // Research mode uses θ=0, which is very sensitive
-    // Any tiny difference might be detected
-    // Just verify the test runs and returns valid results
+    // Research mode should return Research outcome (not Pass/Fail/Inconclusive)
+    assert_eq!(
+        result.outcome,
+        ToOutcome::Research,
+        "Research mode should return Research outcome, got {:?}",
+        result.outcome
+    );
+
+    // Verify research-specific fields are populated
     assert!(
         result.leak_probability >= 0.0 && result.leak_probability <= 1.0,
         "Research mode should return valid probability"
     );
+
+    // Check research_status is a valid variant
+    assert!(
+        matches!(
+            result.research_status,
+            ToResearchStatus::EffectDetected
+                | ToResearchStatus::NoEffectDetected
+                | ToResearchStatus::ResolutionLimitReached
+                | ToResearchStatus::QualityIssue
+                | ToResearchStatus::BudgetExhausted
+        ),
+        "Research status should be a valid variant"
+    );
+
+    // max_effect fields should be populated (even if 0.0)
+    assert!(
+        result.max_effect_ns.is_finite(),
+        "max_effect_ns should be finite"
+    );
+    assert!(
+        result.max_effect_ci_low.is_finite(),
+        "max_effect_ci_low should be finite"
+    );
+    assert!(
+        result.max_effect_ci_high.is_finite(),
+        "max_effect_ci_high should be finite"
+    );
+
+    // CI should be ordered correctly
+    assert!(
+        result.max_effect_ci_low <= result.max_effect_ns,
+        "CI low ({}) should be <= mean ({})",
+        result.max_effect_ci_low,
+        result.max_effect_ns
+    );
+    assert!(
+        result.max_effect_ns <= result.max_effect_ci_high,
+        "mean ({}) should be <= CI high ({})",
+        result.max_effect_ns,
+        result.max_effect_ci_high
+    );
+
+    // Diagnostics should include theta values
+    assert!(
+        result.diagnostics.theta_user == 0.0,
+        "Research mode theta_user should be 0.0"
+    );
+    assert!(
+        result.diagnostics.theta_floor >= 0.0,
+        "theta_floor should be non-negative"
+    );
+
+    eprintln!(
+        "[test_research_mode] status={:?}, max_effect={:.2}ns [{:.2}, {:.2}], detectable={}",
+        result.research_status,
+        result.max_effect_ns,
+        result.max_effect_ci_low,
+        result.max_effect_ci_high,
+        result.research_detectable
+    );
+
+    // Note: to_result_free is for C callers; in Rust tests we skip it
+}
+
+/// Test research mode with a known-leaky operation to verify effect detection
+#[test]
+fn test_research_mode_with_leak() {
+    let mut config = to_config_default(ToAttackerModel::Research);
+    config.time_budget_secs = 15.0;
+    config.max_samples = 15000;
+
+    let mut ctx = TestContext {
+        rng: StdRng::seed_from_u64(99999),
+    };
+
+    let result = unsafe {
+        to_test(
+            &config,
+            512, // Larger input for more pronounced leak
+            random_generator,
+            early_exit_operation, // Known leaky operation
+            &mut ctx as *mut TestContext as *mut c_void,
+        )
+    };
+
+    // Should return Research outcome
+    assert_eq!(
+        result.outcome,
+        ToOutcome::Research,
+        "Research mode should return Research outcome, got {:?}",
+        result.outcome
+    );
+
+    // max_effect fields should be populated with valid values
+    assert!(
+        result.max_effect_ns.is_finite(),
+        "max_effect_ns should be finite"
+    );
+    assert!(
+        result.max_effect_ci_low.is_finite(),
+        "max_effect_ci_low should be finite"
+    );
+    assert!(
+        result.max_effect_ci_high.is_finite(),
+        "max_effect_ci_high should be finite"
+    );
+
+    // With a leaky operation, we expect to see an effect
+    // EffectDetected or BudgetExhausted (if we didn't reach threshold)
+    // QualityIssue is also possible if noise is high
+    eprintln!(
+        "[test_research_mode_with_leak] status={:?}, max_effect={:.2}ns [{:.2}, {:.2}], detectable={}, theta_floor={:.2}ns",
+        result.research_status,
+        result.max_effect_ns,
+        result.max_effect_ci_low,
+        result.max_effect_ci_high,
+        result.research_detectable,
+        result.diagnostics.theta_floor
+    );
+
+    // If we got EffectDetected, verify that research_detectable is true
+    if result.research_status == ToResearchStatus::EffectDetected {
+        assert!(
+            result.research_detectable,
+            "research_detectable should be true when EffectDetected"
+        );
+        assert!(
+            result.max_effect_ci_low > 0.0,
+            "max_effect_ci_low should be > 0 when effect detected"
+        );
+    }
 
     // Note: to_result_free is for C callers; in Rust tests we skip it
 }

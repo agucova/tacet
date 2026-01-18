@@ -557,4 +557,74 @@ mod tests {
             exc_neg
         );
     }
+
+    /// Regression test for spec v5.1: large effect + noisy likelihood regime.
+    ///
+    /// This test ensures that obvious timing leaks (effect ≫ θ) are detected
+    /// even when measurement noise is high (SE ≫ θ). The prior shape change
+    /// from trace-normalized S to correlation matrix R was motivated by this
+    /// failure mode.
+    ///
+    /// Test values based on SILENT web app dataset:
+    /// - θ_eff = 100 ns
+    /// - True effect ≈ 100× threshold (10,000-18,000 ns)
+    /// - Data SEs ≈ 25-80× threshold (2,500-8,000 ns)
+    ///
+    /// With the v5.1 correlation-shaped prior, P(leak) should be > 0.99.
+    #[test]
+    fn test_large_effect_noisy_likelihood_regression() {
+        use crate::adaptive::{calibrate_prior_scale, compute_prior_cov_9d};
+
+        // Fixed values based on SILENT web app dataset
+        let delta = Vector9::from_row_slice(&[
+            10366.0, 13156.0, 13296.0, 12800.0, 11741.0, 12936.0, 13215.0, 11804.0, 18715.0,
+        ]);
+
+        // Variance = SE² (diagonal covariance)
+        let ses = [2731.0, 2796.0, 2612.0, 2555.0, 2734.0, 3125.0, 3953.0, 5662.0, 8105.0];
+        let mut sigma_n = Matrix9::zeros();
+        for i in 0..9 {
+            sigma_n[(i, i)] = ses[i] * ses[i];
+        }
+
+        // Sigma_rate = Sigma_n * n (n = 10,000 samples)
+        let n = 10_000usize;
+        let sigma_rate = sigma_n * (n as f64);
+
+        let theta_eff = 100.0;
+        let discrete_mode = false;
+        let seed = 0xDEADBEEF_u64;
+
+        // Compute prior using v5.1 correlation-shaped method
+        let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, seed);
+        let prior_cov = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
+
+        // Debug output
+        eprintln!("sigma_prior = {}", sigma_prior);
+        eprintln!("Prior diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
+            prior_cov[(0, 0)], prior_cov[(1, 1)], prior_cov[(8, 8)]);
+        eprintln!("Sigma_n diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
+            sigma_n[(0, 0)], sigma_n[(1, 1)], sigma_n[(8, 8)]);
+        eprintln!("Precision ratio Σ_n/Λ₀: [{:.4}, {:.4}, ..., {:.4}]",
+            sigma_n[(0, 0)] / prior_cov[(0, 0)],
+            sigma_n[(1, 1)] / prior_cov[(1, 1)],
+            sigma_n[(8, 8)] / prior_cov[(8, 8)]);
+
+        // Compute Bayes factor
+        let result = compute_bayes_factor(&delta, &sigma_n, &prior_cov, theta_eff, Some(seed));
+
+        eprintln!("P(leak) = {}", result.leak_probability);
+        eprintln!("delta_post[0..3] = [{:.1}, {:.1}, {:.1}]",
+            result.delta_post[0], result.delta_post[1], result.delta_post[2]);
+
+        // With effect ≈ 100× threshold, P(leak) MUST be > 0.99
+        assert!(
+            result.leak_probability > 0.99,
+            "Large effect ({:.0}ns mean) with θ={:.0}ns should give P(leak) > 0.99, got {:.4}. \
+             This regression indicates the prior shape fix (v5.1) may have broken.",
+            delta.iter().sum::<f64>() / 9.0,
+            theta_eff,
+            result.leak_probability
+        );
+    }
 }

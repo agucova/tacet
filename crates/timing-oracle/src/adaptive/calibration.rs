@@ -352,19 +352,19 @@ pub fn calibrate(
         theta_floor_initial
     };
 
-    // Set 9D prior covariance (spec Section 2.5)
+    // Set 9D prior covariance (spec v5.1 §3.3.5)
     //
     // The prior is calibrated so that P(max_k |δ_k| > θ_eff | prior) ≈ 62%,
     // representing reasonable uncertainty about the presence of timing leaks.
     //
-    // We use a shaped prior: Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate).
-    // This matches the empirical covariance structure while maintaining
-    // the desired exceedance probability.
+    // v5.1 uses a correlation-shaped prior: Λ₀ = σ²_prior × R where R = Corr(Σ_rate).
+    // Since diag(R) = 1, σ_prior is the marginal prior SD for all coordinates.
+    // This eliminates hidden heteroskedasticity that could cause pathological shrinkage.
     //
     // The variance ratio quality gate (Gate 1) catches cases where
     // posterior ≈ prior (data uninformative).
-    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, config.seed);
-    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior);
+    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
+    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
 
     Ok(Calibration {
         sigma_rate,

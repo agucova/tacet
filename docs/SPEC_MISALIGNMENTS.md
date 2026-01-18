@@ -21,18 +21,6 @@ This document tracks discrepancies between the specification (`docs/spec.md`) an
 
 **Mitigation:** Users can manually verify their test setup. The `diagnostics.preflight_ok` field is currently always true.
 
-### C Library: Research Mode Behavior (Spec §3.6)
-
-**Status:** Types added, behavior pending
-
-**Location:** `crates/timing-oracle-c/src/types.rs`, `crates/timing-oracle-c/include/timing_oracle.h`
-
-**Issue:** The C library has Research mode types (`ToResearchStatus`, `ToOutcome::Research`) but the adaptive loop doesn't yet return `Research` outcome - it uses standard Pass/Fail/Inconclusive with θ=0.
-
-**Impact:** Low - Users can still use Research mode (θ=0), but get standard outcomes instead of Research-specific outcomes with `max_effect_ns` and `detectable` fields.
-
----
-
 ### Previously Active (C Library) - Resolved
 
 The following items were identified as gaps in the C library but have since been resolved:
@@ -42,10 +30,33 @@ The following items were identified as gaps in the C library but have since been
 3. **Condition drift check** - Gate 7 now implemented in adaptive loop (spec §3.5.2)
 4. **Configurable constants** - Config now supports `calibration_samples`, `batch_size`, `bootstrap_iterations`
 5. **Research mode types** - Added `ToResearchStatus` enum and research fields in `ToResult`
+6. **Research mode behavior** - Fully implemented per spec §3.6 (see resolved items below)
 
 ---
 
 ## Resolved Misalignments
+
+### 7. C Library Research Mode Behavior (Spec §3.6)
+
+**Resolved:** 2026-01-17
+
+**Location:** `crates/timing-oracle-c/src/lib.rs`
+
+**Issue:** The C library had Research mode types (`ToResearchStatus`, `ToOutcome::Research`) but returned standard Pass/Fail/Inconclusive outcomes when using `AttackerModel::Research`.
+
+**Fix:** Implemented full Research mode behavior in `build_result()`:
+- When `attacker_model == Research`, returns `ToOutcome::Research` instead of Pass/Fail/Inconclusive
+- Computes `max_effect_ns` and 95% credible interval using `compute_max_effect_ci()`
+- Sets `research_detectable` based on whether CI lower bound exceeds `theta_floor`
+- Determines `research_status` based on spec §3.6 criteria:
+  - `EffectDetected`: CI lower bound > 1.1 × theta_floor
+  - `NoEffectDetected`: CI upper bound < 0.9 × theta_floor
+  - `ResolutionLimitReached`: theta_floor ≤ theta_tick × 1.01
+  - `QualityIssue`: Quality gate triggered (data too noisy, not learning, etc.)
+  - `BudgetExhausted`: Time/sample budget reached without conclusion
+- Sets `research_model_mismatch` when projection mismatch exceeds threshold
+
+**Verification:** `cargo test -p timing-oracle-c test_research_mode` validates Research outcome with proper fields.
 
 ### 4. C Library Missing Diagnostics Struct (Spec §2.8)
 

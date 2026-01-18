@@ -73,6 +73,7 @@ mod types;
 
 // Functional modules
 pub mod analysis;
+pub mod data;
 pub mod helpers;
 pub mod measurement;
 pub mod output;

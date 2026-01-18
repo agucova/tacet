@@ -1389,6 +1389,89 @@ impl TimingOracle {
             diagnostics,
         })
     }
+
+    // =========================================================================
+    // Raw sample analysis methods
+    // =========================================================================
+
+    /// Analyze pre-collected timing samples in a single pass.
+    ///
+    /// This method computes the posterior probability of a timing leak given
+    /// fixed sets of baseline and test samples. Unlike the `test` method, it
+    /// does not collect new samples - it works with what it has.
+    ///
+    /// Useful for:
+    /// - Analyzing data from external tools (SILENT, dudect, etc.)
+    /// - Replaying historical measurements
+    /// - Testing with synthetic or simulated data
+    ///
+    /// # Arguments
+    /// * `baseline_ns` - Baseline timing samples in nanoseconds
+    /// * `test_ns` - Test timing samples in nanoseconds
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel, Outcome};
+    ///
+    /// // Load pre-collected samples
+    /// let baseline_ns: Vec<f64> = load_samples("baseline.csv");
+    /// let test_ns: Vec<f64> = load_samples("test.csv");
+    ///
+    /// let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    ///     .analyze_raw_samples(&baseline_ns, &test_ns);
+    ///
+    /// match outcome {
+    ///     Outcome::Pass { .. } => println!("No leak detected"),
+    ///     Outcome::Fail { .. } => println!("Leak detected!"),
+    ///     _ => {}
+    /// }
+    /// ```
+    pub fn analyze_raw_samples(&self, baseline_ns: &[f64], test_ns: &[f64]) -> Outcome {
+        use crate::adaptive::single_pass::{analyze_single_pass, SinglePassConfig};
+
+        let theta_ns = self.config.resolve_min_effect_ns(None, None);
+
+        let config = SinglePassConfig {
+            theta_ns,
+            pass_threshold: self.config.pass_threshold,
+            fail_threshold: self.config.fail_threshold,
+            bootstrap_iterations: 2000,
+            seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+        };
+
+        let result = analyze_single_pass(baseline_ns, test_ns, &config);
+        result.outcome
+    }
+
+    /// Analyze timing data loaded from a file or external source.
+    ///
+    /// This is a convenience wrapper around `analyze_raw_samples` that accepts
+    /// `TimingData` loaded via the data module.
+    ///
+    /// # Arguments
+    /// * `data` - Timing data with baseline and test samples
+    /// * `cpu_freq_ghz` - CPU frequency in GHz (for cycle-to-ns conversion, optional)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel, data::load_silent_csv};
+    /// use std::path::Path;
+    ///
+    /// let data = load_silent_csv(Path::new("measurements.csv")).unwrap();
+    /// let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    ///     .analyze_timing_data(&data, Some(3.0)); // 3 GHz CPU
+    /// ```
+    pub fn analyze_timing_data(
+        &self,
+        data: &crate::data::TimingData,
+        cpu_freq_ghz: Option<f64>,
+    ) -> Outcome {
+        let ns_per_unit = data.unit.ns_per_unit(cpu_freq_ghz);
+        let (baseline_ns, test_ns) = data.to_nanoseconds(ns_per_unit);
+        self.analyze_raw_samples(&baseline_ns, &test_ns)
+    }
 }
 
 // =============================================================================

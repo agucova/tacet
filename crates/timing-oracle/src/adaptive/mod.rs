@@ -30,6 +30,7 @@
 
 mod calibration;
 mod loop_runner;
+pub mod single_pass;
 mod state;
 
 // Re-export from timing-oracle-core
@@ -41,4 +42,5 @@ pub use timing_oracle_core::adaptive::{
 // Local exports
 pub use calibration::{calibrate, Calibration, CalibrationConfig, CalibrationError};
 pub use loop_runner::{run_adaptive, AdaptiveConfig, AdaptiveOutcome};
+pub use single_pass::{analyze_single_pass, SinglePassConfig, SinglePassResult};
 pub use state::AdaptiveState;

@@ -950,9 +950,9 @@ fn run_calibration_phase<F: Fn() -> f64>(
     };
     let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
 
-    // Compute 9D prior covariance using calibrated scale factor
-    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, rng_seed);
-    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior);
+    // Compute 9D prior covariance using calibrated scale factor (spec v5.1)
+    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, calibration_samples, discrete_mode, rng_seed);
+    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
 
     let calibration = Calibration::new(
         sigma_rate,
@@ -1143,10 +1143,6 @@ fn build_result(
                 samples_per_class,
                 elapsed_secs,
             } => (posterior.clone(), *samples_per_class, *elapsed_secs, true, Some(reason.clone())),
-            AdaptiveOutcome::Continue { .. } => {
-                // Should not happen, but handle gracefully
-                (None, 0, 0.0, true, None)
-            }
         };
 
     // Research mode: convert to Research outcome
@@ -1370,17 +1366,6 @@ fn build_result(
                 platform: c"".as_ptr(),
                 adaptive_batching_used: batch_k > 1,
                 diagnostics,
-                ..ToResult::default()
-            }
-        }
-
-        AdaptiveOutcome::Continue { .. } => {
-            // Should not happen in normal flow
-            ToResult {
-                outcome: ToOutcome::Inconclusive,
-                inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
-                timer_resolution_ns,
-                timer_name,
                 ..ToResult::default()
             }
         }
