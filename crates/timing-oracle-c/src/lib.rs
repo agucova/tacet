@@ -814,8 +814,8 @@ fn run_calibration_phase<F: Fn() -> f64>(
     Box<ToResult>,
 > {
     use timing_oracle_core::adaptive::{
-        calibrate_prior_scale, compute_prior_cov_9d, AdaptiveState, Calibration,
-        CalibrationSnapshot,
+        calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, AdaptiveState,
+        Calibration, CalibrationSnapshot, MIXTURE_PRIOR_WEIGHT,
     };
     use timing_oracle_core::statistics::{
         bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
@@ -950,14 +950,28 @@ fn run_calibration_phase<F: Fn() -> f64>(
     };
     let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
 
-    // Compute 9D prior covariance using calibrated scale factor (spec v5.1)
-    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, calibration_samples, discrete_mode, rng_seed);
-    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
+    // Compute v5.2 mixture prior: slab first, then calibrate narrow
+    let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, calibration_samples);
+    let sigma_narrow = calibrate_narrow_scale(
+        &sigma_rate,
+        theta_eff,
+        calibration_samples,
+        sigma_slab,
+        MIXTURE_PRIOR_WEIGHT,
+        discrete_mode,
+        rng_seed,
+    );
+    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
+    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
     let calibration = Calibration::new(
         sigma_rate,
         10, // block_length (default)
-        prior_cov_9d,
+        prior_cov_narrow,
+        prior_cov_slab,
+        sigma_narrow,
+        sigma_slab,
+        MIXTURE_PRIOR_WEIGHT,
         theta_ns,
         calibration_samples,
         discrete_mode, // Detected from uniqueness ratio

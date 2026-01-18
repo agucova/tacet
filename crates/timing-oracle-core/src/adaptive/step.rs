@@ -328,7 +328,9 @@ pub fn adaptive_step(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_9d,
+        prior_cov_9d: &calibration.prior_cov_narrow, // v5.2: narrow component
+        prior_cov_slab: Some(&calibration.prior_cov_slab), // v5.2: slab component
+        narrow_weight_post: posterior.narrow_weight_post, // v5.2: from Bayes result
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs,
@@ -442,24 +444,31 @@ mod tests {
             },
         );
 
+        // v5.2 mixture prior
+        let prior_cov_narrow = Matrix9::identity() * 10000.0; // 100^2
+        let prior_cov_slab = Matrix9::identity() * 250000.0; // 500^2
         Calibration::new(
-            Matrix9::identity() * 1000.0,  // sigma_rate
-            10,                            // block_length
-            Matrix9::identity() * 10000.0, // prior_cov_9d
-            100.0,                         // theta_ns
-            5000,                          // calibration_samples
-            false,                         // discrete_mode
-            5.0,                           // mde_shift_ns
-            10.0,                          // mde_tail_ns
-            snapshot,                      // calibration_snapshot
-            1.0,                           // timer_resolution_ns
-            100_000.0,                     // samples_per_second
-            10.0,                          // c_floor
-            18.48,                         // projection_mismatch_thresh
-            0.001,                         // theta_tick
-            100.0,                         // theta_eff
-            0.1,                           // theta_floor_initial
-            42,                            // rng_seed
+            Matrix9::identity() * 1000.0, // sigma_rate
+            10,                           // block_length
+            prior_cov_narrow,             // prior_cov_narrow
+            prior_cov_slab,               // prior_cov_slab
+            100.0,                        // sigma_narrow
+            500.0,                        // sigma_slab
+            0.99,                         // prior_weight
+            100.0,                        // theta_ns
+            5000,                         // calibration_samples
+            false,                        // discrete_mode
+            5.0,                          // mde_shift_ns
+            10.0,                         // mde_tail_ns
+            snapshot,                     // calibration_snapshot
+            1.0,                          // timer_resolution_ns
+            100_000.0,                    // samples_per_second
+            10.0,                         // c_floor
+            18.48,                        // projection_mismatch_thresh
+            0.001,                        // theta_tick
+            100.0,                        // theta_eff
+            0.1,                          // theta_floor_initial
+            42,                           // rng_seed
         )
     }
 

@@ -18,7 +18,7 @@ use crate::adaptive::{
     AdaptiveState, Calibration, InconclusiveReason, Posterior, QualityGateCheckInputs,
     QualityGateConfig, QualityGateResult,
 };
-use crate::analysis::bayes::compute_bayes_factor;
+use crate::analysis::bayes::compute_bayes_factor_mixture;
 use crate::constants::DEFAULT_SEED;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 use timing_oracle_core::adaptive::check_quality_gates;
@@ -235,9 +235,12 @@ pub fn run_adaptive(
     // a confident Pass/Fail decision, even if the posterior would otherwise
     // cross the threshold.
     let current_stats = state.get_stats_snapshot();
+    // v5.2: Pass mixture prior fields for dominant component selection
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_9d,
+        prior_cov_9d: &calibration.prior_cov_narrow,
+        prior_cov_slab: Some(&calibration.prior_cov_slab),
+        narrow_weight_post: posterior.narrow_weight_post,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -337,13 +340,15 @@ fn compute_posterior_from_state(
     // Scale covariance: Sigma_n = Sigma_rate / n
     let sigma_n = calibration.sigma_rate / (n as f64);
 
-    // Run 9D Bayesian inference with prior covariance
+    // Run 9D Bayesian inference with mixture prior (v5.2)
     // IMPORTANT: Use theta_eff (effective threshold accounting for measurement floor),
     // not theta_ns (raw user threshold). The prior was calibrated for theta_eff.
-    let bayes_result = compute_bayes_factor(
+    let bayes_result = compute_bayes_factor_mixture(
         &observed_diff,
         &sigma_n,
-        &calibration.prior_cov_9d,
+        &calibration.prior_cov_narrow,
+        &calibration.prior_cov_slab,
+        calibration.prior_weight,
         calibration.theta_eff,
         Some(config.seed),
     );
@@ -399,9 +404,12 @@ pub fn adaptive_step(
     // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §3.5.2)
     // =========================================================================
     let current_stats = state.get_stats_snapshot();
+    // v5.2: Pass mixture prior fields for dominant component selection
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_9d,
+        prior_cov_9d: &calibration.prior_cov_narrow,
+        prior_cov_slab: Some(&calibration.prior_cov_slab),
+        narrow_weight_post: posterior.narrow_weight_post,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -478,10 +486,17 @@ mod tests {
         };
         let calibration_snapshot = CalibrationSnapshot::new(default_stats, default_stats);
 
+        // v5.2 mixture prior: narrow and slab components
+        let prior_cov_narrow = Matrix9::identity() * 10000.0; // 100^2 for ~100ns SD
+        let prior_cov_slab = Matrix9::identity() * 250000.0; // 500^2 for wide slab
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
             block_length: 10,
-            prior_cov_9d: Matrix9::identity() * 10000.0, // 9D prior covariance
+            prior_cov_narrow,
+            prior_cov_slab,
+            sigma_narrow: 100.0, // sqrt(10000)
+            sigma_slab: 500.0,   // sqrt(250000)
+            prior_weight: 0.99,  // narrow component weight
             timer_resolution_ns: 1.0,
             samples_per_second: 100_000.0,
             discrete_mode: false,

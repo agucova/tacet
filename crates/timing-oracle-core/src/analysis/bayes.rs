@@ -54,16 +54,46 @@ use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 const N_MONTE_CARLO: usize = 1000;
 
 /// Result from Bayesian analysis using 9D inference.
+///
+/// ## Mixture Posterior (v5.2)
+///
+/// When using a 2-component mixture prior, the posterior is also a mixture:
+/// - Narrow component: N(δ_post_narrow, Λ_post_narrow) with weight narrow_weight_post
+/// - Slab component: N(δ_post_slab, Λ_post_slab) with weight slab_weight_post
+///
+/// The `delta_post` and `lambda_post` fields are set to the weighted mixture mean
+/// for backwards compatibility. For accurate inference, use the component-specific fields.
 #[derive(Debug, Clone)]
 pub struct BayesResult {
     /// Posterior probability of a significant leak: P(max_k |δ_k| > θ | Δ).
     pub leak_probability: f64,
 
     /// 9D posterior mean δ_post in nanoseconds.
+    /// For mixture posteriors, this is the weighted mixture mean.
     pub delta_post: Vector9,
 
     /// 9D posterior covariance Λ_post.
+    /// For mixture posteriors, this is set to the dominant component's covariance.
     pub lambda_post: Matrix9,
+
+    /// Narrow component posterior mean (v5.2).
+    pub delta_post_narrow: Vector9,
+
+    /// Narrow component posterior covariance (v5.2).
+    pub lambda_post_narrow: Matrix9,
+
+    /// Slab component posterior mean (v5.2).
+    pub delta_post_slab: Vector9,
+
+    /// Slab component posterior covariance (v5.2).
+    pub lambda_post_slab: Matrix9,
+
+    /// Posterior weight for narrow component (v5.2).
+    /// If this is 0, only slab component was used (single Gaussian case).
+    pub narrow_weight_post: f64,
+
+    /// Posterior weight for slab component: 1 - narrow_weight_post (v5.2).
+    pub slab_weight_post: f64,
 
     /// 2D GLS projection β = (μ, τ) in nanoseconds.
     /// - β[0] = μ (uniform shift): All quantiles move equally
@@ -88,7 +118,9 @@ pub struct BayesResult {
     pub sigma_n: Matrix9,
 }
 
-/// Compute Bayesian posterior for timing leak analysis using 9D model.
+/// Compute Bayesian posterior for timing leak analysis using 9D model (single Gaussian prior).
+///
+/// **Note**: For v5.2 mixture prior, use `compute_bayes_factor_mixture` instead.
 ///
 /// # Arguments
 ///
@@ -111,41 +143,14 @@ pub fn compute_bayes_factor(
     // Regularize covariance for numerical stability
     let regularized = add_jitter(*sigma_n);
 
-    // Compute posterior using stable Cholesky path
-    // A = Σ_n + Λ₀ (SPD)
-    let a = regularized + *lambda0;
-    let a_chol = match Cholesky::new(a) {
-        Some(c) => c,
-        None => {
-            return neutral_result(&regularized, lambda0);
-        }
-    };
-
-    // Solve A*x = Δ, then δ_post = Λ₀ * x
-    let x = a_chol.solve(delta);
-    let delta_post = lambda0 * x;
-
-    // Λ_post = Λ₀ - Λ₀ * A⁻¹ * Λ₀ (via Cholesky solves)
-    // Compute Y = A⁻¹ * Λ₀ by solving A*Y = Λ₀
-    let mut a_inv_lambda0 = Matrix9::zeros();
-    for j in 0..9 {
-        let col = lambda0.column(j).into_owned();
-        let y_col = a_chol.solve(&col);
-        for i in 0..9 {
-            a_inv_lambda0[(i, j)] = y_col[i];
-        }
-    }
-    // Λ_post = Λ₀ - Λ₀ * Y
-    let mut lambda_post = lambda0 - lambda0 * a_inv_lambda0;
-
-    // Ensure symmetry (numerical errors can break it slightly)
-    for i in 0..9 {
-        for j in (i + 1)..9 {
-            let avg = 0.5 * (lambda_post[(i, j)] + lambda_post[(j, i)]);
-            lambda_post[(i, j)] = avg;
-            lambda_post[(j, i)] = avg;
-        }
-    }
+    // Compute single-component posterior
+    let (delta_post, lambda_post, _log_ml) =
+        match compute_component_posterior(delta, &regularized, lambda0) {
+            Some(result) => result,
+            None => {
+                return neutral_result(&regularized, lambda0);
+            }
+        };
 
     // Compute 2D GLS projection
     let (beta_proj, beta_proj_cov, projection_mismatch_q) =
@@ -163,6 +168,13 @@ pub fn compute_bayes_factor(
         leak_probability,
         delta_post,
         lambda_post,
+        // For single Gaussian, set mixture fields to the same values
+        delta_post_narrow: delta_post,
+        lambda_post_narrow: lambda_post,
+        delta_post_slab: delta_post,
+        lambda_post_slab: lambda_post,
+        narrow_weight_post: 1.0, // All weight on single component
+        slab_weight_post: 0.0,
         beta_proj,
         beta_proj_cov,
         projection_mismatch_q,
@@ -170,6 +182,246 @@ pub fn compute_bayes_factor(
         is_clamped: false,
         sigma_n: regularized,
     }
+}
+
+/// Compute Bayesian posterior using 2-component mixture prior (v5.2).
+///
+/// Mixture prior: π(δ) = w·N(0, Λ₀,₁) + (1−w)·N(0, Λ₀,₂)
+///
+/// # Arguments
+///
+/// * `delta` - Observed quantile differences (9-vector)
+/// * `sigma_n` - Covariance matrix scaled for inference sample size (Σ_rate / n)
+/// * `lambda0_narrow` - Narrow component prior covariance (Λ₀,₁ = σ₁²R)
+/// * `lambda0_slab` - Slab component prior covariance (Λ₀,₂ = σ₂²R)
+/// * `prior_weight` - Weight w for narrow component (default 0.99)
+/// * `theta` - Minimum effect of concern (threshold)
+/// * `seed` - Random seed for Monte Carlo reproducibility
+///
+/// # Returns
+///
+/// `BayesResult` with mixture posterior.
+pub fn compute_bayes_factor_mixture(
+    delta: &Vector9,
+    sigma_n: &Matrix9,
+    lambda0_narrow: &Matrix9,
+    lambda0_slab: &Matrix9,
+    prior_weight: f64,
+    theta: f64,
+    seed: Option<u64>,
+) -> BayesResult {
+    let regularized = add_jitter(*sigma_n);
+    let actual_seed = seed.unwrap_or(crate::constants::DEFAULT_SEED);
+
+    // Compute per-component posteriors with log marginal likelihoods
+    let narrow_result = compute_component_posterior(delta, &regularized, lambda0_narrow);
+    let slab_result = compute_component_posterior(delta, &regularized, lambda0_slab);
+
+    // Handle failures
+    let (delta_post_1, lambda_post_1, log_ml_1) = match narrow_result {
+        Some(r) => r,
+        None => {
+            return neutral_result_mixture(&regularized, lambda0_narrow, lambda0_slab);
+        }
+    };
+
+    let (delta_post_2, lambda_post_2, log_ml_2) = match slab_result {
+        Some(r) => r,
+        None => {
+            return neutral_result_mixture(&regularized, lambda0_narrow, lambda0_slab);
+        }
+    };
+
+    // Posterior weights via log-sum-exp for numerical stability
+    let log_w1 = math::ln(prior_weight.max(1e-12)) + log_ml_1;
+    let log_w2 = math::ln((1.0 - prior_weight).max(1e-12)) + log_ml_2;
+    let log_norm = log_sum_exp(log_w1, log_w2);
+
+    let narrow_weight_post = math::exp(log_w1 - log_norm);
+    let slab_weight_post = 1.0 - narrow_weight_post;
+
+    #[cfg(feature = "std")]
+    if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
+        eprintln!("[DEBUG bayes] log_ml_narrow = {:.2}, log_ml_slab = {:.2}", log_ml_1, log_ml_2);
+        eprintln!("[DEBUG bayes] log_w1 (narrow) = {:.2}, log_w2 (slab) = {:.2}", log_w1, log_w2);
+        eprintln!("[DEBUG bayes] log_norm = {:.2}", log_norm);
+    }
+
+    // Monte Carlo from mixture posterior
+    let (leak_probability, effect_magnitude_ci) = run_mixture_monte_carlo(
+        &delta_post_1,
+        &lambda_post_1,
+        &delta_post_2,
+        &lambda_post_2,
+        narrow_weight_post,
+        theta,
+        actual_seed,
+    );
+
+    // Mixture mean for compatibility
+    let delta_post = delta_post_1 * narrow_weight_post + delta_post_2 * slab_weight_post;
+
+    // Use dominant component's covariance for compatibility
+    let lambda_post = if narrow_weight_post >= 0.5 {
+        lambda_post_1
+    } else {
+        lambda_post_2
+    };
+
+    // Compute 2D GLS projection from mixture mean
+    let (beta_proj, beta_proj_cov, projection_mismatch_q) =
+        compute_2d_projection(&delta_post, &lambda_post, &regularized);
+
+    BayesResult {
+        leak_probability,
+        delta_post,
+        lambda_post,
+        delta_post_narrow: delta_post_1,
+        lambda_post_narrow: lambda_post_1,
+        delta_post_slab: delta_post_2,
+        lambda_post_slab: lambda_post_2,
+        narrow_weight_post,
+        slab_weight_post,
+        beta_proj,
+        beta_proj_cov,
+        projection_mismatch_q,
+        effect_magnitude_ci,
+        is_clamped: false,
+        sigma_n: regularized,
+    }
+}
+
+/// Compute single-component Gaussian posterior.
+///
+/// Returns (δ_post, Λ_post, log_ml) where log_ml is the log marginal likelihood.
+fn compute_component_posterior(
+    delta: &Vector9,
+    sigma_n: &Matrix9,
+    lambda0: &Matrix9,
+) -> Option<(Vector9, Matrix9, f64)> {
+    // A = Σ_n + Λ₀ (SPD)
+    let a = *sigma_n + *lambda0;
+    let a_chol = Cholesky::new(a)?;
+
+    // Solve A*x = Δ, then δ_post = Λ₀ * x
+    let x = a_chol.solve(delta);
+    let delta_post = lambda0 * x;
+
+    // Λ_post = Λ₀ - Λ₀ * A⁻¹ * Λ₀ (via Cholesky solves)
+    let mut a_inv_lambda0 = Matrix9::zeros();
+    for j in 0..9 {
+        let col = lambda0.column(j).into_owned();
+        let y_col = a_chol.solve(&col);
+        for i in 0..9 {
+            a_inv_lambda0[(i, j)] = y_col[i];
+        }
+    }
+    let mut lambda_post = lambda0 - lambda0 * a_inv_lambda0;
+
+    // Ensure symmetry
+    for i in 0..9 {
+        for j in (i + 1)..9 {
+            let avg = 0.5 * (lambda_post[(i, j)] + lambda_post[(j, i)]);
+            lambda_post[(i, j)] = avg;
+            lambda_post[(j, i)] = avg;
+        }
+    }
+
+    // Log marginal likelihood: log N(Δ; 0, A)
+    // = -0.5 * (9*log(2π) + log|A| + Δ'A⁻¹Δ)
+    let log_det_a: f64 = 2.0 * a_chol.l().diagonal().iter().map(|&x| math::ln(x.abs().max(1e-300))).sum::<f64>();
+    let quad_form = delta.dot(&a_chol.solve(delta));
+    let log_ml = -0.5 * (9.0 * math::ln(2.0 * PI) + log_det_a + quad_form);
+
+    #[cfg(feature = "std")]
+    if std::env::var("TIMING_ORACLE_DEBUG_ML").is_ok() {
+        eprintln!(
+            "[DEBUG ML] log_det_a = {:.2}, quad_form = {:.2}, log_ml = {:.2}",
+            log_det_a, quad_form, log_ml
+        );
+        eprintln!("[DEBUG ML] lambda0 diag = [{:.2e}, {:.2e}, ..., {:.2e}]",
+            lambda0[(0, 0)], lambda0[(1, 1)], lambda0[(8, 8)]);
+    }
+
+    Some((delta_post, lambda_post, log_ml))
+}
+
+/// Log-sum-exp for numerical stability: log(exp(a) + exp(b)).
+fn log_sum_exp(a: f64, b: f64) -> f64 {
+    let max_val = a.max(b);
+    if max_val == f64::NEG_INFINITY {
+        return f64::NEG_INFINITY;
+    }
+    max_val + math::ln(math::exp(a - max_val) + math::exp(b - max_val))
+}
+
+/// Monte Carlo from mixture posterior.
+fn run_mixture_monte_carlo(
+    delta_post_1: &Vector9,
+    lambda_post_1: &Matrix9,
+    delta_post_2: &Vector9,
+    lambda_post_2: &Matrix9,
+    narrow_weight: f64,
+    theta: f64,
+    seed: u64,
+) -> (f64, (f64, f64)) {
+    // Cholesky decompositions for sampling
+    let chol_1 = match Cholesky::new(*lambda_post_1) {
+        Some(c) => c,
+        None => match Cholesky::new(add_jitter(*lambda_post_1)) {
+            Some(c) => c,
+            None => return (0.5, (0.0, 0.0)),
+        },
+    };
+
+    let chol_2 = match Cholesky::new(*lambda_post_2) {
+        Some(c) => c,
+        None => match Cholesky::new(add_jitter(*lambda_post_2)) {
+            Some(c) => c,
+            None => return (0.5, (0.0, 0.0)),
+        },
+    };
+
+    let l_1 = chol_1.l();
+    let l_2 = chol_2.l();
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let mut count = 0usize;
+    let mut max_effects = Vec::with_capacity(N_MONTE_CARLO);
+
+    for _ in 0..N_MONTE_CARLO {
+        // Sample z ~ N(0, I_9)
+        let mut z = Vector9::zeros();
+        for i in 0..9 {
+            z[i] = sample_standard_normal(&mut rng);
+        }
+
+        // Sample from mixture: with probability narrow_weight, use narrow component
+        let delta_sample = if rng.random::<f64>() < narrow_weight {
+            delta_post_1 + l_1 * z
+        } else {
+            delta_post_2 + l_2 * z
+        };
+
+        // Compute max_k |δ_k|
+        let max_effect = delta_sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        max_effects.push(max_effect);
+
+        if max_effect > theta {
+            count += 1;
+        }
+    }
+
+    // Compute 95% CI for max effect
+    max_effects.sort_by(|a, b| a.total_cmp(b));
+    let lo_idx = math::round((N_MONTE_CARLO as f64) * 0.025) as usize;
+    let hi_idx = math::round((N_MONTE_CARLO as f64) * 0.975) as usize;
+    let ci = (
+        max_effects[lo_idx.min(N_MONTE_CARLO - 1)],
+        max_effects[hi_idx.min(N_MONTE_CARLO - 1)],
+    );
+
+    (count as f64 / N_MONTE_CARLO as f64, ci)
 }
 
 /// Compute 2D GLS projection of 9D posterior.
@@ -402,6 +654,33 @@ fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix9) -> BayesResult {
         leak_probability: 0.5,
         delta_post: Vector9::zeros(),
         lambda_post: *lambda0,
+        delta_post_narrow: Vector9::zeros(),
+        lambda_post_narrow: *lambda0,
+        delta_post_slab: Vector9::zeros(),
+        lambda_post_slab: *lambda0,
+        narrow_weight_post: 1.0,
+        slab_weight_post: 0.0,
+        beta_proj: Vector2::zeros(),
+        beta_proj_cov: Matrix2::identity() * 1e6,
+        projection_mismatch_q: 0.0,
+        effect_magnitude_ci: (0.0, 0.0),
+        is_clamped: true,
+        sigma_n: *sigma_n,
+    }
+}
+
+/// Return a neutral result for mixture prior when computation fails.
+fn neutral_result_mixture(sigma_n: &Matrix9, lambda0_narrow: &Matrix9, lambda0_slab: &Matrix9) -> BayesResult {
+    BayesResult {
+        leak_probability: 0.5,
+        delta_post: Vector9::zeros(),
+        lambda_post: *lambda0_narrow,
+        delta_post_narrow: Vector9::zeros(),
+        lambda_post_narrow: *lambda0_narrow,
+        delta_post_slab: Vector9::zeros(),
+        lambda_post_slab: *lambda0_slab,
+        narrow_weight_post: 0.5,
+        slab_weight_post: 0.5,
         beta_proj: Vector2::zeros(),
         beta_proj_cov: Matrix2::identity() * 1e6,
         projection_mismatch_q: 0.0,
@@ -558,22 +837,24 @@ mod tests {
         );
     }
 
-    /// Regression test for spec v5.1: large effect + noisy likelihood regime.
+    /// Regression test for spec v5.2: large effect + noisy likelihood regime with mixture prior.
     ///
     /// This test ensures that obvious timing leaks (effect ≫ θ) are detected
-    /// even when measurement noise is high (SE ≫ θ). The prior shape change
-    /// from trace-normalized S to correlation matrix R was motivated by this
-    /// failure mode.
+    /// even when measurement noise is high (SE ≫ θ). The mixture prior (v5.2)
+    /// allows the posterior to escape to the slab component when data strongly
+    /// supports large effects.
     ///
     /// Test values based on SILENT web app dataset:
     /// - θ_eff = 100 ns
     /// - True effect ≈ 100× threshold (10,000-18,000 ns)
     /// - Data SEs ≈ 25-80× threshold (2,500-8,000 ns)
     ///
-    /// With the v5.1 correlation-shaped prior, P(leak) should be > 0.99.
+    /// With the v5.2 mixture prior, P(leak) should be > 0.99.
     #[test]
     fn test_large_effect_noisy_likelihood_regression() {
-        use crate::adaptive::{calibrate_prior_scale, compute_prior_cov_9d};
+        use crate::adaptive::{
+            calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
+        };
 
         // Fixed values based on SILENT web app dataset
         let delta = Vector9::from_row_slice(&[
@@ -595,36 +876,70 @@ mod tests {
         let discrete_mode = false;
         let seed = 0xDEADBEEF_u64;
 
-        // Compute prior using v5.1 correlation-shaped method
-        let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, seed);
-        let prior_cov = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
+        // v5.2 mixture prior: compute slab first, then calibrate narrow
+        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n);
+        let sigma_narrow = calibrate_narrow_scale(
+            &sigma_rate,
+            theta_eff,
+            n,
+            sigma_slab,
+            MIXTURE_PRIOR_WEIGHT,
+            discrete_mode,
+            seed,
+        );
+        let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
+        let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
         // Debug output
-        eprintln!("sigma_prior = {}", sigma_prior);
-        eprintln!("Prior diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
-            prior_cov[(0, 0)], prior_cov[(1, 1)], prior_cov[(8, 8)]);
-        eprintln!("Sigma_n diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
-            sigma_n[(0, 0)], sigma_n[(1, 1)], sigma_n[(8, 8)]);
-        eprintln!("Precision ratio Σ_n/Λ₀: [{:.4}, {:.4}, ..., {:.4}]",
-            sigma_n[(0, 0)] / prior_cov[(0, 0)],
-            sigma_n[(1, 1)] / prior_cov[(1, 1)],
-            sigma_n[(8, 8)] / prior_cov[(8, 8)]);
+        eprintln!("sigma_narrow = {}, sigma_slab = {}", sigma_narrow, sigma_slab);
+        eprintln!(
+            "Narrow prior diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
+            prior_cov_narrow[(0, 0)],
+            prior_cov_narrow[(1, 1)],
+            prior_cov_narrow[(8, 8)]
+        );
+        eprintln!(
+            "Slab prior diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
+            prior_cov_slab[(0, 0)],
+            prior_cov_slab[(1, 1)],
+            prior_cov_slab[(8, 8)]
+        );
+        eprintln!(
+            "Sigma_n diagonal: [{:.2e}, {:.2e}, ..., {:.2e}]",
+            sigma_n[(0, 0)],
+            sigma_n[(1, 1)],
+            sigma_n[(8, 8)]
+        );
 
-        // Compute Bayes factor
-        let result = compute_bayes_factor(&delta, &sigma_n, &prior_cov, theta_eff, Some(seed));
+        // Compute Bayes factor with mixture prior
+        let result = compute_bayes_factor_mixture(
+            &delta,
+            &sigma_n,
+            &prior_cov_narrow,
+            &prior_cov_slab,
+            MIXTURE_PRIOR_WEIGHT,
+            theta_eff,
+            Some(seed),
+        );
 
         eprintln!("P(leak) = {}", result.leak_probability);
-        eprintln!("delta_post[0..3] = [{:.1}, {:.1}, {:.1}]",
+        eprintln!(
+            "narrow_weight_post = {:.4}, slab_weight_post = {:.4}",
+            result.narrow_weight_post, result.slab_weight_post
+        );
+        eprintln!(
+            "delta_post (mixture) = [{:.1}, {:.1}, {:.1}]",
             result.delta_post[0], result.delta_post[1], result.delta_post[2]);
 
         // With effect ≈ 100× threshold, P(leak) MUST be > 0.99
         assert!(
             result.leak_probability > 0.99,
             "Large effect ({:.0}ns mean) with θ={:.0}ns should give P(leak) > 0.99, got {:.4}. \
-             This regression indicates the prior shape fix (v5.1) may have broken.",
+             Slab weight = {:.4}. This regression indicates the v5.2 mixture prior may have broken.",
             delta.iter().sum::<f64>() / 9.0,
             theta_eff,
-            result.leak_probability
+            result.leak_probability,
+            result.slab_weight_post
         );
     }
 }

@@ -13,8 +13,10 @@
 
 use std::time::{Duration, Instant};
 
-use timing_oracle_core::adaptive::{calibrate_prior_scale, compute_prior_cov_9d};
-use timing_oracle_core::analysis::{classify_pattern, compute_bayes_factor};
+use timing_oracle_core::adaptive::{
+    calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
+};
+use timing_oracle_core::analysis::{classify_pattern, compute_bayes_factor_mixture};
 use timing_oracle_core::result::{
     Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
     MeasurementQuality, Outcome,
@@ -182,13 +184,83 @@ pub fn analyze_single_pass(
         baseline.iter().map(|&v| v as i64).collect();
     let discrete_mode = (unique_baseline.len() as f64 / n as f64) < 0.10;
 
-    let prior_scale = calibrate_prior_scale(&sigma_rate, config.theta_ns, n, discrete_mode, config.seed);
-    let prior_cov = compute_prior_cov_9d(&sigma_rate, prior_scale, discrete_mode);
+    // v5.2 mixture prior: slab first, then narrow
+    let sigma_slab = compute_slab_scale(&sigma_rate, config.theta_ns, n);
+    let sigma_narrow = calibrate_narrow_scale(
+        &sigma_rate,
+        config.theta_ns,
+        n,
+        sigma_slab,
+        MIXTURE_PRIOR_WEIGHT,
+        discrete_mode,
+        config.seed,
+    );
+    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
+    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
-    // Step 4: Compute Bayesian posterior
-    let bayes_result =
-        compute_bayes_factor(&delta_hat, &sigma, &prior_cov, config.theta_ns, Some(config.seed));
+    // Debug output for v5.2 investigation
+    if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
+        eprintln!("[DEBUG] n = {}, discrete_mode = {}", n, discrete_mode);
+        eprintln!("[DEBUG] delta_hat = {:?}", delta_hat.as_slice());
+        eprintln!(
+            "[DEBUG] sigma diagonal = [{:.2e}, {:.2e}, {:.2e}, ..., {:.2e}]",
+            sigma[(0, 0)],
+            sigma[(1, 1)],
+            sigma[(2, 2)],
+            sigma[(8, 8)]
+        );
+        // Check off-diagonal correlations
+        let r_01 = sigma[(0, 1)] / (sigma[(0, 0)].sqrt() * sigma[(1, 1)].sqrt());
+        let r_08 = sigma[(0, 8)] / (sigma[(0, 0)].sqrt() * sigma[(8, 8)].sqrt());
+        eprintln!("[DEBUG] sigma correlations: r(0,1)={:.3}, r(0,8)={:.3}", r_01, r_08);
+        eprintln!("[DEBUG] sigma_narrow = {}, sigma_slab = {}", sigma_narrow, sigma_slab);
+        eprintln!(
+            "[DEBUG] prior_narrow diag = [{:.2e}, {:.2e}, ..., {:.2e}]",
+            prior_cov_narrow[(0, 0)],
+            prior_cov_narrow[(1, 1)],
+            prior_cov_narrow[(8, 8)]
+        );
+        eprintln!(
+            "[DEBUG] prior_slab diag = [{:.2e}, {:.2e}, ..., {:.2e}]",
+            prior_cov_slab[(0, 0)],
+            prior_cov_slab[(1, 1)],
+            prior_cov_slab[(8, 8)]
+        );
+    }
+
+    // Step 4: Compute Bayesian posterior with mixture prior
+    let bayes_result = compute_bayes_factor_mixture(
+        &delta_hat,
+        &sigma,
+        &prior_cov_narrow,
+        &prior_cov_slab,
+        MIXTURE_PRIOR_WEIGHT,
+        config.theta_ns,
+        Some(config.seed),
+    );
     let leak_probability = bayes_result.leak_probability;
+
+    if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
+        eprintln!("[DEBUG] bayes_result.leak_probability = {}", leak_probability);
+        eprintln!(
+            "[DEBUG] narrow_weight_post = {:.4}, slab_weight_post = {:.4}",
+            bayes_result.narrow_weight_post, bayes_result.slab_weight_post
+        );
+        eprintln!(
+            "[DEBUG] delta_post_narrow = [{:.1}, {:.1}, {:.1}, ..., {:.1}]",
+            bayes_result.delta_post_narrow[0],
+            bayes_result.delta_post_narrow[1],
+            bayes_result.delta_post_narrow[2],
+            bayes_result.delta_post_narrow[8]
+        );
+        eprintln!(
+            "[DEBUG] delta_post_slab = [{:.1}, {:.1}, {:.1}, ..., {:.1}]",
+            bayes_result.delta_post_slab[0],
+            bayes_result.delta_post_slab[1],
+            bayes_result.delta_post_slab[2],
+            bayes_result.delta_post_slab[8]
+        );
+    }
 
     // Step 5: Compute effect estimate from Bayesian result
     let pattern = classify_pattern(&bayes_result.beta_proj, &bayes_result.beta_proj_cov);

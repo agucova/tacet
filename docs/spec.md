@@ -1,4 +1,4 @@
-# timing-oracle Specification (v5.1)
+# timing-oracle Specification (v5.4)
 
 This document is the authoritative specification for timing-oracle, a Bayesian timing side-channel detection system. It defines the statistical methodology, abstract types, and requirements that implementations MUST follow to be conformant.
 
@@ -255,7 +255,17 @@ Diagnostics = {
   seed: Option<Int>,
   threshold_ns: Float,
   timer_name: String,
-  platform: String
+  platform: String,
+  
+  // Gibbs sampler diagnostics
+  gibbs_iters_total: Int,           // N_gibbs used
+  gibbs_burnin: Int,                // N_burn used
+  gibbs_retained: Int,              // N_keep used
+  lambda_mean: Float,               // Posterior mean of λ
+  lambda_sd: Float,                 // Posterior SD of λ
+  lambda_cv: Float,                 // Coefficient of variation: λ_sd / λ_mean
+  lambda_ess: Float,                // Effective sample size of λ chain
+  lambda_mixing_ok: Bool            // See §3.4.4
 }
 
 QualityIssue = {
@@ -269,6 +279,7 @@ IssueCode =
   | DiscreteTimer | SmallSampleDiscrete | HighGeneratorCost
   | LowUniqueInputs | QuantilesFiltered | ThresholdElevated
   | ThresholdClamped | HighWinsorRate | ProjectionMismatch
+  | LambdaMixingPoor
 ```
 
 ---
@@ -353,7 +364,7 @@ The system operates in two phases:
 - Compute "covariance rate" Σ_rate that scales as Σ = Σ_rate / n
 - Compute initial measurement floor θ_floor and floor-rate constant c_floor
 - Compute projection mismatch threshold Q_proj,thresh from bootstrap distribution
-- Compute effective threshold θ_eff and calibrate prior scale
+- Compute effective threshold θ_eff and calibrate prior scale σ
 - Run pre-flight checks (timer sanity, harness sanity, stationarity)
 
 **Phase 2: Adaptive Loop** (iterates until decision)
@@ -361,7 +372,7 @@ The system operates in two phases:
 - Update quantile estimates from all data collected so far
 - Scale covariance: Σ_n = Σ_rate / n
 - Update θ_floor(n) using floor-rate constant
-- Compute posterior and P(effect > θ_eff)
+- Run Gibbs sampler to approximate posterior and compute P(effect > θ_eff)
 - Check quality gates (posterior ≈ prior → Inconclusive)
 - Check decision boundaries (P > 95% → Fail, P < 5% → Pass)
 - Check time/sample budgets
@@ -543,7 +554,7 @@ $$
 Q_{\text{proj,thresh}} = q_{0.99}(\{Q^*_{\text{proj},b}\}_{b=1}^B)
 $$
 
-**Note:** This threshold is used for the non-blocking projection mismatch diagnostic, not for verdict gating. The threshold is computed using the prior Λ₀ defined in §3.3.5; if the prior changes, Q_proj,thresh must be recomputed.
+**Note:** This threshold is used for the non-blocking projection mismatch diagnostic, not for verdict gating. The threshold is computed using the prior defined in §3.3.5; if the prior changes, Q_proj,thresh must be recomputed. For the bootstrap computation, use the posterior mean from a single Gibbs run (or a point estimate approximation for efficiency).
 
 #### 3.3.4 Measurement Floor and Effective Threshold
 
@@ -605,80 +616,111 @@ During the adaptive loop, θ_floor(n) is recomputed analytically as $n$ grows (n
 1. If θ_floor(n) drops below θ_user during sampling, update θ_eff = θ_user (the user's threshold becomes achievable)
 2. Track whether you're on pace to reach θ_user; if extrapolation shows you won't make it within budget, consider early termination with `Inconclusive`
 
-#### 3.3.5 Prior Scale Calibration
+#### 3.3.5 Prior Scale Calibration (Student's *t*)
 
-The prior on the 9D effect profile δ should represent genuine uncertainty about whether effects exceed θ_eff—neither near-certain leak nor near-certain safety.
-
-**Prior structure (correlation-shaped):**
-
-The prior covariance uses the correlation structure of the empirical covariance, ensuring uniform marginal prior variance across all coordinates:
+The prior on the 9D effect profile δ MUST be a **correlation-shaped multivariate Student's *t*** distribution:
 
 $$
-R := \text{Corr}(\Sigma_{\text{rate}}) = D^{-1/2} \Sigma_{\text{rate}} D^{-1/2}, \quad D = \text{diag}(\Sigma_{\text{rate}})
+\delta \sim t_\nu(0, \sigma^2 R)
 $$
 
-where D is computed *after* any diagonal-floor regularization of Σ_rate (ensuring strictly positive entries).
+where R is the correlation matrix derived from Σ_rate, ν is a fixed degrees-of-freedom parameter, and σ is a global scale calibrated to an exceedance target.
 
-Then:
+**Prior correlation matrix (R):**
 
-$$
-\Lambda_0 = \sigma_{\text{prior}}^2 \cdot R
-$$
-
-Since diag(R) = 1, the parameter σ_prior is the marginal prior SD for each coordinate. This eliminates hidden heteroskedasticity across quantiles that could cause pathological shrinkage for certain effect patterns.
-
-**Robustness fallback:**
-
-In fragile regimes (base conditions in §3.3, or condition number of R exceeding 10⁴, or Cholesky failure), apply shrinkage toward identity:
+Let D = diag(Σ_rate), computed **after** any diagonal-floor regularization (§3.3.2). Define:
 
 $$
-R_\lambda \leftarrow (1-\lambda)R + \lambda I, \quad \lambda \in [0.01, 0.2]
+R := \text{Corr}(\Sigma_{\text{rate}}) = D^{-1/2} \Sigma_{\text{rate}} D^{-1/2}
 $$
 
-chosen deterministically from conditioning diagnostics. This regularizes unreliable off-diagonal structure while preserving the unit-diagonal property.
-
-**Numerical conditioning:**
-
-After robustness shrinkage (if applied), implementations MUST ensure R is numerically SPD by adding jitter:
+**Numerical conditioning (required):** Implementations MUST ensure R is strictly SPD:
 
 $$
 R \leftarrow R + \varepsilon I, \quad \varepsilon \in [10^{-10}, 10^{-6}]
 $$
 
-chosen adaptively (e.g., increase ε on Cholesky failure). This is a purely numerical fix, applied as the last step before use.
+chosen adaptively (start at 10⁻¹⁰, increase on Cholesky failure).
 
-**Numerical calibration of σ_prior:**
-
-Choose σ_prior so that the prior exceedance probability equals a fixed target π₀ (default 0.62):
+**Robustness fallback (fragile regimes):** In fragile regimes (§3.3) or when cond(R) > 10⁴, implementations SHOULD apply shrinkage:
 
 $$
-P\left(\max_k |\delta_k| > \theta_{\text{eff}} \;\middle|\; \delta \sim \mathcal{N}(0, \Lambda_0)\right) = \pi_0
+R \leftarrow (1-\lambda_{\text{shrink}})R + \lambda_{\text{shrink}} I, \quad \lambda_{\text{shrink}} \in [0.01, 0.2]
 $$
 
-Given Λ₀ = σ²_prior R, this is a 1D root-find on σ_prior using deterministic Monte Carlo (SHOULD use 50k draws). The target π₀ = 0.62 represents genuine uncertainty about whether effects exceed the effective threshold.
+chosen deterministically from conditioning diagnostics (e.g., stepwise based on condition number buckets).
 
-**Calibration search bounds:**
+**Precomputation requirement:** Implementations MUST precompute and cache a factorization sufficient to apply R⁻¹ efficiently (e.g., a Cholesky factor L_R such that L_R L_Rᵀ = R). Implementations MUST NOT form explicit matrix inverses in floating point unless demonstrably stable. The quadratic form is computed as:
 
-The binary search for σ_prior MUST use bounds that accommodate both threshold-scale effects and measurement-noise-scale effects:
+$$
+\delta^\top R^{-1} \delta = \|L_R^{-1} \delta\|_2^2
+$$
 
-- `lo = θ_eff × 0.05`
-- `hi = max(θ_eff × 50, 10 × median_k(SE_k))`
+via a triangular solve.
 
-where:
+**Degrees of freedom (ν) — normative:**
+
+Implementations MUST use:
+
+$$
+\nu := 4
+$$
+
+**Rationale:** ν = 4 provides:
+- Heavy tails (polynomial decay ∝ |x|⁻⁵) that don't crush large effects
+- Finite variance (required for Gate 1): Var(δ) exists for ν > 2
+- Stable Gibbs mixing: not so heavy that λ becomes degenerate
+
+**Scale-mixture representation — normative:**
+
+The Student's *t* prior MUST be implemented via the scale-mixture representation:
+
+$$
+\lambda \sim \text{Gamma}\left(\frac{\nu}{2}, \frac{\nu}{2}\right)
+$$
+
+$$
+\delta \mid \lambda \sim \mathcal{N}\left(0, \frac{\sigma^2}{\lambda} R\right)
+$$
+
+**Gamma parameterization:** This specification uses **shape–rate** parameterization throughout. Under this parameterization, E[λ] = 1 and Var(λ) = 2/ν.
+
+**Calibrating σ via exceedance target — normative:**
+
+The scale σ MUST be chosen so that the prior exceedance probability equals a fixed target π₀ (default 0.62):
+
+$$
+P\left(\max_k |\delta_k| > \theta_{\text{eff}} \;\middle|\; \delta \sim t_\nu(0, \sigma^2 R)\right) = \pi_0
+$$
+
+This MUST be solved by deterministic 1D root-finding (e.g., bisection or Brent's method) using Monte Carlo integration.
+
+**Monte Carlo sampling procedure:**
+
+For each of M draws (SHOULD use M = 50,000):
+
+1. Draw λ ~ Gamma(shape = ν/2, rate = ν/2)
+2. Draw z ~ N(0, I₉)
+3. Compute δ = (σ/√λ) · L_R z, where L_R is the Cholesky factor of R (i.e., L_R L_Rᵀ = R)
+4. Record whether max_k |δ_k| > θ_eff
+
+The exceedance probability is the fraction of draws exceeding θ_eff.
+
+**Search bounds — normative:**
+
+Let the calibration-time standard errors be:
 
 $$
 \text{SE}_k := \sqrt{(\Sigma_{\text{rate}} / n_{\text{cal}})_{kk}}
 $$
 
-is the standard error at calibration sample size, and the median is taken over k ∈ {1, ..., 9}.
+and SE_med be the median of {SE_k}_{k=1}^9.
 
-This ensures the prior family can represent effects at the scale the data actually exhibits, preventing pathological shrinkage when θ_eff ≪ measurement noise.
+Binary search bounds MUST be:
+- σ_lo = 0.05 · θ_eff
+- σ_hi = max(50 · θ_eff, 10 · SE_med)
 
-**Normative requirements:**
-
-- The RNG seed MUST be deterministic (per §3.3.6)
-- The calibration MUST be performed once per run, during calibration
-- The prior MUST remain fixed throughout the adaptive loop. If θ_eff changes as n grows, it affects only exceedance checks, not the prior.
+**Calibration timing:** The calibration MUST be performed once per run, during the calibration phase. The resulting σ MUST remain fixed for the entire run, even if θ_eff changes due to floor updates.
 
 #### 3.3.6 Deterministic Seeding Policy
 
@@ -696,6 +738,8 @@ To ensure reproducible results, all random number generation MUST be determinist
 
 - All Monte Carlo RNG seeds (leak probability, floor constant, prior scale) MUST be similarly deterministic
 
+- The Gibbs sampler RNG seed MUST be deterministic
+
 - The chosen seeds SHOULD be reported in diagnostics
 
 **Rationale:** For CI gating, the decision function must be well-defined given the data:
@@ -712,7 +756,7 @@ $$
 
 ### 3.4 Bayesian Model
 
-We use a conjugate Gaussian model over the full 9D quantile-difference profile that admits closed-form posteriors—no MCMC required.
+We use a Student's *t* prior over the full 9D quantile-difference profile, implemented via Gibbs sampling on the scale-mixture representation.
 
 #### 3.4.1 Latent Parameter
 
@@ -732,54 +776,190 @@ $$
 
 where Σ_n = Σ_rate / n is the scaled covariance. This is the minimal mean-structure assumption: the covariance is estimated; the mean is unconstrained.
 
-#### 3.4.3 Prior
+#### 3.4.3 Prior (Student's *t* via scale mixture)
+
+The prior on δ ∈ ℝ⁹ is:
 
 $$
-\delta \sim \mathcal{N}(0, \Lambda_0), \quad \Lambda_0 = \sigma_{\text{prior}}^2 \cdot R
+\delta \sim t_\nu(0, \sigma^2 R), \quad \nu = 4
 $$
 
-where R = Corr(Σ_rate) is the correlation matrix and σ_prior is calibrated numerically (see §3.3.5).
-
-Since diag(R) = 1, the marginal prior SD for each coordinate equals σ_prior. This ensures uniform shrinkage across quantiles, preventing pathological behavior when the effect pattern differs from the covariance structure.
-
-#### 3.4.4 Posterior
-
-With Gaussian likelihood and Gaussian prior, the posterior is also Gaussian⁴:
+Implementations MUST implement inference using the equivalent hierarchical model:
 
 $$
-\delta \mid \Delta \sim \mathcal{N}(\delta_{\text{post}}, \Lambda_{\text{post}})
+\lambda \sim \text{Gamma}\left(\frac{\nu}{2}, \frac{\nu}{2}\right)
+$$
+
+$$
+\delta \mid \lambda \sim \mathcal{N}\left(0, \frac{\sigma^2}{\lambda} R\right)
+$$
+
+where Gamma uses **shape–rate** parameterization.
+
+**Marginal prior covariance:**
+
+For ν > 2, the marginal covariance of δ is:
+
+$$
+\text{Cov}(\delta) = \frac{\nu}{\nu - 2} \sigma^2 R
+$$
+
+For ν = 4:
+
+$$
+\Lambda_0^{\text{marginal}} := \text{Cov}(\delta) = 2\sigma^2 R
+$$
+
+This matrix is used as the prior covariance reference in Gate 1 (§3.5.2).
+
+**Why Student's *t* instead of Gaussian?**
+
+A Gaussian prior with scale calibrated to the exceedance target can cause catastrophic shrinkage when measurement noise is high relative to θ_eff. The Student's *t* prior's heavy tails (polynomial decay rather than exponential) naturally accommodate large effects without requiring explicit mixture components.
+
+**Why Student's *t* instead of Gaussian mixture?**
+
+A 2-component Gaussian mixture (as in v5.2) suffers from discrete scale selection. Under correlated likelihoods, the Bayes factor computation for mixture weights is dominated by Occam penalties (log-det terms), causing the posterior to stick to the narrow component even when data clearly favors larger effects — but not as large as the slab.
+
+The Student's *t* prior makes the effective scale λ continuous. The posterior on λ can settle at whatever scale the data supports, rather than being forced to choose between two fixed options.
+
+#### 3.4.4 Posterior Inference (Deterministic Gibbs Sampling)
+
+Because the prior is Student's *t*, the marginal posterior p(δ | Δ) is not available in closed form. Implementations MUST approximate the posterior using a **deterministic Gibbs sampler** over (δ, λ).
+
+**Gibbs conditionals:**
+
+**Conditional 1: δ | λ, Δ (Gaussian)**
+
+Given λ, the prior covariance is:
+
+$$
+\Lambda_0(\lambda) = \frac{\sigma^2}{\lambda} R
+$$
+
+The posterior is conjugate Gaussian:
+
+$$
+\delta \mid \lambda, \Delta \sim \mathcal{N}(\mu(\lambda), \Lambda(\lambda))
 $$
 
 where:
 
 $$
-\Lambda_{\text{post}} = \left( \Lambda_0^{-1} + \Sigma_n^{-1} \right)^{-1}
+\Lambda(\lambda) = \left(\Sigma_n^{-1} + \Lambda_0(\lambda)^{-1}\right)^{-1} = \left(\Sigma_n^{-1} + \frac{\lambda}{\sigma^2} R^{-1}\right)^{-1}
 $$
 
 $$
-\delta_{\text{post}} = \Lambda_{\text{post}} \Sigma_n^{-1} \Delta
+\mu(\lambda) = \Lambda(\lambda) \Sigma_n^{-1} \Delta
 $$
 
-The posterior mean δ_post ∈ ℝ⁹ gives the estimated timing difference at each decile in nanoseconds.
+**Sampling without explicit inverses — normative:**
 
-**Implementation guidance (normative):**
+Let Q(λ) := Σₙ⁻¹ + (λ/σ²)R⁻¹. Note that Σₙ⁻¹ and R⁻¹ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
 
-Implementations MUST NOT form explicit matrix inverses in floating point. Use Cholesky solves on SPD matrices. A stable compute path:
+$$
+L L^\top = Q(\lambda)
+$$
 
-```
-// Form A := Σ_n + Λ_0 (SPD)
-// Solve A x = Δ for x
-// Then δ_post = Λ_0 x
-// And Λ_post = Λ_0 - Λ_0 A⁻¹ Λ_0 (via solves)
-```
+The posterior mean is computed by solving:
 
-This avoids Σ_n⁻¹ explicitly.
+$$
+Q(\lambda) \mu(\lambda) = \Sigma_n^{-1} \Delta
+$$
 
-⁴ Bishop, C. M. (2006). Pattern Recognition and Machine Learning, §3.3. Springer.
+via forward-backward substitution (two triangular solves).
+
+To sample δ:
+
+$$
+\delta = \mu(\lambda) + L^{-\top} z, \quad z \sim \mathcal{N}(0, I_9)
+$$
+
+where L⁻ᵀz MUST be computed via a single triangular solve (backward substitution), not by forming L⁻¹.
+
+**Conditional 2: λ | δ (Gamma)**
+
+Let d = 9 (dimension) and define:
+
+$$
+q := \delta^\top R^{-1} \delta = \|L_R^{-1} \delta\|_2^2
+$$
+
+The conditional posterior is:
+
+$$
+\lambda \mid \delta \sim \text{Gamma}\left(\text{shape} = \frac{\nu + d}{2}, \; \text{rate} = \frac{\nu + \sigma^{-2} q}{2}\right)
+$$
+
+**Derivation:** Combining the Gamma(ν/2, ν/2) prior on λ with the Gaussian likelihood contribution exp(−(λ/2σ²)δᵀR⁻¹δ) yields a Gamma posterior with shape increased by d/2 and rate increased by q/(2σ²).
+
+**Gibbs schedule — normative:**
+
+Implementations MUST use the following deterministic schedule:
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| N_gibbs | 256 | Total iterations |
+| N_burn | 64 | Burn-in (discarded) |
+| N_keep | 192 | Retained samples |
+
+**Initialization — normative:**
+
+The Gibbs sampler MUST be initialized at:
+
+$$
+\lambda^{(0)} = 1
+$$
+
+**Rationale:** Under the Gamma(ν/2, ν/2) prior, E[λ] = 1. Starting at the prior mean provides a neutral initialization.
+
+**Iteration order:**
+
+For t = 1, ..., N_gibbs:
+1. Sample δ^(t) ~ p(δ | λ^(t-1), Δ)
+2. Sample λ^(t) ~ p(λ | δ^(t))
+
+Retain {(δ^(t), λ^(t))}_{t=N_burn+1}^{N_gibbs}.
+
+**RNG seeding:**
+
+The RNG seed MUST be deterministic per §3.3.6. Given identical inputs (Δ, Σₙ, configuration), the Gibbs sampler MUST produce identical output.
+
+**Precomputation requirements:**
+
+To minimize per-iteration cost, implementations MUST precompute during calibration:
+
+1. **L_R** (Cholesky factor of R, i.e., L_R L_Rᵀ = R)
+2. **L_Σ** (Cholesky factor of Σₙ, updated when n changes)
+3. **Σₙ⁻¹ Δ** (the "data precision-weighted observation", computed via Cholesky solve)
+
+Per iteration, the dominant cost is the Cholesky factorization of Q(λ), which is O(9³) ≈ 729 flops — negligible.
+
+**λ mixing diagnostics — normative:**
+
+Implementations SHOULD compute λ mixing diagnostics and SHOULD set `lambda_mixing_ok = false` when either:
+
+1. **Low coefficient of variation:** lambda_cv < 0.1, indicating λ barely moved from initialization
+2. **Low effective sample size:** lambda_ess < 20, indicating high autocorrelation
+
+**Effective sample size computation:**
+
+$$
+\text{ESS} = \frac{N_{\text{keep}}}{1 + 2\sum_{k=1}^{K} \hat{\rho}_k}
+$$
+
+where ρ̂_k is the lag-k autocorrelation of the λ chain, summed until ρ̂_k < 0.05 or k > 50.
+
+**Warning emission:**
+
+When `lambda_mixing_ok = false`, implementations SHOULD emit a quality issue with code `LambdaMixingPoor` and guidance suggesting the user increase Gibbs iterations (if configurable) or noting that the posterior may be unreliable.
+
+**Verdict-blocking status:**
+
+This diagnostic MUST NOT be verdict-blocking. Poor λ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
 
 #### 3.4.5 Decision Functional and Leak Probability
 
-The decision is based on the maximum absolute effect across all quantiles:
+The decision functional is:
 
 $$
 m(\delta) := \max_k |\delta_k|
@@ -788,10 +968,42 @@ $$
 The leak probability is:
 
 $$
-P(\text{leak} > \theta_{\text{eff}} \mid \Delta) = P\bigl(m(\delta) > \theta_{\text{eff}} \;\big|\; \Delta\bigr)
+P(\text{leak} > \theta_{\text{eff}} \mid \Delta) = P(m(\delta) > \theta_{\text{eff}} \mid \Delta)
 $$
 
-Since the posterior is Gaussian, implementations SHOULD compute this by Monte Carlo integration (SHOULD use 10,000 samples with deterministic seed per §3.3.6).
+**Estimation via Gibbs samples — normative:**
+
+Implementations MUST estimate the leak probability from the retained Gibbs samples:
+
+$$
+\widehat{P}(\text{leak}) = \frac{1}{N_{\text{keep}}} \sum_{s=1}^{N_{\text{keep}}} \mathbf{1}\left[m(\delta^{(s)}) > \theta_{\text{eff}}\right]
+$$
+
+**Posterior summaries — normative:**
+
+Implementations MUST compute:
+
+- **Posterior mean:** δ_post := (1/N_keep) Σ_s δ^(s)
+- **Max-effect credible interval:** 95% CI for m(δ) from empirical quantiles of {m(δ^(s))}
+
+Implementations SHOULD compute:
+
+- **Posterior standard deviation:** element-wise SD of {δ^(s)}
+- **λ posterior mean:** λ̄ := (1/N_keep) Σ_s λ^(s)
+
+**Thinning:**
+
+Thinning is NOT required. The Gibbs conditionals for this model mix rapidly (both are conjugate with moderate dimensionality). Implementations MAY thin retained samples but MUST keep the normative iteration counts unchanged.
+
+**Monte Carlo error:**
+
+With N_keep = 192 samples, the standard error on a probability estimate p̂ is approximately:
+
+$$
+\text{SE}(\hat{p}) = \sqrt{\frac{\hat{p}(1-\hat{p})}{N_{\text{keep}}}} \leq \frac{1}{2\sqrt{192}} \approx 0.036
+$$
+
+This is acceptable for decision thresholds at 0.05 and 0.95.
 
 **Interpreting the probability:**
 
@@ -823,10 +1035,12 @@ $$
 
 **Posterior for projection summary:**
 
-Since β_proj = Aδ is linear in δ, under the 9D posterior:
+Compute the projection using the posterior mean δ_post:
 
 - Mean: β_proj,post = A δ_post
 - Covariance: Cov(β_proj | Δ) = A Λ_post Aᵀ
+
+where Λ_post is the sample covariance of the Gibbs draws.
 
 The projection gives interpretable components:
 - **Shift (μ)**: Uniform timing difference affecting all quantiles equally
@@ -864,15 +1078,40 @@ Quality gates detect when data is too poor to reach a confident decision. When a
 
 **Gate 1: Posterior ≈ Prior (Data Too Noisy)**
 
-If measurement uncertainty is high, the posterior barely moves from the prior. For the 9D model, use log-det ratio:
+If measurement uncertainty is high, the posterior barely moves from the prior.
+
+**Prior covariance reference:**
+
+Under the Student's *t* prior with ν = 4, the marginal prior covariance is:
 
 $$
-\rho := \log \frac{|\Lambda_{\text{post}}|}{|\Lambda_0|}
+\Lambda_0^{\text{marginal}} := \text{Cov}(\delta) = 2\sigma^2 R
 $$
 
-If ρ > log(0.5) (posterior volume not reduced much), trigger Inconclusive with reason `DataTooNoisy`.
+**Posterior covariance estimate:**
 
-Alternative: use trace ratio tr(Λ_post)/tr(Λ₀) > 0.5 if log-det is numerically unstable.
+Estimate Λ_post from the Gibbs samples:
+
+$$
+\Lambda_{\text{post}} \approx \frac{1}{N_{\text{keep}}-1} \sum_s (\delta^{(s)} - \delta_{\text{post}})(\delta^{(s)} - \delta_{\text{post}})^\top
+$$
+
+**Log-det ratio computation — normative:**
+
+Implementations MUST use a deterministic computation pathway:
+
+1. Attempt Cholesky factorization of Λ_post
+2. **If Cholesky succeeds:** Compute log-det from the Cholesky diagonal:
+   $$\log|\Lambda_{\text{post}}| = 2 \sum_i \log(L_{ii})$$
+   Then compute:
+   $$\rho := \log \frac{|\Lambda_{\text{post}}|}{|\Lambda_0^{\text{marginal}}|}$$
+3. **If Cholesky fails:** Fall back to the trace ratio:
+   $$\rho_{\text{trace}} := \frac{\text{tr}(\Lambda_{\text{post}})}{\text{tr}(\Lambda_0^{\text{marginal}})}$$
+   Trigger gate if ρ_trace > 0.5.
+
+If ρ > log(0.5) (equivalently, |Λ_post|/|Λ₀^marginal| > 0.5), trigger Inconclusive with reason `DataTooNoisy`.
+
+**Rationale for deterministic fallback:** With 192 Gibbs samples in 9D, Λ_post can be borderline SPD in unlucky cases. The explicit fallback ensures consistent behavior across platforms.
 
 **Exception for decisive probabilities**: If P(leak) > 0.995 or P(leak) < 0.005, AND the projection mismatch Q < 1000 × Q_thresh, implementations MAY bypass this gate and allow a verdict. This handles slow operations (e.g., modular exponentiation) or unusual timing patterns (e.g., branch-dependent timing) where high autocorrelation limits effective sample size, but the effect is so large that the verdict is unambiguous.
 
@@ -880,7 +1119,7 @@ Moderate Q values (e.g., Q ~ 100–1000) can occur with real timing leaks that h
 
 **Gate 2: Learning Rate Collapsed**
 
-Track KL divergence between successive posteriors. For Gaussian posteriors:
+Track KL divergence between successive posteriors. For the Gaussian approximation to the posterior (using sample mean and covariance from Gibbs):
 
 $$
 \text{KL}(p_{\text{new}} \| p_{\text{old}}) = \frac{1}{2}\left( \text{tr}(\Lambda_{\text{old}}^{-1} \Lambda_{\text{new}}) + (\mu_{\text{old}} - \mu_{\text{new}})^\top \Lambda_{\text{old}}^{-1} (\mu_{\text{old}} - \mu_{\text{new}}) - k + \ln\frac{|\Lambda_{\text{old}}|}{|\Lambda_{\text{new}}|} \right)
@@ -932,6 +1171,8 @@ Under the 9D model, there is no risk of "mean model cannot represent the observe
 
 **Projection mismatch statistic:**
 
+Using the posterior mean δ_post:
+
 $$
 r_{\text{proj}} := \delta_{\text{post}} - X\beta_{\text{proj,post}}
 $$
@@ -956,17 +1197,7 @@ $$
 p_k := P(|\delta_k| > \theta_{\text{eff}} \mid \Delta)
 $$
 
-Since the posterior is Gaussian, the marginal δ_k | Δ ~ N(μ_k, s²_k) where:
-
-$$
-\mu_k = (\delta_{\text{post}})_k, \quad s_k^2 = (\Lambda_{\text{post}})_{kk}
-$$
-
-Compute:
-
-$$
-p_k = 1 - \left[\Phi\left(\frac{\theta_{\text{eff}} - \mu_k}{s_k}\right) - \Phi\left(\frac{-\theta_{\text{eff}} - \mu_k}{s_k}\right)\right]
-$$
+Compute this from the Gibbs samples as the fraction where |δ_k^(s)| > θ_eff.
 
 **Selection rule:** Select top 2–3 indices by p_k (descending). Optional stability filter: include only those with p_k ≥ 0.10; if fewer than 2 remain, relax to include the top 2.
 
@@ -1047,7 +1278,7 @@ This provides consistent variance estimation when the standard CLT doesn't apply
 In discrete mode, apply the robustness shrinkage described in §3.3.5:
 
 $$
-R_\lambda \leftarrow (1-\lambda)R + \lambda I, \quad \lambda \in [0.01, 0.2]
+R \leftarrow (1-\lambda_{\text{shrink}})R + \lambda_{\text{shrink}} I, \quad \lambda_{\text{shrink}} \in [0.01, 0.2]
 $$
 
 **Gaussian approximation caveat:**
@@ -1106,15 +1337,55 @@ Re-run calibration after each escalation step. This remediation can run:
 
 This is an end-to-end check that c_floor, Σ scaling, block length selection, prior calibration, and posterior computation are not systematically anti-conservative.
 
-**Large-effect detection test (normative requirement):**
+**Large-effect detection tests (normative requirement):**
 
-Implementations MUST include a validation test for the "large effect + noisy likelihood" regime. Using synthetic or reference data with:
-- True effect ≫ θ_eff (e.g., 100× threshold)
-- Data SEs ≫ θ_eff (e.g., 30× threshold)
+Implementations MUST include validation tests for the "large effect + noisy likelihood" regime. These tests validate the inference layer directly (the probability P(leak), not the verdict), ensuring the Student's *t* prior correctly detects obvious leaks even when measurement noise is high.
 
-Assert that P(leak) > 0.99 at the reference θ_eff. This test validates the inference layer directly (the probability, not the verdict), preventing prior shape pathologies that suppress detection of obvious leaks regardless of quality gate behavior.
+**Test case 1: Diagonal Σₙ (independent coordinates)**
 
-The test SHOULD use fixed Σ_n, Σ_rate, and Δ values consistent with the regime, ensuring determinism independent of bootstrap randomness.
+Using synthetic data with diagonal covariance:
+- θ_eff = 100 ns
+- True effect: Δ with entries ~10,000–15,000 ns (≈100× threshold)
+- Data SEs: ~2,500–8,000 ns (≈25–80× threshold)
+- Σₙ = diag(SE₁², ..., SE₉²)
+- R = I₉
+
+Reference values (SILENT web app dataset):
+```
+Δ = [10366, 13156, 13296, 12800, 11741, 12936, 13215, 11804, 18715] ns
+SE = [2731, 2796, 2612, 2555, 2734, 3125, 3953, 5662, 8105] ns
+```
+
+Assert: P(leak) > 0.99
+
+**Test case 2: Correlated Σₙ (AR(1) structure)**
+
+Using synthetic data with AR(1) correlation structure. Let C denote the AR(1) correlation matrix (distinct from the prior correlation R):
+
+$$
+C_{ij} = \rho^{|i-j|}, \quad \rho = 0.7
+$$
+
+Construct the test covariance as:
+- Same Δ and diagonal SEs as Test case 1
+- Σₙ = D^(1/2) C D^(1/2) where D = diag(SE²)
+
+Assert: P(leak) > 0.99
+
+**Test case 3: Correlated Σₙ (bootstrap-estimated)**
+
+Using a real or realistic bootstrap-estimated Σₙ with non-trivial off-diagonal structure:
+- Same Δ magnitudes as Test case 1
+- Σₙ from an actual calibration run or a reference covariance matrix
+
+Assert: P(leak) > 0.99
+
+**Test implementation requirements:**
+
+- Tests MUST use fixed Σₙ, R, and Δ values for determinism
+- Tests MUST run at the inference layer (Gibbs sampler + leak probability), not the full pipeline
+- Tests MUST use deterministic seeds per §3.3.6
+- Tests MUST NOT invoke verdict-blocking quality gates
 
 ---
 
@@ -1284,9 +1555,20 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | β_proj | 2D projection: (μ, τ)ᵀ |
 | Σ_n | Covariance matrix at sample size n |
 | Σ_rate | Covariance rate: Σ_n = Σ_rate / n |
-| Λ₀ | Prior covariance: σ²_prior · R |
-| Λ_post | Posterior covariance for δ |
 | R | Prior correlation matrix: Corr(Σ_rate) |
+| ν | Student's *t* degrees of freedom (fixed at 4) |
+| σ | Student's *t* prior scale (calibrated via exceedance target) |
+| λ | Latent precision multiplier in scale-mixture representation |
+| t_ν(0, Σ) | Multivariate Student's *t* with ν df, location 0, scale matrix Σ |
+| Λ₀^marginal | Marginal prior covariance: (ν/(ν−2))σ²R = 2σ²R for ν=4 |
+| Λ_post | Posterior covariance of δ (estimated from Gibbs samples) |
+| Q(λ) | Precision matrix in Gibbs: Σₙ⁻¹ + (λ/σ²)R⁻¹ |
+| δ_post | Posterior mean of δ (from Gibbs samples) |
+| L_R | Cholesky factor of R (L_R L_Rᵀ = R) |
+| N_gibbs | Total Gibbs iterations |
+| N_burn | Burn-in iterations (discarded) |
+| N_keep | Retained Gibbs samples |
+| C | AR(1) correlation matrix in test cases (C_ij = ρ^{\|i−j\|}) |
 | θ_user | User-requested threshold |
 | θ_floor | Measurement floor (smallest resolvable effect) |
 | c_floor | Floor-rate constant: θ_floor,stat = c_floor / √n |
@@ -1300,6 +1582,9 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | n | Samples per class |
 | B | Bootstrap iterations |
 | ESS | Effective sample size |
+| SE_k | Standard error of k-th quantile difference |
+| SE_med | Median of SE_k over k ∈ {1,...,9} |
+| λ_shrink | Shrinkage parameter for correlation matrix regularization |
 
 ---
 
@@ -1310,14 +1595,23 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Constant | Default | Normative | Rationale |
 |----------|---------|-----------|-----------|
 | Deciles | {0.1, ..., 0.9} | MUST | Nine quantile positions |
+| Prior family | Student's *t* | MUST | Continuous scale adaptation |
+| Degrees of freedom (ν) | 4 | MUST | Heavy tails + finite variance |
+| Gamma parameterization | shape–rate | MUST | Avoid library ambiguity |
+| Gibbs iterations (N_gibbs) | 256 | MUST | Sufficient mixing for 10D |
+| Gibbs burn-in (N_burn) | 64 | MUST | Conservative |
+| Gibbs retained (N_keep) | 192 | MUST | MC variance control |
+| Gibbs initialization (λ⁽⁰⁾) | 1 | MUST | Prior mean |
+| Prior exceedance target (π₀) | 0.62 | SHOULD | Genuine uncertainty |
+| Prior calibration MC draws | 50,000 | SHOULD | Stable σ calibration |
+| σ search lower bound | 0.05 · θ_eff | MUST | Prevent degenerate narrow prior |
+| σ search upper bound | max(50·θ_eff, 10·SE_med) | MUST | Cover high-noise regimes |
 | Bootstrap iterations | 2,000 | SHOULD | Covariance estimation accuracy |
-| Monte Carlo samples (leak prob) | 10,000 | SHOULD | Leak probability integration |
 | Monte Carlo samples (c_floor) | 50,000 | SHOULD | Floor-rate constant estimation |
 | Batch size | 1,000 | SHOULD | Adaptive iteration granularity |
 | Calibration samples | 5,000 | SHOULD | Initial covariance estimation |
 | Pass threshold | 0.05 | SHOULD | 95% confidence of no leak |
 | Fail threshold | 0.95 | SHOULD | 95% confidence of leak |
-| Prior exceedance target | 0.62 | SHOULD | Genuine uncertainty |
 | Variance ratio gate | 0.5 | SHOULD | Posterior ≈ prior detection |
 | Projection mismatch percentile | 99th | SHOULD | Q_proj_thresh from bootstrap |
 | Block length cap | min(3√T, T/3) | SHOULD | Prevent degenerate blocks |
@@ -1328,9 +1622,11 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Default sample budget | 100,000 | MAY | Maximum samples |
 | CI hysteresis (Research) | 10% | SHOULD | Margin for detection decisions |
 | Default RNG seed | 0x74696D696E67 | SHOULD | "timing" in ASCII |
-| Prior robust shrinkage (λ) | 0.01–0.2 | SHOULD | Robustness for unreliable R |
-| Prior numerical jitter (ε) | 10⁻¹⁰–10⁻⁶ | SHOULD | SPD conditioning |
+| R jitter (ε) | 10⁻¹⁰–10⁻⁶ | MUST | Ensure SPD |
+| R shrinkage (λ_shrink) | 0.01–0.2 | SHOULD | Robustness under fragile regimes |
 | Condition number threshold | 10⁴ | SHOULD | Trigger robust shrinkage |
+| λ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
+| λ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
 
 ---
 
@@ -1348,60 +1644,82 @@ These constants define conformant implementations. Implementations MAY use diffe
 
 5. Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420.
 
+6. Gelman, A. et al. (2013). Bayesian Data Analysis, 3rd ed., Ch. 11–12. CRC Press. — Gibbs sampling, scale mixtures
+
+7. Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). "Robust Statistical Modeling Using the t Distribution." JASA 84(408):881–896. — Student's t for robustness
+
 **Timing attacks:**
 
-6. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — DudeCT methodology
+8. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — DudeCT methodology
 
-7. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. — Exploitability thresholds
+9. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. — Exploitability thresholds
 
-8. Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. — HTTP/2 timing attacks
+10. Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. — HTTP/2 timing attacks
 
-9. Bernstein, D. J. et al. (2024). "KyberSlash." — Timing vulnerability example
+11. Bernstein, D. J. et al. (2024). "KyberSlash." — Timing vulnerability example
 
-10. Dunsche, M. et al. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. — Relevant hypotheses framework
+12. Dunsche, M. et al. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. — Relevant hypotheses framework
 
 **Existing tools:**
 
-11. dudect (C): https://github.com/oreparaz/dudect
-12. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
+13. dudect (C): https://github.com/oreparaz/dudect
+14. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
 
 ---
 
 ## Appendix D: Changelog
+
+### v5.4 (from v5.2)
+
+**Student's *t* prior (§3.3.5, §3.4.3):**
+
+- **Changed:** Prior is now multivariate Student's *t* with ν=4: δ ~ t₄(0, σ²R)
+- **Removed:** 2-component Gaussian mixture (w, σ₁, σ₂, Λ₀,₁, Λ₀,₂)
+- **Rationale:** The discrete mixture suffered from Occam penalty pathology under correlated likelihoods — the slab's log-det penalty dominated even when data favored moderate (not extreme) scale increases. Student's *t* provides continuous scale adaptation via the latent λ.
+
+**Gibbs sampling inference (§3.4.4, §3.4.5):**
+
+- **Changed:** Posterior computed via deterministic Gibbs sampling (256 iter, 64 burn-in)
+- **Added:** Explicit initialization (λ⁽⁰⁾ = 1) and precomputation requirements
+- **Added:** Explicit guidance against forming matrix inverses; use Cholesky solves throughout
+- **Rationale:** Student's *t* posterior has no closed form; Gibbs exploits conjugacy in the scale-mixture representation.
+
+**Gate 1 prior covariance (§3.5.2):**
+
+- **Changed:** Uses marginal prior covariance 2σ²R (for ν=4) instead of per-component covariance
+- **Added:** Deterministic fallback pathway for log-det computation (Cholesky success → log-det; failure → trace ratio)
+- **Rationale:** Single prior family, no mixture components; ensures consistent behavior across platforms.
+
+**λ mixing diagnostics (§2.8, §3.4.4):**
+
+- **Added:** gibbs_* fields, lambda_mean, lambda_sd, lambda_cv, lambda_ess, lambda_mixing_ok
+- **Added:** LambdaMixingPoor quality issue code
+- **Removed:** slab_weight_post, SlabDominant
+- **Rationale:** New diagnostics for Gibbs sampler health replace mixture-specific diagnostics.
+
+**Notation clarification (§3.8, Appendix A):**
+
+- **Added:** C for AR(1) correlation matrix in test cases, distinct from prior correlation R
+- **Rationale:** Avoid naming collision where R was overloaded.
+
+**Validation tests (§3.8):**
+
+- **Added:** Test case 3 (bootstrap-estimated covariance)
+- **Rationale:** Ensures realistic covariance structures are covered, not just synthetic AR(1).
+
+### v5.2 (from v5.1)
+
+**Mixture prior (§3.3.5, §3.4.3, §3.4.4, §3.4.5):**
+
+- **Changed:** Prior is now a 2-component Gaussian scale mixture: w·N(0,σ₁²R) + (1−w)·N(0,σ₂²R)
+- **Added:** Slab component with deterministic scale σ₂ = max(50θ_eff, 10×SE_med)
+- **Added:** Narrow component σ₁ calibrated so mixture satisfies 62% exceedance
+- **Added:** Posterior is 2-component mixture with weights updated via marginal likelihood
+- **Rationale:** A single θ-calibrated Gaussian causes catastrophic shrinkage when SE ≫ θ.
 
 ### v5.1 (from v5.0)
 
 **Prior shape matrix change (§3.3.5, §3.4.3):**
 
 - **Changed:** Prior covariance now uses the correlation matrix R = Corr(Σ_rate) instead of the trace-normalized shape matrix S = Σ_rate / tr(Σ_rate)
-- **Rationale:** The trace-normalized shape matrix caused heteroskedastic marginal prior variances across coordinates. When the exceedance calibration target (62%) was satisfied by high-variance coordinates, low-variance coordinates could have pathologically tight priors, causing catastrophic shrinkage for uniform-shift effects in noisy-likelihood regimes.
-- **Impact:** With R, diag(R) = 1, so σ_prior equals the marginal prior SD for all coordinates uniformly. This eliminates the failure mode where large effects (e.g., 13μs) were shrunk to near-zero when θ_eff was small (e.g., 100ns) and measurement noise was high.
-
-**Prior regularization (§3.3.5):**
-
-- **Changed:** Separated numerical jitter (ε ∈ [10⁻¹⁰, 10⁻⁶]) from robust shrinkage (λ ∈ [0.01, 0.2])
-- **Rationale:** These serve different purposes—jitter ensures SPD for Cholesky, shrinkage handles unreliable covariance structure. The previous spec conflated them.
-- **Order:** Apply robust shrinkage first (if in fragile regime), then numerical jitter.
-
-**Calibration bounds (§3.3.5):**
-
-- **Added:** Explicit search bounds for σ_prior calibration: lo = 0.05θ_eff, hi = max(50θ_eff, 10 × median(SE_k))
-- **Rationale:** Prevents "prior family can't represent what data obviously contains" when θ_eff ≪ measurement noise.
-
-**Large-effect validation test (§3.8):**
-
-- **Added:** Normative requirement for a "large effect + noisy likelihood" regression test asserting P(leak) > 0.99
-- **Rationale:** Prevents future regressions that reintroduce prior shape pathologies.
-
-**Fragile regime unification (§3.3, §3.3.2, §3.3.5, §3.7):**
-
-- **Added:** Base fragile regime definition in §3.3 with shared conditions (discrete timer mode, low uniqueness)
-- **Changed:** §3.3.2 and §3.3.5 now reference the base definition and extend it with context-specific conditions
-- **Changed:** §3.7 now references §3.3 instead of duplicating the uniqueness formula
-- **Rationale:** The previous spec defined "fragile regime" independently in two places with overlapping but not identical conditions. Unifying the base definition clarifies the shared foundation while preserving context-specific extensions (high autocorrelation for block length, numerical conditioning for covariance).
-
-**Notation updates (Appendix A, B):**
-
-- **Removed:** S (shaped prior matrix)
-- **Added:** R (prior correlation matrix)
-- **Added:** Prior numerical jitter (ε), condition number threshold constants
+- **Rationale:** The trace-normalized shape matrix caused heteroskedastic marginal prior variances across coordinates.

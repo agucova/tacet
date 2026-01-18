@@ -141,11 +141,15 @@ pub unsafe extern "C" fn togo_calibrate(
         // Run calibration
         match calibrate(baseline_slice, sample_slice, ns_per_tick, &cal_config) {
             Ok(cal) => {
-                // Convert to core Calibration type for use with adaptive_step
+                // Convert to core Calibration type for use with adaptive_step (v5.2 mixture prior)
                 let core_cal = timing_oracle_core::adaptive::Calibration::new(
                     cal.sigma_rate,
                     cal.block_length,
-                    cal.prior_cov_9d,
+                    cal.prior_cov_narrow,
+                    cal.prior_cov_slab,
+                    cal.sigma_narrow,
+                    cal.sigma_slab,
+                    cal.prior_weight,
                     cal.theta_ns,
                     cal.calibration_samples,
                     cal.discrete_mode,
@@ -404,11 +408,15 @@ pub unsafe extern "C" fn togo_analyze(
             }
         };
 
-        // Convert to core Calibration
+        // Convert to core Calibration (v5.2 mixture prior)
         let core_cal = timing_oracle_core::adaptive::Calibration::new(
             cal.sigma_rate,
             cal.block_length,
-            cal.prior_cov_9d,
+            cal.prior_cov_narrow,
+            cal.prior_cov_slab,
+            cal.sigma_narrow,
+            cal.sigma_slab,
+            cal.prior_weight,
             cal.theta_ns,
             cal.calibration_samples,
             cal.discrete_mode,

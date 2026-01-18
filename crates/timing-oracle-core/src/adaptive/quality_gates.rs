@@ -170,7 +170,18 @@ pub struct QualityGateCheckInputs<'a> {
     pub posterior: &'a Posterior,
 
     /// 9D prior covariance matrix (from calibration).
+    /// For v5.2 mixture prior, this should be the narrow component prior.
+    /// Use `prior_cov_slab` and `narrow_weight_post` for dominant component selection.
     pub prior_cov_9d: &'a Matrix9,
+
+    /// v5.2: Slab (wide) prior covariance matrix.
+    /// Pass `None` if not using mixture prior.
+    pub prior_cov_slab: Option<&'a Matrix9>,
+
+    /// v5.2: Posterior weight of the narrow component (0.0-1.0).
+    /// Pass `None` if not using mixture prior.
+    /// When < 0.5, the slab component dominates and should be used for quality gates.
+    pub narrow_weight_post: Option<f64>,
 
     /// Effect threshold θ in nanoseconds (user's requested threshold).
     pub theta_ns: f64,
@@ -316,6 +327,10 @@ fn check_threshold_unachievable(
 /// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀|)
 /// Gate triggers when per-dimension variance ratio exceeds threshold.
 ///
+/// **v5.2 Mixture Prior**: When mixture prior fields are provided, this gate
+/// uses the DOMINANT posterior component's prior for the variance ratio check.
+/// If narrow_weight_post >= 0.5, uses prior_cov_9d (narrow); otherwise uses prior_cov_slab.
+///
 /// **Exception**: If the leak probability is already decisive (>99.5% or <0.5%)
 /// AND the projection mismatch Q is reasonable (not astronomically high),
 /// we allow the verdict through. This handles cases like slow operations
@@ -342,7 +357,14 @@ fn check_variance_ratio(
         return None;
     }
 
-    let prior_det = inputs.prior_cov_9d.determinant();
+    // v5.2: Select dominant component's prior for variance ratio check
+    // If slab dominates (narrow_weight_post < 0.5), use slab prior
+    let prior_cov = match (inputs.narrow_weight_post, inputs.prior_cov_slab) {
+        (Some(narrow_weight), Some(slab_cov)) if narrow_weight < 0.5 => slab_cov,
+        _ => inputs.prior_cov_9d, // Default to narrow/single prior
+    };
+
+    let prior_det = prior_cov.determinant();
     let post_det = inputs.posterior.lambda_post.determinant();
 
     if prior_det <= 0.0 || post_det <= 0.0 {
@@ -573,6 +595,8 @@ mod tests {
         QualityGateCheckInputs {
             posterior,
             prior_cov_9d,
+            prior_cov_slab: None,       // v5.2: no mixture prior in tests
+            narrow_weight_post: None,   // v5.2: no mixture prior in tests
             theta_ns: 100.0,
             n_total: 5000,
             elapsed_secs: 5.0,

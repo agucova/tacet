@@ -25,7 +25,8 @@ mod state;
 mod step;
 
 pub use calibration::{
-    calibrate_prior_scale, compute_c_floor_9d, compute_prior_cov_9d, Calibration, CalibrationConfig,
+    calibrate_narrow_scale, calibrate_prior_scale, compute_c_floor_9d, compute_prior_cov_9d,
+    compute_slab_scale, Calibration, CalibrationConfig, MIXTURE_PRIOR_WEIGHT,
 };
 pub use drift::{CalibrationSnapshot, ConditionDrift, DriftThresholds};
 pub use kl_divergence::kl_divergence_gaussian;

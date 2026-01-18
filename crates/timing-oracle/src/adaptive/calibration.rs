@@ -24,7 +24,9 @@ use crate::statistics::{
     paired_optimal_block_length, AcquisitionStream, OnlineStats,
 };
 use crate::types::Matrix9;
-use timing_oracle_core::adaptive::{calibrate_prior_scale, compute_prior_cov_9d};
+use timing_oracle_core::adaptive::{
+    calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
+};
 
 /// Calibration results from the initial measurement phase.
 ///
@@ -40,9 +42,25 @@ pub struct Calibration {
     /// Used for block bootstrap to preserve autocorrelation structure.
     pub block_length: usize,
 
-    /// 9D prior covariance for δ = (δ₁, ..., δ₉).
-    /// Λ₀ = σ²_prior × S where S = Σ_rate / tr(Σ_rate) (shaped).
-    pub prior_cov_9d: Matrix9,
+    /// v5.2: Narrow prior covariance for δ = (δ₁, ..., δ₉).
+    /// Λ₀,₁ = σ₁² × R where R = Corr(Σ_rate).
+    /// Calibrated so mixture hits 62% exceedance.
+    pub prior_cov_narrow: Matrix9,
+
+    /// v5.2: Slab prior covariance (wide component).
+    /// Λ₀,₂ = σ₂² × R where σ₂ = max(50θ, 10×SE_med).
+    /// Deterministic, not calibrated.
+    pub prior_cov_slab: Matrix9,
+
+    /// v5.2: Narrow scale σ₁ (calibrated).
+    pub sigma_narrow: f64,
+
+    /// v5.2: Slab scale σ₂ (deterministic).
+    pub sigma_slab: f64,
+
+    /// v5.2: Prior mixture weight w (narrow component weight).
+    /// Fixed at 0.99 per spec.
+    pub prior_weight: f64,
 
     /// Timer resolution in nanoseconds.
     pub timer_resolution_ns: f64,
@@ -352,24 +370,36 @@ pub fn calibrate(
         theta_floor_initial
     };
 
-    // Set 9D prior covariance (spec v5.1 §3.3.5)
+    // Set 9D prior covariance (spec v5.2 §3.3.5)
     //
-    // The prior is calibrated so that P(max_k |δ_k| > θ_eff | prior) ≈ 62%,
-    // representing reasonable uncertainty about the presence of timing leaks.
+    // v5.2 uses a 2-component mixture prior: π(δ) = w·N(0, σ₁²R) + (1-w)·N(0, σ₂²R)
+    // - σ₂ (slab): deterministic, very wide: max(50θ, 10×SE_med)
+    // - σ₁ (narrow): calibrated so MIXTURE hits 62% exceedance
+    // - w = 0.99 (narrow component weight)
     //
-    // v5.1 uses a correlation-shaped prior: Λ₀ = σ²_prior × R where R = Corr(Σ_rate).
-    // Since diag(R) = 1, σ_prior is the marginal prior SD for all coordinates.
-    // This eliminates hidden heteroskedasticity that could cause pathological shrinkage.
-    //
-    // The variance ratio quality gate (Gate 1) catches cases where
-    // posterior ≈ prior (data uninformative).
-    let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
-    let prior_cov_9d = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
+    // This allows the posterior to "escape" to the slab when data strongly
+    // supports large effects, fixing the pathological shrinkage in v5.1.
+    let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n);
+    let sigma_narrow = calibrate_narrow_scale(
+        &sigma_rate,
+        theta_eff,
+        n,
+        sigma_slab,
+        MIXTURE_PRIOR_WEIGHT,
+        discrete_mode,
+        config.seed,
+    );
+    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
+    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
     Ok(Calibration {
         sigma_rate,
         block_length,
-        prior_cov_9d,
+        prior_cov_narrow,
+        prior_cov_slab,
+        sigma_narrow,
+        sigma_slab,
+        prior_weight: MIXTURE_PRIOR_WEIGHT,
         timer_resolution_ns: config.timer_resolution_ns,
         samples_per_second,
         discrete_mode,
@@ -623,8 +653,16 @@ mod tests {
         );
         assert!(cal.block_length >= 1, "Block length should be at least 1");
         assert!(
-            cal.prior_cov_9d[(0, 0)] > 0.0,
-            "Prior variance should be positive"
+            cal.prior_cov_narrow[(0, 0)] > 0.0,
+            "Narrow prior variance should be positive"
+        );
+        assert!(
+            cal.prior_cov_slab[(0, 0)] > 0.0,
+            "Slab prior variance should be positive"
+        );
+        assert!(
+            cal.sigma_slab > cal.sigma_narrow,
+            "Slab scale should be wider than narrow"
         );
         assert!(
             cal.samples_per_second > 0.0,

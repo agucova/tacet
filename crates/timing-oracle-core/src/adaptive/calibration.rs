@@ -44,12 +44,25 @@ const CONDITION_NUMBER_THRESHOLD: f64 = 1e4;
 /// Minimum diagonal floor for regularization (prevents division by zero).
 const DIAGONAL_FLOOR: f64 = 1e-12;
 
+/// Default prior weight for the narrow component in mixture prior (§3.3.5 v5.2).
+/// w = 0.99 means 99% weight on narrow component, 1% on slab.
+pub const MIXTURE_PRIOR_WEIGHT: f64 = 0.99;
+
 /// Calibration results from the initial measurement phase (no_std compatible).
 ///
 /// This struct contains the essential statistical data needed for the adaptive
 /// sampling loop. It is designed for use in no_std environments like SGX enclaves.
 ///
 /// For full calibration with preflight checks, see `timing_oracle::Calibration`.
+///
+/// ## Mixture Prior (v5.2)
+///
+/// The prior is a 2-component scale mixture:
+/// - Narrow component: N(0, σ₁²R) with weight w (default 0.99)
+/// - Slab component: N(0, σ₂²R) with weight (1-w) (default 0.01)
+///
+/// This allows the posterior to "escape" to the slab when data strongly
+/// supports large effects, fixing the shrinkage pathology in noisy-likelihood regimes.
 #[derive(Debug, Clone)]
 pub struct Calibration {
     /// Covariance "rate" - multiply by 1/n to get Sigma_n for n samples.
@@ -62,8 +75,24 @@ pub struct Calibration {
     pub block_length: usize,
 
     /// 9D prior covariance for δ = (δ₁, ..., δ₉).
-    /// Λ₀ = σ²_prior × R where R = Corr(Σ_rate) (correlation-shaped, spec v5.1).
+    /// Λ₀ = σ²_prior × R where R = Corr(Σ_rate) (correlation-shaped).
+    /// For backwards compatibility, this equals prior_cov_narrow.
     pub prior_cov_9d: Matrix9,
+
+    /// Narrow component prior covariance: Λ₀,₁ = σ₁² × R (v5.2).
+    pub prior_cov_narrow: Matrix9,
+
+    /// Slab component prior covariance: Λ₀,₂ = σ₂² × R (v5.2).
+    pub prior_cov_slab: Matrix9,
+
+    /// Narrow component scale σ₁ (calibrated so mixture hits 62% exceedance).
+    pub sigma_narrow: f64,
+
+    /// Slab component scale σ₂ (deterministic: max(50θ, 10×SE_med)).
+    pub sigma_slab: f64,
+
+    /// Prior weight for narrow component (default 0.99).
+    pub prior_weight: f64,
 
     /// The theta threshold being used (in nanoseconds).
     pub theta_ns: f64,
@@ -116,12 +145,16 @@ pub struct Calibration {
 }
 
 impl Calibration {
-    /// Create a new Calibration with all required fields.
+    /// Create a new Calibration with all required fields (v5.2 mixture prior).
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         sigma_rate: Matrix9,
         block_length: usize,
-        prior_cov_9d: Matrix9,
+        prior_cov_narrow: Matrix9,
+        prior_cov_slab: Matrix9,
+        sigma_narrow: f64,
+        sigma_slab: f64,
+        prior_weight: f64,
         theta_ns: f64,
         calibration_samples: usize,
         discrete_mode: bool,
@@ -140,7 +173,12 @@ impl Calibration {
         Self {
             sigma_rate,
             block_length,
-            prior_cov_9d,
+            prior_cov_9d: prior_cov_narrow, // Backwards compatibility
+            prior_cov_narrow,
+            prior_cov_slab,
+            sigma_narrow,
+            sigma_slab,
+            prior_weight,
             theta_ns,
             calibration_samples,
             discrete_mode,
@@ -346,7 +384,168 @@ fn apply_correlation_regularization(r: &Matrix9, discrete_mode: bool) -> Matrix9
     r + Matrix9::identity() * 1e-5
 }
 
-/// Calibrate σ_prior so that P(max_k |δ_k| > θ_eff | δ ~ N(0, Λ₀)) = π₀.
+/// Compute slab scale σ₂ deterministically (§3.3.5 v5.2).
+///
+/// σ₂ = max(50 × θ_eff, 10 × SE_med)
+///
+/// The slab scale is NOT tuned - it is computed deterministically from
+/// calibration-time quantities only. This ensures the slab is always
+/// wide enough to capture large effects.
+///
+/// # Arguments
+/// * `sigma_rate` - Covariance rate matrix from calibration
+/// * `theta_eff` - Effective threshold in nanoseconds
+/// * `n_cal` - Number of calibration samples
+///
+/// # Returns
+/// The slab scale σ₂.
+pub fn compute_slab_scale(sigma_rate: &Matrix9, theta_eff: f64, n_cal: usize) -> f64 {
+    let median_se = compute_median_se(sigma_rate, n_cal);
+    (50.0 * theta_eff).max(10.0 * median_se)
+}
+
+/// Compute median standard error from sigma_rate.
+fn compute_median_se(sigma_rate: &Matrix9, n_cal: usize) -> f64 {
+    let mut ses: Vec<f64> = (0..9)
+        .map(|i| {
+            let var = sigma_rate[(i, i)].max(DIAGONAL_FLOOR);
+            math::sqrt(var / n_cal.max(1) as f64)
+        })
+        .collect();
+    ses.sort_by(|a, b| a.total_cmp(b));
+    ses[4] // Median of 9 values
+}
+
+/// Calibrate narrow scale σ₁ so that the MIXTURE prior hits 62% exceedance (§3.3.5 v5.2).
+///
+/// Uses binary search to find σ₁ such that:
+/// P(max_k |δ_k| > θ_eff | δ ~ mixture) = 0.62
+///
+/// where mixture = w·N(0, σ₁²R) + (1−w)·N(0, σ₂²R)
+///
+/// # Arguments
+/// * `sigma_rate` - Covariance rate matrix from calibration
+/// * `theta_eff` - Effective threshold in nanoseconds
+/// * `n_cal` - Number of calibration samples (for bounds computation)
+/// * `sigma_slab` - Slab scale σ₂ (computed first via compute_slab_scale)
+/// * `prior_weight` - Weight w for narrow component (default 0.99)
+/// * `discrete_mode` - Whether discrete timer mode is active
+/// * `seed` - Deterministic RNG seed
+///
+/// # Returns
+/// The calibrated narrow scale σ₁.
+pub fn calibrate_narrow_scale(
+    sigma_rate: &Matrix9,
+    theta_eff: f64,
+    n_cal: usize,
+    sigma_slab: f64,
+    prior_weight: f64,
+    discrete_mode: bool,
+    seed: u64,
+) -> f64 {
+    let median_se = compute_median_se(sigma_rate, n_cal);
+
+    // Search bounds (same as v5.1)
+    let mut lo = theta_eff * 0.05;
+    let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
+
+    for _ in 0..MAX_CALIBRATION_ITERATIONS {
+        let mid = (lo + hi) / 2.0;
+
+        // Compute MIXTURE exceedance (not single Gaussian)
+        let exceedance = compute_mixture_prior_exceedance(
+            sigma_rate,
+            mid,
+            sigma_slab,
+            prior_weight,
+            theta_eff,
+            discrete_mode,
+            seed,
+        );
+
+        if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
+            return mid; // Close enough
+        }
+
+        if exceedance > TARGET_EXCEEDANCE {
+            // Too much exceedance -> reduce narrow scale
+            hi = mid;
+        } else {
+            // Too little exceedance -> increase narrow scale
+            lo = mid;
+        }
+    }
+
+    // Fallback to conservative value
+    theta_eff * CONSERVATIVE_PRIOR_SCALE
+}
+
+/// Compute P(max_k |δ_k| > θ | δ ~ mixture) via Monte Carlo (v5.2).
+///
+/// Mixture prior: w·N(0, σ₁²R) + (1−w)·N(0, σ₂²R)
+fn compute_mixture_prior_exceedance(
+    sigma_rate: &Matrix9,
+    sigma_narrow: f64,
+    sigma_slab: f64,
+    prior_weight: f64,
+    theta: f64,
+    discrete_mode: bool,
+    seed: u64,
+) -> f64 {
+    // Compute regularized correlation matrix
+    let r = compute_correlation_matrix(sigma_rate);
+    let r = apply_correlation_regularization(&r, discrete_mode);
+
+    // Compute both component covariances
+    let lambda_narrow = r * (sigma_narrow * sigma_narrow);
+    let lambda_slab = r * (sigma_slab * sigma_slab);
+
+    let chol_narrow = match Cholesky::new(lambda_narrow) {
+        Some(c) => c,
+        None => return 0.5, // Neutral if decomposition fails
+    };
+    let chol_slab = match Cholesky::new(lambda_slab) {
+        Some(c) => c,
+        None => return 0.5,
+    };
+
+    let l_narrow = chol_narrow.l();
+    let l_slab = chol_slab.l();
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let mut count = 0usize;
+
+    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+        // Draw from mixture: with probability w, use narrow; else use slab
+        let l = if rng.random::<f64>() < prior_weight {
+            &l_narrow
+        } else {
+            &l_slab
+        };
+
+        // Sample z ~ N(0, I_9)
+        let mut z = Vector9::zeros();
+        for i in 0..9 {
+            z[i] = sample_standard_normal(&mut rng);
+        }
+
+        // Transform to δ ~ N(0, Λ)
+        let delta = l * z;
+
+        // Check if max_k |δ_k| > θ
+        let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        if max_effect > theta {
+            count += 1;
+        }
+    }
+
+    count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+}
+
+/// Legacy function: Calibrate σ_prior so that P(max_k |δ_k| > θ_eff | δ ~ N(0, Λ₀)) = π₀.
+///
+/// **Deprecated in v5.2**: Use `calibrate_narrow_scale` with mixture prior instead.
+/// This function is kept for backwards compatibility and testing.
 ///
 /// Uses binary search to find the scale factor.
 /// Falls back to CONSERVATIVE_PRIOR_SCALE (1.5) with warning if calibration fails.
@@ -367,16 +566,7 @@ pub fn calibrate_prior_scale(
     discrete_mode: bool,
     seed: u64,
 ) -> f64 {
-    // Compute median SE at calibration sample size (§3.3.5)
-    // SE_k = sqrt(Σ_rate[k,k] / n_cal)
-    let mut ses: Vec<f64> = (0..9)
-        .map(|i| {
-            let var = sigma_rate[(i, i)].max(DIAGONAL_FLOOR);
-            math::sqrt(var / n_cal.max(1) as f64)
-        })
-        .collect();
-    ses.sort_by(|a, b| a.total_cmp(b));
-    let median_se = ses[4]; // Median of 9 values
+    let median_se = compute_median_se(sigma_rate, n_cal);
 
     // Search bounds that accommodate both threshold-scale and noise-scale effects (§3.3.5)
     // lo = θ_eff × 0.05
@@ -503,11 +693,45 @@ mod tests {
 
         let sigma_rate = Matrix9::identity() * 1000.0;
         let discrete_mode = false;
-        let prior_cov = compute_prior_cov_9d(&sigma_rate, 100.0 * 1.12, discrete_mode);
+        let theta_eff = 100.0;
+        let n_cal = 5000;
+
+        // v5.2 mixture prior
+        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
+        let sigma_narrow = calibrate_narrow_scale(
+            &sigma_rate,
+            theta_eff,
+            n_cal,
+            sigma_slab,
+            MIXTURE_PRIOR_WEIGHT,
+            discrete_mode,
+            42,
+        );
+        let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
+        let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
         Calibration::new(
-            sigma_rate, 10, prior_cov, 100.0, 5000, discrete_mode, 5.0, 10.0, snapshot, 1.0, 10000.0, 10.0,
-            18.48, 0.001, 100.0, 0.1, 42,
+            sigma_rate,
+            10, // block_length
+            prior_cov_narrow,
+            prior_cov_slab,
+            sigma_narrow,
+            sigma_slab,
+            MIXTURE_PRIOR_WEIGHT,
+            theta_eff,
+            n_cal,
+            discrete_mode,
+            5.0,  // mde_shift_ns
+            10.0, // mde_tail_ns
+            snapshot,
+            1.0,       // timer_resolution_ns
+            10000.0,   // samples_per_second
+            10.0,      // c_floor
+            18.48,     // projection_mismatch_thresh
+            0.001,     // theta_tick
+            theta_eff, // theta_eff
+            0.1,       // theta_floor_initial
+            42,        // rng_seed
         )
     }
 

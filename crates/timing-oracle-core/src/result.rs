@@ -892,6 +892,13 @@ pub enum IssueCode {
 
     /// User's threshold was elevated due to measurement floor.
     ThresholdElevated,
+
+    /// Slab component dominates posterior (v5.2 mixture prior).
+    ///
+    /// The wide "slab" prior component has higher posterior weight than the
+    /// narrow component, indicating evidence strongly favors a large effect
+    /// (well above the threshold). This is informational, not a problem.
+    SlabDominant,
 }
 
 // ============================================================================

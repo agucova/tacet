@@ -18,12 +18,18 @@ use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
 /// represents the timing difference at decile k.
 ///
 /// The 2D projection β_proj = (μ, τ) provides shift/tail decomposition.
+///
+/// **v5.2 Mixture Prior**: When using the mixture prior, `delta_post` and
+/// `lambda_post` are the mixture mean and covariance. The `narrow_weight_post`
+/// field indicates which component dominates (narrow if >= 0.5, slab if < 0.5).
 #[derive(Clone, Debug)]
 pub struct Posterior {
     /// 9D posterior mean δ_post in nanoseconds.
+    /// For v5.2 mixture prior, this is the mixture mean.
     pub delta_post: Vector9,
 
     /// 9D posterior covariance Λ_post.
+    /// For v5.2 mixture prior, this is the mixture covariance (approximation).
     pub lambda_post: Matrix9,
 
     /// 2D GLS projection β = (μ, τ) for interpretability.
@@ -45,6 +51,11 @@ pub struct Posterior {
 
     /// Number of samples used in this posterior computation.
     pub n: usize,
+
+    /// v5.2: Posterior weight of the narrow component (0.0-1.0).
+    /// When < 0.5, the slab component dominates (evidence favors large effect).
+    /// `None` if not using mixture prior.
+    pub narrow_weight_post: Option<f64>,
 }
 
 impl Posterior {
@@ -66,6 +77,30 @@ impl Posterior {
             leak_probability,
             projection_mismatch_q,
             n,
+            narrow_weight_post: None, // Default: no mixture prior
+        }
+    }
+
+    /// Create a new posterior with mixture prior weights (v5.2).
+    pub fn new_with_mixture(
+        delta_post: Vector9,
+        lambda_post: Matrix9,
+        beta_proj: Vector2,
+        beta_proj_cov: Matrix2,
+        leak_probability: f64,
+        projection_mismatch_q: f64,
+        n: usize,
+        narrow_weight_post: f64,
+    ) -> Self {
+        Self {
+            delta_post,
+            lambda_post,
+            beta_proj,
+            beta_proj_cov,
+            leak_probability,
+            projection_mismatch_q,
+            n,
+            narrow_weight_post: Some(narrow_weight_post),
         }
     }
 
