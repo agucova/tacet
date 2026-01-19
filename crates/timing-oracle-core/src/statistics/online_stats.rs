@@ -176,6 +176,7 @@ impl StatsSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::sq;
 
     #[test]
     fn test_online_stats_basic() {
@@ -260,7 +261,7 @@ mod tests {
         let n = data.len() as f64;
         let batch_mean: f64 = data.iter().sum::<f64>() / n;
         let batch_variance: f64 =
-            data.iter().map(|x| (x - batch_mean).powi(2)).sum::<f64>() / (n - 1.0);
+            data.iter().map(|x| sq(x - batch_mean)).sum::<f64>() / (n - 1.0);
 
         assert!(
             (online.mean - batch_mean).abs() < 1e-10,

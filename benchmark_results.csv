@@ -1,0 +1,7 @@
+tool,preset,effect_pattern,effect_sigma_mult,noise_model,dataset_id,samples_per_class,detected,statistic,p_value,time_ms,samples_used
+timing-oracle,quick,shift,0,iid,0,1000,false,0.020833,,69,1000
+timing-oracle,quick,shift,0,iid,1,1000,false,0.031250,,71,1000
+timing-oracle,quick,shift,0,iid,2,1000,false,0.031250,,104,1000
+timing-oracle,quick,shift,0.1,iid,0,1000,false,0.015625,,68,1000
+timing-oracle,quick,shift,0.1,iid,1,1000,false,0.583333,,104,1000
+timing-oracle,quick,shift,0.1,iid,2,1000,false,0.000000,,71,1000

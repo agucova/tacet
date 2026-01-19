@@ -1,0 +1,24 @@
+[package]
+name = "timing-oracle-bench"
+version = "0.1.0"
+edition = "2021"
+description = "Benchmark comparison infrastructure for timing-oracle"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/anthropics/timing-oracle"
+readme = "README.md"
+
+[features]
+default = ["parallel"]
+parallel = ["rayon"]
+
+[dependencies]
+timing-oracle = { path = "../timing-oracle" }
+rand = { version = "0.8", features = ["small_rng"] }
+rand_distr = "0.4"
+tempfile = "3.24.0"
+serde_json = "1.0.149"
+rayon = { version = "1.10", optional = true }
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+
+[dev-dependencies]

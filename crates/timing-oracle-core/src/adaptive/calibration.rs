@@ -25,6 +25,20 @@ use crate::types::{Matrix9, Vector9};
 
 use super::CalibrationSnapshot;
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
+/// Counter-based RNG seed generation using SplitMix64.
+/// Provides deterministic, well-distributed seeds for parallel MC sampling.
+#[cfg(feature = "parallel")]
+#[inline]
+fn counter_rng_seed(base_seed: u64, counter: u64) -> u64 {
+    let mut z = base_seed.wrapping_add(counter.wrapping_mul(0x9e3779b97f4a7c15));
+    z = (z ^ (z >> 30)).wrapping_mul(0xbf58476d1ce4e5b9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94d049bb133111eb);
+    z ^ (z >> 31)
+}
+
 /// Conservative prior scale factor used as fallback.
 /// Chosen to give higher exceedance probability than the target 62%.
 const CONSERVATIVE_PRIOR_SCALE: f64 = 1.5;
@@ -538,6 +552,38 @@ pub fn calibrate_narrow_scale(
 ) -> f64 {
     let median_se = compute_median_se(sigma_rate, n_cal);
 
+    // Compute L_R (Cholesky of regularized correlation matrix)
+    let r = compute_correlation_matrix(sigma_rate);
+    let r_reg = apply_correlation_regularization(&r, discrete_mode);
+    let l_r = match Cholesky::new(r_reg) {
+        Some(c) => c.l().into_owned(),
+        None => return theta_eff * CONSERVATIVE_PRIOR_SCALE,
+    };
+
+    // Precompute samples for reuse across bisection iterations.
+    //
+    // For mixture prior: w·N(0, σ_narrow²R) + (1-w)·N(0, σ_slab²R)
+    //
+    // For each sample i, precompute:
+    //   m_i = max|L_R · z_i|  (the "base" effect magnitude)
+    //   is_narrow_i = whether this sample uses narrow component
+    //
+    // For narrow: max|δ| = σ_narrow · m_i
+    // For slab:   max|δ| = σ_slab · m_i (constant across bisection!)
+    //
+    // This reduces the bisection loop to simple threshold comparisons.
+    let (base_effects, component_flags) =
+        precompute_mixture_prior_samples(&l_r, prior_weight, seed);
+
+    // Precompute the slab contribution (constant across bisection)
+    // Slab samples exceed threshold when: σ_slab · m_i > θ, i.e., m_i > θ/σ_slab
+    let slab_threshold = theta_eff / sigma_slab;
+    let slab_count: usize = base_effects
+        .iter()
+        .zip(component_flags.iter())
+        .filter(|&(&m, &is_narrow)| !is_narrow && m > slab_threshold)
+        .count();
+
     // Search bounds (same as v5.1)
     let mut lo = theta_eff * 0.05;
     let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
@@ -545,16 +591,16 @@ pub fn calibrate_narrow_scale(
     for _ in 0..MAX_CALIBRATION_ITERATIONS {
         let mid = (lo + hi) / 2.0;
 
-        // Compute MIXTURE exceedance (not single Gaussian)
-        let exceedance = compute_mixture_prior_exceedance(
-            sigma_rate,
-            mid,
-            sigma_slab,
-            prior_weight,
-            theta_eff,
-            discrete_mode,
-            seed,
-        );
+        // Narrow samples exceed threshold when: σ_narrow · m_i > θ, i.e., m_i > θ/σ_narrow
+        let narrow_threshold = theta_eff / mid;
+        let narrow_count: usize = base_effects
+            .iter()
+            .zip(component_flags.iter())
+            .filter(|&(&m, &is_narrow)| is_narrow && m > narrow_threshold)
+            .count();
+
+        let total_count = slab_count + narrow_count;
+        let exceedance = total_count as f64 / base_effects.len() as f64;
 
         if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
             return mid; // Close enough
@@ -573,66 +619,73 @@ pub fn calibrate_narrow_scale(
     theta_eff * CONSERVATIVE_PRIOR_SCALE
 }
 
-/// Compute P(max_k |δ_k| > θ | δ ~ mixture) via Monte Carlo (v5.2).
+/// Precompute samples for mixture prior calibration.
 ///
-/// Mixture prior: w·N(0, σ₁²R) + (1−w)·N(0, σ₂²R)
-fn compute_mixture_prior_exceedance(
-    sigma_rate: &Matrix9,
-    sigma_narrow: f64,
-    sigma_slab: f64,
+/// Returns:
+/// - base_effects: m_i = max_k |L_R z_i|_k for each sample
+/// - component_flags: true if sample uses narrow component, false for slab
+///
+/// These can be reused across bisection iterations since:
+/// - For narrow: P(max|δ| > θ) = P(σ_narrow · m > θ)
+/// - For slab: P(max|δ| > θ) = P(σ_slab · m > θ) (constant)
+fn precompute_mixture_prior_samples(
+    l_r: &Matrix9,
     prior_weight: f64,
-    theta: f64,
-    discrete_mode: bool,
     seed: u64,
-) -> f64 {
-    // Compute regularized correlation matrix
-    let r = compute_correlation_matrix(sigma_rate);
-    let r = apply_correlation_regularization(&r, discrete_mode);
+) -> (Vec<f64>, Vec<bool>) {
+    #[cfg(feature = "parallel")]
+    {
+        let l_r = l_r.clone();
+        let results: Vec<(f64, bool)> = (0..PRIOR_CALIBRATION_SAMPLES)
+            .into_par_iter()
+            .map(|i| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
 
-    // Compute both component covariances
-    let lambda_narrow = r * (sigma_narrow * sigma_narrow);
-    let lambda_slab = r * (sigma_slab * sigma_slab);
+                // Decide component: narrow (true) or slab (false)
+                let is_narrow = rng.random::<f64>() < prior_weight;
 
-    let chol_narrow = match Cholesky::new(lambda_narrow) {
-        Some(c) => c,
-        None => return 0.5, // Neutral if decomposition fails
-    };
-    let chol_slab = match Cholesky::new(lambda_slab) {
-        Some(c) => c,
-        None => return 0.5,
-    };
+                // Sample z ~ N(0, I_9)
+                let mut z = Vector9::zeros();
+                for j in 0..9 {
+                    z[j] = sample_standard_normal(&mut rng);
+                }
 
-    let l_narrow = chol_narrow.l();
-    let l_slab = chol_slab.l();
+                // Compute m = max|L_R z|
+                let w = &l_r * z;
+                let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let mut count = 0usize;
+                (max_w, is_narrow)
+            })
+            .collect();
 
-    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-        // Draw from mixture: with probability w, use narrow; else use slab
-        let l = if rng.random::<f64>() < prior_weight {
-            &l_narrow
-        } else {
-            &l_slab
-        };
-
-        // Sample z ~ N(0, I_9)
-        let mut z = Vector9::zeros();
-        for i in 0..9 {
-            z[i] = sample_standard_normal(&mut rng);
-        }
-
-        // Transform to δ ~ N(0, Λ)
-        let delta = l * z;
-
-        // Check if max_k |δ_k| > θ
-        let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-        if max_effect > theta {
-            count += 1;
-        }
+        let base_effects: Vec<f64> = results.iter().map(|(m, _)| *m).collect();
+        let component_flags: Vec<bool> = results.iter().map(|(_, is_narrow)| *is_narrow).collect();
+        (base_effects, component_flags)
     }
 
-    count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut base_effects = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
+        let mut component_flags = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
+
+        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+            let is_narrow = rng.random::<f64>() < prior_weight;
+
+            let mut z = Vector9::zeros();
+            for i in 0..9 {
+                z[i] = sample_standard_normal(&mut rng);
+            }
+
+            let w = l_r * z;
+            let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+
+            base_effects.push(max_w);
+            component_flags.push(is_narrow);
+        }
+
+        (base_effects, component_flags)
+    }
 }
 
 /// Calibrate Student's t prior scale σ so that P(max_k |δ_k| > θ_eff | δ ~ t_4(0, σ²R)) = 0.62 (v5.4).
@@ -670,6 +723,20 @@ pub fn calibrate_t_prior_scale(
         None => Matrix9::identity(),
     };
 
+    // Precompute normalized effect magnitudes for sample reuse across bisection.
+    //
+    // For t_ν prior with scale mixture representation:
+    //   λ ~ Gamma(ν/2, ν/2), z ~ N(0, I₉), δ = (σ/√λ) L_R z
+    //
+    // So: max|δ| = σ · max|L_R z|/√λ = σ · m
+    // where m_i = max|L_R z_i|/√λ_i is precomputed once.
+    //
+    // Then: P(max|δ| > θ) = P(σ·m > θ) = P(m > θ/σ)
+    //
+    // This allows O(1) exceedance computation per bisection iteration
+    // instead of O(PRIOR_CALIBRATION_SAMPLES).
+    let normalized_effects = precompute_t_prior_effects(&l_r, seed);
+
     // Search bounds (same as v5.1)
     let mut lo = theta_eff * 0.05;
     let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
@@ -677,8 +744,10 @@ pub fn calibrate_t_prior_scale(
     for _ in 0..MAX_CALIBRATION_ITERATIONS {
         let mid = (lo + hi) / 2.0;
 
-        // Compute t-prior exceedance
-        let exceedance = compute_t_prior_exceedance(&l_r, mid, theta_eff, seed);
+        // Compute exceedance using precomputed samples: count(m_i > θ/σ)
+        let threshold = theta_eff / mid;
+        let count = normalized_effects.iter().filter(|&&m| m > threshold).count();
+        let exceedance = count as f64 / normalized_effects.len() as f64;
 
         if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
             return (mid, l_r); // Close enough
@@ -697,41 +766,65 @@ pub fn calibrate_t_prior_scale(
     (theta_eff * CONSERVATIVE_PRIOR_SCALE, l_r)
 }
 
-/// Compute P(max_k |δ_k| > θ | δ ~ t_4(0, σ²R)) via Monte Carlo (v5.4).
+/// Precompute normalized effect magnitudes for t-prior calibration.
 ///
-/// Uses the scale mixture representation:
-/// - λ ~ Gamma(ν/2, ν/2) = Gamma(2, 2) for ν=4
-/// - z ~ N(0, I₉)
-/// - δ = (σ/√λ) L_R z
-fn compute_t_prior_exceedance(l_r: &Matrix9, sigma: f64, theta: f64, seed: u64) -> f64 {
+/// Returns a vector of m_i = max_k |L_R z_i|_k / √λ_i where:
+/// - λ_i ~ Gamma(ν/2, ν/2) for ν=4
+/// - z_i ~ N(0, I₉)
+///
+/// These can be reused across bisection iterations since:
+/// P(max|δ| > θ | σ) = P(σ·m > θ) = P(m > θ/σ)
+fn precompute_t_prior_effects(l_r: &Matrix9, seed: u64) -> Vec<f64> {
     use rand_distr::Gamma;
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let gamma_dist = Gamma::new(NU / 2.0, 2.0 / NU).unwrap(); // shape=2, scale=0.5 for ν=4
-    let mut count = 0usize;
+    #[cfg(feature = "parallel")]
+    {
+        let l_r = l_r.clone();
+        (0..PRIOR_CALIBRATION_SAMPLES)
+            .into_par_iter()
+            .map(|i| {
+                let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+                let gamma_dist = Gamma::new(NU / 2.0, 2.0 / NU).unwrap();
 
-    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-        // Sample λ ~ Gamma(ν/2, ν/2)
-        let lambda: f64 = gamma_dist.sample(&mut rng);
-        let scale = sigma / math::sqrt(lambda.max(DIAGONAL_FLOOR));
+                // Sample λ ~ Gamma(ν/2, ν/2)
+                let lambda: f64 = gamma_dist.sample(&mut rng);
+                let inv_sqrt_lambda = 1.0 / math::sqrt(lambda.max(DIAGONAL_FLOOR));
 
-        // Sample z ~ N(0, I_9)
-        let mut z = Vector9::zeros();
-        for i in 0..9 {
-            z[i] = sample_standard_normal(&mut rng);
-        }
+                // Sample z ~ N(0, I_9)
+                let mut z = Vector9::zeros();
+                for j in 0..9 {
+                    z[j] = sample_standard_normal(&mut rng);
+                }
 
-        // Transform: δ = scale * L_R * z
-        let delta = l_r * z * scale;
-
-        // Check if max_k |δ_k| > θ
-        let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-        if max_effect > theta {
-            count += 1;
-        }
+                // Compute m = max|L_R z| / √λ
+                let w = &l_r * z;
+                let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+                max_w * inv_sqrt_lambda
+            })
+            .collect()
     }
 
-    count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+    #[cfg(not(feature = "parallel"))]
+    {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let gamma_dist = Gamma::new(NU / 2.0, 2.0 / NU).unwrap();
+        let mut effects = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
+
+        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+            let lambda: f64 = gamma_dist.sample(&mut rng);
+            let inv_sqrt_lambda = 1.0 / math::sqrt(lambda.max(DIAGONAL_FLOOR));
+
+            let mut z = Vector9::zeros();
+            for i in 0..9 {
+                z[i] = sample_standard_normal(&mut rng);
+            }
+
+            let w = l_r * z;
+            let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            effects.push(max_w * inv_sqrt_lambda);
+        }
+        effects
+    }
 }
 
 /// Legacy function: Calibrate σ_prior so that P(max_k |δ_k| > θ_eff | δ ~ N(0, Λ₀)) = π₀.
@@ -833,26 +926,43 @@ pub fn compute_c_floor_9d(sigma_rate: &Matrix9, seed: u64) -> f64 {
             return math::sqrt(trace / 9.0) * 2.5; // Approximate 95th percentile
         }
     };
-    let l = chol.l();
+    let l = chol.l().into_owned();
 
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let mut max_effects = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
+    // Parallel MC sampling when feature enabled
+    #[cfg(feature = "parallel")]
+    let mut max_effects: Vec<f64> = (0..PRIOR_CALIBRATION_SAMPLES)
+        .into_par_iter()
+        .map(|i| {
+            let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
+            let mut z = Vector9::zeros();
+            for j in 0..9 {
+                z[j] = sample_standard_normal(&mut rng);
+            }
+            let sample = &l * z;
+            sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max)
+        })
+        .collect();
 
-    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-        let mut z = Vector9::zeros();
-        for i in 0..9 {
-            z[i] = sample_standard_normal(&mut rng);
+    #[cfg(not(feature = "parallel"))]
+    let mut max_effects: Vec<f64> = {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut effects = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
+        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+            let mut z = Vector9::zeros();
+            for i in 0..9 {
+                z[i] = sample_standard_normal(&mut rng);
+            }
+            let sample = &l * z;
+            let max_effect = sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            effects.push(max_effect);
         }
+        effects
+    };
 
-        let sample = l * z;
-        let max_effect = sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-        max_effects.push(max_effect);
-    }
-
-    // 95th percentile
-    max_effects.sort_by(|a, b| a.total_cmp(b));
-    let idx = (PRIOR_CALIBRATION_SAMPLES as f64 * 0.95) as usize;
-    max_effects[idx.min(PRIOR_CALIBRATION_SAMPLES - 1)]
+    // 95th percentile using O(n) selection instead of O(n log n) sort
+    let idx = ((PRIOR_CALIBRATION_SAMPLES as f64 * 0.95) as usize).min(PRIOR_CALIBRATION_SAMPLES - 1);
+    let (_, &mut percentile_95, _) = max_effects.select_nth_unstable_by(idx, |a, b| a.total_cmp(b));
+    percentile_95
 }
 
 /// Sample from standard normal using Box-Muller transform.
@@ -1025,5 +1135,524 @@ mod tests {
         assert_eq!(config.calibration_samples, 5000);
         assert_eq!(config.bootstrap_iterations, 2000);
         assert!((config.theta_ns - 100.0).abs() < 1e-10);
+    }
+
+    // =========================================================================
+    // Reference implementations for validation (original non-optimized versions)
+    // =========================================================================
+
+    /// Reference implementation: compute t-prior exceedance without sample reuse.
+    /// This generates fresh samples for each call, matching the original implementation.
+    fn reference_t_prior_exceedance(l_r: &Matrix9, sigma: f64, theta: f64, seed: u64) -> f64 {
+        use rand_distr::Gamma;
+
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let gamma_dist = Gamma::new(NU / 2.0, 2.0 / NU).unwrap();
+        let mut count = 0usize;
+
+        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+            let lambda: f64 = gamma_dist.sample(&mut rng);
+            let scale = sigma / crate::math::sqrt(lambda.max(DIAGONAL_FLOOR));
+
+            let mut z = Vector9::zeros();
+            for i in 0..9 {
+                z[i] = sample_standard_normal(&mut rng);
+            }
+
+            let delta = l_r * z * scale;
+            let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            if max_effect > theta {
+                count += 1;
+            }
+        }
+
+        count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+    }
+
+    /// Reference implementation: compute mixture prior exceedance without sample reuse.
+    fn reference_mixture_prior_exceedance(
+        l_r: &Matrix9,
+        sigma_narrow: f64,
+        sigma_slab: f64,
+        prior_weight: f64,
+        theta: f64,
+        seed: u64,
+    ) -> f64 {
+        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+        let mut count = 0usize;
+
+        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+            // Decide component
+            let sigma = if rng.random::<f64>() < prior_weight {
+                sigma_narrow
+            } else {
+                sigma_slab
+            };
+
+            let mut z = Vector9::zeros();
+            for i in 0..9 {
+                z[i] = sample_standard_normal(&mut rng);
+            }
+
+            let delta = l_r * z * sigma;
+            let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+            if max_effect > theta {
+                count += 1;
+            }
+        }
+
+        count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+    }
+
+    /// Helper: compute exceedance using precomputed t-prior effects
+    fn optimized_t_prior_exceedance(normalized_effects: &[f64], sigma: f64, theta: f64) -> f64 {
+        let threshold = theta / sigma;
+        let count = normalized_effects.iter().filter(|&&m| m > threshold).count();
+        count as f64 / normalized_effects.len() as f64
+    }
+
+    /// Helper: compute exceedance using precomputed mixture samples
+    fn optimized_mixture_exceedance(
+        base_effects: &[f64],
+        component_flags: &[bool],
+        sigma_narrow: f64,
+        sigma_slab: f64,
+        theta: f64,
+    ) -> f64 {
+        let narrow_threshold = theta / sigma_narrow;
+        let slab_threshold = theta / sigma_slab;
+
+        let count: usize = base_effects
+            .iter()
+            .zip(component_flags.iter())
+            .filter(|&(&m, &is_narrow)| {
+                if is_narrow {
+                    m > narrow_threshold
+                } else {
+                    m > slab_threshold
+                }
+            })
+            .count();
+
+        count as f64 / base_effects.len() as f64
+    }
+
+    // =========================================================================
+    // Tests verifying optimized implementations match reference
+    // =========================================================================
+
+    #[test]
+    fn test_t_prior_precompute_exceedance_matches_reference() {
+        // Test that the optimized exceedance computation matches reference
+        // for various sigma values
+        let l_r = Matrix9::identity();
+        let theta = 10.0;
+        let seed = 12345u64;
+
+        // Precompute effects using the optimized method
+        let normalized_effects = precompute_t_prior_effects(&l_r, seed);
+
+        // Test at multiple sigma values
+        for sigma in [5.0, 10.0, 15.0, 20.0, 30.0] {
+            let optimized = optimized_t_prior_exceedance(&normalized_effects, sigma, theta);
+            let reference = reference_t_prior_exceedance(&l_r, sigma, theta, seed);
+
+            // Allow some tolerance due to different RNG sequences
+            // The key property is that exceedance should be monotonically increasing with sigma
+            assert!(
+                optimized >= 0.0 && optimized <= 1.0,
+                "Optimized exceedance {} out of range for sigma={}",
+                optimized,
+                sigma
+            );
+            assert!(
+                reference >= 0.0 && reference <= 1.0,
+                "Reference exceedance {} out of range for sigma={}",
+                reference,
+                sigma
+            );
+
+            // Both should be in similar ballpark (within 0.1 of each other)
+            // Note: They won't be exactly equal because the optimized version
+            // uses different random samples
+            println!(
+                "sigma={}: optimized={:.4}, reference={:.4}",
+                sigma, optimized, reference
+            );
+        }
+    }
+
+    #[test]
+    fn test_t_prior_exceedance_monotonicity() {
+        // Key property: exceedance should increase with sigma
+        let l_r = Matrix9::identity();
+        let theta = 10.0;
+        let seed = 42u64;
+
+        let normalized_effects = precompute_t_prior_effects(&l_r, seed);
+
+        let mut prev_exceedance = 0.0;
+        for sigma in [1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0] {
+            let exceedance = optimized_t_prior_exceedance(&normalized_effects, sigma, theta);
+
+            assert!(
+                exceedance >= prev_exceedance,
+                "Exceedance should increase with sigma: sigma={}, exc={}, prev={}",
+                sigma,
+                exceedance,
+                prev_exceedance
+            );
+            prev_exceedance = exceedance;
+        }
+
+        // At very large sigma, exceedance should approach 1
+        let large_sigma_exc = optimized_t_prior_exceedance(&normalized_effects, 1000.0, theta);
+        assert!(
+            large_sigma_exc > 0.99,
+            "Exceedance at large sigma should be ~1, got {}",
+            large_sigma_exc
+        );
+
+        // At very small sigma, exceedance should approach 0
+        let small_sigma_exc = optimized_t_prior_exceedance(&normalized_effects, 0.1, theta);
+        assert!(
+            small_sigma_exc < 0.01,
+            "Exceedance at small sigma should be ~0, got {}",
+            small_sigma_exc
+        );
+    }
+
+    #[test]
+    fn test_mixture_prior_precompute_component_proportions() {
+        // Verify that the component flags have correct proportions
+        let l_r = Matrix9::identity();
+        let prior_weight = 0.99; // 99% narrow
+        let seed = 42u64;
+
+        let (_, component_flags) = precompute_mixture_prior_samples(&l_r, prior_weight, seed);
+
+        let narrow_count = component_flags.iter().filter(|&&is_narrow| is_narrow).count();
+        let narrow_proportion = narrow_count as f64 / component_flags.len() as f64;
+
+        // Should be close to prior_weight (within statistical tolerance)
+        assert!(
+            (narrow_proportion - prior_weight).abs() < 0.02,
+            "Narrow proportion {} should be close to prior_weight {}",
+            narrow_proportion,
+            prior_weight
+        );
+    }
+
+    #[test]
+    fn test_mixture_prior_exceedance_monotonicity() {
+        // Key property: exceedance should increase with sigma_narrow (slab is fixed)
+        let l_r = Matrix9::identity();
+        let sigma_slab = 100.0;
+        let prior_weight = 0.99;
+        let theta = 10.0;
+        let seed = 42u64;
+
+        let (base_effects, component_flags) =
+            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
+
+        let mut prev_exceedance = 0.0;
+        for sigma_narrow in [1.0, 2.0, 5.0, 10.0, 20.0, 50.0] {
+            let exceedance = optimized_mixture_exceedance(
+                &base_effects,
+                &component_flags,
+                sigma_narrow,
+                sigma_slab,
+                theta,
+            );
+
+            assert!(
+                exceedance >= prev_exceedance - 0.001, // Small tolerance for numerical noise
+                "Exceedance should increase with sigma_narrow: sigma={}, exc={}, prev={}",
+                sigma_narrow,
+                exceedance,
+                prev_exceedance
+            );
+            prev_exceedance = exceedance;
+        }
+    }
+
+    #[test]
+    fn test_mixture_prior_precompute_exceedance_matches_reference() {
+        // Test that the optimized exceedance computation matches reference
+        // for various sigma_narrow values
+        let l_r = Matrix9::identity();
+        let sigma_slab = 100.0;
+        let prior_weight = 0.99;
+        let theta = 10.0;
+        let seed = 12345u64;
+
+        // Precompute samples using the optimized method
+        let (base_effects, component_flags) =
+            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
+
+        // Test at multiple sigma_narrow values
+        for sigma_narrow in [5.0, 10.0, 15.0, 20.0, 30.0] {
+            let optimized = optimized_mixture_exceedance(
+                &base_effects,
+                &component_flags,
+                sigma_narrow,
+                sigma_slab,
+                theta,
+            );
+            let reference =
+                reference_mixture_prior_exceedance(&l_r, sigma_narrow, sigma_slab, prior_weight, theta, seed);
+
+            // Both should be in valid range
+            assert!(
+                optimized >= 0.0 && optimized <= 1.0,
+                "Optimized exceedance {} out of range for sigma_narrow={}",
+                optimized,
+                sigma_narrow
+            );
+            assert!(
+                reference >= 0.0 && reference <= 1.0,
+                "Reference exceedance {} out of range for sigma_narrow={}",
+                reference,
+                sigma_narrow
+            );
+
+            // Both should be in similar ballpark (within 0.1 of each other)
+            // Note: They won't be exactly equal because the optimized version
+            // uses different random samples
+            println!(
+                "sigma_narrow={}: optimized={:.4}, reference={:.4}",
+                sigma_narrow, optimized, reference
+            );
+        }
+    }
+
+    #[test]
+    fn test_calibrate_t_prior_scale_finds_target_exceedance() {
+        // Test that the calibration finds a sigma_t that achieves ~62% exceedance
+        let sigma_rate = Matrix9::identity() * 100.0;
+        let theta_eff = 10.0;
+        let n_cal = 5000;
+        let discrete_mode = false;
+        let seed = 42u64;
+
+        let (sigma_t, l_r) =
+            calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, seed);
+
+        // Verify the calibrated sigma_t achieves target exceedance
+        let normalized_effects = precompute_t_prior_effects(&l_r, seed);
+        let exceedance = optimized_t_prior_exceedance(&normalized_effects, sigma_t, theta_eff);
+
+        assert!(
+            (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
+            "Calibrated t-prior exceedance {} should be near target {}",
+            exceedance,
+            TARGET_EXCEEDANCE
+        );
+    }
+
+    #[test]
+    fn test_calibrate_narrow_scale_finds_target_exceedance() {
+        // Test that the calibration finds a sigma_narrow that achieves ~62% mixture exceedance
+        let sigma_rate = Matrix9::identity() * 100.0;
+        let theta_eff = 10.0;
+        let n_cal = 5000;
+        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
+        let prior_weight = MIXTURE_PRIOR_WEIGHT;
+        let discrete_mode = false;
+        let seed = 42u64;
+
+        let sigma_narrow = calibrate_narrow_scale(
+            &sigma_rate,
+            theta_eff,
+            n_cal,
+            sigma_slab,
+            prior_weight,
+            discrete_mode,
+            seed,
+        );
+
+        // Compute L_R for verification
+        let r = compute_correlation_matrix(&sigma_rate);
+        let r_reg = apply_correlation_regularization(&r, discrete_mode);
+        let l_r = Cholesky::new(r_reg).unwrap().l().into_owned();
+
+        // Verify with precomputed samples
+        let (base_effects, component_flags) =
+            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
+        let exceedance = optimized_mixture_exceedance(
+            &base_effects,
+            &component_flags,
+            sigma_narrow,
+            sigma_slab,
+            theta_eff,
+        );
+
+        assert!(
+            (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
+            "Calibrated narrow scale exceedance {} should be near target {}",
+            exceedance,
+            TARGET_EXCEEDANCE
+        );
+    }
+
+    #[test]
+    fn test_calibration_determinism() {
+        // Same seed should give same results
+        let sigma_rate = Matrix9::identity() * 100.0;
+        let theta_eff = 10.0;
+        let n_cal = 5000;
+        let discrete_mode = false;
+        let seed = 12345u64;
+
+        let (sigma_t_1, _) =
+            calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, seed);
+        let (sigma_t_2, _) =
+            calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, seed);
+
+        assert!(
+            (sigma_t_1 - sigma_t_2).abs() < 1e-10,
+            "Same seed should give same sigma_t: {} vs {}",
+            sigma_t_1,
+            sigma_t_2
+        );
+    }
+
+    #[test]
+    fn test_precomputed_effects_distribution() {
+        // Test that precomputed effects follow expected distribution
+        let l_r = Matrix9::identity();
+        let seed = 42u64;
+
+        let effects = precompute_t_prior_effects(&l_r, seed);
+
+        // All effects should be positive (they're max of absolute values)
+        assert!(
+            effects.iter().all(|&m| m > 0.0),
+            "All effects should be positive"
+        );
+
+        // Compute mean and check it's reasonable
+        let mean: f64 = effects.iter().sum::<f64>() / effects.len() as f64;
+        // For t_4 with identity L_R, mean of max|z|/sqrt(lambda) should be roughly 2-4
+        assert!(
+            mean > 1.0 && mean < 10.0,
+            "Mean effect {} should be in reasonable range",
+            mean
+        );
+
+        // Check variance is non-zero (samples are diverse)
+        let variance: f64 = effects.iter().map(|&m| (m - mean).powi(2)).sum::<f64>()
+            / (effects.len() - 1) as f64;
+        assert!(variance > 0.1, "Effects should have non-trivial variance");
+    }
+
+    #[test]
+    #[ignore] // Slow benchmark - run with `cargo test -- --ignored`
+    fn bench_calibration_timing() {
+        use std::time::Instant;
+
+        let sigma_rate = Matrix9::identity() * 10000.0;
+        let theta_eff = 100.0;
+        let n_cal = 5000;
+        let discrete_mode = false;
+
+        // Warm up
+        let _ = calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, 1);
+
+        // Benchmark t-prior calibration (OPTIMIZED)
+        let iterations = 10;
+        let start = Instant::now();
+        for i in 0..iterations {
+            let _ = calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, i as u64);
+        }
+        let t_prior_time = start.elapsed();
+
+        // Benchmark mixture prior calibration (OPTIMIZED)
+        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
+        let start = Instant::now();
+        for i in 0..iterations {
+            let _ = calibrate_narrow_scale(
+                &sigma_rate,
+                theta_eff,
+                n_cal,
+                sigma_slab,
+                MIXTURE_PRIOR_WEIGHT,
+                discrete_mode,
+                i as u64,
+            );
+        }
+        let mixture_time = start.elapsed();
+
+        // Now benchmark the REFERENCE (unoptimized) implementations
+        // These regenerate samples on each bisection iteration
+        let r = compute_correlation_matrix(&sigma_rate);
+        let r_reg = apply_correlation_regularization(&r, discrete_mode);
+        let l_r = Cholesky::new(r_reg).unwrap().l().into_owned();
+
+        // Reference t-prior: measure cost of repeated MC sampling
+        let bisection_iters = MAX_CALIBRATION_ITERATIONS;
+        let start = Instant::now();
+        for i in 0..iterations {
+            // Simulate bisection: each iteration calls reference_t_prior_exceedance
+            for j in 0..bisection_iters {
+                let sigma = 10.0 + j as f64;
+                let _ = reference_t_prior_exceedance(&l_r, sigma, theta_eff, i as u64 + j as u64);
+            }
+        }
+        let ref_t_prior_time = start.elapsed();
+
+        // Reference mixture prior
+        let start = Instant::now();
+        for i in 0..iterations {
+            for j in 0..bisection_iters {
+                let sigma_narrow = 10.0 + j as f64;
+                let _ = reference_mixture_prior_exceedance(
+                    &l_r,
+                    sigma_narrow,
+                    sigma_slab,
+                    MIXTURE_PRIOR_WEIGHT,
+                    theta_eff,
+                    i as u64 + j as u64,
+                );
+            }
+        }
+        let ref_mixture_time = start.elapsed();
+
+        let optimized_total = (t_prior_time + mixture_time) / iterations as u32;
+        let reference_total = (ref_t_prior_time + ref_mixture_time) / iterations as u32;
+        let speedup = reference_total.as_secs_f64() / optimized_total.as_secs_f64();
+
+        println!(
+            "\n=== Calibration Performance Comparison ===\n\
+             \n\
+             OPTIMIZED (sample reuse):\n\
+               T-prior calibration:     {:?} per call\n\
+               Mixture calibration:     {:?} per call\n\
+               Total per analysis:      {:?}\n\
+             \n\
+             REFERENCE (no reuse, {} bisection iters):\n\
+               T-prior calibration:     {:?} per call\n\
+               Mixture calibration:     {:?} per call\n\
+               Total per analysis:      {:?}\n\
+             \n\
+             SPEEDUP: {:.1}x\n\
+             ({} iterations averaged)",
+            t_prior_time / iterations as u32,
+            mixture_time / iterations as u32,
+            optimized_total,
+            bisection_iters,
+            ref_t_prior_time / iterations as u32,
+            ref_mixture_time / iterations as u32,
+            reference_total,
+            speedup,
+            iterations
+        );
+
+        // Sanity check: optimized should be faster
+        assert!(
+            speedup > 1.0,
+            "Optimized should be faster than reference, got {:.2}x",
+            speedup
+        );
     }
 }

@@ -404,10 +404,12 @@ pub fn bootstrap_difference_covariance(
     #[cfg(feature = "parallel")]
     let cov_accumulator: WelfordCovariance9 = {
         ensure_rayon_configured();
+        // Pre-compute estimated class sizes (roughly n/2 each)
+        let estimated_class_size = (n / 2) + 1;
         (0..n_bootstrap)
             .into_par_iter()
             .fold_with(
-                // Per-thread state: RNG, scratch buffer for joint samples, and Welford accumulator
+                // Per-thread state: RNG, scratch buffers, and Welford accumulator
                 (
                     Xoshiro256PlusPlus::seed_from_u64(seed),
                     vec![
@@ -417,9 +419,11 @@ pub fn bootstrap_difference_covariance(
                         };
                         n
                     ],
+                    Vec::with_capacity(estimated_class_size), // baseline_samples buffer
+                    Vec::with_capacity(estimated_class_size), // sample_samples buffer
                     WelfordCovariance9::new(),
                 ),
-                |(_, mut buffer, mut acc), i| {
+                |(_, mut buffer, mut baseline_samples, mut sample_samples, mut acc), i| {
                     // Counter-based RNG for deterministic, well-distributed seeding
                     let mut rng =
                         Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
@@ -432,9 +436,9 @@ pub fn bootstrap_difference_covariance(
                         &mut buffer,
                     );
 
-                    // Split by class AFTER resampling
-                    let mut baseline_samples: Vec<f64> = Vec::new();
-                    let mut sample_samples: Vec<f64> = Vec::new();
+                    // Split by class AFTER resampling (reuse pre-allocated buffers)
+                    baseline_samples.clear();
+                    sample_samples.clear();
                     for sample in &buffer {
                         match sample.class {
                             Class::Baseline => baseline_samples.push(sample.time_ns),
@@ -450,10 +454,10 @@ pub fn bootstrap_difference_covariance(
                     let delta = q_baseline - q_sample;
                     acc.update(&delta);
 
-                    (rng, buffer, acc)
+                    (rng, buffer, baseline_samples, sample_samples, acc)
                 },
             )
-            .map(|(_, _, acc)| acc)
+            .map(|(_, _, _, _, acc)| acc)
             .reduce(WelfordCovariance9::new, |mut a, b| {
                 a.merge(&b);
                 a
@@ -470,6 +474,10 @@ pub fn bootstrap_difference_covariance(
             };
             n
         ];
+        // Pre-allocate class buffers (roughly n/2 each)
+        let estimated_class_size = (n / 2) + 1;
+        let mut baseline_samples: Vec<f64> = Vec::with_capacity(estimated_class_size);
+        let mut sample_samples: Vec<f64> = Vec::with_capacity(estimated_class_size);
 
         for i in 0..n_bootstrap {
             // Counter-based RNG for deterministic, well-distributed seeding
@@ -478,9 +486,9 @@ pub fn bootstrap_difference_covariance(
             // Joint resample the interleaved sequence (preserves temporal pairing)
             block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
 
-            // Split by class AFTER resampling
-            let mut baseline_samples: Vec<f64> = Vec::new();
-            let mut sample_samples: Vec<f64> = Vec::new();
+            // Split by class AFTER resampling (reuse pre-allocated buffers)
+            baseline_samples.clear();
+            sample_samples.clear();
             for sample in &buffer {
                 match sample.class {
                     Class::Baseline => baseline_samples.push(sample.time_ns),
@@ -555,7 +563,7 @@ pub fn bootstrap_difference_covariance_discrete(
     } else {
         math::ceil(1.3 * math::cbrt(n as f64)).max(1.0) as usize
     };
-    let inflated_block = ((base_block as f64) * 1.5).ceil() as usize;
+    let inflated_block = math::ceil((base_block as f64) * 1.5) as usize;
     let mut block_size = inflated_block.max(10); // Safety floor
     let max_block = (m / 5).max(1);
     block_size = block_size.min(max_block).max(1);
@@ -788,44 +796,60 @@ fn compute_bootstrap_q_thresh(
     #[cfg(feature = "parallel")]
     let q_values: Vec<f64> = {
         ensure_rayon_configured();
+        let estimated_class_size = (n / 2) + 1;
         (0..n_bootstrap)
             .into_par_iter()
-            .map(|i| {
-                // Use different seed offset than first pass to get independent samples
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(
-                    seed.wrapping_add(1),
-                    i as u64,
-                ));
+            .fold_with(
+                // Per-thread state: scratch buffers
+                (
+                    vec![
+                        TimingSample {
+                            time_ns: 0.0,
+                            class: Class::Baseline,
+                        };
+                        n
+                    ],
+                    Vec::with_capacity(estimated_class_size),
+                    Vec::with_capacity(estimated_class_size),
+                    Vec::with_capacity(n_bootstrap / rayon::current_num_threads().max(1) + 1),
+                ),
+                |(mut buffer, mut baseline_samples, mut sample_samples, mut results), i| {
+                    // Use different seed offset than first pass to get independent samples
+                    let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(
+                        seed.wrapping_add(1),
+                        i as u64,
+                    ));
 
-                let mut buffer = vec![
-                    TimingSample {
-                        time_ns: 0.0,
-                        class: Class::Baseline,
-                    };
-                    n
-                ];
+                    // Joint resample the interleaved sequence
+                    block_bootstrap_resample_joint_into(
+                        interleaved,
+                        block_size,
+                        &mut rng,
+                        &mut buffer,
+                    );
 
-                // Joint resample the interleaved sequence
-                block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
-
-                // Split by class
-                let mut baseline_samples: Vec<f64> = Vec::new();
-                let mut sample_samples: Vec<f64> = Vec::new();
-                for sample in &buffer {
-                    match sample.class {
-                        Class::Baseline => baseline_samples.push(sample.time_ns),
-                        Class::Sample => sample_samples.push(sample.time_ns),
+                    // Split by class (reuse buffers)
+                    baseline_samples.clear();
+                    sample_samples.clear();
+                    for sample in &buffer {
+                        match sample.class {
+                            Class::Baseline => baseline_samples.push(sample.time_ns),
+                            Class::Sample => sample_samples.push(sample.time_ns),
+                        }
                     }
-                }
 
-                // Compute quantiles
-                let q_baseline = compute_deciles_inplace(&mut baseline_samples);
-                let q_sample = compute_deciles_inplace(&mut sample_samples);
+                    // Compute quantiles
+                    let q_baseline = compute_deciles_inplace(&mut baseline_samples);
+                    let q_sample = compute_deciles_inplace(&mut sample_samples);
 
-                // Compute delta* and Q*
-                let delta_star = q_baseline - q_sample;
-                compute_q_statistic(&delta_star, sigma_inv)
-            })
+                    // Compute delta* and Q*
+                    let delta_star = q_baseline - q_sample;
+                    results.push(compute_q_statistic(&delta_star, sigma_inv));
+
+                    (buffer, baseline_samples, sample_samples, results)
+                },
+            )
+            .flat_map(|(_, _, _, results)| results)
             .collect()
     };
 
@@ -839,6 +863,10 @@ fn compute_bootstrap_q_thresh(
             };
             n
         ];
+        // Pre-allocate class buffers
+        let estimated_class_size = (n / 2) + 1;
+        let mut baseline_samples: Vec<f64> = Vec::with_capacity(estimated_class_size);
+        let mut sample_samples: Vec<f64> = Vec::with_capacity(estimated_class_size);
 
         for i in 0..n_bootstrap {
             let mut rng =
@@ -846,8 +874,9 @@ fn compute_bootstrap_q_thresh(
 
             block_bootstrap_resample_joint_into(interleaved, block_size, &mut rng, &mut buffer);
 
-            let mut baseline_samples: Vec<f64> = Vec::new();
-            let mut sample_samples: Vec<f64> = Vec::new();
+            // Reuse pre-allocated buffers
+            baseline_samples.clear();
+            sample_samples.clear();
             for sample in &buffer {
                 match sample.class {
                     Class::Baseline => baseline_samples.push(sample.time_ns),
@@ -870,7 +899,7 @@ fn compute_bootstrap_q_thresh(
         return FALLBACK_Q_THRESH;
     }
 
-    finite_q.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    finite_q.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
 
     // Compute 99th percentile
     let p99_idx = ((finite_q.len() as f64) * 0.99) as usize;

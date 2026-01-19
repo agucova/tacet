@@ -41,3 +41,6 @@ std = ["nalgebra/std", "rand/std", "serde/std"]
 
 # Enable parallel bootstrap (requires std)
 parallel = ["std", "dep:rayon"]
+
+[dev-dependencies]
+proptest = "1.8.0"

@@ -30,3 +30,6 @@ target
 .devenv/
 .devenv/nix-eval-cache.db
 2504.19821v1.pdf
+
+# Benchmark data (synthetic and TLS datasets)
+benchmark_data/

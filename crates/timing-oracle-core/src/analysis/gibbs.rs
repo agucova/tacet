@@ -307,10 +307,10 @@ impl GibbsSampler {
         let lambda_mean = retained_lambdas.iter().sum::<f64>() / n;
         let lambda_var = retained_lambdas
             .iter()
-            .map(|&l| (l - lambda_mean).powi(2))
+            .map(|&l| math::sq(l - lambda_mean))
             .sum::<f64>()
             / (n - 1.0);
-        let lambda_sd = lambda_var.sqrt();
+        let lambda_sd = math::sqrt(lambda_var);
         let lambda_cv = if lambda_mean > 0.0 {
             lambda_sd / lambda_mean
         } else {
@@ -483,7 +483,7 @@ fn compute_ess(chain: &[f64]) -> f64 {
     }
 
     let mean: f64 = chain.iter().sum::<f64>() / n as f64;
-    let var: f64 = chain.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / n as f64;
+    let var: f64 = chain.iter().map(|&x| math::sq(x - mean)).sum::<f64>() / n as f64;
 
     if var < 1e-12 {
         return n as f64; // No variance, treat as independent

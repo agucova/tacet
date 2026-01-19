@@ -21,6 +21,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build Commands
 
+## Profiling (LLM-friendly)
+
+Use `just profile bench` or `just profile tests` to produce folded stack output at `PROFILE_DIR` (default `/var/tmp/timing-oracle-profile`). Then run `just profile summary target=bench` (or `target=tests`) for a quick top-leaf summary; the folded stacks are plain text and safe to `grep`/`sort`/`awk`.
+
+
 ```bash
 cargo build                    # Build with all features (parallel + kperf/perf)
 cargo build --no-default-features  # Minimal build

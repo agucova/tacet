@@ -20,8 +20,8 @@ use crate::analysis::mde::estimate_mde;
 use crate::constants::DEFAULT_SEED;
 use crate::preflight::{run_all_checks, PreflightResult};
 use crate::statistics::{
-    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
-    paired_optimal_block_length, AcquisitionStream, OnlineStats,
+    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete, AcquisitionStream,
+    OnlineStats,
 };
 use crate::types::Matrix9;
 use timing_oracle_core::adaptive::{
@@ -290,13 +290,6 @@ pub fn calibrate(
     let min_uniqueness = (unique_baseline as f64 / n as f64).min(unique_sample as f64 / n as f64);
     let discrete_mode = min_uniqueness < 0.10;
 
-    // Compute block length (spec Section 2.6)
-    let block_length = if n >= 10 {
-        paired_optimal_block_length(&baseline_ns, &sample_ns)
-    } else {
-        1
-    };
-
     // Create acquisition stream for joint bootstrap (spec Section 2.3.1)
     // The stream preserves acquisition order which is critical for correct
     // dependence estimation during bootstrap resampling.
@@ -415,7 +408,9 @@ pub fn calibrate(
 
     Ok(Calibration {
         sigma_rate,
-        block_length,
+        // Use block_size from bootstrap covariance estimation (spec §3.3.2 compliant,
+        // uses class-conditional ACF and has floor of 10)
+        block_length: cov_estimate.block_size,
         prior_cov_narrow,
         prior_cov_slab,
         sigma_narrow,

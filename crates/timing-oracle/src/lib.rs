@@ -67,7 +67,7 @@ pub mod adaptive;
 mod config;
 mod constants;
 mod oracle;
-mod result;
+pub mod result;
 mod thread_pool;
 mod types;
 
@@ -94,6 +94,12 @@ pub use types::{AttackerModel, Class, TimingSample};
 
 // Re-export helpers for convenience
 pub use helpers::InputPair;
+
+// Re-export effect injection utilities for benchmarking
+pub use helpers::effect::{
+    busy_wait_ns, counter_frequency_hz, global_max_delay_ns, set_global_max_delay_ns,
+    timer_backend_name, timer_resolution_ns, using_precise_timer, BenchmarkEffect, EffectInjector,
+};
 
 // ============================================================================
 // Assertion Macros

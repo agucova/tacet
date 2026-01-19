@@ -1,5 +1,8 @@
 //! Utilities for correct input handling in timing tests.
 //!
+//! This module also provides effect injection utilities for testing and benchmarking.
+//! See [`effect`] for controlled timing delay injection.
+//!
 //! The most common mistake when using timing-oracle is calling RNG functions
 //! or allocating memory inside the measured closures. This creates timing
 //! overhead that drowns out the actual signal.
@@ -47,6 +50,8 @@
 //!
 //! // After measurement, check_anomaly() will warn about this
 //! ```
+
+pub mod effect;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashSet;

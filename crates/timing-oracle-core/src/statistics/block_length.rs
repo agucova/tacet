@@ -328,11 +328,11 @@ pub fn class_conditional_optimal_block_length(stream: &[TimingSample], is_fragil
     let block_length = politis_white_from_acf(&max_abs_acf, &max_acv, truncation_lag, n);
 
     // Apply safety floor (spec §3.3.2 Step 4)
-    let mut result = (block_length.ceil() as usize).max(BLOCK_LENGTH_FLOOR);
+    let mut result = (math::ceil(block_length) as usize).max(BLOCK_LENGTH_FLOOR);
 
     // Apply inflation factor for fragile regimes (spec §3.3.2 Step 4)
     if is_fragile {
-        result = ((result as f64) * 1.5).ceil() as usize;
+        result = math::ceil((result as f64) * 1.5) as usize;
     }
 
     // Cap at reasonable maximum
@@ -623,7 +623,7 @@ mod tests {
         let opt_x = optimal_block_length(&x);
         let opt_y = optimal_block_length(&y);
 
-        let expected = opt_x.circular.max(opt_y.circular).ceil() as usize;
+        let expected = math::ceil(opt_x.circular.max(opt_y.circular)) as usize;
 
         assert_eq!(
             paired, expected,

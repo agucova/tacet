@@ -6,3 +6,7 @@ inputs:
     inputs:
       nixpkgs:
         follows: nixpkgs
+
+# Allow insecure ecdsa package required by tlsfuzzer
+permittedInsecurePackages:
+  - "python3.13-ecdsa-0.19.1"

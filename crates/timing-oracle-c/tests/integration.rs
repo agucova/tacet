@@ -47,51 +47,69 @@ unsafe extern "C" fn zeros_generator(
     slice.fill(0);
 }
 
+/// Number of iterations to ensure measurable timing (~500ns+ per measurement)
+const ITERATIONS: usize = 200;
+
 /// Constant-time XOR operation (should pass)
+/// Repeated ITERATIONS times to ensure measurable timing on coarse timers.
 unsafe extern "C" fn xor_operation(_ctx: *mut c_void, input: *const u8, input_size: usize) {
     let data = std::slice::from_raw_parts(input, input_size);
-    let mut acc = 0u8;
-    for &byte in data {
-        acc ^= byte;
+    for _ in 0..ITERATIONS {
+        let mut acc = 0u8;
+        for &byte in data {
+            acc ^= byte;
+        }
+        std::hint::black_box(acc);
     }
-    std::hint::black_box(acc);
 }
 
 /// Constant-time bitwise accumulator (should pass)
+/// Repeated ITERATIONS times to ensure measurable timing on coarse timers.
 unsafe extern "C" fn bitwise_accumulator(_ctx: *mut c_void, input: *const u8, input_size: usize) {
     let data = std::slice::from_raw_parts(input, input_size);
-    let mut acc = 0u8;
-    for &byte in data {
-        acc |= byte;
-        acc &= !byte | acc;
+    for _ in 0..ITERATIONS {
+        let mut acc = 0u8;
+        for &byte in data {
+            acc |= byte;
+            acc &= !byte | acc;
+        }
+        std::hint::black_box(acc);
     }
-    std::hint::black_box(acc);
 }
 
 /// Early-exit comparison (LEAKY - should fail)
+/// Repeated ITERATIONS times to ensure measurable timing on coarse timers.
 unsafe extern "C" fn early_exit_operation(_ctx: *mut c_void, input: *const u8, input_size: usize) {
     let data = std::slice::from_raw_parts(input, input_size);
-    // Early exit on first non-zero byte - this is a timing leak!
-    for &byte in data {
-        if byte != 0 {
-            return;
+    for _ in 0..ITERATIONS {
+        // Early exit on first non-zero byte - this is a timing leak!
+        let mut found = false;
+        for &byte in data {
+            if byte != 0 {
+                found = true;
+                break;
+            }
         }
+        std::hint::black_box(found);
     }
 }
 
 /// Branch-based timing (LEAKY - should fail)
+/// Repeated ITERATIONS times to ensure measurable timing on coarse timers.
 unsafe extern "C" fn branch_operation(_ctx: *mut c_void, input: *const u8, input_size: usize) {
     let data = std::slice::from_raw_parts(input, input_size);
-    let mut sum = 0u64;
-    for &byte in data {
-        // Data-dependent branch - this is a timing leak!
-        if byte > 127 {
-            sum += byte as u64;
-        } else {
-            sum += 1;
+    for _ in 0..ITERATIONS {
+        let mut sum = 0u64;
+        for &byte in data {
+            // Data-dependent branch - this is a timing leak!
+            if byte > 127 {
+                sum += byte as u64;
+            } else {
+                sum += 1;
+            }
         }
+        std::hint::black_box(sum);
     }
-    std::hint::black_box(sum);
 }
 
 /// No-op operation (very fast, likely unmeasurable)

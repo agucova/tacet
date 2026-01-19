@@ -7,6 +7,7 @@ oracle_crate := "crates/timing-oracle"
 # Default output directories (at repo root)
 data_dir := env("CALIBRATION_DATA_DIR", justfile_directory() + "/calibration_data")
 plot_dir := env("CALIBRATION_PLOT_DIR", justfile_directory() + "/plots")
+profile_dir := env("PROFILE_DIR", "/var/tmp/timing-oracle-profile")
 
 # Load subcommand modules
 mod build
@@ -16,6 +17,7 @@ mod bench
 mod example
 mod doc
 mod quality
+mod profile
 
 # ============================================================================
 # TOP-LEVEL COMMANDS

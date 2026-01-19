@@ -16,9 +16,13 @@ use rand::{rngs::StdRng, SeedableRng};
 use std::fs::{self, File};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use timing_oracle::Outcome;
+
+// Re-export effect injection from the shared module
+// These are used by other calibration test files via `mod calibration_utils;`
+#[allow(unused_imports)]
+pub use timing_oracle::helpers::effect::{busy_wait_ns, set_global_max_delay_ns};
 
 // =============================================================================
 // CONFIGURATION
@@ -455,126 +459,14 @@ pub fn fnv1a_64(data: &[u8]) -> u64 {
 }
 
 // =============================================================================
-// EFFECT INJECTION
+// EFFECT INJECTION (delegated to timing_oracle::helpers::effect)
 // =============================================================================
 
-/// Global max inject limit (can be overridden per-tier).
-static MAX_INJECT_NS: AtomicU64 = AtomicU64::new(100_000); // Default: 100μs
-
 /// Set the maximum injectable delay for the current tier.
+///
+/// This is a compatibility wrapper around `set_global_max_delay_ns`.
 pub fn set_max_inject_ns(ns: u64) {
-    MAX_INJECT_NS.store(ns, Ordering::Relaxed);
-}
-
-/// Get the ARM64 counter frequency in Hz.
-///
-/// On macOS (Apple Silicon), the counter runs at a fixed 24MHz.
-/// On Linux ARM64, the frequency varies by platform (e.g., 1GHz on AWS Graviton).
-/// We read it from the CNTFRQ_EL0 register.
-#[cfg(target_arch = "aarch64")]
-fn get_aarch64_counter_freq_hz() -> u64 {
-    #[cfg(target_os = "macos")]
-    {
-        // Apple Silicon counter is always 24MHz
-        24_000_000
-    }
-
-    #[cfg(target_os = "linux")]
-    {
-        // Read counter frequency from CNTFRQ_EL0 register
-        let freq: u64;
-        unsafe {
-            core::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq);
-        }
-        freq
-    }
-
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    {
-        // Fallback: assume 24MHz (may be inaccurate)
-        24_000_000
-    }
-}
-
-/// Cached counter frequency for ARM64.
-#[cfg(target_arch = "aarch64")]
-static AARCH64_COUNTER_FREQ: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
-
-/// Get the cached ARM64 counter frequency.
-#[cfg(target_arch = "aarch64")]
-fn aarch64_counter_freq() -> u64 {
-    *AARCH64_COUNTER_FREQ.get_or_init(|| {
-        let freq = get_aarch64_counter_freq_hz();
-        eprintln!(
-            "[calibration] ARM64 counter frequency: {} Hz ({:.1} MHz)",
-            freq,
-            freq as f64 / 1_000_000.0
-        );
-        freq
-    })
-}
-
-/// Convert nanoseconds to counter ticks for ARM64.
-#[cfg(target_arch = "aarch64")]
-#[inline]
-fn ns_to_ticks(ns: u64) -> u64 {
-    let freq = aarch64_counter_freq();
-
-    if freq == 24_000_000 {
-        // Apple Silicon fast path: ticks = ns * 24 / 1000
-        (ns * 24 + 999) / 1000
-    } else {
-        // General case: ticks = ns * freq / 1e9
-        // Use u128 to avoid overflow for large ns values
-        ((ns as u128 * freq as u128 + 999_999_999) / 1_000_000_000) as u64
-    }
-}
-
-/// On aarch64, uses direct counter register access for accuracy.
-/// The Instant::now() approach has ~40ns overhead which biases effect estimation.
-/// On other platforms, falls back to Instant-based spinning.
-///
-/// On macOS ARM64, the counter runs at 24MHz.
-/// On Linux ARM64, the frequency is read from CNTFRQ_EL0 (e.g., 1GHz on Graviton).
-///
-/// Clamps to tier-dependent MAX_INJECT_NS.
-#[inline(never)]
-pub fn busy_wait_ns(ns: u64) {
-    let max = MAX_INJECT_NS.load(Ordering::Relaxed);
-    let clamped = ns.min(max);
-    if clamped < ns {
-        eprintln!("[WARN] busy_wait_ns clamped {} -> {}", ns, clamped);
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    {
-        let ticks = ns_to_ticks(clamped);
-
-        let start: u64;
-        unsafe {
-            core::arch::asm!("mrs {}, cntvct_el0", out(reg) start);
-        }
-
-        loop {
-            let now: u64;
-            unsafe {
-                core::arch::asm!("mrs {}, cntvct_el0", out(reg) now);
-            }
-            if now.wrapping_sub(start) >= ticks {
-                break;
-            }
-            std::hint::spin_loop();
-        }
-    }
-
-    #[cfg(not(target_arch = "aarch64"))]
-    {
-        let start = Instant::now();
-        let target = Duration::from_nanos(clamped);
-        while start.elapsed() < target {
-            std::hint::spin_loop();
-        }
-    }
+    set_global_max_delay_ns(ns);
 }
 
 // =============================================================================

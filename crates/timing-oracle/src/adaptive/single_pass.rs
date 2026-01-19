@@ -35,7 +35,7 @@ use timing_oracle_core::result::{
 };
 use timing_oracle_core::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
-    compute_deciles_inplace, paired_optimal_block_length, AcquisitionStream,
+    compute_deciles_inplace, AcquisitionStream,
 };
 use timing_oracle_core::types::AttackerModel;
 use timing_oracle_core::Vector9;
@@ -205,7 +205,7 @@ pub fn analyze_single_pass(
     let q_test = compute_deciles_inplace(&mut test_sorted);
     let delta_hat: Vector9 = q_baseline - q_test;
 
-    // Step 2: Detect discrete mode and compute block length (spec §3.3.2)
+    // Step 2: Detect discrete mode (spec §3.3.2)
     let unique_baseline: std::collections::HashSet<i64> =
         baseline.iter().map(|&v| v as i64).collect();
     let unique_test: std::collections::HashSet<i64> =
@@ -213,13 +213,6 @@ pub fn analyze_single_pass(
     let min_uniqueness = (unique_baseline.len() as f64 / n as f64)
         .min(unique_test.len() as f64 / n as f64);
     let discrete_mode = min_uniqueness < 0.10;
-
-    // Compute block length for dependence-aware bootstrap (spec §3.3.2)
-    let block_length = if n >= 10 {
-        paired_optimal_block_length(baseline, test)
-    } else {
-        1
-    };
 
     // Step 3: Bootstrap covariance estimation (spec §3.3.1)
     // Use acquisition stream for non-discrete mode to preserve dependence structure
@@ -316,7 +309,7 @@ pub fn analyze_single_pass(
 
     // Debug output for investigation
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] n = {}, discrete_mode = {}, block_length = {}", n, discrete_mode, block_length);
+        eprintln!("[DEBUG] n = {}, discrete_mode = {}, block_length = {}", n, discrete_mode, cov_estimate.block_size);
         eprintln!("[DEBUG] theta_user = {:.2} ns, theta_floor_stat = {:.2} ns, theta_tick = {:.2} ns, theta_floor = {:.2} ns, theta_eff = {:.2} ns",
             config.theta_ns, theta_floor_stat, theta_tick, theta_floor, theta_eff);
         eprintln!("[DEBUG] c_floor = {:.2} ns·√n", c_floor);
@@ -400,6 +393,8 @@ pub fn analyze_single_pass(
     }
 
     // Build diagnostics
+    // Use block_size from covariance estimation (spec §3.3.2 compliant)
+    let block_length = cov_estimate.block_size;
     let diagnostics = Diagnostics {
         dependence_length: block_length,
         effective_sample_size: n / block_length.max(1),
