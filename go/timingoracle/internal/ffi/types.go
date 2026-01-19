@@ -49,7 +49,7 @@ const (
 	InconclusiveTimeBudgetExceeded
 	InconclusiveSampleBudgetExceeded
 	InconclusiveConditionsChanged
-	InconclusiveThresholdUnachievable
+	InconclusiveThresholdElevated
 	InconclusiveModelMismatch
 )
 

@@ -76,10 +76,27 @@ fn main() {
 
     // 3. mbedTLS PKCS#1 dataset (use 50k subset for speed)
     println!("\n3. mbedTLS Bleichenbacher (PKCS#1 padding oracle)");
-    println!("   Known vulnerability: Timing difference based on padding validity\n");
+    println!("   SILENT result: 'Failed to reject' (no timing leak detected)");
+    println!("   This was a FALSE POSITIVE from RTLF that SILENT correctly handles.");
+    println!("   NOTE: SILENT uses block_size=2122 for this highly autocorrelated data.");
+    println!("         Our bootstrap uses ~48 (Politis-White), which underestimates variance.");
+    println!("         This is a known limitation for extremely autocorrelated external data.\n");
 
-    // Test with AdjacentNetwork threshold (100ns)
+    // Test with SILENT's exact threshold: delta=5 cycles @ 3GHz = 1.67ns
+    println!("   --- SILENT's threshold (delta=5 cycles ≈ 1.67ns) ---");
+    analyze_dataset_subset(
+        &silent_path.join("paper-mbedtls/Wrong_second_byte_(0x02_set_to_0x17)vsCorrectly_formatted_PKCS#1_PMS_message.csv"),
+        DatasetType::CustomLabels("BASELINE", "MODIFIED"),
+        TimeUnit::Cycles,
+        Some(3.0),
+        1.67, // 5 cycles at 3GHz
+        50_000,
+    );
+    println!();
+
+    // Also test with AdjacentNetwork threshold (100ns) - should also PASS
     println!("   --- AdjacentNetwork (theta = 100ns) ---");
+    println!("   Expected: PASS (if SILENT passes at 1.67ns, we must pass at 100ns)");
     analyze_dataset_subset(
         &silent_path.join("paper-mbedtls/Wrong_second_byte_(0x02_set_to_0x17)vsCorrectly_formatted_PKCS#1_PMS_message.csv"),
         DatasetType::CustomLabels("BASELINE", "MODIFIED"),
@@ -181,7 +198,9 @@ fn analyze_dataset_subset(
         pass_threshold: 0.05,
         fail_threshold: 0.95,
         bootstrap_iterations: 2000,
+        timer_resolution_ns: 1.0, // Unknown for external data
         seed: 0xDEADBEEF,
+        max_variance_ratio: 0.95,
     };
 
     let result = analyze_single_pass(&baseline_ns, &test_ns, &config);

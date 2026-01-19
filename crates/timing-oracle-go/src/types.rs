@@ -124,8 +124,8 @@ pub enum ToGoInconclusiveReason {
     SampleBudgetExceeded = 5,
     /// Measurement conditions changed during test.
     ConditionsChanged = 6,
-    /// Requested threshold is below measurement floor.
-    ThresholdUnachievable = 7,
+    /// Threshold was elevated and pass criterion was met at effective threshold (v5.5).
+    ThresholdElevated = 7,
 }
 
 /// Pattern of timing effect.

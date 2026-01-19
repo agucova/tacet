@@ -204,6 +204,65 @@ fn compute_percentile(data: &mut [u64], percentile: f64) -> u64 {
     }
 }
 
+/// Winsorize timing samples in place using pooled symmetric thresholding (spec §4.4).
+///
+/// This is the f64 version for nanosecond-converted data, used in the adaptive loop.
+/// It:
+/// 1. Pools all samples from both classes
+/// 2. Computes the threshold at the given percentile
+/// 3. Caps samples above the threshold in both classes (in place)
+///
+/// # Arguments
+///
+/// * `baseline` - Baseline class samples in nanoseconds (modified in place)
+/// * `sample` - Sample class samples in nanoseconds (modified in place)
+/// * `percentile` - Percentile for threshold (e.g., 0.9999 for 99.99th percentile)
+///
+/// # Returns
+///
+/// Number of samples that were capped.
+pub fn winsorize_f64(baseline: &mut [f64], sample: &mut [f64], percentile: f64) -> usize {
+    // Skip filtering if percentile is 1.0 or higher
+    if percentile >= 1.0 {
+        return 0;
+    }
+
+    // Pool all samples to compute threshold
+    let total_len = baseline.len() + sample.len();
+    if total_len == 0 {
+        return 0;
+    }
+
+    let mut pooled: Vec<f64> = Vec::with_capacity(total_len);
+    pooled.extend_from_slice(baseline);
+    pooled.extend_from_slice(sample);
+
+    // Sort to compute percentile
+    pooled.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Compute threshold at percentile
+    let p = percentile.clamp(0.0, 1.0);
+    let idx = (p * (total_len - 1) as f64).round() as usize;
+    let threshold = pooled[idx.min(total_len - 1)];
+
+    // Cap values above threshold (winsorize)
+    let mut capped = 0;
+    for x in baseline.iter_mut() {
+        if *x > threshold {
+            *x = threshold;
+            capped += 1;
+        }
+    }
+    for x in sample.iter_mut() {
+        if *x > threshold {
+            *x = threshold;
+            capped += 1;
+        }
+    }
+
+    capped
+}
+
 #[cfg(test)]
 /// Compute the threshold for outlier filtering without modifying the input.
 ///

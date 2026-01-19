@@ -774,10 +774,11 @@ impl TimingOracle {
             .fail_threshold(self.config.fail_threshold)
             .time_budget(self.config.time_budget)
             .max_samples(self.config.max_samples);
-        // Note: batch_size and seed are not exposed in builder, set via struct update
+        // Note: batch_size, seed, and outlier_percentile are not exposed in builder, set via struct update
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            outlier_percentile: self.config.outlier_percentile, // spec §4.4: winsorization
             ..adaptive_config
         };
 
@@ -977,6 +978,40 @@ impl TimingOracle {
                     adaptive_state.update_posterior(posterior);
                     continue;
                 }
+                AdaptiveOutcome::ThresholdElevated {
+                    posterior,
+                    theta_user,
+                    theta_eff,
+                    achievable_at_max,
+                    samples_per_class: _,
+                    elapsed: _,
+                    ..
+                } => {
+                    // v5.5: Threshold elevated and P < pass_threshold at θ_eff
+                    let stationarity = stationarity_tracker.compute();
+                    let reason = InconclusiveReason::ThresholdElevated {
+                        theta_user,
+                        theta_eff,
+                        leak_probability_at_eff: posterior.leak_probability,
+                        meets_pass_criterion_at_eff: true, // P < pass_threshold
+                        achievable_at_max,
+                        message: format!(
+                            "Threshold elevated from {:.0}ns to {:.1}ns; P={:.1}% at elevated threshold",
+                            theta_user, theta_eff, posterior.leak_probability * 100.0
+                        ),
+                        guidance: "Use a cycle counter (PmuTimer on macOS, LinuxPerfTimer on Linux) \
+                            or increase max_samples to achieve the requested threshold.".to_string(),
+                    };
+                    return self.build_inconclusive_outcome(
+                        reason,
+                        &adaptive_state,
+                        &calibration,
+                        &timer,
+                        start_time,
+                        theta_ns,
+                        stationarity,
+                    );
+                }
                 AdaptiveOutcome::Inconclusive { reason, .. } => {
                     // Real stop condition (DataTooNoisy, NotLearning, WouldTakeTooLong, Timeout)
                     let result_reason = convert_adaptive_reason(&reason);
@@ -1169,6 +1204,7 @@ impl TimingOracle {
         let adaptive_config = AdaptiveConfig {
             batch_size: self.config.batch_size,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            outlier_percentile: self.config.outlier_percentile, // spec §4.4: winsorization
             ..adaptive_config
         };
 
@@ -1260,6 +1296,11 @@ impl TimingOracle {
                 AdaptiveOutcome::Continue { posterior, .. } => posterior,
                 AdaptiveOutcome::LeakDetected { posterior, .. } => posterior,
                 AdaptiveOutcome::NoLeakDetected { posterior, .. } => posterior,
+                AdaptiveOutcome::ThresholdElevated { posterior, .. } => {
+                    // Research mode: threshold elevation is not a concern since we're
+                    // running at θ→0, so we can continue with the posterior
+                    posterior
+                }
                 AdaptiveOutcome::Inconclusive { reason, .. } => {
                     // Quality gate failed - return with QualityIssue
                     // Convert adaptive reason to our InconclusiveReason
@@ -1437,7 +1478,9 @@ impl TimingOracle {
             pass_threshold: self.config.pass_threshold,
             fail_threshold: self.config.fail_threshold,
             bootstrap_iterations: 2000,
+            timer_resolution_ns: 1.0, // Unknown for raw samples
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
+            max_variance_ratio: 0.95,
         };
 
         let result = analyze_single_pass(baseline_ns, test_ns, &config);
@@ -1577,6 +1620,15 @@ fn build_diagnostics(
         threshold_ns: theta_ns,
         timer_name: timer.name().to_string(),
         platform,
+        // v5.4 Gibbs sampler diagnostics
+        gibbs_iters_total: 256,
+        gibbs_burnin: 64,
+        gibbs_retained: 192,
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
     }
 }
 
@@ -1625,14 +1677,20 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
             message: message.clone(),
             guidance: guidance.clone(),
         },
-        AdaptiveInconclusiveReason::ThresholdUnachievable {
+        AdaptiveInconclusiveReason::ThresholdElevated {
             theta_user,
-            best_achievable,
+            theta_eff,
+            leak_probability_at_eff,
+            meets_pass_criterion_at_eff,
+            achievable_at_max,
             message,
             guidance,
-        } => InconclusiveReason::ThresholdUnachievable {
+        } => InconclusiveReason::ThresholdElevated {
             theta_user: *theta_user,
-            best_achievable: *best_achievable,
+            theta_eff: *theta_eff,
+            leak_probability_at_eff: *leak_probability_at_eff,
+            meets_pass_criterion_at_eff: *meets_pass_criterion_at_eff,
+            achievable_at_max: *achievable_at_max,
             message: message.clone(),
             guidance: guidance.clone(),
         },

@@ -56,6 +56,17 @@ pub struct Posterior {
     /// When < 0.5, the slab component dominates (evidence favors large effect).
     /// `None` if not using mixture prior.
     pub narrow_weight_post: Option<f64>,
+
+    // ==================== v5.4 Gibbs sampler fields ====================
+
+    /// v5.4: Posterior mean of latent scale λ.
+    /// `None` if not using Gibbs sampler.
+    pub lambda_mean: Option<f64>,
+
+    /// v5.4: Whether the Gibbs sampler's lambda chain mixed well.
+    /// `None` if not using Gibbs sampler.
+    /// When `Some(false)`, indicates potential posterior unreliability.
+    pub lambda_mixing_ok: Option<bool>,
 }
 
 impl Posterior {
@@ -78,6 +89,8 @@ impl Posterior {
             projection_mismatch_q,
             n,
             narrow_weight_post: None, // Default: no mixture prior
+            lambda_mean: None,        // v5.4: no Gibbs sampler
+            lambda_mixing_ok: None,   // v5.4: no Gibbs sampler
         }
     }
 
@@ -101,6 +114,34 @@ impl Posterior {
             projection_mismatch_q,
             n,
             narrow_weight_post: Some(narrow_weight_post),
+            lambda_mean: None,      // v5.4: no Gibbs sampler
+            lambda_mixing_ok: None, // v5.4: no Gibbs sampler
+        }
+    }
+
+    /// Create a new posterior with Gibbs sampler diagnostics (v5.4).
+    pub fn new_with_gibbs(
+        delta_post: Vector9,
+        lambda_post: Matrix9,
+        beta_proj: Vector2,
+        beta_proj_cov: Matrix2,
+        leak_probability: f64,
+        projection_mismatch_q: f64,
+        n: usize,
+        lambda_mean: f64,
+        lambda_mixing_ok: bool,
+    ) -> Self {
+        Self {
+            delta_post,
+            lambda_post,
+            beta_proj,
+            beta_proj_cov,
+            leak_probability,
+            projection_mismatch_q,
+            n,
+            narrow_weight_post: None, // Not used with Gibbs
+            lambda_mean: Some(lambda_mean),
+            lambda_mixing_ok: Some(lambda_mixing_ok),
         }
     }
 

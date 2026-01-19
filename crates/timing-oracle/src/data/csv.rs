@@ -211,37 +211,6 @@ fn load_single_column_file(path: &Path) -> Result<Vec<u64>, DataError> {
     Ok(samples)
 }
 
-/// Load timing data from a dudect-style interleaved format.
-///
-/// Dudect format alternates between classes:
-/// - Even indices (0, 2, 4, ...): Class 0 (baseline)
-/// - Odd indices (1, 3, 5, ...): Class 1 (test)
-///
-/// # Arguments
-/// * `path` - Path to the CSV file with single column of timing values
-///
-/// # Returns
-/// `TimingData` with samples split by index parity.
-pub fn load_dudect_interleaved(path: &Path) -> Result<TimingData, DataError> {
-    let all_samples = load_single_column_file(path)?;
-
-    let baseline_samples: Vec<u64> = all_samples.iter().step_by(2).copied().collect();
-    let test_samples: Vec<u64> = all_samples.iter().skip(1).step_by(2).copied().collect();
-
-    let metadata = DataMetadata {
-        source: path.to_string_lossy().to_string().into(),
-        group_labels: Some(("class0".to_string(), "class1".to_string())),
-        context: Some("dudect interleaved format".to_string()),
-    };
-
-    Ok(TimingData::with_metadata(
-        baseline_samples,
-        test_samples,
-        TimeUnit::Cycles,
-        metadata,
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -297,23 +266,6 @@ mod tests {
 
         assert_eq!(data.baseline_samples, vec![500, 510]);
         assert_eq!(data.test_samples, vec![600, 610]);
-    }
-
-    #[test]
-    fn test_load_dudect_interleaved() {
-        let mut file = NamedTempFile::new().unwrap();
-        writeln!(file, "100").unwrap(); // class 0
-        writeln!(file, "200").unwrap(); // class 1
-        writeln!(file, "110").unwrap(); // class 0
-        writeln!(file, "210").unwrap(); // class 1
-        writeln!(file, "120").unwrap(); // class 0
-        writeln!(file, "220").unwrap(); // class 1
-        file.flush().unwrap();
-
-        let data = load_dudect_interleaved(file.path()).unwrap();
-
-        assert_eq!(data.baseline_samples, vec![100, 110, 120]);
-        assert_eq!(data.test_samples, vec![200, 210, 220]);
     }
 
     #[test]

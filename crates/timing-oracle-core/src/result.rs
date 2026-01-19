@@ -230,17 +230,28 @@ pub enum InconclusiveReason {
         guidance: String,
     },
 
-    /// Requested threshold cannot be achieved with available resources.
+    /// Threshold was elevated and pass criterion was met at effective threshold.
     ///
-    /// Even at maximum sample budget, the measurement floor would exceed the
-    /// user's requested threshold. This indicates the timer resolution or
-    /// noise level is too high for the requested sensitivity.
-    /// See spec Section 2.6, Gate 4.
-    ThresholdUnachievable {
-        /// User's requested threshold in nanoseconds.
+    /// The measurement floor exceeded the user's requested threshold, so inference
+    /// was performed at an elevated effective threshold. The posterior probability
+    /// dropped below pass_threshold at θ_eff, but since θ_eff > θ_user + ε, we
+    /// cannot guarantee the user's original requirement is met.
+    ///
+    /// This is NOT a quality gate failure - it's a semantic constraint: Pass requires
+    /// both P < pass_threshold AND θ_eff ≤ θ_user + ε.
+    ///
+    /// See spec Section 3.5.3 (v5.5 Threshold Elevation Decision Rule).
+    ThresholdElevated {
+        /// User's requested threshold in nanoseconds (θ_user).
         theta_user: f64,
-        /// Best achievable threshold at max samples.
-        best_achievable: f64,
+        /// Effective threshold used for inference (θ_eff = max(θ_user, θ_floor)).
+        theta_eff: f64,
+        /// Posterior probability at θ_eff (was < pass_threshold).
+        leak_probability_at_eff: f64,
+        /// True: P(leak > θ_eff) < pass_threshold (pass criterion met at elevated threshold).
+        meets_pass_criterion_at_eff: bool,
+        /// True: θ_floor at max_samples would be ≤ θ_user + ε (more samples could achieve user threshold).
+        achievable_at_max: bool,
         /// Human-readable explanation.
         message: String,
         /// Suggested actions.
@@ -788,6 +799,34 @@ pub struct Diagnostics {
 
     /// Platform description (e.g., "macos-aarch64").
     pub platform: String,
+
+    // =========================================================================
+    // v5.4 Gibbs sampler diagnostics
+    // =========================================================================
+
+    /// v5.4: Total number of Gibbs iterations.
+    pub gibbs_iters_total: usize,
+
+    /// v5.4: Number of burn-in iterations.
+    pub gibbs_burnin: usize,
+
+    /// v5.4: Number of retained samples.
+    pub gibbs_retained: usize,
+
+    /// v5.4: Posterior mean of latent scale λ.
+    pub lambda_mean: f64,
+
+    /// v5.4: Posterior standard deviation of λ.
+    pub lambda_sd: f64,
+
+    /// v5.4: Coefficient of variation of λ (λ_sd / λ_mean).
+    pub lambda_cv: f64,
+
+    /// v5.4: Effective sample size of λ chain.
+    pub lambda_ess: f64,
+
+    /// v5.4: Whether λ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub lambda_mixing_ok: bool,
 }
 
 impl Diagnostics {
@@ -822,6 +861,15 @@ impl Diagnostics {
             threshold_ns: 0.0,
             timer_name: String::new(),
             platform: String::new(),
+            // v5.4 Gibbs sampler diagnostics
+            gibbs_iters_total: 256,
+            gibbs_burnin: 64,
+            gibbs_retained: 192,
+            lambda_mean: 1.0,
+            lambda_sd: 0.0,
+            lambda_cv: 0.0,
+            lambda_ess: 0.0,
+            lambda_mixing_ok: true,
         }
     }
 
@@ -898,7 +946,17 @@ pub enum IssueCode {
     /// The wide "slab" prior component has higher posterior weight than the
     /// narrow component, indicating evidence strongly favors a large effect
     /// (well above the threshold). This is informational, not a problem.
+    ///
+    /// DEPRECATED: v5.4 uses Student's t prior with Gibbs sampling instead
+    /// of mixture prior. This code is kept for backwards compatibility.
     SlabDominant,
+
+    /// v5.4: Gibbs sampler's lambda chain did not mix well.
+    ///
+    /// The latent scale variable λ showed poor mixing (CV < 0.1 or ESS < 20),
+    /// indicating the posterior may be unreliable. This typically occurs with
+    /// very small or very large effects where the posterior is concentrated.
+    LambdaMixingPoor,
 }
 
 // ============================================================================
@@ -1467,7 +1525,7 @@ impl fmt::Display for Outcome {
                     InconclusiveReason::TimeBudgetExceeded { .. } => "time budget exceeded",
                     InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
                     InconclusiveReason::ConditionsChanged { .. } => "conditions changed",
-                    InconclusiveReason::ThresholdUnachievable { .. } => "threshold unachievable",
+                    InconclusiveReason::ThresholdElevated { .. } => "threshold elevated",
                 };
                 write!(
                     f,
@@ -1571,16 +1629,23 @@ impl fmt::Display for InconclusiveReason {
                     message, guidance
                 )
             }
-            InconclusiveReason::ThresholdUnachievable {
+            InconclusiveReason::ThresholdElevated {
                 theta_user,
-                best_achievable,
+                theta_eff,
+                leak_probability_at_eff,
+                achievable_at_max,
                 guidance,
                 ..
             } => {
+                let achievability = if *achievable_at_max {
+                    "achievable with more samples"
+                } else {
+                    "not achievable at max samples"
+                };
                 write!(
                     f,
-                    "Threshold unachievable: requested {:.1}ns, best achievable {:.1}ns\n  \u{2192} {}",
-                    theta_user, best_achievable, guidance
+                    "Threshold elevated: requested {:.1}ns, used {:.1}ns (P={:.1}% at θ_eff, {})\n  \u{2192} {}",
+                    theta_user, theta_eff, leak_probability_at_eff * 100.0, achievability, guidance
                 )
             }
         }

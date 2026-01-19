@@ -591,7 +591,7 @@ pub extern "C" fn togo_inconclusive_reason_str(reason: ToGoInconclusiveReason) -
         ToGoInconclusiveReason::TimeBudgetExceeded => c"TimeBudgetExceeded".as_ptr(),
         ToGoInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
         ToGoInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
-        ToGoInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
+        ToGoInconclusiveReason::ThresholdElevated => c"ThresholdElevated".as_ptr(),
     }
 }
 
@@ -661,6 +661,44 @@ unsafe fn fill_result_from_outcome(
             (*result).quality = ToGoQuality::Good; // Passed, so quality is at least good
         }
 
+        AdaptiveOutcome::ThresholdElevated {
+            posterior,
+            theta_user,
+            theta_eff,
+            achievable_at_max,
+            samples_per_class,
+            elapsed_secs,
+            ..
+        } => {
+            // v5.5: Threshold was elevated - map to Inconclusive with ThresholdElevated reason
+            (*result).outcome = ToGoOutcome::Inconclusive;
+            (*result).leak_probability = posterior.leak_probability;
+            (*result).samples_used = *samples_per_class;
+            (*result).elapsed_secs = *elapsed_secs;
+
+            (*result).effect.shift_ns = posterior.beta_proj[0];
+            (*result).effect.tail_ns = posterior.beta_proj[1];
+            (*result).effect.pattern = classify_effect_pattern(posterior.beta_proj[0], posterior.beta_proj[1]);
+
+            (*result).inconclusive_reason = ToGoInconclusiveReason::ThresholdElevated;
+
+            let guidance = if *achievable_at_max {
+                format!(
+                    "Threshold elevated from {:.0}ns to {:.1}ns. More samples could achieve the requested threshold.",
+                    theta_user, theta_eff
+                )
+            } else {
+                format!(
+                    "Threshold elevated from {:.0}ns to {:.1}ns. Use a cycle counter (PMU timer) for better resolution.",
+                    theta_user, theta_eff
+                )
+            };
+
+            if let Ok(cstr) = CString::new(guidance) {
+                (*result).recommendation = cstr.into_raw();
+            }
+        }
+
         AdaptiveOutcome::Inconclusive {
             reason,
             posterior,
@@ -693,8 +731,8 @@ unsafe fn fill_result_from_outcome(
                 InconclusiveReason::ConditionsChanged { .. } => {
                     ToGoInconclusiveReason::ConditionsChanged
                 }
-                InconclusiveReason::ThresholdUnachievable { .. } => {
-                    ToGoInconclusiveReason::ThresholdUnachievable
+                InconclusiveReason::ThresholdElevated { .. } => {
+                    ToGoInconclusiveReason::ThresholdElevated
                 }
             };
 
@@ -710,7 +748,7 @@ unsafe fn fill_result_from_outcome(
                     String::from("Increase sample budget or reduce threshold")
                 }
                 InconclusiveReason::ConditionsChanged { guidance, .. } => guidance.clone(),
-                InconclusiveReason::ThresholdUnachievable { guidance, .. } => guidance.clone(),
+                InconclusiveReason::ThresholdElevated { guidance, .. } => guidance.clone(),
             };
 
             if let Ok(cstr) = CString::new(guidance) {

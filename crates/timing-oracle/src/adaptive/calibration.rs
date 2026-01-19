@@ -25,7 +25,8 @@ use crate::statistics::{
 };
 use crate::types::Matrix9;
 use timing_oracle_core::adaptive::{
-    calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
+    calibrate_narrow_scale, calibrate_t_prior_scale, compute_c_floor_9d, compute_prior_cov_9d,
+    compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
 };
 
 /// Calibration results from the initial measurement phase.
@@ -61,6 +62,17 @@ pub struct Calibration {
     /// v5.2: Prior mixture weight w (narrow component weight).
     /// Fixed at 0.99 per spec.
     pub prior_weight: f64,
+
+    /// v5.4: Student's t prior scale (calibrated for 62% exceedance).
+    pub sigma_t: f64,
+
+    /// v5.4: Cholesky factor of correlation matrix R.
+    /// Used for Gibbs sampling: L_R where R = L_R L_R^T.
+    pub l_r: Matrix9,
+
+    /// v5.4: Marginal prior covariance = 2σ_t² R (for ν=4).
+    /// Used for quality gate variance ratio check.
+    pub prior_cov_marginal: Matrix9,
 
     /// Timer resolution in nanoseconds.
     pub timer_resolution_ns: f64,
@@ -349,8 +361,10 @@ pub fn calibrate(
     // Compute calibration statistics snapshot for drift detection (Gate 6)
     let calibration_snapshot = compute_calibration_snapshot(&baseline_ns, &sample_ns);
 
-    // v4.1: Compute floor-rate constant and model mismatch threshold
-    let c_floor = compute_floor_rate_constant(&sigma_rate, config.seed);
+    // v5.4: Compute floor-rate constant: c_floor = q_95(max_k |Z_k|) where Z ~ N(0, Σ_rate)
+    // This is used for theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n)
+    // IMPORTANT: Use compute_c_floor_9d from core which samples from Σ_rate directly (spec §3.3.4)
+    let c_floor = compute_c_floor_9d(&sigma_rate, config.seed);
 
     // Note: cov_estimate.q_thresh (bootstrap-calibrated projection mismatch threshold)
     // is used directly when constructing the Calibration struct below.
@@ -392,6 +406,13 @@ pub fn calibrate(
     let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
     let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
+    // v5.4: Student's t prior (ν=4) via Gibbs sampling
+    // Calibrate sigma_t so t-prior hits 62% exceedance, get L_R for Gibbs
+    let (sigma_t, l_r) =
+        calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
+    // Marginal prior covariance for t_4: Var(δ) = (ν/(ν-2)) σ² R = 2σ² R for ν=4
+    let prior_cov_marginal = compute_prior_cov_9d(&sigma_rate, sigma_t * std::f64::consts::SQRT_2, discrete_mode);
+
     Ok(Calibration {
         sigma_rate,
         block_length,
@@ -400,6 +421,9 @@ pub fn calibrate(
         sigma_narrow,
         sigma_slab,
         prior_weight: MIXTURE_PRIOR_WEIGHT,
+        sigma_t,
+        l_r,
+        prior_cov_marginal,
         timer_resolution_ns: config.timer_resolution_ns,
         samples_per_second,
         discrete_mode,
@@ -420,6 +444,10 @@ pub fn calibrate(
 
 /// Compute the floor-rate constant c_floor (spec Section 2.3.4).
 ///
+/// DEPRECATED: This function incorrectly samples from projection covariance Σ_pred,rate
+/// instead of Σ_rate directly as required by spec §3.3.4.
+/// Use `compute_c_floor_9d` from timing-oracle-core instead.
+///
 /// This is the 95th percentile of max|Z_k| where Z ~ N(0, Σ_pred,rate).
 /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
 ///
@@ -428,6 +456,7 @@ pub fn calibrate(
 ///
 /// We draw 50,000 Monte Carlo samples from N(0, Σ_pred,rate) and compute
 /// the 95th percentile of the max absolute value across the 9 quantile positions.
+#[allow(dead_code)]
 fn compute_floor_rate_constant(sigma_rate: &Matrix9, seed: u64) -> f64 {
     use rand::SeedableRng;
     use rand_distr::{Distribution, Normal};

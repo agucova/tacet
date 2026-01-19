@@ -44,8 +44,11 @@ const CONDITION_NUMBER_THRESHOLD: f64 = 1e4;
 /// Minimum diagonal floor for regularization (prevents division by zero).
 const DIAGONAL_FLOOR: f64 = 1e-12;
 
+/// Degrees of freedom for Student's t prior (v5.4).
+pub const NU: f64 = 4.0;
+
 /// Default prior weight for the narrow component in mixture prior (§3.3.5 v5.2).
-/// w = 0.99 means 99% weight on narrow component, 1% on slab.
+/// DEPRECATED: Kept for backwards compatibility. Use t-prior with NU=4 instead.
 pub const MIXTURE_PRIOR_WEIGHT: f64 = 0.99;
 
 /// Calibration results from the initial measurement phase (no_std compatible).
@@ -125,6 +128,20 @@ pub struct Calibration {
     /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
     pub c_floor: f64,
 
+    // ==================== v5.4 Student's t prior fields ====================
+
+    /// Calibrated Student's t prior scale (v5.4).
+    /// This is the σ in δ|λ ~ N(0, (σ²/λ)R).
+    pub sigma_t: f64,
+
+    /// Cholesky factor L_R of correlation matrix R.
+    /// Used for Gibbs sampling: δ = (σ/√λ) L_R z.
+    pub l_r: Matrix9,
+
+    /// Marginal prior covariance: 2σ²R (for ν=4).
+    /// This is the unconditional prior variance of δ under the t-prior.
+    pub prior_cov_marginal: Matrix9,
+
     /// Projection mismatch threshold.
     /// 99th percentile of bootstrap Q_proj distribution.
     pub projection_mismatch_thresh: f64,
@@ -170,6 +187,17 @@ impl Calibration {
         theta_floor_initial: f64,
         rng_seed: u64,
     ) -> Self {
+        // Compute L_R for backwards compatibility with v5.4 code
+        let r = compute_correlation_matrix(&sigma_rate);
+        let r_reg = apply_correlation_regularization(&r, discrete_mode);
+        let l_r = match Cholesky::new(r_reg) {
+            Some(c) => c.l().into_owned(),
+            None => Matrix9::identity(),
+        };
+
+        // Marginal prior cov = 2σ²R for t-prior compatibility
+        let prior_cov_marginal = r_reg * (2.0 * sigma_narrow * sigma_narrow);
+
         Self {
             sigma_rate,
             block_length,
@@ -193,6 +221,71 @@ impl Calibration {
             theta_eff,
             theta_floor_initial,
             rng_seed,
+            sigma_t: sigma_narrow,
+            l_r,
+            prior_cov_marginal,
+        }
+    }
+
+    /// Create a new Calibration with v5.4 Student's t prior.
+    ///
+    /// This is the preferred constructor for v5.4+.
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_t_prior(
+        sigma_rate: Matrix9,
+        block_length: usize,
+        sigma_t: f64,
+        l_r: Matrix9,
+        theta_ns: f64,
+        calibration_samples: usize,
+        discrete_mode: bool,
+        mde_shift_ns: f64,
+        mde_tail_ns: f64,
+        calibration_snapshot: CalibrationSnapshot,
+        timer_resolution_ns: f64,
+        samples_per_second: f64,
+        c_floor: f64,
+        projection_mismatch_thresh: f64,
+        theta_tick: f64,
+        theta_eff: f64,
+        theta_floor_initial: f64,
+        rng_seed: u64,
+    ) -> Self {
+        // Compute marginal prior covariance: 2σ²R (for ν=4)
+        // The marginal variance of t_ν(0, σ²R) is (ν/(ν-2)) σ²R = 2σ²R for ν=4
+        let r = &l_r * l_r.transpose();
+        let prior_cov_marginal = r * (2.0 * sigma_t * sigma_t);
+
+        // For backwards compatibility, also populate mixture fields
+        // (will be removed in future version)
+        let prior_cov_compat = compute_prior_cov_9d(&sigma_rate, sigma_t, discrete_mode);
+
+        Self {
+            sigma_rate,
+            block_length,
+            prior_cov_9d: prior_cov_marginal,
+            prior_cov_narrow: prior_cov_compat,
+            prior_cov_slab: prior_cov_compat, // Same for compat
+            sigma_narrow: sigma_t,
+            sigma_slab: sigma_t,
+            prior_weight: 1.0, // No mixture
+            theta_ns,
+            calibration_samples,
+            discrete_mode,
+            mde_shift_ns,
+            mde_tail_ns,
+            calibration_snapshot,
+            timer_resolution_ns,
+            samples_per_second,
+            c_floor,
+            projection_mismatch_thresh,
+            theta_tick,
+            theta_eff,
+            theta_floor_initial,
+            rng_seed,
+            sigma_t,
+            l_r,
+            prior_cov_marginal,
         }
     }
 
@@ -531,6 +624,105 @@ fn compute_mixture_prior_exceedance(
 
         // Transform to δ ~ N(0, Λ)
         let delta = l * z;
+
+        // Check if max_k |δ_k| > θ
+        let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        if max_effect > theta {
+            count += 1;
+        }
+    }
+
+    count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
+}
+
+/// Calibrate Student's t prior scale σ so that P(max_k |δ_k| > θ_eff | δ ~ t_4(0, σ²R)) = 0.62 (v5.4).
+///
+/// Uses binary search to find σ such that the marginal exceedance probability
+/// matches the target 62%. The t-prior is sampled via scale mixture:
+/// - λ ~ Gamma(ν/2, ν/2) = Gamma(2, 2) for ν=4
+/// - z ~ N(0, I₉)
+/// - δ = (σ/√λ) L_R z
+///
+/// # Arguments
+/// * `sigma_rate` - Covariance rate matrix from calibration
+/// * `theta_eff` - Effective threshold in nanoseconds
+/// * `n_cal` - Number of calibration samples (for SE computation)
+/// * `discrete_mode` - Whether discrete timer mode is active
+/// * `seed` - Deterministic RNG seed
+///
+/// # Returns
+/// A tuple of (sigma_t, l_r) where sigma_t is the calibrated scale and l_r is
+/// the Cholesky factor of the regularized correlation matrix.
+pub fn calibrate_t_prior_scale(
+    sigma_rate: &Matrix9,
+    theta_eff: f64,
+    n_cal: usize,
+    discrete_mode: bool,
+    seed: u64,
+) -> (f64, Matrix9) {
+    let median_se = compute_median_se(sigma_rate, n_cal);
+
+    // Compute and cache L_R (Cholesky of regularized correlation matrix)
+    let r = compute_correlation_matrix(sigma_rate);
+    let r_reg = apply_correlation_regularization(&r, discrete_mode);
+    let l_r = match Cholesky::new(r_reg) {
+        Some(c) => c.l().into_owned(),
+        None => Matrix9::identity(),
+    };
+
+    // Search bounds (same as v5.1)
+    let mut lo = theta_eff * 0.05;
+    let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
+
+    for _ in 0..MAX_CALIBRATION_ITERATIONS {
+        let mid = (lo + hi) / 2.0;
+
+        // Compute t-prior exceedance
+        let exceedance = compute_t_prior_exceedance(&l_r, mid, theta_eff, seed);
+
+        if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
+            return (mid, l_r); // Close enough
+        }
+
+        if exceedance > TARGET_EXCEEDANCE {
+            // Too much exceedance -> reduce scale
+            hi = mid;
+        } else {
+            // Too little exceedance -> increase scale
+            lo = mid;
+        }
+    }
+
+    // Fallback to conservative value
+    (theta_eff * CONSERVATIVE_PRIOR_SCALE, l_r)
+}
+
+/// Compute P(max_k |δ_k| > θ | δ ~ t_4(0, σ²R)) via Monte Carlo (v5.4).
+///
+/// Uses the scale mixture representation:
+/// - λ ~ Gamma(ν/2, ν/2) = Gamma(2, 2) for ν=4
+/// - z ~ N(0, I₉)
+/// - δ = (σ/√λ) L_R z
+fn compute_t_prior_exceedance(l_r: &Matrix9, sigma: f64, theta: f64, seed: u64) -> f64 {
+    use rand_distr::Gamma;
+
+    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+    let gamma_dist = Gamma::new(NU / 2.0, 2.0 / NU).unwrap(); // shape=2, scale=0.5 for ν=4
+    let mut count = 0usize;
+
+    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
+        // Sample λ ~ Gamma(ν/2, ν/2)
+        let lambda: f64 = gamma_dist.sample(&mut rng);
+        let scale = sigma / math::sqrt(lambda.max(DIAGONAL_FLOOR));
+
+        // Sample z ~ N(0, I_9)
+        let mut z = Vector9::zeros();
+        for i in 0..9 {
+            z[i] = sample_standard_normal(&mut rng);
+        }
+
+        // Transform: δ = scale * L_R * z
+        let delta = l_r * z * scale;
 
         // Check if max_k |δ_k| > θ
         let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);

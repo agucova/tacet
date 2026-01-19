@@ -68,5 +68,5 @@ pub use collector::{
     Collector, Sample, MAX_BATCH_SIZE, MIN_TICKS_SINGLE_CALL, TARGET_TICKS_PER_BATCH,
 };
 pub use cycle_timer::{BoxedTimer, TimerSpec};
-pub use outlier::{filter_outliers, OutlierStats};
+pub use outlier::{filter_outliers, winsorize_f64, OutlierStats};
 pub use timer::{black_box, cycles_per_ns, rdtsc, Timer};

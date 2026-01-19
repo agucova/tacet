@@ -10,19 +10,32 @@
 //!
 //! The analysis follows the same statistical methodology as the adaptive loop,
 //! but computes the posterior from all available samples at once.
+//!
+//! ## Alignment with Main Pipeline
+//!
+//! This module replicates the statistical methodology of the main adaptive pipeline:
+//! - Bootstrap covariance estimation with acquisition stream (spec §3.3.1)
+//! - Block length computation for dependence-aware bootstrap (spec §3.3.2)
+//! - Measurement floor with timer tick floor (spec §3.3.4)
+//! - Student's t prior calibration (spec §3.3.5)
+//! - Gibbs sampling inference (spec §3.4.4)
+//! - Variance ratio quality check (spec §3.5.2)
+//! - Proper MDE estimation for quality assessment
 
 use std::time::{Duration, Instant};
 
 use timing_oracle_core::adaptive::{
-    calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
+    calibrate_t_prior_scale, compute_achievable_at_max, compute_c_floor_9d, compute_prior_cov_9d,
+    is_threshold_elevated,
 };
-use timing_oracle_core::analysis::{classify_pattern, compute_bayes_factor_mixture};
+use timing_oracle_core::analysis::{classify_pattern, compute_bayes_gibbs, estimate_mde};
 use timing_oracle_core::result::{
     Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
-    MeasurementQuality, Outcome,
+    MeasurementQuality, Outcome, IssueCode, QualityIssue,
 };
 use timing_oracle_core::statistics::{
-    bootstrap_difference_covariance_discrete, compute_deciles_inplace,
+    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
+    compute_deciles_inplace, paired_optimal_block_length, AcquisitionStream,
 };
 use timing_oracle_core::types::AttackerModel;
 use timing_oracle_core::Vector9;
@@ -42,8 +55,16 @@ pub struct SinglePassConfig {
     /// Number of bootstrap iterations for covariance estimation (default 2000).
     pub bootstrap_iterations: usize,
 
+    /// Timer resolution in nanoseconds (default 1.0 for pre-collected data).
+    /// Set this to the actual timer resolution if known (e.g., 41.7 for Apple Silicon cntvct_el0).
+    pub timer_resolution_ns: f64,
+
     /// Random seed for reproducibility.
     pub seed: u64,
+
+    /// Maximum variance ratio for quality gate (default 0.95).
+    /// If posterior variance > this fraction of prior variance, data is not informative.
+    pub max_variance_ratio: f64,
 }
 
 impl Default for SinglePassConfig {
@@ -53,7 +74,9 @@ impl Default for SinglePassConfig {
             pass_threshold: 0.05,
             fail_threshold: 0.95,
             bootstrap_iterations: 2000,
+            timer_resolution_ns: 1.0, // Assume 1ns resolution for pre-collected data
             seed: 0xDEADBEEF,
+            max_variance_ratio: 0.95,
         }
     }
 }
@@ -73,6 +96,12 @@ impl SinglePassConfig {
             theta_ns,
             ..Default::default()
         }
+    }
+
+    /// Set the timer resolution (useful when analyzing data from known timer sources).
+    pub fn with_timer_resolution(mut self, resolution_ns: f64) -> Self {
+        self.timer_resolution_ns = resolution_ns;
+        self
     }
 }
 
@@ -103,6 +132,16 @@ pub struct SinglePassResult {
 /// This function computes the posterior probability of a timing leak given
 /// fixed sets of baseline and test samples. Unlike the adaptive loop, it
 /// cannot collect additional samples - it works with what it has.
+///
+/// The analysis follows the same statistical methodology as the main pipeline:
+/// 1. Compute quantile differences (observed effect)
+/// 2. Bootstrap covariance estimation with acquisition stream preservation (spec §3.3.1)
+/// 3. Block length computation for dependence structure (spec §3.3.2)
+/// 4. Measurement floor with timer tick floor (spec §3.3.4)
+/// 5. Student's t prior calibration (spec §3.3.5)
+/// 6. Gibbs sampling inference (spec §3.4.4)
+/// 7. Variance ratio quality check (spec §3.5.2)
+/// 8. Decision based on posterior probability
 ///
 /// # Arguments
 /// * `baseline_ns` - Baseline timing samples in nanoseconds
@@ -141,7 +180,7 @@ pub fn analyze_single_pass(
                 leak_probability: 0.5,
                 effect: effect.clone(),
                 quality: MeasurementQuality::TooNoisy,
-                diagnostics: Diagnostics::default(),
+                diagnostics: make_default_diagnostics(config.timer_resolution_ns),
                 samples_used: n,
                 theta_user: config.theta_ns,
                 theta_eff: config.theta_ns,
@@ -166,41 +205,122 @@ pub fn analyze_single_pass(
     let q_test = compute_deciles_inplace(&mut test_sorted);
     let delta_hat: Vector9 = q_baseline - q_test;
 
-    // Step 2: Bootstrap covariance estimation using discrete mode (separate arrays)
-    let cov_estimate = bootstrap_difference_covariance_discrete(
-        baseline,
-        test,
-        config.bootstrap_iterations,
-        config.seed,
-    );
-    let sigma = cov_estimate.matrix;
-
-    // Step 3: Compute prior covariance (MDE-based)
-    // Convert covariance to rate: sigma_rate = sigma * n (for scaling purposes)
-    let sigma_rate = sigma * (n as f64);
-
-    // Detect discrete mode (< 10% unique values)
+    // Step 2: Detect discrete mode and compute block length (spec §3.3.2)
     let unique_baseline: std::collections::HashSet<i64> =
         baseline.iter().map(|&v| v as i64).collect();
-    let discrete_mode = (unique_baseline.len() as f64 / n as f64) < 0.10;
+    let unique_test: std::collections::HashSet<i64> =
+        test.iter().map(|&v| v as i64).collect();
+    let min_uniqueness = (unique_baseline.len() as f64 / n as f64)
+        .min(unique_test.len() as f64 / n as f64);
+    let discrete_mode = min_uniqueness < 0.10;
 
-    // v5.2 mixture prior: slab first, then narrow
-    let sigma_slab = compute_slab_scale(&sigma_rate, config.theta_ns, n);
-    let sigma_narrow = calibrate_narrow_scale(
-        &sigma_rate,
-        config.theta_ns,
-        n,
-        sigma_slab,
-        MIXTURE_PRIOR_WEIGHT,
-        discrete_mode,
-        config.seed,
-    );
-    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
-    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
+    // Compute block length for dependence-aware bootstrap (spec §3.3.2)
+    let block_length = if n >= 10 {
+        paired_optimal_block_length(baseline, test)
+    } else {
+        1
+    };
 
-    // Debug output for v5.2 investigation
+    // Step 3: Bootstrap covariance estimation (spec §3.3.1)
+    // Use acquisition stream for non-discrete mode to preserve dependence structure
+    let cov_estimate = if discrete_mode {
+        // Discrete mode: use m-out-of-n bootstrap
+        bootstrap_difference_covariance_discrete(
+            baseline,
+            test,
+            config.bootstrap_iterations,
+            config.seed,
+        )
+    } else {
+        // Non-discrete mode: create interleaved acquisition stream per spec §3.3.1
+        let mut acquisition_stream = AcquisitionStream::with_capacity(2 * n);
+        acquisition_stream.push_batch_interleaved(baseline, test);
+        let interleaved = acquisition_stream.to_timing_samples();
+
+        bootstrap_difference_covariance(
+            &interleaved,
+            config.bootstrap_iterations,
+            config.seed,
+            false, // is_fragile - let block length handle it
+        )
+    };
+    let sigma = cov_estimate.matrix;
+
+    // Check covariance validity
+    if !cov_estimate.is_stable() {
+        let effect = EffectEstimate {
+            shift_ns: 0.0,
+            tail_ns: 0.0,
+            credible_interval_ns: (0.0, 0.0),
+            pattern: EffectPattern::Indeterminate,
+            interpretation_caveat: Some("Covariance matrix is not positive definite".to_string()),
+        };
+        return SinglePassResult {
+            outcome: Outcome::Inconclusive {
+                reason: InconclusiveReason::DataTooNoisy {
+                    message: "Covariance matrix estimation failed".to_string(),
+                    guidance: "Data may have too little variance or numerical issues".to_string(),
+                },
+                leak_probability: 0.5,
+                effect: effect.clone(),
+                quality: MeasurementQuality::TooNoisy,
+                diagnostics: make_default_diagnostics(config.timer_resolution_ns),
+                samples_used: n,
+                theta_user: config.theta_ns,
+                theta_eff: config.theta_ns,
+                theta_floor: f64::INFINITY,
+            },
+            leak_probability: 0.5,
+            effect_estimate: effect,
+            quality: MeasurementQuality::TooNoisy,
+            samples_used: n,
+            analysis_time: start_time.elapsed(),
+        };
+    }
+
+    // Step 4: Compute covariance rate and measurement floor (spec §3.3.4)
+    // sigma_rate = sigma * n (covariance scales as 1/n)
+    let sigma_rate = sigma * (n as f64);
+
+    // Compute c_floor: 95th percentile of max_k |Z_k| where Z ~ N(0, Σ_rate)
+    let c_floor = compute_c_floor_9d(&sigma_rate, config.seed);
+
+    // Statistical floor: c_floor / √n
+    let theta_floor_stat = c_floor / (n as f64).sqrt();
+
+    // Timer tick floor (spec §3.3.4)
+    let theta_tick = config.timer_resolution_ns;
+
+    // Combined measurement floor: max(statistical, timer tick)
+    let theta_floor = theta_floor_stat.max(theta_tick);
+
+    // Compute theta_eff per spec §3.3.4:
+    // theta_eff = max(theta_user, theta_floor) if theta_user > 0
+    let theta_eff = if config.theta_ns > 0.0 {
+        config.theta_ns.max(theta_floor)
+    } else {
+        // Research mode: use floor directly
+        theta_floor
+    };
+
+    // Step 5: Student's t prior calibration (spec §3.3.5)
+    let (sigma_t, l_r) = calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
+
+    // Compute marginal prior covariance for variance ratio check (spec §3.5.2)
+    // For t_4: Var(δ) = (ν/(ν-2)) σ² R = 2σ² R
+    let prior_cov_marginal = compute_prior_cov_9d(&sigma_rate, sigma_t * std::f64::consts::SQRT_2, discrete_mode);
+
+    // Step 6: Compute MDE for quality assessment (spec §3.4.6)
+    let mde = estimate_mde(&sigma, 0.05); // α = 0.05
+    let quality = MeasurementQuality::from_mde_ns(mde.shift_ns);
+
+    // Debug output for investigation
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] n = {}, discrete_mode = {}", n, discrete_mode);
+        eprintln!("[DEBUG] n = {}, discrete_mode = {}, block_length = {}", n, discrete_mode, block_length);
+        eprintln!("[DEBUG] theta_user = {:.2} ns, theta_floor_stat = {:.2} ns, theta_tick = {:.2} ns, theta_floor = {:.2} ns, theta_eff = {:.2} ns",
+            config.theta_ns, theta_floor_stat, theta_tick, theta_floor, theta_eff);
+        eprintln!("[DEBUG] c_floor = {:.2} ns·√n", c_floor);
+        eprintln!("[DEBUG] MDE: shift = {:.2} ns, tail = {:.2} ns", mde.shift_ns, mde.tail_ns);
         eprintln!("[DEBUG] delta_hat = {:?}", delta_hat.as_slice());
         eprintln!(
             "[DEBUG] sigma diagonal = [{:.2e}, {:.2e}, {:.2e}, ..., {:.2e}]",
@@ -209,33 +329,16 @@ pub fn analyze_single_pass(
             sigma[(2, 2)],
             sigma[(8, 8)]
         );
-        // Check off-diagonal correlations
-        let r_01 = sigma[(0, 1)] / (sigma[(0, 0)].sqrt() * sigma[(1, 1)].sqrt());
-        let r_08 = sigma[(0, 8)] / (sigma[(0, 0)].sqrt() * sigma[(8, 8)].sqrt());
-        eprintln!("[DEBUG] sigma correlations: r(0,1)={:.3}, r(0,8)={:.3}", r_01, r_08);
-        eprintln!("[DEBUG] sigma_narrow = {}, sigma_slab = {}", sigma_narrow, sigma_slab);
-        eprintln!(
-            "[DEBUG] prior_narrow diag = [{:.2e}, {:.2e}, ..., {:.2e}]",
-            prior_cov_narrow[(0, 0)],
-            prior_cov_narrow[(1, 1)],
-            prior_cov_narrow[(8, 8)]
-        );
-        eprintln!(
-            "[DEBUG] prior_slab diag = [{:.2e}, {:.2e}, ..., {:.2e}]",
-            prior_cov_slab[(0, 0)],
-            prior_cov_slab[(1, 1)],
-            prior_cov_slab[(8, 8)]
-        );
+        eprintln!("[DEBUG] sigma_t = {:.2e}", sigma_t);
     }
 
-    // Step 4: Compute Bayesian posterior with mixture prior
-    let bayes_result = compute_bayes_factor_mixture(
+    // Step 7: Compute Bayesian posterior with Gibbs sampling (spec §3.4.4)
+    let bayes_result = compute_bayes_gibbs(
         &delta_hat,
         &sigma,
-        &prior_cov_narrow,
-        &prior_cov_slab,
-        MIXTURE_PRIOR_WEIGHT,
-        config.theta_ns,
+        sigma_t,
+        &l_r,
+        theta_eff,
         Some(config.seed),
     );
     let leak_probability = bayes_result.leak_probability;
@@ -243,26 +346,23 @@ pub fn analyze_single_pass(
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
         eprintln!("[DEBUG] bayes_result.leak_probability = {}", leak_probability);
         eprintln!(
-            "[DEBUG] narrow_weight_post = {:.4}, slab_weight_post = {:.4}",
-            bayes_result.narrow_weight_post, bayes_result.slab_weight_post
+            "[DEBUG] lambda: mean={:.3}, sd={:.3}, cv={:.3}, ess={:.1}, mixing_ok={}",
+            bayes_result.lambda_mean,
+            bayes_result.lambda_sd,
+            bayes_result.lambda_cv,
+            bayes_result.lambda_ess,
+            bayes_result.lambda_mixing_ok
         );
         eprintln!(
-            "[DEBUG] delta_post_narrow = [{:.1}, {:.1}, {:.1}, ..., {:.1}]",
-            bayes_result.delta_post_narrow[0],
-            bayes_result.delta_post_narrow[1],
-            bayes_result.delta_post_narrow[2],
-            bayes_result.delta_post_narrow[8]
-        );
-        eprintln!(
-            "[DEBUG] delta_post_slab = [{:.1}, {:.1}, {:.1}, ..., {:.1}]",
-            bayes_result.delta_post_slab[0],
-            bayes_result.delta_post_slab[1],
-            bayes_result.delta_post_slab[2],
-            bayes_result.delta_post_slab[8]
+            "[DEBUG] delta_post = [{:.1}, {:.1}, {:.1}, ..., {:.1}]",
+            bayes_result.delta_post[0],
+            bayes_result.delta_post[1],
+            bayes_result.delta_post[2],
+            bayes_result.delta_post[8]
         );
     }
 
-    // Step 5: Compute effect estimate from Bayesian result
+    // Step 8: Compute effect estimate from Bayesian result
     let pattern = classify_pattern(&bayes_result.beta_proj, &bayes_result.beta_proj_cov);
     let effect_estimate = EffectEstimate {
         shift_ns: bayes_result.beta_proj[0],
@@ -276,38 +376,150 @@ pub fn analyze_single_pass(
         },
     };
 
-    // Step 6: Assess measurement quality based on MDE
-    // MDE approximation: theta where we'd have 80% power
-    let sigma_trace = sigma.trace();
-    let mde_approx = (sigma_trace / n as f64).sqrt() * 2.8; // ~z_0.8 + z_0.05
-    let quality = MeasurementQuality::from_mde_ns(mde_approx);
+    // Step 9: Check variance ratio quality gate (spec §3.5.2)
+    // Compute variance ratio: posterior_var / prior_var
+    let variance_ratio = compute_variance_ratio(&bayes_result.lambda_post, &prior_cov_marginal);
+    let data_too_noisy = variance_ratio > config.max_variance_ratio;
 
-    // Step 7: Make decision
-    let outcome = if leak_probability < config.pass_threshold {
-        Outcome::Pass {
+    if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
+        eprintln!("[DEBUG] variance_ratio = {:.3}, max = {:.3}, data_too_noisy = {}",
+            variance_ratio, config.max_variance_ratio, data_too_noisy);
+    }
+
+    // Build quality issues
+    let mut quality_issues = Vec::new();
+    if theta_eff > config.theta_ns && config.theta_ns > 0.0 {
+        quality_issues.push(QualityIssue {
+            code: IssueCode::ThresholdElevated,
+            message: format!(
+                "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
+                config.theta_ns, theta_eff
+            ),
+            guidance: "For better resolution, use more samples or a higher-resolution timer.".to_string(),
+        });
+    }
+
+    // Build diagnostics
+    let diagnostics = Diagnostics {
+        dependence_length: block_length,
+        effective_sample_size: n / block_length.max(1),
+        stationarity_ratio: 1.0, // Assume stationary for pre-collected data
+        stationarity_ok: true,
+        projection_mismatch_q: bayes_result.projection_mismatch_q,
+        projection_mismatch_threshold: cov_estimate.q_thresh,
+        projection_mismatch_ok: bayes_result.projection_mismatch_q <= cov_estimate.q_thresh,
+        top_quantiles: None,
+        outlier_rate_baseline: 0.0, // Not computed for pre-collected data
+        outlier_rate_sample: 0.0,
+        outlier_asymmetry_ok: true,
+        discrete_mode,
+        timer_resolution_ns: config.timer_resolution_ns,
+        duplicate_fraction: 1.0 - min_uniqueness,
+        preflight_ok: true, // Not applicable for pre-collected data
+        preflight_warnings: Vec::new(),
+        calibration_samples: n,
+        total_time_secs: start_time.elapsed().as_secs_f64(),
+        warnings: Vec::new(),
+        quality_issues,
+        seed: Some(config.seed),
+        attacker_model: None,
+        threshold_ns: config.theta_ns,
+        timer_name: "external".to_string(),
+        platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        // Gibbs sampler diagnostics
+        gibbs_iters_total: 256,
+        gibbs_burnin: 64,
+        gibbs_retained: 192,
+        lambda_mean: bayes_result.lambda_mean,
+        lambda_sd: bayes_result.lambda_sd,
+        lambda_cv: bayes_result.lambda_cv,
+        lambda_ess: bayes_result.lambda_ess,
+        lambda_mixing_ok: bayes_result.lambda_mixing_ok,
+    };
+
+    // Step 10: Make decision based on quality check and posterior (v5.5 threshold elevation rule)
+    let outcome = if data_too_noisy {
+        // Quality gate failed - return Inconclusive
+        Outcome::Inconclusive {
+            reason: InconclusiveReason::DataTooNoisy {
+                message: format!(
+                    "Posterior variance is {:.0}% of prior; data not informative",
+                    variance_ratio * 100.0
+                ),
+                guidance: "Try: more samples, higher-resolution timer, reduce system load".to_string(),
+            },
             leak_probability,
             effect: effect_estimate.clone(),
             quality,
-            diagnostics: Diagnostics::default(),
+            diagnostics,
             samples_used: n,
             theta_user: config.theta_ns,
-            theta_eff: config.theta_ns,
-            theta_floor: mde_approx,
+            theta_eff,
+            theta_floor,
         }
     } else if leak_probability > config.fail_threshold {
+        // Fail propagates regardless of threshold elevation (v5.5)
         let exploitability = Exploitability::from_effect_ns(effect_estimate.shift_ns.abs());
         Outcome::Fail {
             leak_probability,
             effect: effect_estimate.clone(),
             exploitability,
             quality,
-            diagnostics: Diagnostics::default(),
+            diagnostics,
             samples_used: n,
             theta_user: config.theta_ns,
-            theta_eff: config.theta_ns,
-            theta_floor: mde_approx,
+            theta_eff,
+            theta_floor,
+        }
+    } else if leak_probability < config.pass_threshold {
+        // Pass requires both P < pass_threshold AND θ_eff ≤ θ_user + ε (v5.5)
+        if is_threshold_elevated(theta_eff, config.theta_ns, theta_tick) {
+            // Threshold elevated: return Inconclusive(ThresholdElevated) instead of Pass
+            // For single-pass, we use n as max_samples since we can't collect more
+            let achievable_at_max = compute_achievable_at_max(
+                c_floor,
+                theta_tick,
+                config.theta_ns,
+                n, // Single-pass has fixed samples
+            );
+
+            Outcome::Inconclusive {
+                reason: InconclusiveReason::ThresholdElevated {
+                    theta_user: config.theta_ns,
+                    theta_eff,
+                    leak_probability_at_eff: leak_probability,
+                    meets_pass_criterion_at_eff: true,
+                    achievable_at_max,
+                    message: format!(
+                        "Threshold elevated from {:.0}ns to {:.1}ns; P={:.1}% at elevated threshold",
+                        config.theta_ns, theta_eff, leak_probability * 100.0
+                    ),
+                    guidance: "Use more samples or a higher-resolution timer to achieve the requested threshold.".to_string(),
+                },
+                leak_probability,
+                effect: effect_estimate.clone(),
+                quality,
+                diagnostics,
+                samples_used: n,
+                theta_user: config.theta_ns,
+                theta_eff,
+                theta_floor,
+            }
+        } else {
+            // Threshold not elevated: true Pass
+            Outcome::Pass {
+                leak_probability,
+                effect: effect_estimate.clone(),
+                quality,
+                diagnostics,
+                samples_used: n,
+                theta_user: config.theta_ns,
+                theta_eff,
+                theta_floor,
+            }
         }
     } else {
+        // Between thresholds - inconclusive
         Outcome::Inconclusive {
             reason: InconclusiveReason::SampleBudgetExceeded {
                 current_probability: leak_probability,
@@ -316,11 +528,11 @@ pub fn analyze_single_pass(
             leak_probability,
             effect: effect_estimate.clone(),
             quality,
-            diagnostics: Diagnostics::default(),
+            diagnostics,
             samples_used: n,
             theta_user: config.theta_ns,
-            theta_eff: config.theta_ns,
-            theta_floor: mde_approx,
+            theta_eff,
+            theta_floor,
         }
     };
 
@@ -331,6 +543,58 @@ pub fn analyze_single_pass(
         quality,
         samples_used: n,
         analysis_time: start_time.elapsed(),
+    }
+}
+
+/// Compute variance ratio (average diagonal posterior/prior ratio).
+fn compute_variance_ratio(posterior_cov: &timing_oracle_core::Matrix9, prior_cov: &timing_oracle_core::Matrix9) -> f64 {
+    let mut sum = 0.0;
+    for i in 0..9 {
+        let prior_var = prior_cov[(i, i)];
+        let post_var = posterior_cov[(i, i)];
+        if prior_var > 1e-12 {
+            sum += post_var / prior_var;
+        }
+    }
+    sum / 9.0
+}
+
+/// Create default diagnostics for error cases.
+fn make_default_diagnostics(timer_resolution_ns: f64) -> Diagnostics {
+    Diagnostics {
+        dependence_length: 1,
+        effective_sample_size: 0,
+        stationarity_ratio: 1.0,
+        stationarity_ok: true,
+        projection_mismatch_q: 0.0,
+        projection_mismatch_threshold: f64::INFINITY,
+        projection_mismatch_ok: true,
+        top_quantiles: None,
+        outlier_rate_baseline: 0.0,
+        outlier_rate_sample: 0.0,
+        outlier_asymmetry_ok: true,
+        discrete_mode: false,
+        timer_resolution_ns,
+        duplicate_fraction: 0.0,
+        preflight_ok: true,
+        preflight_warnings: Vec::new(),
+        calibration_samples: 0,
+        total_time_secs: 0.0,
+        warnings: Vec::new(),
+        quality_issues: Vec::new(),
+        seed: Some(0),
+        attacker_model: None,
+        threshold_ns: 0.0,
+        timer_name: "external".to_string(),
+        platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        gibbs_iters_total: 0,
+        gibbs_burnin: 0,
+        gibbs_retained: 0,
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: false,
     }
 }
 
@@ -423,5 +687,40 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn test_diagnostics_populated() {
+        let baseline = generate_samples(1000.0, 50.0, 1000, 42);
+        let test = generate_samples(1000.0, 50.0, 1000, 43);
+
+        let config = SinglePassConfig::default();
+        let result = analyze_single_pass(&baseline, &test, &config);
+
+        // Check that diagnostics are populated
+        match &result.outcome {
+            Outcome::Pass { diagnostics, .. } |
+            Outcome::Fail { diagnostics, .. } |
+            Outcome::Inconclusive { diagnostics, .. } => {
+                assert!(diagnostics.dependence_length > 0, "Block length should be > 0");
+                assert!(diagnostics.effective_sample_size > 0, "ESS should be > 0");
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn test_timer_resolution_config() {
+        let baseline = generate_samples(1000.0, 50.0, 1000, 42);
+        let test = generate_samples(1000.0, 50.0, 1000, 43);
+
+        // Test with high timer resolution (should affect theta_floor)
+        let config = SinglePassConfig::for_attacker(AttackerModel::SharedHardware)
+            .with_timer_resolution(42.0); // Apple Silicon-like resolution
+
+        let result = analyze_single_pass(&baseline, &test, &config);
+
+        // Should complete without error
+        assert!(result.samples_used == 1000);
     }
 }

@@ -93,15 +93,25 @@ pub enum InconclusiveReason {
         drift_description: String,
     },
 
-    /// Requested threshold is unachievable given maximum sample budget (Gate 7).
+    /// Threshold was elevated and pass criterion was met at effective threshold.
     ///
-    /// The measurement floor at max_samples exceeds the user's requested threshold.
-    /// Even with the maximum allowed samples, we cannot resolve the requested precision.
-    ThresholdUnachievable {
-        /// User's requested threshold in nanoseconds.
+    /// The measurement floor exceeded the user's requested threshold, so inference
+    /// was performed at an elevated effective threshold. The posterior probability
+    /// dropped below pass_threshold at θ_eff, but since θ_eff > θ_user + ε, we
+    /// cannot guarantee the user's original requirement is met.
+    ///
+    /// This is NOT a quality gate - it's checked at decision time in loop_runner.
+    ThresholdElevated {
+        /// User's requested threshold in nanoseconds (θ_user).
         theta_user: f64,
-        /// Best achievable threshold at max_samples.
-        best_achievable: f64,
+        /// Effective threshold used for inference (θ_eff = max(θ_user, θ_floor)).
+        theta_eff: f64,
+        /// Posterior probability at θ_eff (was < pass_threshold).
+        leak_probability_at_eff: f64,
+        /// True: P(leak > θ_eff) < pass_threshold.
+        meets_pass_criterion_at_eff: bool,
+        /// True: θ_floor at max_samples would be ≤ θ_user + ε.
+        achievable_at_max: bool,
         /// Human-readable message.
         message: String,
         /// Suggested remediation.
@@ -174,6 +184,11 @@ pub struct QualityGateCheckInputs<'a> {
     /// Use `prior_cov_slab` and `narrow_weight_post` for dominant component selection.
     pub prior_cov_9d: &'a Matrix9,
 
+    /// v5.4: Marginal prior covariance matrix Λ₀^marginal = 2σ²R (for ν=4).
+    /// This is the unconditional prior variance of δ under the t-prior.
+    /// Used by Gate 1 for the variance ratio check (spec §3.5.2).
+    pub prior_cov_marginal: &'a Matrix9,
+
     /// v5.2: Slab (wide) prior covariance matrix.
     /// Pass `None` if not using mixture prior.
     pub prior_cov_slab: Option<&'a Matrix9>,
@@ -221,6 +236,13 @@ pub struct QualityGateCheckInputs<'a> {
 
     /// Projection mismatch threshold from bootstrap calibration.
     pub projection_mismatch_thresh: f64,
+
+    // ==================== v5.4 Gibbs sampler fields ====================
+
+    /// Whether the Gibbs sampler's lambda chain mixed well (v5.4).
+    /// `None` if not using Gibbs sampler (mixture mode).
+    /// When `Some(false)`, indicates potential posterior unreliability.
+    pub lambda_mixing_ok: Option<bool>,
 }
 
 /// Check all quality gates and return result.
@@ -228,14 +250,19 @@ pub struct QualityGateCheckInputs<'a> {
 /// Gates are checked in priority order. Returns `Continue` if all pass,
 /// or `Stop` with the reason if any gate triggers.
 ///
-/// **Gate order (spec Section 2.6):**
+/// **Gate order (spec Section 3.5.2, v5.5):**
 /// 1. Posterior too close to prior (data not informative)
 /// 2. Learning rate collapsed
 /// 3. Would take too long
-/// 4. Threshold unachievable
-/// 5. Time budget exceeded
-/// 6. Sample budget exceeded
-/// 7. Condition drift detected
+/// 4. Time budget exceeded
+/// 5. Sample budget exceeded
+/// 6. Condition drift detected
+///
+/// **Note**: Threshold elevation (v5.5) is NOT a quality gate. It's checked at
+/// decision time in loop_runner.rs. The decision rule requires:
+/// - Pass: P < pass_threshold AND θ_eff ≤ θ_user + ε
+/// - Fail: P > fail_threshold (propagates regardless of elevation)
+/// - ThresholdElevated: P < pass_threshold AND θ_eff > θ_user + ε
 ///
 /// # Arguments
 ///
@@ -260,22 +287,17 @@ pub fn check_quality_gates(
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 4: Threshold unachievable
-    if let Some(reason) = check_threshold_unachievable(inputs, config) {
-        return QualityGateResult::Stop(reason);
-    }
-
-    // Gate 5: Time budget exceeded
+    // Gate 4: Time budget exceeded
     if let Some(reason) = check_time_budget(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 6: Sample budget exceeded
+    // Gate 5: Sample budget exceeded
     if let Some(reason) = check_sample_budget(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
-    // Gate 7: Condition drift detected
+    // Gate 6: Condition drift detected
     if let Some(reason) = check_condition_drift(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
@@ -283,61 +305,73 @@ pub fn check_quality_gates(
     QualityGateResult::Continue
 }
 
-/// Gate 4 (v4.1): Check if the requested threshold is unachievable.
+/// Check if the requested threshold is achievable at max_samples (helper for v5.5).
 ///
-/// If theta_floor at max_samples exceeds theta_user, we can never resolve
-/// the requested precision even with the maximum sample budget.
-fn check_threshold_unachievable(
-    inputs: &QualityGateCheckInputs,
-    config: &QualityGateConfig,
-) -> Option<InconclusiveReason> {
-    // Only check if user specified a threshold (not research mode)
-    if inputs.theta_ns <= 0.0 {
-        return None;
+/// Returns `true` if theta_floor at max_samples would be ≤ theta_user + epsilon,
+/// meaning more samples could eventually achieve the user's threshold.
+///
+/// This is NOT a verdict-blocking gate in v5.5. It's used by the decision logic
+/// to populate the `achievable_at_max` field in ThresholdElevated outcomes.
+pub fn compute_achievable_at_max(
+    c_floor: f64,
+    theta_tick: f64,
+    theta_user: f64,
+    max_samples: usize,
+) -> bool {
+    // Research mode (theta_user = 0) is always "achievable" (no user target)
+    if theta_user <= 0.0 {
+        return true;
     }
 
     // Compute theta_floor at max_samples
     let theta_floor_at_max = libm::fmax(
-        inputs.c_floor / libm::sqrt(config.max_samples as f64),
-        inputs.theta_tick,
+        c_floor / libm::sqrt(max_samples as f64),
+        theta_tick,
     );
 
-    // If floor at max_samples exceeds user's threshold, it's unachievable
-    if theta_floor_at_max > inputs.theta_ns {
-        return Some(InconclusiveReason::ThresholdUnachievable {
-            theta_user: inputs.theta_ns,
-            best_achievable: theta_floor_at_max,
-            message: alloc::format!(
-                "Requested θ = {:.1} ns, but measurement floor is {:.1} ns",
-                inputs.theta_ns,
-                theta_floor_at_max
-            ),
-            guidance: String::from(
-                "Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution, \
-                increase max_samples, or use a higher threshold",
-            ),
-        });
-    }
+    // Compute epsilon: max(theta_tick, 1e-6 * theta_user)
+    let epsilon = libm::fmax(theta_tick, 1e-6 * theta_user);
 
-    None
+    // Achievable if floor at max_samples would be within tolerance of user threshold
+    theta_floor_at_max <= theta_user + epsilon
 }
 
-/// Gate 1: Check if posterior variance is too close to prior variance.
+/// Check if the threshold is elevated beyond tolerance (v5.5).
 ///
-/// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀|)
-/// Gate triggers when per-dimension variance ratio exceeds threshold.
+/// Returns `true` if θ_eff > θ_user + ε, meaning the effective threshold
+/// is elevated beyond the tolerance band around the user's requested threshold.
 ///
-/// **v5.2 Mixture Prior**: When mixture prior fields are provided, this gate
-/// uses the DOMINANT posterior component's prior for the variance ratio check.
-/// If narrow_weight_post >= 0.5, uses prior_cov_9d (narrow); otherwise uses prior_cov_slab.
+/// The epsilon tolerance is: ε = max(θ_tick, 1e-6 * θ_user)
+///
+/// This check is used at decision time: if P < pass_threshold but the threshold
+/// is elevated, we return ThresholdElevated instead of Pass.
+pub fn is_threshold_elevated(theta_eff: f64, theta_user: f64, theta_tick: f64) -> bool {
+    // Research mode (theta_user <= 0) is never "elevated"
+    if theta_user <= 0.0 {
+        return false;
+    }
+
+    // Compute epsilon: max(theta_tick, 1e-6 * theta_user)
+    let epsilon = libm::fmax(theta_tick, 1e-6 * theta_user);
+
+    // Elevated if effective threshold exceeds user threshold + tolerance
+    theta_eff > theta_user + epsilon
+}
+
+/// Gate 1: Check if posterior variance is too close to prior variance (spec §3.5.2).
+///
+/// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀^marginal|)
+/// where Λ₀^marginal = 2σ²R is the marginal prior covariance under t-prior (ν=4).
+///
+/// Gate triggers when ρ > log(0.5) (i.e., |Λ_post|/|Λ₀^marginal| > 0.5).
+///
+/// **Cholesky fallback (spec §3.5.2)**: If Cholesky fails, uses trace ratio instead:
+/// ρ_trace = tr(Λ_post) / tr(Λ₀^marginal), triggers if ρ_trace > 0.5.
 ///
 /// **Exception**: If the leak probability is already decisive (>99.5% or <0.5%)
-/// AND the projection mismatch Q is reasonable (not astronomically high),
+/// AND the projection mismatch Q is reasonable (< 1000x threshold),
 /// we allow the verdict through. This handles cases like slow operations
 /// (modexp) where variance doesn't shrink much but there's a clear timing leak.
-///
-/// High Q with high P indicates pathological data (systematic measurement bias)
-/// rather than a real timing leak, so we still return Inconclusive.
 fn check_variance_ratio(
     inputs: &QualityGateCheckInputs,
     config: &QualityGateConfig,
@@ -357,33 +391,48 @@ fn check_variance_ratio(
         return None;
     }
 
-    // v5.2: Select dominant component's prior for variance ratio check
-    // If slab dominates (narrow_weight_post < 0.5), use slab prior
-    let prior_cov = match (inputs.narrow_weight_post, inputs.prior_cov_slab) {
-        (Some(narrow_weight), Some(slab_cov)) if narrow_weight < 0.5 => slab_cov,
-        _ => inputs.prior_cov_9d, // Default to narrow/single prior
+    // v5.4: Use the marginal prior covariance Λ₀^marginal = 2σ²R (spec §3.5.2)
+    let prior_cov = inputs.prior_cov_marginal;
+    let post_cov = &inputs.posterior.lambda_post;
+
+    // Try Cholesky-based log-det computation (spec §3.5.2)
+    let variance_ratio = match (
+        nalgebra::Cholesky::new(*post_cov),
+        nalgebra::Cholesky::new(*prior_cov),
+    ) {
+        (Some(post_chol), Some(prior_chol)) => {
+            // Compute log-det from Cholesky diagonals: log|A| = 2 * sum(log(L_ii))
+            let post_log_det: f64 = (0..9)
+                .map(|i| libm::log(post_chol.l()[(i, i)]))
+                .sum::<f64>()
+                * 2.0;
+            let prior_log_det: f64 = (0..9)
+                .map(|i| libm::log(prior_chol.l()[(i, i)]))
+                .sum::<f64>()
+                * 2.0;
+
+            // Check for NaN/Inf (can happen with very small diagonal elements)
+            if !post_log_det.is_finite() || !prior_log_det.is_finite() {
+                // Fall back to trace ratio
+                let trace_ratio = post_cov.trace() / prior_cov.trace();
+                trace_ratio
+            } else {
+                // log-det ratio: ρ = log(|Λ_post| / |Λ₀^marginal|)
+                let log_det_ratio = post_log_det - prior_log_det;
+                // Convert to per-dimension ratio (geometric mean)
+                let log_variance_ratio = log_det_ratio / 9.0;
+                libm::exp(log_variance_ratio)
+            }
+        }
+        _ => {
+            // Cholesky failed - fall back to trace ratio (spec §3.5.2)
+            let trace_ratio = post_cov.trace() / prior_cov.trace();
+            trace_ratio
+        }
     };
 
-    let prior_det = prior_cov.determinant();
-    let post_det = inputs.posterior.lambda_post.determinant();
-
-    if prior_det <= 0.0 || post_det <= 0.0 {
-        // Can't compute ratio with non-positive determinants
-        return None;
-    }
-
-    // Use log-det ratio for numerical stability with 9D matrices
-    let log_det_ratio = libm::log(post_det / prior_det);
-
-    // Convert to per-dimension log ratio (geometric mean)
-    let log_variance_ratio = log_det_ratio / 9.0;
-    let log_threshold = libm::log(config.max_variance_ratio);
-
-    // Convert log ratio to variance ratio for reporting
-    let variance_ratio = libm::exp(log_variance_ratio);
-
-    // Trigger when per-dimension variance ratio > threshold
-    if log_variance_ratio > log_threshold {
+    // Trigger when variance ratio > threshold (default 0.5)
+    if variance_ratio > config.max_variance_ratio {
         return Some(InconclusiveReason::DataTooNoisy {
             message: alloc::format!(
                 "Posterior variance is {:.0}% of prior; data not informative",
@@ -595,6 +644,7 @@ mod tests {
         QualityGateCheckInputs {
             posterior,
             prior_cov_9d,
+            prior_cov_marginal: prior_cov_9d, // v5.4: use same as prior_cov_9d for tests
             prior_cov_slab: None,       // v5.2: no mixture prior in tests
             narrow_weight_post: None,   // v5.2: no mixture prior in tests
             theta_ns: 100.0,
@@ -608,6 +658,7 @@ mod tests {
             theta_tick: 1.0,
             projection_mismatch_q: None,
             projection_mismatch_thresh: 18.48,
+            lambda_mixing_ok: None,     // v5.4: no Gibbs sampler in tests
         }
     }
 

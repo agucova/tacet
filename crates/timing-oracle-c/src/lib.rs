@@ -131,7 +131,7 @@ unsafe fn init_timer(config: &ToConfig) -> Result<(), Box<ToResult>> {
     if result != 0 && config.timer_preference == ToTimerPref::PreferPmu {
         return Err(Box::new(ToResult {
             outcome: ToOutcome::Inconclusive,
-            inconclusive_reason: ToInconclusiveReason::ThresholdUnachievable,
+            inconclusive_reason: ToInconclusiveReason::ThresholdElevated,
             recommendation: make_recommendation(
                 "PMU timer requested but unavailable. On Linux, try: sudo or \
                  echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid. \
@@ -399,7 +399,7 @@ pub extern "C" fn to_inconclusive_reason_str(reason: ToInconclusiveReason) -> *c
         ToInconclusiveReason::TimeBudgetExceeded => c"TimeBudgetExceeded".as_ptr(),
         ToInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
         ToInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
-        ToInconclusiveReason::ThresholdUnachievable => c"ThresholdUnachievable".as_ptr(),
+        ToInconclusiveReason::ThresholdElevated => c"ThresholdElevated".as_ptr(),
     }
 }
 
@@ -1157,6 +1157,32 @@ fn build_result(
                 samples_per_class,
                 elapsed_secs,
             } => (posterior.clone(), *samples_per_class, *elapsed_secs, true, Some(reason.clone())),
+            AdaptiveOutcome::ThresholdElevated {
+                posterior,
+                theta_user,
+                theta_eff,
+                achievable_at_max,
+                samples_per_class,
+                elapsed_secs,
+                ..
+            } => {
+                // v5.5: ThresholdElevated maps to Inconclusive with ThresholdElevated reason
+                let reason = timing_oracle_core::adaptive::InconclusiveReason::ThresholdElevated {
+                    theta_user: *theta_user,
+                    theta_eff: *theta_eff,
+                    leak_probability_at_eff: posterior.leak_probability,
+                    meets_pass_criterion_at_eff: true,
+                    achievable_at_max: *achievable_at_max,
+                    message: format!(
+                        "Threshold elevated from {:.0}ns to {:.1}ns",
+                        theta_user, theta_eff
+                    ),
+                    guidance: String::from(
+                        "Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution"
+                    ),
+                };
+                (Some(posterior.clone()), *samples_per_class, *elapsed_secs, true, Some(reason))
+            }
         };
 
     // Research mode: convert to Research outcome
@@ -1383,6 +1409,57 @@ fn build_result(
                 ..ToResult::default()
             }
         }
+
+        AdaptiveOutcome::ThresholdElevated {
+            posterior,
+            theta_user,
+            theta_eff,
+            achievable_at_max,
+            samples_per_class,
+            elapsed_secs,
+            ..
+        } => {
+            // v5.5: ThresholdElevated is semantically Inconclusive
+            let recommendation = if achievable_at_max {
+                format!(
+                    "Threshold elevated from {:.0}ns to {:.1}ns. More samples could achieve the requested threshold.",
+                    theta_user, theta_eff
+                )
+            } else {
+                format!(
+                    "Threshold elevated from {:.0}ns to {:.1}ns. Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution.",
+                    theta_user, theta_eff
+                )
+            };
+
+            let recommendation_ptr = make_recommendation(&recommendation);
+            let diagnostics = build_diagnostics(
+                calibration,
+                Some(&posterior),
+                elapsed_secs,
+                stationarity_ratio,
+                stationarity_ok,
+            );
+
+            ToResult {
+                outcome: ToOutcome::Inconclusive,
+                leak_probability: posterior.leak_probability,
+                effect: build_effect_with_mismatch(&posterior, calibration),
+                quality: build_quality(&posterior),
+                samples_used: samples_per_class,
+                elapsed_secs,
+                exploitability: ToExploitability::SharedHardwareOnly,
+                inconclusive_reason: ToInconclusiveReason::ThresholdElevated,
+                operation_ns: 0.0,
+                timer_resolution_ns,
+                recommendation: recommendation_ptr,
+                timer_name,
+                platform: c"".as_ptr(),
+                adaptive_batching_used: batch_k > 1,
+                diagnostics,
+                ..ToResult::default()
+            }
+        }
     }
 }
 
@@ -1419,10 +1496,10 @@ fn convert_reason(
             ToInconclusiveReason::ConditionsChanged,
             Some(format!("{} {}", message, guidance)),
         ),
-        InconclusiveReason::ThresholdUnachievable {
+        InconclusiveReason::ThresholdElevated {
             message, guidance, ..
         } => (
-            ToInconclusiveReason::ThresholdUnachievable,
+            ToInconclusiveReason::ThresholdElevated,
             Some(format!("{} {}", message, guidance)),
         ),
     }
@@ -1538,8 +1615,8 @@ mod tests {
             ),
             (ToInconclusiveReason::ConditionsChanged, "ConditionsChanged"),
             (
-                ToInconclusiveReason::ThresholdUnachievable,
-                "ThresholdUnachievable",
+                ToInconclusiveReason::ThresholdElevated,
+                "ThresholdElevated",
             ),
         ];
 

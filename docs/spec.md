@@ -1,4 +1,4 @@
-# timing-oracle Specification (v5.4)
+# timing-oracle Specification (v5.5)
 
 This document is the authoritative specification for timing-oracle, a Bayesian timing side-channel detection system. It defines the statistical methodology, abstract types, and requirements that implementations MUST follow to be conformant.
 
@@ -63,29 +63,31 @@ The primary result type returned by the oracle:
 ```
 Outcome =
   | Pass {
-      leak_probability: Float,      // P(max|δ| > θ_eff | data)
+      leak_probability: Float,        // P(m(δ) > θ_eff | Δ), always at θ_eff
       effect: EffectEstimate,
-      theta_user: Float,            // User-requested threshold (ns)
-      theta_eff: Float,             // Effective threshold used (ns)
-      theta_floor: Float,           // Measurement floor (ns)
+      theta_user: Float,              // User-requested threshold (ns)
+      theta_eff: Float,               // Effective threshold used (ns)
+      theta_floor: Float,             // Measurement floor at decision time (ns)
+      decision_threshold_ns: Float,   // θ_eff at which decision was made
       samples_used: Int,
       quality: MeasurementQuality,
       diagnostics: Diagnostics
     }
   | Fail {
-      leak_probability: Float,
+      leak_probability: Float,        // P(m(δ) > θ_eff | Δ)
       effect: EffectEstimate,
       exploitability: Exploitability,
       theta_user: Float,
-      theta_eff: Float,
+      theta_eff: Float,               // MAY exceed θ_user (leak detected above floor)
       theta_floor: Float,
+      decision_threshold_ns: Float,   // θ_eff at which decision was made
       samples_used: Int,
       quality: MeasurementQuality,
       diagnostics: Diagnostics
     }
   | Inconclusive {
       reason: InconclusiveReason,
-      leak_probability: Float,      // Current posterior estimate
+      leak_probability: Float,        // P(m(δ) > θ_eff | Δ)
       effect: EffectEstimate,
       theta_user: Float,
       theta_eff: Float,
@@ -95,15 +97,15 @@ Outcome =
       diagnostics: Diagnostics
     }
   | Unmeasurable {
-      operation_ns: Float,          // Estimated operation time
-      threshold_ns: Float,          // Timer resolution
+      operation_ns: Float,            // Estimated operation time
+      threshold_ns: Float,            // Timer resolution
       platform: String,
       recommendation: String
     }
   | Research {
       status: ResearchStatus,
-      max_effect_ns: Float,         // Posterior mean of max|δ|
-      max_effect_ci: (Float, Float), // 95% credible interval
+      max_effect_ns: Float,           // Posterior mean of max|δ|
+      max_effect_ci: (Float, Float),  // 95% credible interval
       theta_floor: Float,
       detectable: Bool,
       projection_mismatch: Bool,
@@ -116,11 +118,32 @@ Outcome =
 
 **Semantics:**
 
-- **Pass**: MUST be returned when `leak_probability < pass_threshold` (default 0.05) AND all verdict-blocking quality gates pass
-- **Fail**: MUST be returned when `leak_probability > fail_threshold` (default 0.95) AND all verdict-blocking quality gates pass
-- **Inconclusive**: MUST be returned when a verdict-blocking quality gate fails OR resource budgets are exhausted without reaching a decision threshold
+The field `leak_probability` MUST be computed as P(m(δ) > θ_eff | Δ), where θ_eff is the effective threshold used for inference at decision time.
+
+When θ_eff > θ_user, the oracle cannot support a **Pass claim at θ_user**, because effects in the range (θ_user, θ_eff] are not distinguishable from noise under the measured conditions.
+
+Implementations MUST NOT substitute θ_user into `leak_probability` when θ_eff > θ_user.
+
+- **Pass**: MUST be returned when ALL of the following hold:
+  1. `leak_probability < pass_threshold` (default 0.05)
+  2. `theta_eff ≤ theta_user + ε_θ` where ε_θ = max(θ_tick, 10⁻⁶ · θ_user)
+  3. All verdict-blocking quality gates pass
+  4. θ_user > 0 (non-research mode)
+
+- **Fail**: MUST be returned when ALL of the following hold:
+  1. `leak_probability > fail_threshold` (default 0.95)
+  2. All verdict-blocking quality gates pass
+
+  Note: Fail MAY be returned when θ_eff > θ_user. Detecting m(δ) > θ_eff implies m(δ) > θ_user (since θ_eff ≥ θ_user by construction).
+
+- **Inconclusive**: MUST be returned when ANY of the following hold:
+  1. A verdict-blocking quality gate fails
+  2. Resource budgets exhausted without reaching a decision threshold
+  3. `leak_probability < pass_threshold` but `theta_eff > theta_user + ε_θ` (threshold elevated)
+
 - **Unmeasurable**: MUST be returned when the operation is too fast to measure reliably (see §4.5)
-- **Research**: MUST be returned only in research mode (θ_user = 0)
+
+- **Research**: MUST be returned only when θ_user = 0. In research mode, Pass/Fail semantics do not apply; the oracle reports effect estimates at the measurement floor.
 
 ### 2.2 AttackerModel
 
@@ -213,11 +236,25 @@ InconclusiveReason =
   | DataTooNoisy { message: String, guidance: String }
   | NotLearning { message: String, guidance: String }
   | WouldTakeTooLong { estimated_time_secs: Float, samples_needed: Int, guidance: String }
-  | ThresholdUnachievable { theta_user: Float, best_achievable: Float, message: String, guidance: String }
+  | ThresholdElevated {
+      theta_user: Float,                    // What user requested
+      theta_eff: Float,                     // What we measured at
+      leak_probability_at_eff: Float,       // P(m(δ) > θ_eff | Δ)
+      meets_pass_criterion_at_eff: Bool,    // True if P < pass_threshold at θ_eff
+      achievable_at_max: Bool,              // Could θ_user be reached with max budget?
+      message: String,
+      guidance: String
+    }
   | TimeBudgetExceeded { current_probability: Float, samples_collected: Int }
   | SampleBudgetExceeded { current_probability: Float, samples_collected: Int }
   | ConditionsChanged { drift: ConditionDrift }
 ```
+
+The `meets_pass_criterion_at_eff` field indicates whether P(m(δ) > θ_eff | Δ) < pass_threshold. This allows CI systems to implement policies like "treat pass-criterion-met-at-floor as acceptable" without changing inference semantics.
+
+The `achievable_at_max` field distinguishes:
+- `true`: θ_floor > θ_user now, but θ_floor(n_max) ≤ θ_user (more sampling may help)
+- `false`: θ_floor(n_max) > θ_user (cannot reach θ_user on this platform/configuration)
 
 ### 2.7 ResearchStatus
 
@@ -605,16 +642,52 @@ $$
 \end{cases}
 $$
 
-**Threshold elevation warning:**
+**Threshold Elevation Decision Rule:**
 
-When θ_eff > θ_user, implementations MUST emit a quality issue indicating that the requested threshold could not be achieved and reporting the effective threshold used.
+When the measurement floor exceeds the user's requested threshold, claims at θ_user are fundamentally limited. This section defines the normative decision rule.
+
+*Definitions:*
+
+- θ_user: User-requested threshold (from AttackerModel or custom)
+- θ_floor(n): Measurement floor at sample count n (see formula above)
+- θ_eff: Effective threshold used for inference = max(θ_user, θ_floor)
+- ε_θ: Tolerance for threshold comparison = max(θ_tick, 10⁻⁶ · θ_user)
+
+*Core principle:*
+
+When θ_eff > θ_user, the oracle cannot support a Pass claim at θ_user, because effects in the range (θ_user, θ_eff] are not distinguishable from noise under the measured conditions.
+
+1. **Fail propagates**: Detecting m(δ) > θ_eff implies m(δ) > θ_user (since θ_eff ≥ θ_user). Implementations MAY return Fail when θ_eff > θ_user.
+
+2. **Pass does not propagate**: "No detectable effect above θ_eff" is compatible with effects in (θ_user, θ_eff]. Implementations MUST NOT return Pass when θ_eff > θ_user + ε_θ.
+
+*Decision rule (normative):*
+
+At decision time, let P = P(m(δ) > θ_eff | Δ):
+
+| Condition | P value | θ_eff vs θ_user | Outcome |
+|-----------|---------|-----------------|---------|
+| Leak detected | P > fail_threshold | any | **Fail** |
+| No leak, threshold met | P < pass_threshold | θ_eff ≤ θ_user + ε_θ | **Pass** |
+| No leak, threshold elevated | P < pass_threshold | θ_eff > θ_user + ε_θ | **Inconclusive**(ThresholdElevated) |
+| Uncertain | else | any | Continue sampling or **Inconclusive** |
 
 **Dynamic floor updates:**
 
-During the adaptive loop, θ_floor(n) is recomputed analytically as $n$ grows (no Monte Carlo needed). The policy:
+During the adaptive loop, θ_floor(n) decreases as n grows. Implementations MUST:
 
-1. If θ_floor(n) drops below θ_user during sampling, update θ_eff = θ_user (the user's threshold becomes achievable)
-2. Track whether you're on pace to reach θ_user; if extrapolation shows you won't make it within budget, consider early termination with `Inconclusive`
+1. Recompute θ_eff = max(θ_user, θ_floor(n)) after each batch
+2. If θ_floor(n) drops to θ_user or below, Pass becomes possible (subject to posterior)
+3. Report the θ_eff used for the **final** decision, not the maximum observed during the run
+
+**Early termination heuristic (SHOULD):**
+
+At calibration, compute θ_floor,max = max(c_floor/√n_max, θ_tick). If θ_floor,max > θ_user + ε_θ:
+
+- Set `achievable_at_max = false`
+- If P < pass_threshold and the posterior is stable, implementations SHOULD terminate early with Inconclusive(ThresholdElevated) rather than exhausting the budget
+
+This is a budget-control optimization, not a verdict-blocking gate.
 
 #### 3.3.5 Prior Scale Calibration (Student's *t*)
 
@@ -1133,25 +1206,15 @@ If the sum of recent KL divergences (e.g., over last 5 batches) falls below 0.00
 
 Extrapolate time to decision based on current convergence rate. If projected time exceeds budget by a large margin (e.g., 10×), trigger Inconclusive with reason `WouldTakeTooLong`.
 
-**Gate 4: Threshold Unachievable**
-
-If even at maximum budget, we cannot reach θ_user:
-
-$$
-\theta_{\text{floor,max}} = \max\left(\frac{c_{\text{floor}}}{\sqrt{n_{\max}}}, \theta_{\text{tick}}\right)
-$$
-
-If θ_floor,max > θ_user and θ_user > 0, trigger Inconclusive with reason `ThresholdUnachievable`.
-
-**Gate 5: Time Budget Exceeded**
+**Gate 4: Time Budget Exceeded**
 
 If elapsed time exceeds configured time budget, trigger Inconclusive with reason `TimeBudgetExceeded`.
 
-**Gate 6: Sample Budget Exceeded**
+**Gate 5: Sample Budget Exceeded**
 
 If total samples per class exceeds configured maximum, trigger Inconclusive with reason `SampleBudgetExceeded`.
 
-**Gate 7: Condition Drift Detected**
+**Gate 6: Condition Drift Detected**
 
 The covariance estimate Σ_rate is computed during calibration. If measurement conditions change during the adaptive loop, this estimate becomes invalid.
 
@@ -1162,6 +1225,8 @@ Detect condition drift by comparing measurement statistics from calibration agai
 - Mean drift: |μ_post − μ_cal| / σ_cal
 
 If variance ratio is outside [0.5, 2.0], or autocorrelation change exceeds 0.3, or mean drift exceeds 3.0, trigger Inconclusive with reason `ConditionsChanged`.
+
+**Note on threshold elevation:** The case where θ_floor > θ_user is handled by the threshold elevation decision rule (§3.3.4), not by a quality gate. This allows Fail to be returned when large leaks are detected, even if the user's exact threshold cannot be achieved. See §3.3.4 for the early termination heuristic when `achievable_at_max = false`.
 
 #### 3.5.3 Non-Blocking Diagnostics
 
@@ -1668,6 +1733,33 @@ These constants define conformant implementations. Implementations MAY use diffe
 ---
 
 ## Appendix D: Changelog
+
+### v5.5 (from v5.4)
+
+**Threshold elevation decision rule (§2.1, §2.6, §3.3.4, §3.5.2):**
+
+- **Changed:** Pass now requires θ_eff ≤ θ_user + ε_θ (cannot Pass when threshold is elevated)
+- **Changed:** When θ_floor > θ_user and P < pass_threshold, outcome is Inconclusive(ThresholdElevated), not Pass
+- **Added:** Fail MAY be returned when θ_eff > θ_user (large leaks are still detectable)
+- **Added:** `decision_threshold_ns` field to Pass/Fail outcomes
+- **Removed:** Gate 4 (ThresholdUnachievable) as verdict-blocking gate; subsumed by decision rule
+- **Renamed:** `ThresholdUnachievable` → `ThresholdElevated` with additional fields
+- **Added:** `meets_pass_criterion_at_eff` and `achievable_at_max` fields to ThresholdElevated
+- **Added:** ε_θ tolerance = max(θ_tick, 10⁻⁶ · θ_user) for threshold comparison
+- **Rationale:** A Pass at θ_eff does not certify absence of leaks at θ_user when θ_eff > θ_user. Effects in the range (θ_user, θ_eff] are not distinguishable from noise. Fail can propagate because detecting m(δ) > θ_eff implies m(δ) > θ_user.
+
+**Gate renumbering (§3.5.2):**
+
+- Gate 4 removed (was ThresholdUnachievable)
+- Gate 5 → Gate 4 (Time Budget Exceeded)
+- Gate 6 → Gate 5 (Sample Budget Exceeded)
+- Gate 7 → Gate 6 (Condition Drift Detected)
+
+**leak_probability semantics (§2.1):**
+
+- **Clarified:** `leak_probability` MUST always be P(m(δ) > θ_eff | Δ), never P(m(δ) > θ_user | Δ)
+- **Added:** Implementations MUST NOT substitute θ_user into leak_probability when θ_eff > θ_user
+- **Rationale:** Probabilities computed at sub-floor thresholds are not calibrated.
 
 ### v5.4 (from v5.2)
 

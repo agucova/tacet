@@ -25,13 +25,14 @@
 
 use alloc::string::String;
 
-use crate::analysis::bayes::compute_bayes_factor;
+use crate::analysis::bayes::compute_bayes_gibbs;
 use crate::constants::DEFAULT_SEED;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 
 use super::{
-    check_quality_gates, AdaptiveState, Calibration, InconclusiveReason, Posterior,
-    QualityGateCheckInputs, QualityGateConfig, QualityGateResult,
+    check_quality_gates, compute_achievable_at_max, is_threshold_elevated, AdaptiveState,
+    Calibration, InconclusiveReason, Posterior, QualityGateCheckInputs, QualityGateConfig,
+    QualityGateResult,
 };
 
 /// Configuration for the adaptive step (no_std compatible).
@@ -153,6 +154,28 @@ pub enum AdaptiveOutcome {
         /// Time spent in seconds.
         elapsed_secs: f64,
     },
+
+    /// Threshold was elevated and pass criterion was met at effective threshold (v5.5).
+    ///
+    /// P < pass_threshold at θ_eff, but θ_eff > θ_user + ε. This is semantically
+    /// distinct from both Pass (can't guarantee user threshold) and Inconclusive
+    /// (not a quality issue - we got a clear statistical result).
+    ThresholdElevated {
+        /// Final posterior distribution.
+        posterior: Posterior,
+        /// User's requested threshold (θ_user).
+        theta_user: f64,
+        /// Effective threshold used (θ_eff).
+        theta_eff: f64,
+        /// Timer tick floor (θ_tick).
+        theta_tick: f64,
+        /// Whether threshold is achievable at max_samples.
+        achievable_at_max: bool,
+        /// Number of samples collected per class.
+        samples_per_class: usize,
+        /// Time spent in seconds.
+        elapsed_secs: f64,
+    },
 }
 
 impl AdaptiveOutcome {
@@ -161,6 +184,9 @@ impl AdaptiveOutcome {
         match self {
             AdaptiveOutcome::LeakDetected { posterior, .. } => Some(posterior.leak_probability),
             AdaptiveOutcome::NoLeakDetected { posterior, .. } => Some(posterior.leak_probability),
+            AdaptiveOutcome::ThresholdElevated { posterior, .. } => {
+                Some(posterior.leak_probability)
+            }
             AdaptiveOutcome::Inconclusive { posterior, .. } => {
                 posterior.as_ref().map(|p| p.leak_probability)
             }
@@ -173,11 +199,19 @@ impl AdaptiveOutcome {
     }
 
     /// Check if the outcome is conclusive (either pass or fail).
+    ///
+    /// Note: ThresholdElevated is NOT considered conclusive in v5.5 - it means
+    /// we got a statistical result but can't guarantee the user's threshold.
     pub fn is_conclusive(&self) -> bool {
         matches!(
             self,
             AdaptiveOutcome::LeakDetected { .. } | AdaptiveOutcome::NoLeakDetected { .. }
         )
+    }
+
+    /// Check if the threshold was elevated beyond tolerance (v5.5).
+    pub fn is_threshold_elevated(&self) -> bool {
+        matches!(self, AdaptiveOutcome::ThresholdElevated { .. })
     }
 
     /// Get the number of samples per class.
@@ -187,6 +221,9 @@ impl AdaptiveOutcome {
                 samples_per_class, ..
             } => *samples_per_class,
             AdaptiveOutcome::NoLeakDetected {
+                samples_per_class, ..
+            } => *samples_per_class,
+            AdaptiveOutcome::ThresholdElevated {
                 samples_per_class, ..
             } => *samples_per_class,
             AdaptiveOutcome::Inconclusive {
@@ -200,6 +237,7 @@ impl AdaptiveOutcome {
         match self {
             AdaptiveOutcome::LeakDetected { elapsed_secs, .. } => *elapsed_secs,
             AdaptiveOutcome::NoLeakDetected { elapsed_secs, .. } => *elapsed_secs,
+            AdaptiveOutcome::ThresholdElevated { elapsed_secs, .. } => *elapsed_secs,
             AdaptiveOutcome::Inconclusive { elapsed_secs, .. } => *elapsed_secs,
         }
     }
@@ -307,7 +345,10 @@ pub fn adaptive_step(
     // Track KL divergence for learning rate monitoring
     let _kl = state.update_posterior(posterior.clone());
 
-    // Check decision boundaries
+    // Check decision boundaries (v5.5 threshold elevation decision rule)
+    //
+    // Fail propagates regardless of threshold elevation: if P > fail_threshold,
+    // we detected a leak even at the elevated threshold.
     if posterior.leak_probability > config.fail_threshold {
         return StepResult::Decision(AdaptiveOutcome::LeakDetected {
             posterior,
@@ -316,7 +357,34 @@ pub fn adaptive_step(
         });
     }
 
+    // Pass requires both P < pass_threshold AND θ_eff ≤ θ_user + ε (v5.5)
     if posterior.leak_probability < config.pass_threshold {
+        // Check if threshold is elevated beyond tolerance
+        let theta_user = config.theta_ns;
+        let theta_eff = calibration.theta_eff;
+        let theta_tick = calibration.theta_tick;
+
+        if is_threshold_elevated(theta_eff, theta_user, theta_tick) {
+            // Threshold elevated: return ThresholdElevated instead of Pass
+            let achievable_at_max = compute_achievable_at_max(
+                calibration.c_floor,
+                theta_tick,
+                theta_user,
+                config.max_samples,
+            );
+
+            return StepResult::Decision(AdaptiveOutcome::ThresholdElevated {
+                posterior,
+                theta_user,
+                theta_eff,
+                theta_tick,
+                achievable_at_max,
+                samples_per_class: state.n_total(),
+                elapsed_secs,
+            });
+        }
+
+        // Threshold not elevated: true Pass
         return StepResult::Decision(AdaptiveOutcome::NoLeakDetected {
             posterior,
             samples_per_class: state.n_total(),
@@ -328,9 +396,10 @@ pub fn adaptive_step(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_narrow, // v5.2: narrow component
-        prior_cov_slab: Some(&calibration.prior_cov_slab), // v5.2: slab component
-        narrow_weight_post: posterior.narrow_weight_post, // v5.2: from Bayes result
+        prior_cov_9d: &calibration.prior_cov_9d,
+        prior_cov_marginal: &calibration.prior_cov_marginal, // v5.4: marginal prior (2σ²R)
+        prior_cov_slab: None, // v5.4: no mixture prior
+        narrow_weight_post: None, // v5.4: no mixture prior
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs,
@@ -350,6 +419,7 @@ pub fn adaptive_step(
             Some(posterior.projection_mismatch_q)
         },
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
+        lambda_mixing_ok: posterior.lambda_mixing_ok, // v5.4: from Gibbs result
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -400,16 +470,17 @@ fn compute_posterior(
     // Scale covariance: Sigma_n = Sigma_rate / n
     let sigma_n = calibration.covariance_for_n(n);
 
-    // Run 9D Bayesian inference with prior covariance
-    let bayes_result = compute_bayes_factor(
+    // Run 9D Bayesian inference with v5.4 Gibbs sampler
+    let bayes_result = compute_bayes_gibbs(
         &observed_diff,
         &sigma_n,
-        &calibration.prior_cov_9d,
+        calibration.sigma_t,
+        &calibration.l_r,
         config.theta_ns,
         Some(config.seed),
     );
 
-    Some(Posterior::new(
+    Some(Posterior::new_with_gibbs(
         bayes_result.delta_post,
         bayes_result.lambda_post,
         bayes_result.beta_proj,
@@ -417,6 +488,8 @@ fn compute_posterior(
         bayes_result.leak_probability,
         bayes_result.projection_mismatch_q,
         n,
+        bayes_result.lambda_mean,
+        bayes_result.lambda_mixing_ok,
     ))
 }
 

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Spec v5.5: Threshold elevation decision rule (§2.1, §2.6, §3.3.4, §3.5.2)**
+  - Pass now requires θ_eff ≤ θ_user + ε_θ (cannot Pass when threshold is elevated)
+  - When θ_floor > θ_user and P < pass_threshold, outcome is `Inconclusive(ThresholdElevated)`, not `Pass`
+  - Fail MAY be returned when θ_eff > θ_user (large leaks are still detectable)
+  - Renamed `ThresholdUnachievable` → `ThresholdElevated` with additional fields:
+    - `leak_probability_at_eff`: posterior probability at elevated threshold
+    - `meets_pass_criterion_at_eff`: whether P < pass_threshold at θ_eff
+    - `achievable_at_max`: whether θ_user is achievable with max_samples
+  - ε_θ tolerance = max(θ_tick, 10⁻⁶ · θ_user) for threshold comparison
+  - Gate 4 (ThresholdUnachievable) removed as verdict-blocking gate; subsumed by decision rule
+  - Gates renumbered: 5→4 (Time Budget), 6→5 (Sample Budget), 7→6 (Condition Drift)
+  - **Rationale:** A Pass at θ_eff does not certify absence of leaks at θ_user when θ_eff > θ_user
+
 - **Spec §3.3.2: Block length selection now uses class-conditional ACF**
   - Previous: Politis-White on pooled acquisition stream (anti-conservative due to class alternation)
   - New: Class-conditional acquisition-lag ACF with conservative combination

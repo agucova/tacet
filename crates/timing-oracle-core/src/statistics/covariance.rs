@@ -26,6 +26,29 @@ use super::quantile::{compute_deciles_inplace, compute_midquantile_deciles};
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+/// Configure rayon's global thread pool with a larger stack size (8 MB).
+///
+/// This is necessary because the statistical analysis (Gibbs sampling, bootstrap)
+/// creates multiple 9x9 matrices (648 bytes each) on the stack in deeply nested
+/// function calls. The default 2 MB rayon thread stack can overflow when running
+/// multiple tests in parallel.
+///
+/// This function is idempotent and will only configure the pool once.
+#[cfg(feature = "parallel")]
+fn ensure_rayon_configured() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+
+    INIT.call_once(|| {
+        // Configure rayon's global thread pool with 8 MB stack per thread.
+        // If this fails (e.g., user already configured the pool), that's fine -
+        // they presumably configured it with appropriate settings.
+        let _ = rayon::ThreadPoolBuilder::new()
+            .stack_size(8 * 1024 * 1024)
+            .build_global();
+    });
+}
+
 /// Result of covariance estimation including the matrix and diagnostics.
 #[derive(Debug, Clone)]
 pub struct CovarianceEstimate {
@@ -237,6 +260,7 @@ pub fn bootstrap_covariance_matrix(
     // This avoids allocating Vec<Vector9> (saves 72 KB for 1000 iterations)
     #[cfg(feature = "parallel")]
     let cov_accumulator: WelfordCovariance9 = {
+        ensure_rayon_configured();
         (0..n_bootstrap)
             .into_par_iter()
             .fold_with(
@@ -379,6 +403,7 @@ pub fn bootstrap_difference_covariance(
     // Generate bootstrap replicates of Δ* = q_F* - q_R* using joint resampling
     #[cfg(feature = "parallel")]
     let cov_accumulator: WelfordCovariance9 = {
+        ensure_rayon_configured();
         (0..n_bootstrap)
             .into_par_iter()
             .fold_with(
@@ -537,6 +562,7 @@ pub fn bootstrap_difference_covariance_discrete(
 
     #[cfg(feature = "parallel")]
     let cov_accumulator: WelfordCovariance9 = {
+        ensure_rayon_configured();
         (0..n_bootstrap)
             .into_par_iter()
             .fold_with(
@@ -658,23 +684,32 @@ fn compute_sample_covariance(vectors: &[Vector9]) -> Matrix9 {
     cov
 }
 
-/// Add small jitter to diagonal for numerical stability.
+/// Apply diagonal floor and jitter for numerical stability (spec §3.3.2).
 ///
-/// This ensures the covariance matrix is positive definite even
-/// when there's near-collinearity in the quantile vectors.
+/// Implements the spec requirement:
+/// σ²_i ← max(σ²_i, 0.01·σ̄²) + ε
+/// where σ̄² = tr(Σ)/9 and ε = 10⁻¹⁰ + σ̄²·10⁻⁸
+///
+/// This ensures:
+/// 1. Diagonal elements have a minimum floor (1% of average variance)
+/// 2. Small jitter is added for positive definiteness
 fn add_diagonal_jitter(mut matrix: Matrix9) -> (Matrix9, f64) {
-    // Compute a data-adaptive jitter based on the matrix scale
+    // Compute average variance: σ̄² = tr(Σ)/9
     let trace = matrix.trace();
-    let base_jitter = 1e-10;
-    let adaptive_jitter = (trace / 9.0) * 1e-8;
-    let jitter = base_jitter + adaptive_jitter;
+    let sigma_bar_sq = trace / 9.0;
 
-    // Add jitter to diagonal
+    // Diagonal floor: 1% of average variance (spec §3.3.2)
+    let floor = 0.01 * sigma_bar_sq;
+
+    // Jitter: ε = 10⁻¹⁰ + σ̄²·10⁻⁸ (spec §3.3.2)
+    let epsilon = 1e-10 + sigma_bar_sq * 1e-8;
+
+    // Apply floor and jitter to diagonal: σ²_i ← max(σ²_i, floor) + ε
     for i in 0..9 {
-        matrix[(i, i)] += jitter;
+        matrix[(i, i)] = matrix[(i, i)].max(floor) + epsilon;
     }
 
-    (matrix, jitter)
+    (matrix, epsilon)
 }
 
 /// Compute Q* statistic for model fit check.
@@ -752,6 +787,7 @@ fn compute_bootstrap_q_thresh(
     // Collect Q* values from bootstrap replicates
     #[cfg(feature = "parallel")]
     let q_values: Vec<f64> = {
+        ensure_rayon_configured();
         (0..n_bootstrap)
             .into_par_iter()
             .map(|i| {

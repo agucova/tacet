@@ -48,7 +48,7 @@ const (
 	ReasonTimeBudgetExceeded
 	ReasonSampleBudgetExceeded
 	ReasonConditionsChanged
-	ReasonThresholdUnachievable
+	ReasonThresholdElevated
 	ReasonModelMismatch
 )
 
@@ -69,8 +69,8 @@ func (r InconclusiveReason) String() string {
 		return "SampleBudgetExceeded"
 	case ReasonConditionsChanged:
 		return "ConditionsChanged"
-	case ReasonThresholdUnachievable:
-		return "ThresholdUnachievable"
+	case ReasonThresholdElevated:
+		return "ThresholdElevated"
 	case ReasonModelMismatch:
 		return "ModelMismatch"
 	default:

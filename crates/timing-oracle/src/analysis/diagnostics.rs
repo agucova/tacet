@@ -159,6 +159,15 @@ pub fn compute_diagnostics(
         threshold_ns: 0.0,
         timer_name: String::new(),
         platform: String::new(),
+        // v5.4 Gibbs sampler diagnostics
+        gibbs_iters_total: 256,
+        gibbs_burnin: 64,
+        gibbs_retained: 192,
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
     }
 }
 

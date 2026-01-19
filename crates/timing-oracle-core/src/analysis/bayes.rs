@@ -116,6 +116,24 @@ pub struct BayesResult {
 
     /// Covariance matrix used for inference (after regularization).
     pub sigma_n: Matrix9,
+
+    // ==================== v5.4 Gibbs sampler diagnostics ====================
+
+    /// Posterior mean of latent scale λ (v5.4 Gibbs).
+    /// Only populated when using `compute_bayes_gibbs()`.
+    pub lambda_mean: f64,
+
+    /// Posterior standard deviation of λ (v5.4 Gibbs).
+    pub lambda_sd: f64,
+
+    /// Coefficient of variation: λ_sd / λ_mean (v5.4 Gibbs).
+    pub lambda_cv: f64,
+
+    /// Effective sample size of λ chain (v5.4 Gibbs).
+    pub lambda_ess: f64,
+
+    /// True if mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20 (v5.4 Gibbs).
+    pub lambda_mixing_ok: bool,
 }
 
 /// Compute Bayesian posterior for timing leak analysis using 9D model (single Gaussian prior).
@@ -181,6 +199,12 @@ pub fn compute_bayes_factor(
         effect_magnitude_ci,
         is_clamped: false,
         sigma_n: regularized,
+        // v5.4 Gibbs fields - not used in single Gaussian mode
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
     }
 }
 
@@ -288,6 +312,72 @@ pub fn compute_bayes_factor_mixture(
         effect_magnitude_ci,
         is_clamped: false,
         sigma_n: regularized,
+        // v5.4 Gibbs fields - not used in mixture mode
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
+    }
+}
+
+/// Compute Bayesian posterior using Student's t prior with Gibbs sampling (v5.4).
+///
+/// This replaces the v5.2 mixture prior, using a Student's t prior (ν=4) that
+/// is more robust to correlation-induced pathologies. The t-prior is represented
+/// as a scale mixture of Gaussians and sampled via Gibbs.
+///
+/// # Arguments
+///
+/// * `delta` - Observed quantile differences (9-vector)
+/// * `sigma_n` - Covariance matrix scaled for inference sample size (Σ_rate / n)
+/// * `sigma_t` - Calibrated Student's t prior scale
+/// * `l_r` - Cholesky factor of correlation matrix R
+/// * `theta` - Minimum effect of concern (threshold)
+/// * `seed` - Random seed for Gibbs sampling reproducibility
+///
+/// # Returns
+///
+/// `BayesResult` with posterior from Gibbs sampling, including lambda diagnostics.
+pub fn compute_bayes_gibbs(
+    delta: &Vector9,
+    sigma_n: &Matrix9,
+    sigma_t: f64,
+    l_r: &Matrix9,
+    theta: f64,
+    seed: Option<u64>,
+) -> BayesResult {
+    use super::gibbs::run_gibbs_inference;
+
+    let regularized = add_jitter(*sigma_n);
+    let actual_seed = seed.unwrap_or(crate::constants::DEFAULT_SEED);
+
+    // Run Gibbs sampler
+    let gibbs_result = run_gibbs_inference(delta, &regularized, sigma_t, l_r, theta, actual_seed);
+
+    BayesResult {
+        leak_probability: gibbs_result.leak_probability,
+        delta_post: gibbs_result.delta_post,
+        lambda_post: gibbs_result.lambda_post,
+        // For t-prior, no mixture components - set to same values
+        delta_post_narrow: gibbs_result.delta_post,
+        lambda_post_narrow: gibbs_result.lambda_post,
+        delta_post_slab: gibbs_result.delta_post,
+        lambda_post_slab: gibbs_result.lambda_post,
+        narrow_weight_post: 1.0,
+        slab_weight_post: 0.0,
+        beta_proj: gibbs_result.beta_proj,
+        beta_proj_cov: gibbs_result.beta_proj_cov,
+        projection_mismatch_q: gibbs_result.projection_mismatch_q,
+        effect_magnitude_ci: gibbs_result.effect_magnitude_ci,
+        is_clamped: false,
+        sigma_n: regularized,
+        // v5.4 Gibbs diagnostics
+        lambda_mean: gibbs_result.lambda_mean,
+        lambda_sd: gibbs_result.lambda_sd,
+        lambda_cv: gibbs_result.lambda_cv,
+        lambda_ess: gibbs_result.lambda_ess,
+        lambda_mixing_ok: gibbs_result.lambda_mixing_ok,
     }
 }
 
@@ -666,6 +756,11 @@ fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix9) -> BayesResult {
         effect_magnitude_ci: (0.0, 0.0),
         is_clamped: true,
         sigma_n: *sigma_n,
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
     }
 }
 
@@ -687,6 +782,11 @@ fn neutral_result_mixture(sigma_n: &Matrix9, lambda0_narrow: &Matrix9, lambda0_s
         effect_magnitude_ci: (0.0, 0.0),
         is_clamped: true,
         sigma_n: *sigma_n,
+        lambda_mean: 1.0,
+        lambda_sd: 0.0,
+        lambda_cv: 0.0,
+        lambda_ess: 0.0,
+        lambda_mixing_ok: true,
     }
 }
 
