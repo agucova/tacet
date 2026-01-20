@@ -301,6 +301,53 @@ pub struct ToDiagnostics {
 
     /// Warning messages (null-terminated, fixed-size buffers).
     pub warnings: [[c_char; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
+
+    // =========================================================================
+    // v5.4 Gibbs sampler λ (lambda) diagnostics
+    // =========================================================================
+
+    /// Total number of Gibbs iterations.
+    pub gibbs_iters_total: usize,
+
+    /// Number of burn-in iterations.
+    pub gibbs_burnin: usize,
+
+    /// Number of retained samples.
+    pub gibbs_retained: usize,
+
+    /// Posterior mean of latent scale λ.
+    pub lambda_mean: f64,
+
+    /// Posterior standard deviation of λ.
+    pub lambda_sd: f64,
+
+    /// Coefficient of variation of λ (λ_sd / λ_mean).
+    pub lambda_cv: f64,
+
+    /// Effective sample size of λ chain.
+    pub lambda_ess: f64,
+
+    /// Whether λ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub lambda_mixing_ok: bool,
+
+    // =========================================================================
+    // v5.6 Gibbs sampler κ (kappa) diagnostics
+    // =========================================================================
+
+    /// Posterior mean of likelihood precision κ.
+    pub kappa_mean: f64,
+
+    /// Posterior standard deviation of κ.
+    pub kappa_sd: f64,
+
+    /// Coefficient of variation of κ (kappa_sd / kappa_mean).
+    pub kappa_cv: f64,
+
+    /// Effective sample size of κ chain.
+    pub kappa_ess: f64,
+
+    /// Whether κ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub kappa_mixing_ok: bool,
 }
 
 /// Test result.
@@ -351,6 +398,10 @@ pub struct ToResult {
     /// Detailed diagnostics (spec §2.8).
     pub diagnostics: ToDiagnostics,
 
+    /// Threshold at which decision was made (θ_eff at decision time).
+    /// Only valid for Pass/Fail outcomes.
+    pub decision_threshold_ns: f64,
+
     // Research mode fields (only valid if outcome == Research)
     /// Research mode status (only valid if outcome == Research).
     pub research_status: ToResearchStatus,
@@ -395,6 +446,21 @@ impl Default for ToDiagnostics {
             theta_floor: 0.0,
             warning_count: 0,
             warnings: [[0; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
+            // v5.4 Gibbs sampler λ diagnostics
+            gibbs_iters_total: 256,
+            gibbs_burnin: 64,
+            gibbs_retained: 192,
+            lambda_mean: 1.0,
+            lambda_sd: 0.0,
+            lambda_cv: 0.0,
+            lambda_ess: 0.0,
+            lambda_mixing_ok: true,
+            // v5.6 Gibbs sampler κ diagnostics
+            kappa_mean: 1.0,
+            kappa_sd: 0.0,
+            kappa_cv: 0.0,
+            kappa_ess: 0.0,
+            kappa_mixing_ok: true,
         }
     }
 }
@@ -431,6 +497,7 @@ impl Default for ToResult {
             platform: ptr::null(),
             adaptive_batching_used: false,
             diagnostics: ToDiagnostics::default(),
+            decision_threshold_ns: 0.0,
             // Research mode defaults
             research_status: ToResearchStatus::BudgetExhausted,
             max_effect_ns: 0.0,

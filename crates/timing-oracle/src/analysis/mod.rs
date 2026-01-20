@@ -9,9 +9,9 @@
 
 // Re-export analysis functions from core
 pub use timing_oracle_core::analysis::{
-    analytical_mde, bayes, build_design_matrix, classify_pattern, compute_bayes_factor,
-    compute_bayes_factor_mixture, compute_max_effect_ci, decompose_effect, effect, estimate_mde,
-    mde, BayesResult, EffectDecomposition, MaxEffectCI, MdeEstimate,
+    analytical_mde, bayes, build_design_matrix, classify_pattern, compute_bayes_gibbs,
+    compute_max_effect_ci, decompose_effect, effect, estimate_mde, mde, BayesResult,
+    EffectDecomposition, MaxEffectCI, MdeEstimate,
 };
 
 // Keep diagnostics locally (depends on main crate types)

@@ -159,59 +159,65 @@ pub fn timer_resolution_ns() -> f64 {
 ///
 /// # Platform Notes
 ///
-/// - **macOS (Apple Silicon)**: Always 24 MHz. The counter increments at a fixed
-///   rate regardless of CPU frequency. `mach_timebase_info()` returns 125/3 ratio
-///   (41.67ns per tick).
+/// - **macOS (Apple Silicon)**: Reads from CNTFRQ_EL0 register.
+///   - M1/M2 chips: 24 MHz (24,000,000 Hz)
+///   - M3/M4+ chips (macOS 15+): 1 GHz (1,000,000,000 Hz)
+///   See: https://developer.apple.com/documentation/macos-release-notes/macos-15-release-notes
 ///
 /// - **Linux**: Reads from CNTFRQ_EL0 register. This can be unreliable on some
 ///   platforms due to firmware bugs (e.g., some older Raspberry Pi firmware,
 ///   early QEMU versions). We validate the value and fall back to known
 ///   frequencies for common platforms.
 ///
-/// - **Known ARM64 Linux frequencies**:
+/// - **Known ARM64 frequencies**:
+///   - Apple M3/M4+: 1 GHz (1,000,000,000 Hz)
+///   - Apple M1/M2: 24 MHz (24,000,000 Hz)
 ///   - AWS Graviton: 1 GHz (1,000,000,000 Hz)
 ///   - Raspberry Pi 4: 54 MHz (54,000,000 Hz)
 ///   - QEMU default: 62.5 MHz (62,500,000 Hz)
 ///   - Generic ARM: Often 24 MHz or 100 MHz
 #[cfg(target_arch = "aarch64")]
 fn get_aarch64_counter_freq_hz() -> u64 {
-    #[cfg(target_os = "macos")]
-    {
-        // Apple Silicon counter is always 24MHz
-        24_000_000
+    // Read counter frequency from CNTFRQ_EL0 register (works on both macOS and Linux)
+    let freq: u64;
+    unsafe {
+        core::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq);
     }
 
+    // Validate: CNTFRQ_EL0 can be incorrectly programmed by firmware
+    // Valid range: 1 MHz to 10 GHz
+    if is_reasonable_aarch64_freq(freq) {
+        return freq;
+    }
+
+    // CNTFRQ_EL0 looks wrong - try platform-specific fallbacks
+    eprintln!(
+        "[timing-oracle::effect] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
+        freq
+    );
+
+    #[cfg(target_os = "linux")]
+    if let Some(platform_freq) = detect_aarch64_platform_freq() {
+        eprintln!(
+            "[timing-oracle::effect] INFO: Using platform-detected frequency: {} Hz",
+            platform_freq
+        );
+        return platform_freq;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // Fallback for older macOS or unusual configurations
+        // Try 1GHz first (M3+), then 24MHz (M1/M2)
+        eprintln!("[timing-oracle::effect] INFO: Using macOS fallback frequency: 1 GHz");
+        return 1_000_000_000;
+    }
+
+    // Ultimate fallback: calibrate against Instant::now()
     #[cfg(target_os = "linux")]
     {
-        // Read counter frequency from CNTFRQ_EL0 register
-        let freq: u64;
-        unsafe {
-            core::arch::asm!("mrs {}, cntfrq_el0", out(reg) freq);
-        }
-
-        // Validate: CNTFRQ_EL0 can be incorrectly programmed by firmware
-        // Valid range: 1 MHz to 10 GHz
-        if is_reasonable_aarch64_freq(freq) {
-            return freq;
-        }
-
-        // CNTFRQ_EL0 looks wrong - try to detect platform from /proc/cpuinfo
-        eprintln!(
-            "[timing-oracle::effect] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
-            freq
-        );
-
-        if let Some(platform_freq) = detect_aarch64_platform_freq() {
-            eprintln!(
-                "[timing-oracle::effect] INFO: Using platform-detected frequency: {} Hz",
-                platform_freq
-            );
-            return platform_freq;
-        }
-
-        // Ultimate fallback: calibrate against Instant::now()
         eprintln!("[timing-oracle::effect] INFO: Calibrating ARM64 counter frequency...");
-        calibrate_aarch64_frequency()
+        return calibrate_aarch64_frequency();
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -222,7 +228,7 @@ fn get_aarch64_counter_freq_hz() -> u64 {
 }
 
 /// Check if an ARM64 counter frequency is reasonable (1 MHz to 10 GHz).
-#[cfg(all(target_arch = "aarch64", target_os = "linux"))]
+#[cfg(target_arch = "aarch64")]
 fn is_reasonable_aarch64_freq(freq: u64) -> bool {
     freq >= 1_000_000 && freq <= 10_000_000_000
 }
@@ -324,13 +330,21 @@ fn aarch64_counter_freq() -> u64 {
 }
 
 /// Convert nanoseconds to counter ticks for ARM64.
+///
+/// Note: On Apple Silicon, the physical clock runs at 24MHz regardless of the
+/// reported frequency. On M3+ with macOS 15+, the kernel scales CNTVCT_EL0 values
+/// so they appear to run at 1GHz (incrementing by ~41.67 per physical tick).
+/// The actual measurement granularity remains ~42ns on all Apple Silicon.
 #[cfg(target_arch = "aarch64")]
 #[inline]
 fn ns_to_ticks_aarch64(ns: u64) -> u64 {
     let freq = aarch64_counter_freq();
 
-    if freq == 24_000_000 {
-        // Apple Silicon fast path: ticks = ns * 24 / 1000
+    if freq == 1_000_000_000 {
+        // 1GHz fast path (M3+ with macOS 15+, AWS Graviton, etc.): 1 tick = 1 ns
+        ns
+    } else if freq == 24_000_000 {
+        // 24MHz fast path (M1/M2 Apple Silicon): ticks = ns * 24 / 1000
         (ns * 24 + 999) / 1000
     } else {
         // General case: ticks = ns * freq / 1e9
@@ -541,6 +555,61 @@ fn ns_to_ticks_x86_64(ns: u64) -> u64 {
 /// Default: 1ms. Can be adjusted via `set_global_max_delay_ns`.
 static GLOBAL_MAX_DELAY_NS: AtomicU64 = AtomicU64::new(1_000_000);
 
+/// Track whether we've validated busy_wait accuracy.
+static BUSY_WAIT_VALIDATED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+
+/// Validate busy_wait_ns accuracy on first use.
+///
+/// Runs a quick sanity check to ensure the counter frequency is correct.
+/// If the actual delay differs significantly from the requested delay,
+/// prints a warning (once) to help diagnose misconfigured timers.
+fn validate_busy_wait_once() {
+    BUSY_WAIT_VALIDATED.get_or_init(|| {
+        // Skip validation on fallback platforms (no precise timer)
+        if !using_precise_timer() {
+            return true;
+        }
+
+        // Use a moderate delay that's measurable but fast
+        const TARGET_NS: u64 = 10_000; // 10μs
+
+        let start = Instant::now();
+
+        // Temporarily bypass validation to avoid recursion
+        #[cfg(target_arch = "aarch64")]
+        {
+            busy_wait_ns_aarch64(TARGET_NS);
+        }
+        #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
+        {
+            busy_wait_ns_x86_64(TARGET_NS);
+        }
+
+        let actual_ns = start.elapsed().as_nanos() as u64;
+        let ratio = actual_ns as f64 / TARGET_NS as f64;
+
+        // Allow wide tolerance: 0.3x to 10x
+        // - Below 0.3x suggests frequency is way too high (e.g., using 24MHz when it's 1GHz)
+        // - Above 10x suggests frequency is way too low or severe system interference
+        if ratio < 0.3 || ratio > 10.0 {
+            eprintln!(
+                "[timing-oracle::effect] WARNING: busy_wait_ns accuracy issue detected!\n\
+                 Requested: {}ns, Actual: {}ns, Ratio: {:.2}x\n\
+                 Detected frequency: {} Hz ({})\n\
+                 This may indicate incorrect counter frequency detection.\n\
+                 Effect injection timing may be inaccurate.",
+                TARGET_NS,
+                actual_ns,
+                ratio,
+                counter_frequency_hz(),
+                timer_backend_name()
+            );
+        }
+
+        true
+    });
+}
+
 /// Set the global maximum delay limit.
 ///
 /// This is a safety feature to prevent accidentally injecting very long delays.
@@ -575,12 +644,18 @@ pub fn global_max_delay_ns() -> u64 {
 ///
 /// | Platform | Method | Resolution |
 /// |----------|--------|------------|
-/// | aarch64 macOS | cntvct_el0 | ~42ns (24MHz) |
+/// | aarch64 macOS (all) | cntvct_el0 | ~42ns (physical 24MHz clock) |
 /// | aarch64 Linux | cntvct_el0 | ~1ns (1GHz typical) |
 /// | x86_64 Linux/macOS | RDTSC | ~0.3ns (3GHz typical) |
 /// | Other | Instant::now() | ~50ns (prints warning) |
+///
+/// Note: On Apple Silicon M3+ with macOS 15+, the counter is scaled to appear
+/// as 1GHz, but the physical resolution remains ~42ns.
 #[inline(never)]
 pub fn busy_wait_ns(ns: u64) {
+    // Validate accuracy on first call (prints warning if misconfigured)
+    validate_busy_wait_once();
+
     let max = GLOBAL_MAX_DELAY_NS.load(Ordering::Relaxed);
     let clamped = ns.min(max);
 
@@ -1607,8 +1682,12 @@ mod tests {
             // Platform-specific sanity checks
             #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
             {
-                // Apple Silicon is always 24MHz
-                assert_eq!(freq, 24_000_000, "Apple Silicon should be 24MHz");
+                // Apple Silicon: 24MHz on M1/M2, 1GHz on M3/M4+
+                assert!(
+                    freq == 24_000_000 || freq == 1_000_000_000,
+                    "Apple Silicon should be 24MHz (M1/M2) or 1GHz (M3+), got {} Hz",
+                    freq
+                );
             }
 
             #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
@@ -1650,10 +1729,12 @@ mod tests {
             // Platform-specific checks
             #[cfg(all(target_arch = "aarch64", target_os = "macos"))]
             {
-                // Apple Silicon: 24MHz → ~41.67ns
+                // Apple Silicon: 24MHz → ~41.67ns (M1/M2), 1GHz → 1ns (M3/M4+)
+                let is_m1_m2 = (resolution - 41.67).abs() < 1.0;
+                let is_m3_plus = resolution < 2.0;
                 assert!(
-                    (resolution - 41.67).abs() < 1.0,
-                    "Apple Silicon resolution should be ~42ns, got {}",
+                    is_m1_m2 || is_m3_plus,
+                    "Apple Silicon resolution should be ~42ns (M1/M2) or ~1ns (M3+), got {}",
                     resolution
                 );
             }

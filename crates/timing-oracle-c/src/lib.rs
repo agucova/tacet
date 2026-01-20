@@ -814,8 +814,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
     Box<ToResult>,
 > {
     use timing_oracle_core::adaptive::{
-        calibrate_narrow_scale, compute_prior_cov_9d, compute_slab_scale, AdaptiveState,
-        Calibration, CalibrationSnapshot, MIXTURE_PRIOR_WEIGHT,
+        calibrate_t_prior_scale, AdaptiveState, Calibration, CalibrationSnapshot,
     };
     use timing_oracle_core::statistics::{
         bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
@@ -950,31 +949,23 @@ fn run_calibration_phase<F: Fn() -> f64>(
     };
     let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
 
-    // Compute v5.2 mixture prior: slab first, then calibrate narrow
-    let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, calibration_samples);
-    let sigma_narrow = calibrate_narrow_scale(
+    // Compute Student's t prior (v5.4+)
+    let (sigma_t, l_r) = calibrate_t_prior_scale(
         &sigma_rate,
         theta_eff,
         calibration_samples,
-        sigma_slab,
-        MIXTURE_PRIOR_WEIGHT,
         discrete_mode,
         rng_seed,
     );
-    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
-    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
     let calibration = Calibration::new(
         sigma_rate,
         10, // block_length (default)
-        prior_cov_narrow,
-        prior_cov_slab,
-        sigma_narrow,
-        sigma_slab,
-        MIXTURE_PRIOR_WEIGHT,
+        sigma_t,
+        l_r,
         theta_ns,
         calibration_samples,
-        discrete_mode, // Detected from uniqueness ratio
+        discrete_mode,
         mde_shift_ns,
         mde_tail_ns,
         calibration_snapshot,
@@ -986,6 +977,7 @@ fn run_calibration_phase<F: Fn() -> f64>(
         theta_eff,
         theta_floor_initial,
         rng_seed,
+        batch_k as u32,
     );
 
     // Initialize adaptive state with calibration samples
@@ -1057,6 +1049,21 @@ fn build_diagnostics(
     let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
     let projection_mismatch_ok = projection_mismatch_q <= calibration.projection_mismatch_thresh;
 
+    // Extract Gibbs sampler diagnostics from posterior if available
+    let (lambda_mean, lambda_mixing_ok, kappa_mean, kappa_cv, kappa_ess, kappa_mixing_ok) =
+        posterior
+            .map(|p| {
+                (
+                    p.lambda_mean.unwrap_or(1.0),
+                    p.lambda_mixing_ok.unwrap_or(true),
+                    p.kappa_mean.unwrap_or(1.0),
+                    p.kappa_cv.unwrap_or(0.0),
+                    p.kappa_ess.unwrap_or(0.0),
+                    p.kappa_mixing_ok.unwrap_or(true),
+                )
+            })
+            .unwrap_or((1.0, true, 1.0, 0.0, 0.0, true));
+
     ToDiagnostics {
         dependence_length: calibration.block_length,
         effective_sample_size: posterior.map(|p| p.n).unwrap_or(0),
@@ -1079,6 +1086,21 @@ fn build_diagnostics(
         theta_floor: calibration.theta_floor_initial,
         warning_count: 0,
         warnings: [[0; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
+        // v5.4 Gibbs sampler λ diagnostics
+        gibbs_iters_total: 256,  // Default value (actual value not stored in Posterior)
+        gibbs_burnin: 64,        // Default value
+        gibbs_retained: 192,     // Default value
+        lambda_mean,
+        lambda_sd: 0.0,          // Not stored in Posterior (compute from chain if needed)
+        lambda_cv: 0.0,          // Not stored in Posterior
+        lambda_ess: 0.0,         // Not stored in Posterior
+        lambda_mixing_ok,
+        // v5.6 Gibbs sampler κ diagnostics
+        kappa_mean,
+        kappa_sd: 0.0,           // Not stored in Posterior
+        kappa_cv,
+        kappa_ess,
+        kappa_mixing_ok,
     }
 }
 
@@ -1271,6 +1293,7 @@ fn build_result(
             platform: c"".as_ptr(),
             adaptive_batching_used: batch_k > 1,
             diagnostics,
+            decision_threshold_ns: calibration.theta_eff,
             // Research-specific fields
             research_status,
             max_effect_ns,

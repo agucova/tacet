@@ -179,24 +179,10 @@ pub struct QualityGateCheckInputs<'a> {
     /// Current posterior distribution.
     pub posterior: &'a Posterior,
 
-    /// 9D prior covariance matrix (from calibration).
-    /// For v5.2 mixture prior, this should be the narrow component prior.
-    /// Use `prior_cov_slab` and `narrow_weight_post` for dominant component selection.
-    pub prior_cov_9d: &'a Matrix9,
-
-    /// v5.4: Marginal prior covariance matrix Λ₀^marginal = 2σ²R (for ν=4).
+    /// Marginal prior covariance matrix Λ₀^marginal = 2σ²R (for ν=4).
     /// This is the unconditional prior variance of δ under the t-prior.
-    /// Used by Gate 1 for the variance ratio check (spec §3.5.2).
+    /// Used by Gate 1 for the KL divergence check (spec §3.5.2).
     pub prior_cov_marginal: &'a Matrix9,
-
-    /// v5.2: Slab (wide) prior covariance matrix.
-    /// Pass `None` if not using mixture prior.
-    pub prior_cov_slab: Option<&'a Matrix9>,
-
-    /// v5.2: Posterior weight of the narrow component (0.0-1.0).
-    /// Pass `None` if not using mixture prior.
-    /// When < 0.5, the slab component dominates and should be used for quality gates.
-    pub narrow_weight_post: Option<f64>,
 
     /// Effect threshold θ in nanoseconds (user's requested threshold).
     pub theta_ns: f64,
@@ -687,20 +673,17 @@ mod tests {
         )
     }
 
-    fn make_prior_cov_9d() -> Matrix9 {
+    fn make_prior_cov_marginal() -> Matrix9 {
         Matrix9::identity() * 100.0 // Prior variance = 100 per dimension
     }
 
     fn make_inputs<'a>(
         posterior: &'a Posterior,
-        prior_cov_9d: &'a Matrix9,
+        prior_cov_marginal: &'a Matrix9,
     ) -> QualityGateCheckInputs<'a> {
         QualityGateCheckInputs {
             posterior,
-            prior_cov_9d,
-            prior_cov_marginal: prior_cov_9d, // v5.4: use same as prior_cov_9d for tests
-            prior_cov_slab: None,       // v5.2: no mixture prior in tests
-            narrow_weight_post: None,   // v5.2: no mixture prior in tests
+            prior_cov_marginal,
             theta_ns: 100.0,
             n_total: 5000,
             elapsed_secs: 5.0,
@@ -712,7 +695,7 @@ mod tests {
             theta_tick: 1.0,
             projection_mismatch_q: None,
             projection_mismatch_thresh: 18.48,
-            lambda_mixing_ok: None,     // v5.4: no Gibbs sampler in tests
+            lambda_mixing_ok: None,
         }
     }
 
@@ -721,8 +704,8 @@ mod tests {
         // v5.6: Use KL divergence instead of variance ratio
         // Small posterior variance = large covariance contraction = high KL
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let inputs = make_inputs(&posterior, &prior_cov_marginal);
         let config = QualityGateConfig::default();
 
         let result = check_kl_divergence(&inputs, &config);
@@ -734,8 +717,8 @@ mod tests {
         // v5.6: Use KL divergence instead of variance ratio
         // High posterior variance ≈ prior = low KL
         let posterior = make_posterior(0.5, 95.0); // Close to prior variance of 100
-        let prior_cov_9d = make_prior_cov_9d();
-        let inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let inputs = make_inputs(&posterior, &prior_cov_marginal);
         let config = QualityGateConfig::default();
 
         let result = check_kl_divergence(&inputs, &config);
@@ -748,8 +731,8 @@ mod tests {
     #[test]
     fn test_learning_rate_gate_passes() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.recent_kl_sum = Some(0.05); // Sum > 0.001
         let config = QualityGateConfig::default();
 
@@ -760,8 +743,8 @@ mod tests {
     #[test]
     fn test_learning_rate_gate_fails() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.recent_kl_sum = Some(0.0005); // Sum < 0.001
         let config = QualityGateConfig::default();
 
@@ -775,8 +758,8 @@ mod tests {
     #[test]
     fn test_time_budget_gate() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.elapsed_secs = 35.0; // Exceeds 30s budget
         let config = QualityGateConfig::default();
 
@@ -790,8 +773,8 @@ mod tests {
     #[test]
     fn test_sample_budget_gate() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.n_total = 1_000_001; // Exceeds 1M budget
         let config = QualityGateConfig::default();
 
@@ -805,8 +788,8 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_no_snapshots() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let inputs = make_inputs(&posterior, &prior_cov_marginal);
         // No snapshots provided
         let config = QualityGateConfig::default();
 
@@ -817,7 +800,7 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_no_drift() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
+        let prior_cov_marginal = make_prior_cov_marginal();
 
         let stats = StatsSnapshot {
             mean: 100.0,
@@ -828,7 +811,7 @@ mod tests {
         let cal_snapshot = CalibrationSnapshot::new(stats, stats);
         let post_snapshot = CalibrationSnapshot::new(stats, stats);
 
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.calibration_snapshot = Some(&cal_snapshot);
         inputs.current_stats_snapshot = Some(&post_snapshot);
 
@@ -841,7 +824,7 @@ mod tests {
     #[test]
     fn test_condition_drift_gate_detects_variance_change() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
+        let prior_cov_marginal = make_prior_cov_marginal();
 
         let cal_stats = StatsSnapshot {
             mean: 100.0,
@@ -858,7 +841,7 @@ mod tests {
         let cal_snapshot = CalibrationSnapshot::new(cal_stats, cal_stats);
         let post_snapshot = CalibrationSnapshot::new(post_stats, post_stats);
 
-        let mut inputs = make_inputs(&posterior, &prior_cov_9d);
+        let mut inputs = make_inputs(&posterior, &prior_cov_marginal);
         inputs.calibration_snapshot = Some(&cal_snapshot);
         inputs.current_stats_snapshot = Some(&post_snapshot);
 
@@ -874,8 +857,8 @@ mod tests {
     #[test]
     fn test_full_quality_gates_pass() {
         let posterior = make_posterior(0.5, 10.0);
-        let prior_cov_9d = make_prior_cov_9d();
-        let inputs = make_inputs(&posterior, &prior_cov_9d);
+        let prior_cov_marginal = make_prior_cov_marginal();
+        let inputs = make_inputs(&posterior, &prior_cov_marginal);
         let config = QualityGateConfig::default();
 
         let result = check_quality_gates(&inputs, &config);

@@ -719,7 +719,10 @@ impl TimingOracle {
             1.0 / timer.cycles_per_ns(), // ns per cycle
             &cal_config,
         ) {
-            Ok(cal) => cal,
+            Ok(cal) => {
+                // Set the actual batch K value (determined during pilot phase)
+                Calibration { batch_k: k, ..cal }
+            }
             Err(e) => {
                 // Calibration failed - return Inconclusive
                 let diagnostics = Diagnostics {
@@ -1045,7 +1048,7 @@ impl TimingOracle {
         theta_ns: f64,
         stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
-        let effect = build_effect_estimate(posterior, theta_ns);
+        let effect = build_effect_estimate(posterior, theta_ns, calibration.batch_k);
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
         let diagnostics = build_diagnostics(
             calibration,
@@ -1081,7 +1084,7 @@ impl TimingOracle {
         theta_ns: f64,
         stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
-        let effect = build_effect_estimate(posterior, theta_ns);
+        let effect = build_effect_estimate(posterior, theta_ns, calibration.batch_k);
         let exploitability = Exploitability::from_effect_ns(effect.total_effect_ns());
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
         let diagnostics = build_diagnostics(
@@ -1122,7 +1125,7 @@ impl TimingOracle {
         let posterior = state.current_posterior();
         let leak_probability = posterior.map(|p| p.leak_probability).unwrap_or(0.5);
         let effect = posterior
-            .map(|p| build_effect_estimate(p, theta_ns))
+            .map(|p| build_effect_estimate(p, theta_ns, calibration.batch_k))
             .unwrap_or_default();
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
         let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
@@ -1401,7 +1404,7 @@ impl TimingOracle {
 
         // Build effect estimate
         let effect = posterior
-            .map(|p| build_effect_estimate(p, theta_ns))
+            .map(|p| build_effect_estimate(p, theta_ns, calibration.batch_k))
             .unwrap_or_default();
 
         let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
@@ -1524,21 +1527,28 @@ impl TimingOracle {
 use crate::adaptive::Posterior;
 
 /// Build an EffectEstimate from a posterior.
-fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64) -> EffectEstimate {
+///
+/// When batching is enabled (batch_k > 1), the posterior contains batch totals.
+/// This function divides by batch_k to report per-call effect sizes.
+fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64, batch_k: u32) -> EffectEstimate {
     let pattern = classify_pattern(&posterior.beta_proj, &posterior.beta_proj_cov);
+    let k = batch_k.max(1) as f64; // Prevent division by zero
 
     // Compute credible interval from posterior covariance
-    let shift_std = posterior.shift_se();
-    let tail_std = posterior.tail_se();
-    let total_effect = (posterior.shift_ns().powi(2) + posterior.tail_ns().powi(2)).sqrt();
+    // Divide by K to convert from batch totals to per-call effects
+    let shift_std = posterior.shift_se() / k;
+    let tail_std = posterior.tail_se() / k;
+    let shift_ns = posterior.shift_ns() / k;
+    let tail_ns = posterior.tail_ns() / k;
+    let total_effect = (shift_ns.powi(2) + tail_ns.powi(2)).sqrt();
     let total_std = ((shift_std.powi(2) + tail_std.powi(2)) / 2.0).sqrt();
 
     let ci_low = (total_effect - 1.96 * total_std).max(0.0);
     let ci_high = total_effect + 1.96 * total_std;
 
     EffectEstimate {
-        shift_ns: posterior.shift_ns(),
-        tail_ns: posterior.tail_ns(),
+        shift_ns,
+        tail_ns,
         credible_interval_ns: (ci_low, ci_high),
         pattern,
         interpretation_caveat: None, // Set when model fit is poor

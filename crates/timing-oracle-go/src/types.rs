@@ -200,6 +200,115 @@ impl Default for ToGoEffect {
     }
 }
 
+/// Diagnostics information for debugging and quality assessment.
+///
+/// Contains detailed information about the measurement process for debugging
+/// and quality assessment (spec §2.8).
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ToGoDiagnostics {
+    // Core diagnostics
+
+    /// Block length used for bootstrap resampling.
+    pub dependence_length: usize,
+
+    /// Effective sample size accounting for autocorrelation.
+    pub effective_sample_size: usize,
+
+    /// Ratio of post-test variance to calibration variance.
+    pub stationarity_ratio: f64,
+
+    /// Whether stationarity check passed.
+    pub stationarity_ok: bool,
+
+    /// Projection mismatch Q statistic.
+    pub projection_mismatch_q: f64,
+
+    /// Whether projection mismatch is acceptable.
+    pub projection_mismatch_ok: bool,
+
+    // Timer diagnostics
+
+    /// Whether discrete mode was used (low timer resolution).
+    pub discrete_mode: bool,
+
+    /// Timer resolution in nanoseconds.
+    pub timer_resolution_ns: f64,
+
+    // v5.4 Gibbs sampler λ diagnostics
+
+    /// Total number of Gibbs iterations.
+    pub gibbs_iters_total: usize,
+
+    /// Number of burn-in iterations.
+    pub gibbs_burnin: usize,
+
+    /// Number of retained samples.
+    pub gibbs_retained: usize,
+
+    /// Posterior mean of latent scale λ.
+    pub lambda_mean: f64,
+
+    /// Posterior standard deviation of λ.
+    pub lambda_sd: f64,
+
+    /// Coefficient of variation of λ (λ_sd / λ_mean).
+    pub lambda_cv: f64,
+
+    /// Effective sample size of λ chain.
+    pub lambda_ess: f64,
+
+    /// Whether λ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub lambda_mixing_ok: bool,
+
+    // v5.6 Gibbs sampler κ diagnostics
+
+    /// Posterior mean of likelihood precision κ.
+    pub kappa_mean: f64,
+
+    /// Posterior standard deviation of κ.
+    pub kappa_sd: f64,
+
+    /// Coefficient of variation of κ (kappa_sd / kappa_mean).
+    pub kappa_cv: f64,
+
+    /// Effective sample size of κ chain.
+    pub kappa_ess: f64,
+
+    /// Whether κ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub kappa_mixing_ok: bool,
+}
+
+impl Default for ToGoDiagnostics {
+    fn default() -> Self {
+        Self {
+            dependence_length: 0,
+            effective_sample_size: 0,
+            stationarity_ratio: 1.0,
+            stationarity_ok: true,
+            projection_mismatch_q: 0.0,
+            projection_mismatch_ok: true,
+            discrete_mode: false,
+            timer_resolution_ns: 0.0,
+            // v5.4 Gibbs sampler λ diagnostics
+            gibbs_iters_total: 256,
+            gibbs_burnin: 64,
+            gibbs_retained: 192,
+            lambda_mean: 1.0,
+            lambda_sd: 0.0,
+            lambda_cv: 0.0,
+            lambda_ess: 0.0,
+            lambda_mixing_ok: true,
+            // v5.6 Gibbs sampler κ diagnostics
+            kappa_mean: 1.0,
+            kappa_sd: 0.0,
+            kappa_cv: 0.0,
+            kappa_ess: 0.0,
+            kappa_mixing_ok: true,
+        }
+    }
+}
+
 /// Analysis result.
 #[repr(C)]
 pub struct ToGoResult {
@@ -242,8 +351,21 @@ pub struct ToGoResult {
     /// Effective threshold after floor adjustment in nanoseconds.
     pub theta_eff_ns: f64,
 
+    /// Measurement floor (theta_floor) in nanoseconds.
+    /// Minimum detectable effect given current noise.
+    pub theta_floor_ns: f64,
+
+    /// Threshold at which decision was made (for Pass/Fail).
+    pub decision_threshold_ns: f64,
+
     /// Recommendation string (owned, must be freed via togo_result_free; NULL if not applicable).
     pub recommendation: *const c_char,
+
+    /// Detailed diagnostics (optional).
+    pub diagnostics: ToGoDiagnostics,
+
+    /// Whether diagnostics are populated.
+    pub has_diagnostics: bool,
 }
 
 impl Default for ToGoResult {
@@ -262,7 +384,11 @@ impl Default for ToGoResult {
             timer_resolution_ns: 0.0,
             theta_user_ns: 0.0,
             theta_eff_ns: 0.0,
+            theta_floor_ns: 0.0,
+            decision_threshold_ns: 0.0,
             recommendation: ptr::null(),
+            diagnostics: ToGoDiagnostics::default(),
+            has_diagnostics: false,
         }
     }
 }

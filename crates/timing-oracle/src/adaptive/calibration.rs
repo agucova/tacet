@@ -24,10 +24,7 @@ use crate::statistics::{
     OnlineStats,
 };
 use crate::types::Matrix9;
-use timing_oracle_core::adaptive::{
-    calibrate_narrow_scale, calibrate_t_prior_scale, compute_c_floor_9d, compute_prior_cov_9d,
-    compute_slab_scale, MIXTURE_PRIOR_WEIGHT,
-};
+use timing_oracle_core::adaptive::{calibrate_t_prior_scale, compute_c_floor_9d};
 
 /// Calibration results from the initial measurement phase.
 ///
@@ -43,35 +40,15 @@ pub struct Calibration {
     /// Used for block bootstrap to preserve autocorrelation structure.
     pub block_length: usize,
 
-    /// v5.2: Narrow prior covariance for δ = (δ₁, ..., δ₉).
-    /// Λ₀,₁ = σ₁² × R where R = Corr(Σ_rate).
-    /// Calibrated so mixture hits 62% exceedance.
-    pub prior_cov_narrow: Matrix9,
-
-    /// v5.2: Slab prior covariance (wide component).
-    /// Λ₀,₂ = σ₂² × R where σ₂ = max(50θ, 10×SE_med).
-    /// Deterministic, not calibrated.
-    pub prior_cov_slab: Matrix9,
-
-    /// v5.2: Narrow scale σ₁ (calibrated).
-    pub sigma_narrow: f64,
-
-    /// v5.2: Slab scale σ₂ (deterministic).
-    pub sigma_slab: f64,
-
-    /// v5.2: Prior mixture weight w (narrow component weight).
-    /// Fixed at 0.99 per spec.
-    pub prior_weight: f64,
-
-    /// v5.4: Student's t prior scale (calibrated for 62% exceedance).
+    /// Student's t prior scale (calibrated for 62% exceedance).
     pub sigma_t: f64,
 
-    /// v5.4: Cholesky factor of correlation matrix R.
+    /// Cholesky factor of correlation matrix R.
     /// Used for Gibbs sampling: L_R where R = L_R L_R^T.
     pub l_r: Matrix9,
 
-    /// v5.4: Marginal prior covariance = 2σ_t² R (for ν=4).
-    /// Used for quality gate variance ratio check.
+    /// Marginal prior covariance = 2σ_t² R (for ν=4).
+    /// Used for quality gate KL divergence check.
     pub prior_cov_marginal: Matrix9,
 
     /// Timer resolution in nanoseconds.
@@ -130,6 +107,11 @@ pub struct Calibration {
     /// Deterministic RNG seed used for this run.
     /// Enables reproducibility: same seed + same data = same result.
     pub rng_seed: u64,
+
+    /// Batch size K for adaptive batching.
+    /// When K > 1, samples contain K iterations worth of timing.
+    /// Effect estimates must be divided by K to report per-call differences.
+    pub batch_k: u32,
 }
 
 /// Errors that can occur during calibration.
@@ -377,45 +359,20 @@ pub fn calibrate(
         theta_floor_initial
     };
 
-    // Set 9D prior covariance (spec v5.2 §3.3.5)
-    //
-    // v5.2 uses a 2-component mixture prior: π(δ) = w·N(0, σ₁²R) + (1-w)·N(0, σ₂²R)
-    // - σ₂ (slab): deterministic, very wide: max(50θ, 10×SE_med)
-    // - σ₁ (narrow): calibrated so MIXTURE hits 62% exceedance
-    // - w = 0.99 (narrow component weight)
-    //
-    // This allows the posterior to "escape" to the slab when data strongly
-    // supports large effects, fixing the pathological shrinkage in v5.1.
-    let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n);
-    let sigma_narrow = calibrate_narrow_scale(
-        &sigma_rate,
-        theta_eff,
-        n,
-        sigma_slab,
-        MIXTURE_PRIOR_WEIGHT,
-        discrete_mode,
-        config.seed,
-    );
-    let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
-    let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
-
-    // v5.4: Student's t prior (ν=4) via Gibbs sampling
+    // Student's t prior (ν=4) via Gibbs sampling
     // Calibrate sigma_t so t-prior hits 62% exceedance, get L_R for Gibbs
     let (sigma_t, l_r) =
         calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
     // Marginal prior covariance for t_4: Var(δ) = (ν/(ν-2)) σ² R = 2σ² R for ν=4
-    let prior_cov_marginal = compute_prior_cov_9d(&sigma_rate, sigma_t * std::f64::consts::SQRT_2, discrete_mode);
+    // Compute L_R * L_R^T = R, then scale by 2σ²
+    let r = &l_r * l_r.transpose();
+    let prior_cov_marginal = r * (2.0 * sigma_t * sigma_t);
 
     Ok(Calibration {
         sigma_rate,
         // Use block_size from bootstrap covariance estimation (spec §3.3.2 compliant,
         // uses class-conditional ACF and has floor of 10)
         block_length: cov_estimate.block_size,
-        prior_cov_narrow,
-        prior_cov_slab,
-        sigma_narrow,
-        sigma_slab,
-        prior_weight: MIXTURE_PRIOR_WEIGHT,
         sigma_t,
         l_r,
         prior_cov_marginal,
@@ -434,6 +391,8 @@ pub fn calibrate(
         theta_eff,
         theta_tick,
         rng_seed: config.seed,
+        // Default to 1 (no batching). The oracle will update this after determining K.
+        batch_k: 1,
     })
 }
 
@@ -677,17 +636,10 @@ mod tests {
         );
         assert!(cal.block_length >= 1, "Block length should be at least 1");
         assert!(
-            cal.prior_cov_narrow[(0, 0)] > 0.0,
-            "Narrow prior variance should be positive"
+            cal.prior_cov_marginal[(0, 0)] > 0.0,
+            "Prior marginal variance should be positive"
         );
-        assert!(
-            cal.prior_cov_slab[(0, 0)] > 0.0,
-            "Slab prior variance should be positive"
-        );
-        assert!(
-            cal.sigma_slab > cal.sigma_narrow,
-            "Slab scale should be wider than narrow"
-        );
+        assert!(cal.sigma_t > 0.0, "Sigma t should be positive");
         assert!(
             cal.samples_per_second > 0.0,
             "Throughput should be positive"

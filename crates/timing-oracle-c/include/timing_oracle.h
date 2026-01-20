@@ -400,6 +400,38 @@ typedef struct {
     size_t warning_count;
     /** Warning messages (null-terminated strings). */
     char warnings[TO_MAX_WARNINGS][TO_MAX_WARNING_LEN];
+
+    /* v5.4 Gibbs sampler lambda diagnostics */
+
+    /** Total number of Gibbs iterations. */
+    size_t gibbs_iters_total;
+    /** Number of burn-in iterations. */
+    size_t gibbs_burnin;
+    /** Number of retained samples. */
+    size_t gibbs_retained;
+    /** Posterior mean of latent scale lambda. */
+    double lambda_mean;
+    /** Posterior standard deviation of lambda. */
+    double lambda_sd;
+    /** Coefficient of variation of lambda (lambda_sd / lambda_mean). */
+    double lambda_cv;
+    /** Effective sample size of lambda chain. */
+    double lambda_ess;
+    /** Whether lambda chain mixed well (CV >= 0.1 AND ESS >= 20). */
+    bool lambda_mixing_ok;
+
+    /* v5.6 Gibbs sampler kappa diagnostics */
+
+    /** Posterior mean of likelihood precision kappa. */
+    double kappa_mean;
+    /** Posterior standard deviation of kappa. */
+    double kappa_sd;
+    /** Coefficient of variation of kappa (kappa_sd / kappa_mean). */
+    double kappa_cv;
+    /** Effective sample size of kappa chain. */
+    double kappa_ess;
+    /** Whether kappa chain mixed well (CV >= 0.1 AND ESS >= 20). */
+    bool kappa_mixing_ok;
 } to_diagnostics_t;
 
 /**
@@ -453,6 +485,10 @@ typedef struct {
 
     /** Detailed diagnostics (spec Section 2.8). */
     to_diagnostics_t diagnostics;
+
+    /** Threshold at which decision was made (theta_eff at decision time).
+     * Only valid for Pass/Fail outcomes. */
+    double decision_threshold_ns;
 
     /* Research mode fields (only valid if outcome == TO_OUTCOME_RESEARCH) */
 

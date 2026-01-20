@@ -277,13 +277,9 @@ pub fn run_adaptive(
     // a confident Pass/Fail decision, even if the posterior would otherwise
     // cross the threshold.
     let current_stats = state.get_stats_snapshot();
-    // v5.2: Pass mixture prior fields for dominant component selection
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_narrow,
-        prior_cov_marginal: &calibration.prior_cov_marginal, // v5.4: marginal prior (2σ²R)
-        prior_cov_slab: Some(&calibration.prior_cov_slab),
-        narrow_weight_post: posterior.narrow_weight_post,
+        prior_cov_marginal: &calibration.prior_cov_marginal,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -303,7 +299,7 @@ pub fn run_adaptive(
             Some(posterior.projection_mismatch_q)
         },
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
-        lambda_mixing_ok: posterior.lambda_mixing_ok, // v5.4: from Gibbs result
+        lambda_mixing_ok: posterior.lambda_mixing_ok,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -490,13 +486,9 @@ pub fn adaptive_step(
     // CRITICAL: Check ALL quality gates BEFORE decision boundaries (spec §3.5.2)
     // =========================================================================
     let current_stats = state.get_stats_snapshot();
-    // v5.2: Pass mixture prior fields for dominant component selection
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_narrow,
-        prior_cov_marginal: &calibration.prior_cov_marginal, // v5.4: marginal prior (2σ²R)
-        prior_cov_slab: Some(&calibration.prior_cov_slab),
-        narrow_weight_post: posterior.narrow_weight_post,
+        prior_cov_marginal: &calibration.prior_cov_marginal,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs: state.elapsed().as_secs_f64(),
@@ -516,7 +508,7 @@ pub fn adaptive_step(
             Some(posterior.projection_mismatch_q)
         },
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
-        lambda_mixing_ok: posterior.lambda_mixing_ok, // v5.4: from Gibbs result
+        lambda_mixing_ok: posterior.lambda_mixing_ok,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -605,23 +597,15 @@ mod tests {
         };
         let calibration_snapshot = CalibrationSnapshot::new(default_stats, default_stats);
 
-        // v5.2 mixture prior: narrow and slab components
-        let prior_cov_narrow = Matrix9::identity() * 10000.0; // 100^2 for ~100ns SD
-        let prior_cov_slab = Matrix9::identity() * 250000.0; // 500^2 for wide slab
-        // v5.4: t-prior fields (using same scale as narrow for tests)
+        // v5.4+ t-prior fields
         let l_r = Matrix9::identity(); // Identity for tests
         let prior_cov_marginal = Matrix9::identity() * 20000.0; // 2 * sigma_t^2 for nu=4
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
             block_length: 10,
-            prior_cov_narrow,
-            prior_cov_slab,
-            sigma_narrow: 100.0, // sqrt(10000)
-            sigma_slab: 500.0,   // sqrt(250000)
-            prior_weight: 0.99,  // narrow component weight
-            sigma_t: 100.0,      // v5.4: t-prior scale
-            l_r,                 // v5.4: Cholesky of R
-            prior_cov_marginal,  // v5.4: marginal prior cov
+            sigma_t: 100.0,      // t-prior scale
+            l_r,                 // Cholesky of R
+            prior_cov_marginal,  // marginal prior cov
             timer_resolution_ns: 1.0,
             samples_per_second: 100_000.0,
             discrete_mode: false,
@@ -637,6 +621,7 @@ mod tests {
             theta_eff: 100.0, // max(theta_ns, theta_floor_initial)
             theta_tick: 1.0, // Timer resolution
             rng_seed: 42,    // Test seed
+            batch_k: 1,      // No batching in tests
         }
     }
 

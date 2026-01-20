@@ -61,9 +61,6 @@ const DIAGONAL_FLOOR: f64 = 1e-12;
 /// Degrees of freedom for Student's t prior (v5.4).
 pub const NU: f64 = 4.0;
 
-/// Default prior weight for the narrow component in mixture prior (§3.3.5 v5.2).
-/// DEPRECATED: Kept for backwards compatibility. Use t-prior with NU=4 instead.
-pub const MIXTURE_PRIOR_WEIGHT: f64 = 0.99;
 
 /// Calibration results from the initial measurement phase (no_std compatible).
 ///
@@ -72,14 +69,13 @@ pub const MIXTURE_PRIOR_WEIGHT: f64 = 0.99;
 ///
 /// For full calibration with preflight checks, see `timing_oracle::Calibration`.
 ///
-/// ## Mixture Prior (v5.2)
+/// ## Student's t Prior (v5.4+)
 ///
-/// The prior is a 2-component scale mixture:
-/// - Narrow component: N(0, σ₁²R) with weight w (default 0.99)
-/// - Slab component: N(0, σ₂²R) with weight (1-w) (default 0.01)
+/// The prior is a Student's t distribution with ν=4 degrees of freedom:
+/// δ ~ t_ν(0, σ_t²R)
 ///
-/// This allows the posterior to "escape" to the slab when data strongly
-/// supports large effects, fixing the shrinkage pathology in noisy-likelihood regimes.
+/// This is implemented via scale mixture: λ ~ Gamma(ν/2, ν/2), δ|λ ~ N(0, (σ_t²/λ)R).
+/// The marginal variance is (ν/(ν-2)) σ_t² R = 2σ_t² R for ν=4.
 #[derive(Debug, Clone)]
 pub struct Calibration {
     /// Covariance "rate" - multiply by 1/n to get Sigma_n for n samples.
@@ -91,25 +87,17 @@ pub struct Calibration {
     /// Used for block bootstrap to preserve autocorrelation structure.
     pub block_length: usize,
 
-    /// 9D prior covariance for δ = (δ₁, ..., δ₉).
-    /// Λ₀ = σ²_prior × R where R = Corr(Σ_rate) (correlation-shaped).
-    /// For backwards compatibility, this equals prior_cov_narrow.
-    pub prior_cov_9d: Matrix9,
+    /// Calibrated Student's t prior scale (v5.4).
+    /// This is the σ in δ|λ ~ N(0, (σ²/λ)R).
+    pub sigma_t: f64,
 
-    /// Narrow component prior covariance: Λ₀,₁ = σ₁² × R (v5.2).
-    pub prior_cov_narrow: Matrix9,
+    /// Cholesky factor L_R of correlation matrix R.
+    /// Used for Gibbs sampling: δ = (σ/√λ) L_R z.
+    pub l_r: Matrix9,
 
-    /// Slab component prior covariance: Λ₀,₂ = σ₂² × R (v5.2).
-    pub prior_cov_slab: Matrix9,
-
-    /// Narrow component scale σ₁ (calibrated so mixture hits 62% exceedance).
-    pub sigma_narrow: f64,
-
-    /// Slab component scale σ₂ (deterministic: max(50θ, 10×SE_med)).
-    pub sigma_slab: f64,
-
-    /// Prior weight for narrow component (default 0.99).
-    pub prior_weight: f64,
+    /// Marginal prior covariance: 2σ²R (for ν=4).
+    /// This is the unconditional prior variance of δ under the t-prior.
+    pub prior_cov_marginal: Matrix9,
 
     /// The theta threshold being used (in nanoseconds).
     pub theta_ns: f64,
@@ -142,20 +130,6 @@ pub struct Calibration {
     /// Used for analytical theta_floor computation: theta_floor_stat(n) = c_floor / sqrt(n).
     pub c_floor: f64,
 
-    // ==================== v5.4 Student's t prior fields ====================
-
-    /// Calibrated Student's t prior scale (v5.4).
-    /// This is the σ in δ|λ ~ N(0, (σ²/λ)R).
-    pub sigma_t: f64,
-
-    /// Cholesky factor L_R of correlation matrix R.
-    /// Used for Gibbs sampling: δ = (σ/√λ) L_R z.
-    pub l_r: Matrix9,
-
-    /// Marginal prior covariance: 2σ²R (for ν=4).
-    /// This is the unconditional prior variance of δ under the t-prior.
-    pub prior_cov_marginal: Matrix9,
-
     /// Projection mismatch threshold.
     /// 99th percentile of bootstrap Q_proj distribution.
     pub projection_mismatch_thresh: f64,
@@ -173,79 +147,17 @@ pub struct Calibration {
 
     /// Deterministic RNG seed used for this run.
     pub rng_seed: u64,
+
+    /// Batch size K for adaptive batching.
+    /// When K > 1, samples contain K iterations worth of timing.
+    /// Effect estimates must be divided by K to report per-call differences.
+    pub batch_k: u32,
 }
 
 impl Calibration {
-    /// Create a new Calibration with all required fields (v5.2 mixture prior).
+    /// Create a new Calibration with v5.4+ Student's t prior.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        sigma_rate: Matrix9,
-        block_length: usize,
-        prior_cov_narrow: Matrix9,
-        prior_cov_slab: Matrix9,
-        sigma_narrow: f64,
-        sigma_slab: f64,
-        prior_weight: f64,
-        theta_ns: f64,
-        calibration_samples: usize,
-        discrete_mode: bool,
-        mde_shift_ns: f64,
-        mde_tail_ns: f64,
-        calibration_snapshot: CalibrationSnapshot,
-        timer_resolution_ns: f64,
-        samples_per_second: f64,
-        c_floor: f64,
-        projection_mismatch_thresh: f64,
-        theta_tick: f64,
-        theta_eff: f64,
-        theta_floor_initial: f64,
-        rng_seed: u64,
-    ) -> Self {
-        // Compute L_R for backwards compatibility with v5.4 code
-        let r = compute_correlation_matrix(&sigma_rate);
-        let r_reg = apply_correlation_regularization(&r, discrete_mode);
-        let l_r = match Cholesky::new(r_reg) {
-            Some(c) => c.l().into_owned(),
-            None => Matrix9::identity(),
-        };
-
-        // Marginal prior cov = 2σ²R for t-prior compatibility
-        let prior_cov_marginal = r_reg * (2.0 * sigma_narrow * sigma_narrow);
-
-        Self {
-            sigma_rate,
-            block_length,
-            prior_cov_9d: prior_cov_narrow, // Backwards compatibility
-            prior_cov_narrow,
-            prior_cov_slab,
-            sigma_narrow,
-            sigma_slab,
-            prior_weight,
-            theta_ns,
-            calibration_samples,
-            discrete_mode,
-            mde_shift_ns,
-            mde_tail_ns,
-            calibration_snapshot,
-            timer_resolution_ns,
-            samples_per_second,
-            c_floor,
-            projection_mismatch_thresh,
-            theta_tick,
-            theta_eff,
-            theta_floor_initial,
-            rng_seed,
-            sigma_t: sigma_narrow,
-            l_r,
-            prior_cov_marginal,
-        }
-    }
-
-    /// Create a new Calibration with v5.4 Student's t prior.
-    ///
-    /// This is the preferred constructor for v5.4+.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_t_prior(
         sigma_rate: Matrix9,
         block_length: usize,
         sigma_t: f64,
@@ -264,25 +176,19 @@ impl Calibration {
         theta_eff: f64,
         theta_floor_initial: f64,
         rng_seed: u64,
+        batch_k: u32,
     ) -> Self {
         // Compute marginal prior covariance: 2σ²R (for ν=4)
         // The marginal variance of t_ν(0, σ²R) is (ν/(ν-2)) σ²R = 2σ²R for ν=4
         let r = &l_r * l_r.transpose();
         let prior_cov_marginal = r * (2.0 * sigma_t * sigma_t);
 
-        // For backwards compatibility, also populate mixture fields
-        // (will be removed in future version)
-        let prior_cov_compat = compute_prior_cov_9d(&sigma_rate, sigma_t, discrete_mode);
-
         Self {
             sigma_rate,
             block_length,
-            prior_cov_9d: prior_cov_marginal,
-            prior_cov_narrow: prior_cov_compat,
-            prior_cov_slab: prior_cov_compat, // Same for compat
-            sigma_narrow: sigma_t,
-            sigma_slab: sigma_t,
-            prior_weight: 1.0, // No mixture
+            sigma_t,
+            l_r,
+            prior_cov_marginal,
             theta_ns,
             calibration_samples,
             discrete_mode,
@@ -297,9 +203,7 @@ impl Calibration {
             theta_eff,
             theta_floor_initial,
             rng_seed,
-            sigma_t,
-            l_r,
-            prior_cov_marginal,
+            batch_k,
         }
     }
 
@@ -522,26 +426,6 @@ fn apply_correlation_regularization(r: &Matrix9, discrete_mode: bool) -> Matrix9
     r + Matrix9::identity() * 1e-5
 }
 
-/// Compute slab scale σ₂ deterministically (§3.3.5 v5.2).
-///
-/// σ₂ = max(50 × θ_eff, 10 × SE_med)
-///
-/// The slab scale is NOT tuned - it is computed deterministically from
-/// calibration-time quantities only. This ensures the slab is always
-/// wide enough to capture large effects.
-///
-/// # Arguments
-/// * `sigma_rate` - Covariance rate matrix from calibration
-/// * `theta_eff` - Effective threshold in nanoseconds
-/// * `n_cal` - Number of calibration samples
-///
-/// # Returns
-/// The slab scale σ₂.
-pub fn compute_slab_scale(sigma_rate: &Matrix9, theta_eff: f64, n_cal: usize) -> f64 {
-    let median_se = compute_median_se(sigma_rate, n_cal);
-    (50.0 * theta_eff).max(10.0 * median_se)
-}
-
 /// Compute median standard error from sigma_rate.
 fn compute_median_se(sigma_rate: &Matrix9, n_cal: usize) -> f64 {
     let mut ses: Vec<f64> = (0..9)
@@ -552,171 +436,6 @@ fn compute_median_se(sigma_rate: &Matrix9, n_cal: usize) -> f64 {
         .collect();
     ses.sort_by(|a, b| a.total_cmp(b));
     ses[4] // Median of 9 values
-}
-
-/// Calibrate narrow scale σ₁ so that the MIXTURE prior hits 62% exceedance (§3.3.5 v5.2).
-///
-/// Uses binary search to find σ₁ such that:
-/// P(max_k |δ_k| > θ_eff | δ ~ mixture) = 0.62
-///
-/// where mixture = w·N(0, σ₁²R) + (1−w)·N(0, σ₂²R)
-///
-/// # Arguments
-/// * `sigma_rate` - Covariance rate matrix from calibration
-/// * `theta_eff` - Effective threshold in nanoseconds
-/// * `n_cal` - Number of calibration samples (for bounds computation)
-/// * `sigma_slab` - Slab scale σ₂ (computed first via compute_slab_scale)
-/// * `prior_weight` - Weight w for narrow component (default 0.99)
-/// * `discrete_mode` - Whether discrete timer mode is active
-/// * `seed` - Deterministic RNG seed
-///
-/// # Returns
-/// The calibrated narrow scale σ₁.
-pub fn calibrate_narrow_scale(
-    sigma_rate: &Matrix9,
-    theta_eff: f64,
-    n_cal: usize,
-    sigma_slab: f64,
-    prior_weight: f64,
-    discrete_mode: bool,
-    seed: u64,
-) -> f64 {
-    let median_se = compute_median_se(sigma_rate, n_cal);
-
-    // Compute L_R (Cholesky of regularized correlation matrix)
-    let r = compute_correlation_matrix(sigma_rate);
-    let r_reg = apply_correlation_regularization(&r, discrete_mode);
-    let l_r = match Cholesky::new(r_reg) {
-        Some(c) => c.l().into_owned(),
-        None => return theta_eff * CONSERVATIVE_PRIOR_SCALE,
-    };
-
-    // Precompute samples for reuse across bisection iterations.
-    //
-    // For mixture prior: w·N(0, σ_narrow²R) + (1-w)·N(0, σ_slab²R)
-    //
-    // For each sample i, precompute:
-    //   m_i = max|L_R · z_i|  (the "base" effect magnitude)
-    //   is_narrow_i = whether this sample uses narrow component
-    //
-    // For narrow: max|δ| = σ_narrow · m_i
-    // For slab:   max|δ| = σ_slab · m_i (constant across bisection!)
-    //
-    // This reduces the bisection loop to simple threshold comparisons.
-    let (base_effects, component_flags) =
-        precompute_mixture_prior_samples(&l_r, prior_weight, seed);
-
-    // Precompute the slab contribution (constant across bisection)
-    // Slab samples exceed threshold when: σ_slab · m_i > θ, i.e., m_i > θ/σ_slab
-    let slab_threshold = theta_eff / sigma_slab;
-    let slab_count: usize = base_effects
-        .iter()
-        .zip(component_flags.iter())
-        .filter(|&(&m, &is_narrow)| !is_narrow && m > slab_threshold)
-        .count();
-
-    // Search bounds (same as v5.1)
-    let mut lo = theta_eff * 0.05;
-    let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
-
-    for _ in 0..MAX_CALIBRATION_ITERATIONS {
-        let mid = (lo + hi) / 2.0;
-
-        // Narrow samples exceed threshold when: σ_narrow · m_i > θ, i.e., m_i > θ/σ_narrow
-        let narrow_threshold = theta_eff / mid;
-        let narrow_count: usize = base_effects
-            .iter()
-            .zip(component_flags.iter())
-            .filter(|&(&m, &is_narrow)| is_narrow && m > narrow_threshold)
-            .count();
-
-        let total_count = slab_count + narrow_count;
-        let exceedance = total_count as f64 / base_effects.len() as f64;
-
-        if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
-            return mid; // Close enough
-        }
-
-        if exceedance > TARGET_EXCEEDANCE {
-            // Too much exceedance -> reduce narrow scale
-            hi = mid;
-        } else {
-            // Too little exceedance -> increase narrow scale
-            lo = mid;
-        }
-    }
-
-    // Fallback to conservative value
-    theta_eff * CONSERVATIVE_PRIOR_SCALE
-}
-
-/// Precompute samples for mixture prior calibration.
-///
-/// Returns:
-/// - base_effects: m_i = max_k |L_R z_i|_k for each sample
-/// - component_flags: true if sample uses narrow component, false for slab
-///
-/// These can be reused across bisection iterations since:
-/// - For narrow: P(max|δ| > θ) = P(σ_narrow · m > θ)
-/// - For slab: P(max|δ| > θ) = P(σ_slab · m > θ) (constant)
-fn precompute_mixture_prior_samples(
-    l_r: &Matrix9,
-    prior_weight: f64,
-    seed: u64,
-) -> (Vec<f64>, Vec<bool>) {
-    #[cfg(feature = "parallel")]
-    {
-        let l_r = l_r.clone();
-        let results: Vec<(f64, bool)> = (0..PRIOR_CALIBRATION_SAMPLES)
-            .into_par_iter()
-            .map(|i| {
-                let mut rng = Xoshiro256PlusPlus::seed_from_u64(counter_rng_seed(seed, i as u64));
-
-                // Decide component: narrow (true) or slab (false)
-                let is_narrow = rng.random::<f64>() < prior_weight;
-
-                // Sample z ~ N(0, I_9)
-                let mut z = Vector9::zeros();
-                for j in 0..9 {
-                    z[j] = sample_standard_normal(&mut rng);
-                }
-
-                // Compute m = max|L_R z|
-                let w = &l_r * z;
-                let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-
-                (max_w, is_narrow)
-            })
-            .collect();
-
-        let base_effects: Vec<f64> = results.iter().map(|(m, _)| *m).collect();
-        let component_flags: Vec<bool> = results.iter().map(|(_, is_narrow)| *is_narrow).collect();
-        (base_effects, component_flags)
-    }
-
-    #[cfg(not(feature = "parallel"))]
-    {
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut base_effects = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
-        let mut component_flags = Vec::with_capacity(PRIOR_CALIBRATION_SAMPLES);
-
-        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-            let is_narrow = rng.random::<f64>() < prior_weight;
-
-            let mut z = Vector9::zeros();
-            for i in 0..9 {
-                z[i] = sample_standard_normal(&mut rng);
-            }
-
-            let w = l_r * z;
-            let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-
-            base_effects.push(max_w);
-            component_flags.push(is_narrow);
-        }
-
-        (base_effects, component_flags)
-    }
 }
 
 /// Calibrate Student's t prior scale σ so that P(max_k |δ_k| > θ_eff | δ ~ t_4(0, σ²R)) = 0.62 (v5.4).
@@ -858,91 +577,6 @@ fn precompute_t_prior_effects(l_r: &Matrix9, seed: u64) -> Vec<f64> {
     }
 }
 
-/// Legacy function: Calibrate σ_prior so that P(max_k |δ_k| > θ_eff | δ ~ N(0, Λ₀)) = π₀.
-///
-/// **Deprecated in v5.2**: Use `calibrate_narrow_scale` with mixture prior instead.
-/// This function is kept for backwards compatibility and testing.
-///
-/// Uses binary search to find the scale factor.
-/// Falls back to CONSERVATIVE_PRIOR_SCALE (1.5) with warning if calibration fails.
-///
-/// # Arguments
-/// * `sigma_rate` - Covariance rate matrix from calibration
-/// * `theta_eff` - Effective threshold in nanoseconds
-/// * `n_cal` - Number of calibration samples (for SE computation)
-/// * `discrete_mode` - Whether discrete timer mode is active
-/// * `seed` - Deterministic RNG seed
-///
-/// # Returns
-/// The calibrated σ_prior value.
-pub fn calibrate_prior_scale(
-    sigma_rate: &Matrix9,
-    theta_eff: f64,
-    n_cal: usize,
-    discrete_mode: bool,
-    seed: u64,
-) -> f64 {
-    let median_se = compute_median_se(sigma_rate, n_cal);
-
-    // Search bounds that accommodate both threshold-scale and noise-scale effects (§3.3.5)
-    // lo = θ_eff × 0.05
-    // hi = max(θ_eff × 50, 10 × median_SE)
-    let mut lo = theta_eff * 0.05;
-    let mut hi = (theta_eff * 50.0).max(10.0 * median_se);
-
-    for _ in 0..MAX_CALIBRATION_ITERATIONS {
-        let mid = (lo + hi) / 2.0;
-        let lambda0 = compute_prior_cov_9d(sigma_rate, mid, discrete_mode);
-        let exceedance = compute_prior_exceedance(&lambda0, theta_eff, seed);
-
-        if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
-            return mid; // Close enough
-        }
-
-        if exceedance > TARGET_EXCEEDANCE {
-            // Too much exceedance -> reduce scale
-            hi = mid;
-        } else {
-            // Too little exceedance -> increase scale
-            lo = mid;
-        }
-    }
-
-    // Fallback to conservative value
-    theta_eff * CONSERVATIVE_PRIOR_SCALE
-}
-
-/// Compute P(max_k |δ_k| > θ | δ ~ N(0, Λ₀)) via Monte Carlo.
-fn compute_prior_exceedance(lambda0: &Matrix9, theta: f64, seed: u64) -> f64 {
-    let chol = match Cholesky::new(*lambda0) {
-        Some(c) => c,
-        None => return 0.5, // Neutral if decomposition fails
-    };
-    let l = chol.l();
-
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-    let mut count = 0usize;
-
-    for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-        // Sample z ~ N(0, I_9)
-        let mut z = Vector9::zeros();
-        for i in 0..9 {
-            z[i] = sample_standard_normal(&mut rng);
-        }
-
-        // Transform to δ ~ N(0, Λ₀)
-        let delta = l * z;
-
-        // Check if max_k |δ_k| > θ
-        let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-        if max_effect > theta {
-            count += 1;
-        }
-    }
-
-    count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
-}
-
 /// Compute floor-rate constant c_floor for 9D model.
 ///
 /// c_floor = q_95(max_k |Z_k|) where Z ~ N(0, Σ_rate)
@@ -1025,46 +659,28 @@ mod tests {
         );
 
         let sigma_rate = Matrix9::identity() * 1000.0;
-        let discrete_mode = false;
         let theta_eff = 100.0;
-        let n_cal = 5000;
-
-        // v5.2 mixture prior
-        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
-        let sigma_narrow = calibrate_narrow_scale(
-            &sigma_rate,
-            theta_eff,
-            n_cal,
-            sigma_slab,
-            MIXTURE_PRIOR_WEIGHT,
-            discrete_mode,
-            42,
-        );
-        let prior_cov_narrow = compute_prior_cov_9d(&sigma_rate, sigma_narrow, discrete_mode);
-        let prior_cov_slab = compute_prior_cov_9d(&sigma_rate, sigma_slab, discrete_mode);
 
         Calibration::new(
             sigma_rate,
-            10, // block_length
-            prior_cov_narrow,
-            prior_cov_slab,
-            sigma_narrow,
-            sigma_slab,
-            MIXTURE_PRIOR_WEIGHT,
-            theta_eff,
-            n_cal,
-            discrete_mode,
-            5.0,  // mde_shift_ns
-            10.0, // mde_tail_ns
-            snapshot,
-            1.0,       // timer_resolution_ns
-            10000.0,   // samples_per_second
-            10.0,      // c_floor
-            18.48,     // projection_mismatch_thresh
-            0.001,     // theta_tick
-            theta_eff, // theta_eff
-            0.1,       // theta_floor_initial
-            42,        // rng_seed
+            10,                  // block_length
+            100.0,               // sigma_t
+            Matrix9::identity(), // l_r (identity for tests)
+            theta_eff,           // theta_ns
+            5000,                // calibration_samples
+            false,               // discrete_mode
+            5.0,                 // mde_shift_ns
+            10.0,                // mde_tail_ns
+            snapshot,            // calibration_snapshot
+            1.0,                 // timer_resolution_ns
+            10000.0,             // samples_per_second
+            10.0,                // c_floor
+            18.48,               // projection_mismatch_thresh
+            0.001,               // theta_tick
+            theta_eff,           // theta_eff
+            0.1,                 // theta_floor_initial
+            42,                  // rng_seed
+            1,                   // batch_k (no batching in tests)
         )
     }
 
@@ -1146,36 +762,6 @@ mod tests {
     }
 
     #[test]
-    fn test_prior_exceedance_calibration() {
-        let sigma_rate = Matrix9::identity() * 100.0;
-        let theta_eff = 10.0;
-        let n_cal = 5000;
-        let discrete_mode = false;
-
-        let sigma_prior = calibrate_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, 42);
-
-        // Check that calibration gives reasonable value
-        assert!(
-            sigma_prior > theta_eff * 0.5,
-            "sigma_prior should be > theta_eff/2"
-        );
-        assert!(
-            sigma_prior < theta_eff * 3.0,
-            "sigma_prior should be < 3*theta_eff"
-        );
-
-        // Verify exceedance is near target
-        let lambda0 = compute_prior_cov_9d(&sigma_rate, sigma_prior, discrete_mode);
-        let exceedance = compute_prior_exceedance(&lambda0, theta_eff, 42);
-        assert!(
-            (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
-            "Exceedance {} should be near {}",
-            exceedance,
-            TARGET_EXCEEDANCE
-        );
-    }
-
-    #[test]
     fn test_c_floor_computation() {
         let sigma_rate = Matrix9::identity() * 100.0;
         let c_floor = compute_c_floor_9d(&sigma_rate, 42);
@@ -1225,72 +811,11 @@ mod tests {
         count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
     }
 
-    /// Reference implementation: compute mixture prior exceedance without sample reuse.
-    fn reference_mixture_prior_exceedance(
-        l_r: &Matrix9,
-        sigma_narrow: f64,
-        sigma_slab: f64,
-        prior_weight: f64,
-        theta: f64,
-        seed: u64,
-    ) -> f64 {
-        let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let mut count = 0usize;
-
-        for _ in 0..PRIOR_CALIBRATION_SAMPLES {
-            // Decide component
-            let sigma = if rng.random::<f64>() < prior_weight {
-                sigma_narrow
-            } else {
-                sigma_slab
-            };
-
-            let mut z = Vector9::zeros();
-            for i in 0..9 {
-                z[i] = sample_standard_normal(&mut rng);
-            }
-
-            let delta = l_r * z * sigma;
-            let max_effect = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
-            if max_effect > theta {
-                count += 1;
-            }
-        }
-
-        count as f64 / PRIOR_CALIBRATION_SAMPLES as f64
-    }
-
     /// Helper: compute exceedance using precomputed t-prior effects
     fn optimized_t_prior_exceedance(normalized_effects: &[f64], sigma: f64, theta: f64) -> f64 {
         let threshold = theta / sigma;
         let count = normalized_effects.iter().filter(|&&m| m > threshold).count();
         count as f64 / normalized_effects.len() as f64
-    }
-
-    /// Helper: compute exceedance using precomputed mixture samples
-    fn optimized_mixture_exceedance(
-        base_effects: &[f64],
-        component_flags: &[bool],
-        sigma_narrow: f64,
-        sigma_slab: f64,
-        theta: f64,
-    ) -> f64 {
-        let narrow_threshold = theta / sigma_narrow;
-        let slab_threshold = theta / sigma_slab;
-
-        let count: usize = base_effects
-            .iter()
-            .zip(component_flags.iter())
-            .filter(|&(&m, &is_narrow)| {
-                if is_narrow {
-                    m > narrow_threshold
-                } else {
-                    m > slab_threshold
-                }
-            })
-            .count();
-
-        count as f64 / base_effects.len() as f64
     }
 
     // =========================================================================
@@ -1379,110 +904,6 @@ mod tests {
     }
 
     #[test]
-    fn test_mixture_prior_precompute_component_proportions() {
-        // Verify that the component flags have correct proportions
-        let l_r = Matrix9::identity();
-        let prior_weight = 0.99; // 99% narrow
-        let seed = 42u64;
-
-        let (_, component_flags) = precompute_mixture_prior_samples(&l_r, prior_weight, seed);
-
-        let narrow_count = component_flags.iter().filter(|&&is_narrow| is_narrow).count();
-        let narrow_proportion = narrow_count as f64 / component_flags.len() as f64;
-
-        // Should be close to prior_weight (within statistical tolerance)
-        assert!(
-            (narrow_proportion - prior_weight).abs() < 0.02,
-            "Narrow proportion {} should be close to prior_weight {}",
-            narrow_proportion,
-            prior_weight
-        );
-    }
-
-    #[test]
-    fn test_mixture_prior_exceedance_monotonicity() {
-        // Key property: exceedance should increase with sigma_narrow (slab is fixed)
-        let l_r = Matrix9::identity();
-        let sigma_slab = 100.0;
-        let prior_weight = 0.99;
-        let theta = 10.0;
-        let seed = 42u64;
-
-        let (base_effects, component_flags) =
-            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
-
-        let mut prev_exceedance = 0.0;
-        for sigma_narrow in [1.0, 2.0, 5.0, 10.0, 20.0, 50.0] {
-            let exceedance = optimized_mixture_exceedance(
-                &base_effects,
-                &component_flags,
-                sigma_narrow,
-                sigma_slab,
-                theta,
-            );
-
-            assert!(
-                exceedance >= prev_exceedance - 0.001, // Small tolerance for numerical noise
-                "Exceedance should increase with sigma_narrow: sigma={}, exc={}, prev={}",
-                sigma_narrow,
-                exceedance,
-                prev_exceedance
-            );
-            prev_exceedance = exceedance;
-        }
-    }
-
-    #[test]
-    fn test_mixture_prior_precompute_exceedance_matches_reference() {
-        // Test that the optimized exceedance computation matches reference
-        // for various sigma_narrow values
-        let l_r = Matrix9::identity();
-        let sigma_slab = 100.0;
-        let prior_weight = 0.99;
-        let theta = 10.0;
-        let seed = 12345u64;
-
-        // Precompute samples using the optimized method
-        let (base_effects, component_flags) =
-            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
-
-        // Test at multiple sigma_narrow values
-        for sigma_narrow in [5.0, 10.0, 15.0, 20.0, 30.0] {
-            let optimized = optimized_mixture_exceedance(
-                &base_effects,
-                &component_flags,
-                sigma_narrow,
-                sigma_slab,
-                theta,
-            );
-            let reference =
-                reference_mixture_prior_exceedance(&l_r, sigma_narrow, sigma_slab, prior_weight, theta, seed);
-
-            // Both should be in valid range
-            assert!(
-                optimized >= 0.0 && optimized <= 1.0,
-                "Optimized exceedance {} out of range for sigma_narrow={}",
-                optimized,
-                sigma_narrow
-            );
-            assert!(
-                reference >= 0.0 && reference <= 1.0,
-                "Reference exceedance {} out of range for sigma_narrow={}",
-                reference,
-                sigma_narrow
-            );
-
-            // Both should be in similar ballpark (within 0.1 of each other)
-            // Note: They won't be exactly equal because the optimized version
-            // uses different random samples
-            println!(
-                "sigma_narrow={}: optimized={:.4}, reference={:.4}",
-                sigma_narrow, optimized, reference
-            );
-        }
-    }
-
-    #[test]
     fn test_calibrate_t_prior_scale_finds_target_exceedance() {
         // Test that the calibration finds a sigma_t that achieves ~62% exceedance
         let sigma_rate = Matrix9::identity() * 100.0;
@@ -1501,51 +922,6 @@ mod tests {
         assert!(
             (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
             "Calibrated t-prior exceedance {} should be near target {}",
-            exceedance,
-            TARGET_EXCEEDANCE
-        );
-    }
-
-    #[test]
-    fn test_calibrate_narrow_scale_finds_target_exceedance() {
-        // Test that the calibration finds a sigma_narrow that achieves ~62% mixture exceedance
-        let sigma_rate = Matrix9::identity() * 100.0;
-        let theta_eff = 10.0;
-        let n_cal = 5000;
-        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
-        let prior_weight = MIXTURE_PRIOR_WEIGHT;
-        let discrete_mode = false;
-        let seed = 42u64;
-
-        let sigma_narrow = calibrate_narrow_scale(
-            &sigma_rate,
-            theta_eff,
-            n_cal,
-            sigma_slab,
-            prior_weight,
-            discrete_mode,
-            seed,
-        );
-
-        // Compute L_R for verification
-        let r = compute_correlation_matrix(&sigma_rate);
-        let r_reg = apply_correlation_regularization(&r, discrete_mode);
-        let l_r = Cholesky::new(r_reg).unwrap().l().into_owned();
-
-        // Verify with precomputed samples
-        let (base_effects, component_flags) =
-            precompute_mixture_prior_samples(&l_r, prior_weight, seed);
-        let exceedance = optimized_mixture_exceedance(
-            &base_effects,
-            &component_flags,
-            sigma_narrow,
-            sigma_slab,
-            theta_eff,
-        );
-
-        assert!(
-            (exceedance - TARGET_EXCEEDANCE).abs() < 0.05,
-            "Calibrated narrow scale exceedance {} should be near target {}",
             exceedance,
             TARGET_EXCEEDANCE
         );
@@ -1615,7 +991,7 @@ mod tests {
         // Warm up
         let _ = calibrate_t_prior_scale(&sigma_rate, theta_eff, n_cal, discrete_mode, 1);
 
-        // Benchmark t-prior calibration (OPTIMIZED)
+        // Benchmark t-prior calibration
         let iterations = 10;
         let start = Instant::now();
         for i in 0..iterations {
@@ -1623,92 +999,13 @@ mod tests {
         }
         let t_prior_time = start.elapsed();
 
-        // Benchmark mixture prior calibration (OPTIMIZED)
-        let sigma_slab = compute_slab_scale(&sigma_rate, theta_eff, n_cal);
-        let start = Instant::now();
-        for i in 0..iterations {
-            let _ = calibrate_narrow_scale(
-                &sigma_rate,
-                theta_eff,
-                n_cal,
-                sigma_slab,
-                MIXTURE_PRIOR_WEIGHT,
-                discrete_mode,
-                i as u64,
-            );
-        }
-        let mixture_time = start.elapsed();
-
-        // Now benchmark the REFERENCE (unoptimized) implementations
-        // These regenerate samples on each bisection iteration
-        let r = compute_correlation_matrix(&sigma_rate);
-        let r_reg = apply_correlation_regularization(&r, discrete_mode);
-        let l_r = Cholesky::new(r_reg).unwrap().l().into_owned();
-
-        // Reference t-prior: measure cost of repeated MC sampling
-        let bisection_iters = MAX_CALIBRATION_ITERATIONS;
-        let start = Instant::now();
-        for i in 0..iterations {
-            // Simulate bisection: each iteration calls reference_t_prior_exceedance
-            for j in 0..bisection_iters {
-                let sigma = 10.0 + j as f64;
-                let _ = reference_t_prior_exceedance(&l_r, sigma, theta_eff, i as u64 + j as u64);
-            }
-        }
-        let ref_t_prior_time = start.elapsed();
-
-        // Reference mixture prior
-        let start = Instant::now();
-        for i in 0..iterations {
-            for j in 0..bisection_iters {
-                let sigma_narrow = 10.0 + j as f64;
-                let _ = reference_mixture_prior_exceedance(
-                    &l_r,
-                    sigma_narrow,
-                    sigma_slab,
-                    MIXTURE_PRIOR_WEIGHT,
-                    theta_eff,
-                    i as u64 + j as u64,
-                );
-            }
-        }
-        let ref_mixture_time = start.elapsed();
-
-        let optimized_total = (t_prior_time + mixture_time) / iterations as u32;
-        let reference_total = (ref_t_prior_time + ref_mixture_time) / iterations as u32;
-        let speedup = reference_total.as_secs_f64() / optimized_total.as_secs_f64();
-
         println!(
-            "\n=== Calibration Performance Comparison ===\n\
+            "\n=== Calibration Performance ===\n\
              \n\
-             OPTIMIZED (sample reuse):\n\
-               T-prior calibration:     {:?} per call\n\
-               Mixture calibration:     {:?} per call\n\
-               Total per analysis:      {:?}\n\
-             \n\
-             REFERENCE (no reuse, {} bisection iters):\n\
-               T-prior calibration:     {:?} per call\n\
-               Mixture calibration:     {:?} per call\n\
-               Total per analysis:      {:?}\n\
-             \n\
-             SPEEDUP: {:.1}x\n\
+             T-prior calibration: {:?} per call\n\
              ({} iterations averaged)",
             t_prior_time / iterations as u32,
-            mixture_time / iterations as u32,
-            optimized_total,
-            bisection_iters,
-            ref_t_prior_time / iterations as u32,
-            ref_mixture_time / iterations as u32,
-            reference_total,
-            speedup,
             iterations
-        );
-
-        // Sanity check: optimized should be faster
-        assert!(
-            speedup > 1.0,
-            "Optimized should be faster than reference, got {:.2}x",
-            speedup
         );
     }
 }

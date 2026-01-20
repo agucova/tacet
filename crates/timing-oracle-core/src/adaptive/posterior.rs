@@ -19,17 +19,13 @@ use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
 ///
 /// The 2D projection β_proj = (μ, τ) provides shift/tail decomposition.
 ///
-/// **v5.2 Mixture Prior**: When using the mixture prior, `delta_post` and
-/// `lambda_post` are the mixture mean and covariance. The `narrow_weight_post`
-/// field indicates which component dominates (narrow if >= 0.5, slab if < 0.5).
+/// Uses Student's t prior (ν=4) via Gibbs sampling for robust inference.
 #[derive(Clone, Debug)]
 pub struct Posterior {
     /// 9D posterior mean δ_post in nanoseconds.
-    /// For v5.2 mixture prior, this is the mixture mean.
     pub delta_post: Vector9,
 
     /// 9D posterior covariance Λ_post.
-    /// For v5.2 mixture prior, this is the mixture covariance (approximation).
     pub lambda_post: Matrix9,
 
     /// 2D GLS projection β = (μ, τ) for interpretability.
@@ -52,38 +48,31 @@ pub struct Posterior {
     /// Number of samples used in this posterior computation.
     pub n: usize,
 
-    /// v5.2: Posterior weight of the narrow component (0.0-1.0).
-    /// When < 0.5, the slab component dominates (evidence favors large effect).
-    /// `None` if not using mixture prior.
-    pub narrow_weight_post: Option<f64>,
+    // ==================== Gibbs sampler fields ====================
 
-    // ==================== v5.4 Gibbs sampler fields ====================
-
-    /// v5.4: Posterior mean of latent scale λ.
-    /// `None` if not using Gibbs sampler.
+    /// Posterior mean of latent scale λ.
+    /// `None` if using simple posterior (no Gibbs sampler).
     pub lambda_mean: Option<f64>,
 
-    /// v5.4: Whether the Gibbs sampler's lambda chain mixed well.
-    /// `None` if not using Gibbs sampler.
+    /// Whether the Gibbs sampler's lambda chain mixed well.
+    /// `None` if using simple posterior.
     /// When `Some(false)`, indicates potential posterior unreliability.
     pub lambda_mixing_ok: Option<bool>,
 
-    // ==================== v5.6 Gibbs sampler kappa fields ====================
-
-    /// v5.6: Posterior mean of likelihood precision κ.
-    /// `None` if not using Gibbs sampler.
+    /// Posterior mean of likelihood precision κ.
+    /// `None` if using simple posterior.
     pub kappa_mean: Option<f64>,
 
-    /// v5.6: Coefficient of variation of κ.
-    /// `None` if not using Gibbs sampler.
+    /// Coefficient of variation of κ.
+    /// `None` if using simple posterior.
     pub kappa_cv: Option<f64>,
 
-    /// v5.6: Effective sample size of κ chain.
-    /// `None` if not using Gibbs sampler.
+    /// Effective sample size of κ chain.
+    /// `None` if using simple posterior.
     pub kappa_ess: Option<f64>,
 
-    /// v5.6: Whether the Gibbs sampler's kappa chain mixed well.
-    /// `None` if not using Gibbs sampler.
+    /// Whether the Gibbs sampler's kappa chain mixed well.
+    /// `None` if using simple posterior.
     pub kappa_mixing_ok: Option<bool>,
 }
 
@@ -106,42 +95,12 @@ impl Posterior {
             leak_probability,
             projection_mismatch_q,
             n,
-            narrow_weight_post: None, // Default: no mixture prior
             lambda_mean: None,        // v5.4: no Gibbs sampler
             lambda_mixing_ok: None,   // v5.4: no Gibbs sampler
             kappa_mean: None,         // v5.6: no Gibbs sampler
             kappa_cv: None,           // v5.6: no Gibbs sampler
             kappa_ess: None,          // v5.6: no Gibbs sampler
             kappa_mixing_ok: None,    // v5.6: no Gibbs sampler
-        }
-    }
-
-    /// Create a new posterior with mixture prior weights (v5.2).
-    pub fn new_with_mixture(
-        delta_post: Vector9,
-        lambda_post: Matrix9,
-        beta_proj: Vector2,
-        beta_proj_cov: Matrix2,
-        leak_probability: f64,
-        projection_mismatch_q: f64,
-        n: usize,
-        narrow_weight_post: f64,
-    ) -> Self {
-        Self {
-            delta_post,
-            lambda_post,
-            beta_proj,
-            beta_proj_cov,
-            leak_probability,
-            projection_mismatch_q,
-            n,
-            narrow_weight_post: Some(narrow_weight_post),
-            lambda_mean: None,      // v5.4: no Gibbs sampler
-            lambda_mixing_ok: None, // v5.4: no Gibbs sampler
-            kappa_mean: None,       // v5.6: no Gibbs sampler
-            kappa_cv: None,         // v5.6: no Gibbs sampler
-            kappa_ess: None,        // v5.6: no Gibbs sampler
-            kappa_mixing_ok: None,  // v5.6: no Gibbs sampler
         }
     }
 
@@ -170,7 +129,6 @@ impl Posterior {
             leak_probability,
             projection_mismatch_q,
             n,
-            narrow_weight_post: None, // Not used with Gibbs
             lambda_mean: Some(lambda_mean),
             lambda_mixing_ok: Some(lambda_mixing_ok),
             kappa_mean: Some(kappa_mean),

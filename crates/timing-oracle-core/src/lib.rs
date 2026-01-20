@@ -17,7 +17,7 @@
 //!
 //! ```ignore
 //! use timing_oracle_core::{
-//!     analysis::{compute_bayes_factor, estimate_mde},
+//!     analysis::{compute_bayes_gibbs, estimate_mde},
 //!     statistics::{bootstrap_covariance_matrix, compute_deciles},
 //!     types::{Matrix9, Vector9, Class, TimingSample},
 //! };

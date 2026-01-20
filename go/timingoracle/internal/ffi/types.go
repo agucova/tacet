@@ -142,6 +142,38 @@ func configFromC(c *C.togo_config_t) Config {
 	}
 }
 
+// Diagnostics holds detailed diagnostic information from the analysis.
+type Diagnostics struct {
+	// Core diagnostics
+	DependenceLength      int
+	EffectiveSampleSize   int
+	StationarityRatio     float64
+	StationarityOK        bool
+	ProjectionMismatchQ   float64
+	ProjectionMismatchOK  bool
+
+	// Timer diagnostics
+	DiscreteMode          bool
+	TimerResolutionNs     float64
+
+	// Gibbs sampler lambda diagnostics (v5.4)
+	GibbsItersTotal       int
+	GibbsBurnin           int
+	GibbsRetained         int
+	LambdaMean            float64
+	LambdaSD              float64
+	LambdaCV              float64
+	LambdaESS             float64
+	LambdaMixingOK        bool
+
+	// Gibbs sampler kappa diagnostics (v5.6)
+	KappaMean             float64
+	KappaSD               float64
+	KappaCV               float64
+	KappaESS              float64
+	KappaMixingOK         bool
+}
+
 // Result holds the analysis result.
 type Result struct {
 	Outcome            Outcome
@@ -157,7 +189,11 @@ type Result struct {
 	TimerResolutionNs  float64
 	ThetaUserNs        float64
 	ThetaEffNs         float64
+	ThetaFloorNs       float64
+	DecisionThresholdNs float64
 	Recommendation     string
+	Diagnostics        *Diagnostics
+	HasDiagnostics     bool
 }
 
 func resultFromC(r *C.togo_result_t) *Result {
@@ -181,6 +217,36 @@ func resultFromC(r *C.togo_result_t) *Result {
 		TimerResolutionNs:  float64(r.timer_resolution_ns),
 		ThetaUserNs:        float64(r.theta_user_ns),
 		ThetaEffNs:         float64(r.theta_eff_ns),
+		ThetaFloorNs:       float64(r.theta_floor_ns),
+		DecisionThresholdNs: float64(r.decision_threshold_ns),
+		HasDiagnostics:     bool(r.has_diagnostics),
+	}
+
+	// Parse diagnostics if available
+	if r.has_diagnostics {
+		result.Diagnostics = &Diagnostics{
+			DependenceLength:      int(r.diagnostics.dependence_length),
+			EffectiveSampleSize:   int(r.diagnostics.effective_sample_size),
+			StationarityRatio:     float64(r.diagnostics.stationarity_ratio),
+			StationarityOK:        bool(r.diagnostics.stationarity_ok),
+			ProjectionMismatchQ:   float64(r.diagnostics.projection_mismatch_q),
+			ProjectionMismatchOK:  bool(r.diagnostics.projection_mismatch_ok),
+			DiscreteMode:          bool(r.diagnostics.discrete_mode),
+			TimerResolutionNs:     float64(r.diagnostics.timer_resolution_ns),
+			GibbsItersTotal:       int(r.diagnostics.gibbs_iters_total),
+			GibbsBurnin:           int(r.diagnostics.gibbs_burnin),
+			GibbsRetained:         int(r.diagnostics.gibbs_retained),
+			LambdaMean:            float64(r.diagnostics.lambda_mean),
+			LambdaSD:              float64(r.diagnostics.lambda_sd),
+			LambdaCV:              float64(r.diagnostics.lambda_cv),
+			LambdaESS:             float64(r.diagnostics.lambda_ess),
+			LambdaMixingOK:        bool(r.diagnostics.lambda_mixing_ok),
+			KappaMean:             float64(r.diagnostics.kappa_mean),
+			KappaSD:               float64(r.diagnostics.kappa_sd),
+			KappaCV:               float64(r.diagnostics.kappa_cv),
+			KappaESS:              float64(r.diagnostics.kappa_ess),
+			KappaMixingOK:         bool(r.diagnostics.kappa_mixing_ok),
+		}
 	}
 
 	if r.recommendation != nil {

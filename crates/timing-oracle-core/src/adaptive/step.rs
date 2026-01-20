@@ -397,10 +397,7 @@ pub fn adaptive_step(
     let current_stats = state.get_stats_snapshot();
     let gate_inputs = QualityGateCheckInputs {
         posterior: &posterior,
-        prior_cov_9d: &calibration.prior_cov_9d,
-        prior_cov_marginal: &calibration.prior_cov_marginal, // v5.4: marginal prior (2σ²R)
-        prior_cov_slab: None, // v5.4: no mixture prior
-        narrow_weight_post: None, // v5.4: no mixture prior
+        prior_cov_marginal: &calibration.prior_cov_marginal,
         theta_ns: config.theta_ns,
         n_total: state.n_total(),
         elapsed_secs,
@@ -420,7 +417,7 @@ pub fn adaptive_step(
             Some(posterior.projection_mismatch_q)
         },
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
-        lambda_mixing_ok: posterior.lambda_mixing_ok, // v5.4: from Gibbs result
+        lambda_mixing_ok: posterior.lambda_mixing_ok,
     };
 
     match check_quality_gates(&gate_inputs, &config.quality_gates) {
@@ -523,17 +520,12 @@ mod tests {
             },
         );
 
-        // v5.2 mixture prior
-        let prior_cov_narrow = Matrix9::identity() * 10000.0; // 100^2
-        let prior_cov_slab = Matrix9::identity() * 250000.0; // 500^2
+        // v5.4+ t-prior
         Calibration::new(
             Matrix9::identity() * 1000.0, // sigma_rate
             10,                           // block_length
-            prior_cov_narrow,             // prior_cov_narrow
-            prior_cov_slab,               // prior_cov_slab
-            100.0,                        // sigma_narrow
-            500.0,                        // sigma_slab
-            0.99,                         // prior_weight
+            100.0,                        // sigma_t
+            Matrix9::identity(),          // l_r (identity for tests)
             100.0,                        // theta_ns
             5000,                         // calibration_samples
             false,                        // discrete_mode
@@ -548,6 +540,7 @@ mod tests {
             100.0,                        // theta_eff
             0.1,                          // theta_floor_initial
             42,                           // rng_seed
+            1,                            // batch_k (no batching in tests)
         )
     }
 

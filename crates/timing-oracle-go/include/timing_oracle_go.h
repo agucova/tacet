@@ -205,6 +205,67 @@ typedef struct {
 } togo_effect_t;
 
 /**
+ * @brief Diagnostics information for debugging and quality assessment.
+ *
+ * Contains detailed information about the measurement process (spec §2.8).
+ */
+typedef struct {
+    /* Core diagnostics */
+
+    /** Block length used for bootstrap resampling. */
+    size_t dependence_length;
+    /** Effective sample size accounting for autocorrelation. */
+    size_t effective_sample_size;
+    /** Ratio of post-test variance to calibration variance. */
+    double stationarity_ratio;
+    /** Whether stationarity check passed. */
+    bool stationarity_ok;
+    /** Projection mismatch Q statistic. */
+    double projection_mismatch_q;
+    /** Whether projection mismatch is acceptable. */
+    bool projection_mismatch_ok;
+
+    /* Timer diagnostics */
+
+    /** Whether discrete mode was used (low timer resolution). */
+    bool discrete_mode;
+    /** Timer resolution in nanoseconds. */
+    double timer_resolution_ns;
+
+    /* v5.4 Gibbs sampler lambda diagnostics */
+
+    /** Total number of Gibbs iterations. */
+    size_t gibbs_iters_total;
+    /** Number of burn-in iterations. */
+    size_t gibbs_burnin;
+    /** Number of retained samples. */
+    size_t gibbs_retained;
+    /** Posterior mean of latent scale lambda. */
+    double lambda_mean;
+    /** Posterior standard deviation of lambda. */
+    double lambda_sd;
+    /** Coefficient of variation of lambda (lambda_sd / lambda_mean). */
+    double lambda_cv;
+    /** Effective sample size of lambda chain. */
+    double lambda_ess;
+    /** Whether lambda chain mixed well (CV >= 0.1 AND ESS >= 20). */
+    bool lambda_mixing_ok;
+
+    /* v5.6 Gibbs sampler kappa diagnostics */
+
+    /** Posterior mean of likelihood precision kappa. */
+    double kappa_mean;
+    /** Posterior standard deviation of kappa. */
+    double kappa_sd;
+    /** Coefficient of variation of kappa (kappa_sd / kappa_mean). */
+    double kappa_cv;
+    /** Effective sample size of kappa chain. */
+    double kappa_ess;
+    /** Whether kappa chain mixed well (CV >= 0.1 AND ESS >= 20). */
+    bool kappa_mixing_ok;
+} togo_diagnostics_t;
+
+/**
  * @brief Analysis result.
  *
  * Contains the outcome and all diagnostic information.
@@ -250,8 +311,21 @@ typedef struct {
     /** Effective threshold after floor adjustment in nanoseconds. */
     double theta_eff_ns;
 
+    /** Measurement floor (theta_floor) in nanoseconds.
+     * Minimum detectable effect given current noise. */
+    double theta_floor_ns;
+
+    /** Threshold at which decision was made (for Pass/Fail). */
+    double decision_threshold_ns;
+
     /** Recommendation string (owned, must be freed via togo_result_free; NULL if not applicable). */
     const char *recommendation;
+
+    /** Detailed diagnostics (optional). */
+    togo_diagnostics_t diagnostics;
+
+    /** Whether diagnostics are populated. */
+    bool has_diagnostics;
 } togo_result_t;
 
 /* ============================================================================

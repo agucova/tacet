@@ -182,6 +182,57 @@ type Effect struct {
 	Pattern EffectPattern
 }
 
+// Diagnostics holds detailed diagnostic information from the analysis.
+// This provides insight into the statistical analysis quality and can
+// be used for debugging or understanding measurement reliability.
+type Diagnostics struct {
+	// DependenceLength is the block length used for bootstrap resampling.
+	DependenceLength int
+	// EffectiveSampleSize accounts for autocorrelation in timing data.
+	EffectiveSampleSize int
+	// StationarityRatio is the ratio of post-test variance to calibration variance.
+	StationarityRatio float64
+	// StationarityOK indicates whether the stationarity check passed.
+	StationarityOK bool
+	// ProjectionMismatchQ is the projection mismatch Q statistic.
+	ProjectionMismatchQ float64
+	// ProjectionMismatchOK indicates whether projection mismatch is acceptable.
+	ProjectionMismatchOK bool
+
+	// DiscreteMode indicates whether discrete mode was used (low timer resolution).
+	DiscreteMode bool
+	// TimerResolutionNs is the timer resolution in nanoseconds.
+	TimerResolutionNs float64
+
+	// GibbsItersTotal is the total number of Gibbs sampler iterations.
+	GibbsItersTotal int
+	// GibbsBurnin is the number of burn-in iterations discarded.
+	GibbsBurnin int
+	// GibbsRetained is the number of samples retained after burn-in.
+	GibbsRetained int
+	// LambdaMean is the posterior mean of the latent scale parameter lambda.
+	LambdaMean float64
+	// LambdaSD is the posterior standard deviation of lambda.
+	LambdaSD float64
+	// LambdaCV is the coefficient of variation of lambda (SD/mean).
+	LambdaCV float64
+	// LambdaESS is the effective sample size of the lambda chain.
+	LambdaESS float64
+	// LambdaMixingOK indicates whether the lambda chain mixed well.
+	LambdaMixingOK bool
+
+	// KappaMean is the posterior mean of the likelihood precision kappa.
+	KappaMean float64
+	// KappaSD is the posterior standard deviation of kappa.
+	KappaSD float64
+	// KappaCV is the coefficient of variation of kappa.
+	KappaCV float64
+	// KappaESS is the effective sample size of the kappa chain.
+	KappaESS float64
+	// KappaMixingOK indicates whether the kappa chain mixed well.
+	KappaMixingOK bool
+}
+
 // TotalNs returns the total effect magnitude in nanoseconds.
 func (e Effect) TotalNs() float64 {
 	return e.ShiftNs + e.TailNs
@@ -229,8 +280,17 @@ type Result struct {
 	// ThetaEffNs is the effective threshold after floor adjustment.
 	ThetaEffNs float64
 
+	// ThetaFloorNs is the measurement floor (minimum detectable effect given noise).
+	ThetaFloorNs float64
+
+	// DecisionThresholdNs is the threshold at which the decision was made.
+	DecisionThresholdNs float64
+
 	// Recommendation is guidance for inconclusive/unmeasurable results.
 	Recommendation string
+
+	// Diagnostics contains detailed diagnostic information (nil if not available).
+	Diagnostics *Diagnostics
 }
 
 // IsConclusive returns true if the result is Pass or Fail.
@@ -264,7 +324,7 @@ func (r *Result) String() string {
 
 // fromFFI converts from FFI result to public Result.
 func resultFromFFI(r *ffi.Result) *Result {
-	return &Result{
+	result := &Result{
 		Outcome:            Outcome(r.Outcome),
 		LeakProbability:    r.LeakProbability,
 		Effect: Effect{
@@ -284,6 +344,37 @@ func resultFromFFI(r *ffi.Result) *Result {
 		TimerResolutionNs:  r.TimerResolutionNs,
 		ThetaUserNs:        r.ThetaUserNs,
 		ThetaEffNs:         r.ThetaEffNs,
+		ThetaFloorNs:       r.ThetaFloorNs,
+		DecisionThresholdNs: r.DecisionThresholdNs,
 		Recommendation:     r.Recommendation,
 	}
+
+	// Convert diagnostics if available
+	if r.HasDiagnostics && r.Diagnostics != nil {
+		result.Diagnostics = &Diagnostics{
+			DependenceLength:      r.Diagnostics.DependenceLength,
+			EffectiveSampleSize:   r.Diagnostics.EffectiveSampleSize,
+			StationarityRatio:     r.Diagnostics.StationarityRatio,
+			StationarityOK:        r.Diagnostics.StationarityOK,
+			ProjectionMismatchQ:   r.Diagnostics.ProjectionMismatchQ,
+			ProjectionMismatchOK:  r.Diagnostics.ProjectionMismatchOK,
+			DiscreteMode:          r.Diagnostics.DiscreteMode,
+			TimerResolutionNs:     r.Diagnostics.TimerResolutionNs,
+			GibbsItersTotal:       r.Diagnostics.GibbsItersTotal,
+			GibbsBurnin:           r.Diagnostics.GibbsBurnin,
+			GibbsRetained:         r.Diagnostics.GibbsRetained,
+			LambdaMean:            r.Diagnostics.LambdaMean,
+			LambdaSD:              r.Diagnostics.LambdaSD,
+			LambdaCV:              r.Diagnostics.LambdaCV,
+			LambdaESS:             r.Diagnostics.LambdaESS,
+			LambdaMixingOK:        r.Diagnostics.LambdaMixingOK,
+			KappaMean:             r.Diagnostics.KappaMean,
+			KappaSD:               r.Diagnostics.KappaSD,
+			KappaCV:               r.Diagnostics.KappaCV,
+			KappaESS:              r.Diagnostics.KappaESS,
+			KappaMixingOK:         r.Diagnostics.KappaMixingOK,
+		}
+	}
+
+	return result
 }

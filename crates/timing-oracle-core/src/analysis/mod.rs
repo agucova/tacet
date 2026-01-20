@@ -12,9 +12,8 @@ pub mod gibbs;
 pub mod mde;
 
 pub use bayes::{
-    build_design_matrix, compute_2d_projection, compute_bayes_factor, compute_bayes_factor_mixture,
-    compute_bayes_gibbs, compute_max_effect_ci, compute_quantile_exceedances, BayesResult,
-    MaxEffectCI,
+    build_design_matrix, compute_2d_projection, compute_bayes_gibbs, compute_max_effect_ci,
+    compute_quantile_exceedances, BayesResult, MaxEffectCI,
 };
 pub use effect::{classify_pattern, decompose_effect, EffectDecomposition, EffectEstimate};
 pub use gibbs::{run_gibbs_inference, GibbsResult, NU, N_BURN, N_GIBBS, N_KEEP};

@@ -121,7 +121,7 @@ impl EffectDecomposition {
 ///
 /// # Note
 ///
-/// This function duplicates some computation with `compute_bayes_factor`.
+/// This function duplicates some computation with `compute_bayes_gibbs`.
 /// In the adaptive architecture, prefer using `BayesResult.beta_mean` and
 /// `BayesResult.beta_cov` directly, then calling `classify_pattern` for
 /// the pattern classification.

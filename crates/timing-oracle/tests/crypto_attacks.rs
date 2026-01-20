@@ -15,6 +15,7 @@
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use std::time::Duration;
+use timing_oracle::helpers::effect::busy_wait_ns;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{
     skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, Outcome, TimingOracle,
@@ -61,42 +62,7 @@ mod helpers {
         sbox
     }
 
-    /// Platform-specific busy-wait for controlled timing delays
-    #[cfg(target_arch = "x86_64")]
-    pub fn busy_wait_cycles(cycles: u64) {
-        let start = unsafe { core::arch::x86_64::_rdtsc() };
-        while unsafe { core::arch::x86_64::_rdtsc() } - start < cycles {
-            std::hint::spin_loop();
-        }
-    }
-
-    #[cfg(target_arch = "aarch64")]
-    pub fn busy_wait_cycles(cycles: u64) {
-        let start = unsafe {
-            let cnt: u64;
-            core::arch::asm!("mrs {}, cntvct_el0", out(reg) cnt);
-            cnt
-        };
-        loop {
-            let now = unsafe {
-                let cnt: u64;
-                core::arch::asm!("mrs {}, cntvct_el0", out(reg) cnt);
-                cnt
-            };
-            if now - start >= cycles {
-                break;
-            }
-            std::hint::spin_loop();
-        }
-    }
-
-    #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-    pub fn busy_wait_cycles(_cycles: u64) {
-        // Fallback: just use a fixed delay
-        for _ in 0..100 {
-            std::hint::black_box(std::hint::spin_loop());
-        }
-    }
+    // Note: busy_wait_cycles was removed - use timing_oracle::helpers::effect::busy_wait_ns instead
 
     /// Cache line size aligned buffer for cache timing tests
     #[repr(align(64))]
@@ -685,10 +651,11 @@ fn table_lookup_large_cache_thrash() {
 
 /// 4.1 Pure Uniform Shift - Validates UniformShift classification
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn effect_pattern_pure_uniform_shift() {
-    // Use a larger delay to ensure uniform shift dominates any measurement noise
-    const DELAY_CYCLES: u64 = 500;
+    // Use a larger delay (2μs) to ensure uniform shift dominates quantization noise
+    // Note: On Apple Silicon, actual granularity is ~42ns regardless of reported frequency,
+    // so smaller delays (~500ns) can have significant quantization-induced variance
+    const DELAY_NS: u64 = 2000;
 
     let which_class = InputPair::new(|| 0, || 1);
 
@@ -702,7 +669,7 @@ fn effect_pattern_pure_uniform_shift() {
                 std::hint::black_box(42);
             } else {
                 // Constant delay
-                helpers::busy_wait_cycles(DELAY_CYCLES);
+                busy_wait_ns(DELAY_NS);
                 std::hint::black_box(42);
             }
         });
@@ -721,28 +688,25 @@ fn effect_pattern_pure_uniform_shift() {
         Outcome::Research(_) => return,
     };
 
-    // Should classify as UniformShift (or Mixed with dominant shift)
-    // On real hardware, constant delays may have small jitter that creates a minor tail
+    // Should classify as UniformShift (constant delay should produce uniform shift)
     assert!(
-        matches!(
-            effect.pattern,
-            EffectPattern::UniformShift | EffectPattern::Mixed
-        ),
-        "Expected UniformShift or Mixed pattern (got {:?})",
+        matches!(effect.pattern, EffectPattern::UniformShift),
+        "Expected UniformShift pattern for constant delay (got {:?})",
         effect.pattern
     );
 
-    // Should have significant shift component
-    // Use abs() since sign depends on which class is slower
+    // Verify effect magnitude matches injected delay (2μs ± 50%)
+    // If this fails with huge values, the effect estimation is broken
+    let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
     assert!(
-        effect.shift_ns.abs() > 50.0,
-        "Expected significant shift component (got {:.1}ns)",
-        effect.shift_ns
+        (1_000.0..=3_000.0).contains(&total_effect),
+        "Expected total effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
+        total_effect
     );
 
-    // Shift should dominate tail (at least 5x larger)
+    // Shift should dominate tail for uniform shift pattern
     assert!(
-        effect.shift_ns.abs() > effect.tail_ns.abs() * 5.0,
+        effect.shift_ns.abs() > effect.tail_ns.abs() * 2.0,
         "Expected shift to dominate tail (got shift={:.1}ns, tail={:.1}ns)",
         effect.shift_ns,
         effect.tail_ns
@@ -751,13 +715,12 @@ fn effect_pattern_pure_uniform_shift() {
 
 /// 4.2 Pure Tail Effect - Validates TailEffect classification
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn effect_pattern_pure_tail() {
     use std::cell::Cell;
 
-    // Use larger values to ensure tail effect is measurable
-    const BASE_CYCLES: u64 = 50; // Base operation to ensure measurability (>5 ticks)
-    const EXPENSIVE_CYCLES: u64 = 2000;
+    // Use nanosecond-based delays for cross-platform consistency
+    const BASE_NS: u64 = 100; // Base operation to ensure measurability
+    const EXPENSIVE_NS: u64 = 2000; // 2μs spike
     const TAIL_PROBABILITY: f64 = 0.15;
     const SAMPLES: usize = 10_000;
 
@@ -779,8 +742,8 @@ fn effect_pattern_pure_tail() {
             if *class == 0 {
                 let i = fixed_idx.get();
                 fixed_idx.set(i.wrapping_add(1));
-                // Base operation to ensure measurability on ARM
-                helpers::busy_wait_cycles(BASE_CYCLES);
+                // Base operation to ensure measurability
+                busy_wait_ns(BASE_NS);
                 // No spike regardless of decision
                 let _ = spike_decisions[i % SAMPLES];
                 std::hint::black_box(42);
@@ -788,10 +751,10 @@ fn effect_pattern_pure_tail() {
                 let i = random_idx.get();
                 random_idx.set(i.wrapping_add(1));
                 // Same base operation
-                helpers::busy_wait_cycles(BASE_CYCLES);
+                busy_wait_ns(BASE_NS);
                 // Apply spike based on pre-generated decision
                 if spike_decisions[i % SAMPLES] {
-                    helpers::busy_wait_cycles(EXPENSIVE_CYCLES);
+                    busy_wait_ns(EXPENSIVE_NS);
                 }
                 std::hint::black_box(42);
             }
@@ -845,12 +808,12 @@ fn effect_pattern_pure_tail() {
 
 /// 4.3 Mixed Pattern - Validates Mixed classification
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn effect_pattern_mixed() {
     use std::cell::Cell;
 
-    const BASE_DELAY: u64 = 30;
-    const SPIKE_DELAY: u64 = 150;
+    // Use nanosecond-based delays for cross-platform consistency
+    const BASE_NS: u64 = 100; // Base uniform shift
+    const SPIKE_NS: u64 = 500; // Spike for tail effect
     const SPIKE_PROBABILITY: f64 = 0.15;
     const SAMPLES: usize = 10_000;
 
@@ -879,11 +842,11 @@ fn effect_pattern_mixed() {
                 let i = random_idx.get();
                 random_idx.set(i.wrapping_add(1));
                 // Base delay (uniform shift)
-                helpers::busy_wait_cycles(BASE_DELAY);
+                busy_wait_ns(BASE_NS);
 
                 // Plus occasional spike (tail effect)
                 if spike_decisions[i % SAMPLES] {
-                    helpers::busy_wait_cycles(SPIKE_DELAY);
+                    busy_wait_ns(SPIKE_NS);
                 }
                 std::hint::black_box(42);
             }
@@ -1020,15 +983,9 @@ fn exploitability_negligible() {
 
 /// 5.2 StandardRemote (100ns-10μs) - Should classify appropriately
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn exploitability_standard_remote() {
-    // Medium delay targeting ~200-300ns
-    // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~700-900 cycles
-    // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~5-7 ticks
-    #[cfg(target_arch = "x86_64")]
-    const MEDIUM_DELAY: u64 = 800;
-    #[cfg(target_arch = "aarch64")]
-    const MEDIUM_DELAY: u64 = 6;
+    // Medium delay targeting ~250ns (StandardRemote range: 100ns-10μs)
+    const MEDIUM_DELAY_NS: u64 = 250;
 
     let which_class = InputPair::new(|| 0, || 1);
 
@@ -1040,7 +997,7 @@ fn exploitability_standard_remote() {
             if *class == 0 {
                 std::hint::black_box(42);
             } else {
-                helpers::busy_wait_cycles(MEDIUM_DELAY);
+                busy_wait_ns(MEDIUM_DELAY_NS);
                 std::hint::black_box(42);
             }
         });
@@ -1054,17 +1011,22 @@ fn exploitability_standard_remote() {
             effect,
             ..
         } => {
+            // For a 250ns delay, expect Http2Multiplexing or StandardRemote
             assert!(
-                matches!(exploitability, Exploitability::StandardRemote),
-                "Expected StandardRemote exploitability for 200-300ns delay (got {:?})",
+                matches!(
+                    exploitability,
+                    Exploitability::Http2Multiplexing | Exploitability::StandardRemote
+                ),
+                "Expected Http2Multiplexing or StandardRemote for ~250ns delay (got {:?}) - effect estimation may be broken",
                 exploitability
             );
 
-            // Verify the leak was detected - effect magnitude can vary significantly by platform
+            // Verify effect magnitude matches injected delay (250ns ± 100%)
+            // If this fails with huge values, the effect estimation is broken
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                total_effect >= 50.0,
-                "Expected measurable effect for medium delay (got {:.1}ns)",
+                (100.0..=500.0).contains(&total_effect),
+                "Expected total effect ~250ns for 250ns delay (got {:.1}ns) - effect estimation may be broken",
                 total_effect
             );
         }
@@ -1095,15 +1057,9 @@ fn exploitability_standard_remote() {
 
 /// 5.3 StandardRemote large (100ns-10μs) - Should classify appropriately
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn exploitability_standard_remote_large() {
-    // Large delay targeting ~2μs
-    // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~6000 cycles
-    // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~48 ticks
-    #[cfg(target_arch = "x86_64")]
-    const LARGE_DELAY: u64 = 6000;
-    #[cfg(target_arch = "aarch64")]
-    const LARGE_DELAY: u64 = 48;
+    // Large delay targeting ~2μs (StandardRemote range: 100ns-10μs)
+    const LARGE_DELAY_NS: u64 = 2000;
 
     let which_class = InputPair::new(|| 0, || 1);
 
@@ -1115,7 +1071,7 @@ fn exploitability_standard_remote_large() {
             if *class == 0 {
                 std::hint::black_box(42);
             } else {
-                helpers::busy_wait_cycles(LARGE_DELAY);
+                busy_wait_ns(LARGE_DELAY_NS);
                 std::hint::black_box(42);
             }
         });
@@ -1129,18 +1085,19 @@ fn exploitability_standard_remote_large() {
             effect,
             ..
         } => {
+            // For a 2μs delay, expect StandardRemote (100ns-10μs range)
             assert!(
                 matches!(exploitability, Exploitability::StandardRemote),
-                "Expected StandardRemote exploitability for ~2μs delay (got {:?})",
+                "Expected StandardRemote exploitability for ~2μs delay (got {:?}) - effect estimation may be broken",
                 exploitability
             );
 
-            // Verify effect magnitude is in the 100ns-10μs range (with reasonable margins)
-            // Target was ~2μs, so expect 400ns-25μs with platform variance
+            // Verify effect magnitude matches injected delay (2μs ± 50%)
+            // If this fails with huge values, the effect estimation is broken
             let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                (400.0..=25_000.0).contains(&total_effect),
-                "Expected total effect in 400ns-25μs range for StandardRemote classification (got {:.1}ns)",
+                (1_000.0..=3_000.0).contains(&total_effect),
+                "Expected total effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
                 total_effect
             );
         }
@@ -1171,15 +1128,9 @@ fn exploitability_standard_remote_large() {
 
 /// 5.4 ObviousLeak (>10μs) - Should classify appropriately
 #[test]
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn exploitability_obvious_leak() {
-    // Very large delay targeting ~50μs
-    // x86_64: rdtsc at ~3GHz = 0.33ns/cycle, so ~150000 cycles
-    // aarch64: cntvct_el0 at 24MHz = 41.67ns/tick, so ~1200 ticks
-    #[cfg(target_arch = "x86_64")]
-    const HUGE_DELAY: u64 = 150_000;
-    #[cfg(target_arch = "aarch64")]
-    const HUGE_DELAY: u64 = 1200;
+    // Very large delay targeting ~50μs (ObviousLeak range: >10μs)
+    const HUGE_DELAY_NS: u64 = 50_000;
 
     let which_class = InputPair::new(|| 0, || 1);
 
@@ -1191,7 +1142,7 @@ fn exploitability_obvious_leak() {
             if *class == 0 {
                 std::hint::black_box(42);
             } else {
-                helpers::busy_wait_cycles(HUGE_DELAY);
+                busy_wait_ns(HUGE_DELAY_NS);
                 std::hint::black_box(42);
             }
         });

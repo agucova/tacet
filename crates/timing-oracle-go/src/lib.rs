@@ -141,15 +141,12 @@ pub unsafe extern "C" fn togo_calibrate(
         // Run calibration
         match calibrate(baseline_slice, sample_slice, ns_per_tick, &cal_config) {
             Ok(cal) => {
-                // Convert to core Calibration type for use with adaptive_step (v5.2 mixture prior)
+                // Convert to core Calibration type for use with adaptive_step
                 let core_cal = timing_oracle_core::adaptive::Calibration::new(
                     cal.sigma_rate,
                     cal.block_length,
-                    cal.prior_cov_narrow,
-                    cal.prior_cov_slab,
-                    cal.sigma_narrow,
-                    cal.sigma_slab,
-                    cal.prior_weight,
+                    cal.sigma_t,
+                    cal.l_r,
                     cal.theta_ns,
                     cal.calibration_samples,
                     cal.discrete_mode,
@@ -164,6 +161,7 @@ pub unsafe extern "C" fn togo_calibrate(
                     cal.theta_eff,
                     cal.theta_floor_initial,
                     cal.rng_seed,
+                    cal.batch_k,
                 );
 
                 let cal_box = Box::new(core_cal);
@@ -317,7 +315,13 @@ pub unsafe extern "C" fn togo_adaptive_step(
         Ok(step) => match step {
             StepResult::Continue { .. } => 0,
             StepResult::Decision(outcome) => {
-                fill_result_from_outcome(&outcome, &*config, result);
+                // Get calibration for diagnostics
+                let cal = if (*calibration).ptr.is_null() {
+                    None
+                } else {
+                    Some(&*((*calibration).ptr as *const Calibration))
+                };
+                fill_result_from_outcome(&outcome, &*config, cal, result);
                 1
             }
         },
@@ -408,15 +412,12 @@ pub unsafe extern "C" fn togo_analyze(
             }
         };
 
-        // Convert to core Calibration (v5.2 mixture prior)
+        // Convert to core Calibration
         let core_cal = timing_oracle_core::adaptive::Calibration::new(
             cal.sigma_rate,
             cal.block_length,
-            cal.prior_cov_narrow,
-            cal.prior_cov_slab,
-            cal.sigma_narrow,
-            cal.sigma_slab,
-            cal.prior_weight,
+            cal.sigma_t,
+            cal.l_r,
             cal.theta_ns,
             cal.calibration_samples,
             cal.discrete_mode,
@@ -431,6 +432,7 @@ pub unsafe extern "C" fn togo_analyze(
             cal.theta_eff,
             cal.theta_floor_initial,
             cal.rng_seed,
+            cal.batch_k,
         );
 
         // Run adaptive loop on all samples
@@ -468,6 +470,7 @@ pub unsafe extern "C" fn togo_analyze(
             if let StepResult::Decision(outcome) = step {
                 return Ok((
                     outcome,
+                    core_cal,
                     cal.mde_shift_ns,
                     cal.mde_tail_ns,
                     theta_ns,
@@ -492,6 +495,7 @@ pub unsafe extern "C" fn togo_analyze(
 
         Ok((
             outcome,
+            core_cal,
             cal.mde_shift_ns,
             cal.mde_tail_ns,
             theta_ns,
@@ -500,8 +504,8 @@ pub unsafe extern "C" fn togo_analyze(
     });
 
     match analysis_result {
-        Ok(Ok((outcome, mde_shift, mde_tail, theta_user, theta_eff))) => {
-            fill_result_from_outcome(&outcome, &*config, result);
+        Ok(Ok((outcome, core_cal, mde_shift, mde_tail, theta_user, theta_eff))) => {
+            fill_result_from_outcome(&outcome, &*config, Some(&core_cal), result);
             (*result).mde_shift_ns = mde_shift;
             (*result).mde_tail_ns = mde_tail;
             (*result).theta_user_ns = theta_user;
@@ -599,10 +603,43 @@ pub extern "C" fn togo_inconclusive_reason_str(reason: ToGoInconclusiveReason) -
 // Internal helpers
 // =============================================================================
 
+/// Build diagnostics from posterior.
+fn build_diagnostics_from_posterior(
+    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
+    calibration: Option<&Calibration>,
+) -> ToGoDiagnostics {
+    let mut diag = ToGoDiagnostics::default();
+
+    if let Some(p) = posterior {
+        diag.effective_sample_size = p.n;
+        diag.projection_mismatch_q = p.projection_mismatch_q;
+        diag.projection_mismatch_ok = calibration
+            .map(|c| p.projection_mismatch_q <= c.projection_mismatch_thresh)
+            .unwrap_or(true);
+
+        // Gibbs sampler diagnostics
+        diag.lambda_mean = p.lambda_mean.unwrap_or(1.0);
+        diag.lambda_mixing_ok = p.lambda_mixing_ok.unwrap_or(true);
+        diag.kappa_mean = p.kappa_mean.unwrap_or(1.0);
+        diag.kappa_cv = p.kappa_cv.unwrap_or(0.0);
+        diag.kappa_ess = p.kappa_ess.unwrap_or(0.0);
+        diag.kappa_mixing_ok = p.kappa_mixing_ok.unwrap_or(true);
+    }
+
+    if let Some(cal) = calibration {
+        diag.dependence_length = cal.block_length;
+        diag.discrete_mode = cal.discrete_mode;
+        diag.timer_resolution_ns = cal.timer_resolution_ns;
+    }
+
+    diag
+}
+
 /// Fill result struct from adaptive outcome.
 unsafe fn fill_result_from_outcome(
     outcome: &AdaptiveOutcome,
     config: &ToGoConfig,
+    calibration: Option<&Calibration>,
     result: *mut ToGoResult,
 ) {
     match outcome {
@@ -633,6 +670,14 @@ unsafe fn fill_result_from_outcome(
 
             (*result).exploitability = exploitability_from_effect_ns(total_effect);
             (*result).quality = quality_from_mde_ns(total_effect / 5.0); // Rough estimate
+
+            // Set threshold and diagnostics
+            if let Some(cal) = calibration {
+                (*result).theta_floor_ns = cal.theta_floor_initial;
+                (*result).decision_threshold_ns = cal.theta_eff;
+            }
+            (*result).diagnostics = build_diagnostics_from_posterior(Some(posterior), calibration);
+            (*result).has_diagnostics = true;
         }
 
         AdaptiveOutcome::NoLeakDetected {
@@ -659,6 +704,14 @@ unsafe fn fill_result_from_outcome(
             (*result).effect.ci_high_ns = total_effect + ci_width;
 
             (*result).quality = ToGoQuality::Good; // Passed, so quality is at least good
+
+            // Set threshold and diagnostics
+            if let Some(cal) = calibration {
+                (*result).theta_floor_ns = cal.theta_floor_initial;
+                (*result).decision_threshold_ns = cal.theta_eff;
+            }
+            (*result).diagnostics = build_diagnostics_from_posterior(Some(posterior), calibration);
+            (*result).has_diagnostics = true;
         }
 
         AdaptiveOutcome::ThresholdElevated {
@@ -697,6 +750,16 @@ unsafe fn fill_result_from_outcome(
             if let Ok(cstr) = CString::new(guidance) {
                 (*result).recommendation = cstr.into_raw();
             }
+
+            // Set threshold and diagnostics
+            (*result).theta_user_ns = *theta_user;
+            (*result).theta_eff_ns = *theta_eff;
+            (*result).decision_threshold_ns = *theta_eff;
+            if let Some(cal) = calibration {
+                (*result).theta_floor_ns = cal.theta_floor_initial;
+            }
+            (*result).diagnostics = build_diagnostics_from_posterior(Some(posterior), calibration);
+            (*result).has_diagnostics = true;
         }
 
         AdaptiveOutcome::Inconclusive {
@@ -754,6 +817,14 @@ unsafe fn fill_result_from_outcome(
             if let Ok(cstr) = CString::new(guidance) {
                 (*result).recommendation = cstr.into_raw();
             }
+
+            // Set threshold and diagnostics
+            if let Some(cal) = calibration {
+                (*result).theta_floor_ns = cal.theta_floor_initial;
+                (*result).decision_threshold_ns = cal.theta_eff;
+            }
+            (*result).diagnostics = build_diagnostics_from_posterior(posterior.as_ref(), calibration);
+            (*result).has_diagnostics = posterior.is_some();
         }
     }
 
