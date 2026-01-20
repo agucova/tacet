@@ -916,6 +916,8 @@ fn format_issue_code(code: IssueCode) -> &'static str {
         IssueCode::ThresholdElevated => "ThresholdElevated",
         IssueCode::SlabDominant => "SlabDominant",
         IssueCode::LambdaMixingPoor => "LambdaMixingPoor",
+        IssueCode::KappaMixingPoor => "KappaMixingPoor",
+        IssueCode::LikelihoodInflated => "LikelihoodInflated",
     }
 }
 

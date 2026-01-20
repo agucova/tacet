@@ -272,8 +272,8 @@ pub fn check_quality_gates(
     inputs: &QualityGateCheckInputs,
     config: &QualityGateConfig,
 ) -> QualityGateResult {
-    // Gate 1: Posterior too close to prior (data not informative)
-    if let Some(reason) = check_variance_ratio(inputs, config) {
+    // Gate 1: Posterior too close to prior (data not informative) - v5.6: uses KL divergence
+    if let Some(reason) = check_kl_divergence(inputs, config) {
         return QualityGateResult::Stop(reason);
     }
 
@@ -312,20 +312,31 @@ pub fn check_quality_gates(
 ///
 /// This is NOT a verdict-blocking gate in v5.5. It's used by the decision logic
 /// to populate the `achievable_at_max` field in ThresholdElevated outcomes.
+///
+/// v5.6: Uses n_eff = max(1, floor(max_samples / block_length)) for proper
+/// scaling under temporal dependence.
 pub fn compute_achievable_at_max(
     c_floor: f64,
     theta_tick: f64,
     theta_user: f64,
     max_samples: usize,
+    block_length: usize,
 ) -> bool {
     // Research mode (theta_user = 0) is always "achievable" (no user target)
     if theta_user <= 0.0 {
         return true;
     }
 
-    // Compute theta_floor at max_samples
+    // v5.6: Use n_eff for achievability check (spec §3.3.4)
+    let n_eff_max = if block_length > 0 {
+        (max_samples / block_length).max(1)
+    } else {
+        max_samples.max(1)
+    };
+
+    // Compute theta_floor at max_samples using n_eff
     let theta_floor_at_max = libm::fmax(
-        c_floor / libm::sqrt(max_samples as f64),
+        c_floor / libm::sqrt(n_eff_max as f64),
         theta_tick,
     );
 
@@ -358,89 +369,132 @@ pub fn is_threshold_elevated(theta_eff: f64, theta_user: f64, theta_tick: f64) -
     theta_eff > theta_user + epsilon
 }
 
-/// Gate 1: Check if posterior variance is too close to prior variance (spec §3.5.2).
-///
-/// Uses 9D log-det ratio: ρ = log(|Λ_post| / |Λ₀^marginal|)
-/// where Λ₀^marginal = 2σ²R is the marginal prior covariance under t-prior (ν=4).
-///
-/// Gate triggers when ρ > log(0.5) (i.e., |Λ_post|/|Λ₀^marginal| > 0.5).
-///
-/// **Cholesky fallback (spec §3.5.2)**: If Cholesky fails, uses trace ratio instead:
-/// ρ_trace = tr(Λ_post) / tr(Λ₀^marginal), triggers if ρ_trace > 0.5.
-///
-/// **Exception**: If the leak probability is already decisive (>99.5% or <0.5%)
-/// AND the projection mismatch Q is reasonable (< 1000x threshold),
-/// we allow the verdict through. This handles cases like slow operations
-/// (modexp) where variance doesn't shrink much but there's a clear timing leak.
-fn check_variance_ratio(
-    inputs: &QualityGateCheckInputs,
-    config: &QualityGateConfig,
-) -> Option<InconclusiveReason> {
-    // Allow confident verdicts through IF:
-    // 1. leak_probability is very high (>99.5%) or very low (<0.5%)
-    // 2. AND projection mismatch Q is not astronomically high (< 1000x threshold)
-    //
-    // Astronomical Q (e.g., 100000+) indicates pathological data patterns that don't
-    // resemble normal timing leaks - likely measurement artifacts.
-    // Moderate Q (e.g., 100-1000) can occur with real but unusual timing patterns.
-    let p = inputs.posterior.leak_probability;
-    let q = inputs.projection_mismatch_q.unwrap_or(0.0);
-    let q_limit = inputs.projection_mismatch_thresh * 1000.0; // Filter only extreme pathological cases
+/// Minimum KL divergence threshold (nats) for Gate 1 (spec §3.5.2 v5.6).
+const KL_MIN: f64 = 0.7;
 
-    if !(0.005..=0.995).contains(&p) && q < q_limit {
-        return None;
-    }
+/// Gate 1: Check if posterior learned from prior using KL divergence (spec §3.5.2 v5.6).
+///
+/// v5.6 CHANGE: Replaces the log-det variance ratio with full KL divergence.
+///
+/// KL = 0.5 * (tr(Λ₀⁻¹Λ_post) + μ_postᵀΛ₀⁻¹μ_post - 9 + ln|Λ₀|/|Λ_post|)
+///
+/// Gate triggers when KL < KL_min where KL_min := 0.7 nats.
+///
+/// v5.6 CHANGE: NO decisive probability bypass - the bypass logic is removed entirely.
+/// This ensures consistent treatment regardless of observed leak probability.
+///
+/// **Cholesky fallback (spec §3.5.2)**: If Cholesky fails after jitter ladder,
+/// uses trace ratio as conservative fallback.
+fn check_kl_divergence(
+    inputs: &QualityGateCheckInputs,
+    _config: &QualityGateConfig,
+) -> Option<InconclusiveReason> {
+    // v5.6: NO decisive probability bypass - removed per spec
+    // The gate checks KL divergence unconditionally
 
     // v5.4: Use the marginal prior covariance Λ₀^marginal = 2σ²R (spec §3.5.2)
     let prior_cov = inputs.prior_cov_marginal;
     let post_cov = &inputs.posterior.lambda_post;
+    let post_mean = &inputs.posterior.delta_post;
 
-    // Try Cholesky-based log-det computation (spec §3.5.2)
-    let variance_ratio = match (
-        nalgebra::Cholesky::new(*post_cov),
-        nalgebra::Cholesky::new(*prior_cov),
-    ) {
-        (Some(post_chol), Some(prior_chol)) => {
-            // Compute log-det from Cholesky diagonals: log|A| = 2 * sum(log(L_ii))
-            let post_log_det: f64 = (0..9)
-                .map(|i| libm::log(post_chol.l()[(i, i)]))
-                .sum::<f64>()
-                * 2.0;
-            let prior_log_det: f64 = (0..9)
-                .map(|i| libm::log(prior_chol.l()[(i, i)]))
-                .sum::<f64>()
-                * 2.0;
-
-            // Check for NaN/Inf (can happen with very small diagonal elements)
-            if !post_log_det.is_finite() || !prior_log_det.is_finite() {
-                // Fall back to trace ratio
-                let trace_ratio = post_cov.trace() / prior_cov.trace();
-                trace_ratio
-            } else {
-                // log-det ratio: ρ = log(|Λ_post| / |Λ₀^marginal|)
-                let log_det_ratio = post_log_det - prior_log_det;
-                // Convert to per-dimension ratio (geometric mean)
-                let log_variance_ratio = log_det_ratio / 9.0;
-                libm::exp(log_variance_ratio)
-            }
-        }
-        _ => {
-            // Cholesky failed - fall back to trace ratio (spec §3.5.2)
+    // Try to compute KL divergence via Cholesky
+    let kl = match compute_kl_divergence(prior_cov, post_cov, post_mean) {
+        Some(kl) => kl,
+        None => {
+            // Fall back to trace ratio if KL computation fails
             let trace_ratio = post_cov.trace() / prior_cov.trace();
-            trace_ratio
+            if trace_ratio > 0.5 {
+                return Some(InconclusiveReason::DataTooNoisy {
+                    message: alloc::format!(
+                        "Posterior variance is {:.0}% of prior; data not informative (KL computation failed)",
+                        trace_ratio * 100.0
+                    ),
+                    guidance: String::from("Try: cycle counter, reduce system load, increase batch size"),
+                    variance_ratio: trace_ratio,
+                });
+            }
+            return None;
         }
     };
 
-    // Trigger when variance ratio > threshold (default 0.5)
-    if variance_ratio > config.max_variance_ratio {
+    // Trigger when KL < KL_min (spec §3.5.2 v5.6)
+    if kl < KL_MIN {
         return Some(InconclusiveReason::DataTooNoisy {
             message: alloc::format!(
-                "Posterior variance is {:.0}% of prior; data not informative",
-                variance_ratio * 100.0
+                "KL divergence {:.2} nats < {:.1} threshold; posterior ≈ prior",
+                kl, KL_MIN
             ),
             guidance: String::from("Try: cycle counter, reduce system load, increase batch size"),
-            variance_ratio,
+            variance_ratio: kl / KL_MIN, // Report KL ratio for diagnostics
         });
+    }
+
+    None
+}
+
+/// Compute KL(N(μ_post, Λ_post) || N(0, Λ₀)) via Cholesky (spec §3.5.2 v5.6).
+///
+/// KL = 0.5 * (tr(Λ₀⁻¹Λ_post) + μ_postᵀΛ₀⁻¹μ_post - d + ln|Λ₀| - ln|Λ_post|)
+///
+/// Returns `None` if Cholesky fails even after jitter ladder.
+fn compute_kl_divergence(
+    prior_cov: &crate::types::Matrix9,
+    post_cov: &crate::types::Matrix9,
+    post_mean: &crate::types::Vector9,
+) -> Option<f64> {
+    // Try Cholesky with jitter ladder (spec §3.5.2)
+    let prior_chol = try_cholesky_with_jitter(prior_cov)?;
+    let post_chol = try_cholesky_with_jitter(post_cov)?;
+
+    // Log determinants from Cholesky: log|A| = 2 * sum(log(L_ii))
+    let prior_log_det: f64 = (0..9)
+        .map(|i| libm::log(prior_chol.l()[(i, i)]))
+        .sum::<f64>() * 2.0;
+    let post_log_det: f64 = (0..9)
+        .map(|i| libm::log(post_chol.l()[(i, i)]))
+        .sum::<f64>() * 2.0;
+
+    if !prior_log_det.is_finite() || !post_log_det.is_finite() {
+        return None;
+    }
+
+    // tr(Λ₀⁻¹Λ_post) via Cholesky solves
+    let mut trace_term = 0.0;
+    for j in 0..9 {
+        let col = post_cov.column(j).into_owned();
+        let solved = prior_chol.solve(&col);
+        trace_term += solved[j];
+    }
+
+    // μ_postᵀΛ₀⁻¹μ_post
+    let solved_mean = prior_chol.solve(post_mean);
+    let quad_term = post_mean.dot(&solved_mean);
+
+    // KL = 0.5 * (tr + quad - d + ln|Λ₀| - ln|Λ_post|)
+    let kl = 0.5 * (trace_term + quad_term - 9.0 + prior_log_det - post_log_det);
+
+    // KL should be non-negative
+    Some(kl.max(0.0))
+}
+
+/// Try Cholesky decomposition with jitter ladder (spec §3.5.2 v5.6).
+///
+/// Starts at 10⁻¹⁰ and increases by factors of 10 until success or 10⁻⁴.
+fn try_cholesky_with_jitter(
+    matrix: &crate::types::Matrix9,
+) -> Option<nalgebra::Cholesky<f64, nalgebra::Const<9>>> {
+    // Try without jitter first
+    if let Some(chol) = nalgebra::Cholesky::new(*matrix) {
+        return Some(chol);
+    }
+
+    // Jitter ladder: 10⁻¹⁰, 10⁻⁹, ..., 10⁻⁴
+    for exp in -10..=-4 {
+        let jitter = libm::pow(10.0, exp as f64);
+        let jittered = matrix + crate::types::Matrix9::identity() * jitter;
+        if let Some(chol) = nalgebra::Cholesky::new(jittered) {
+            return Some(chol);
+        }
     }
 
     None
@@ -663,28 +717,32 @@ mod tests {
     }
 
     #[test]
-    fn test_variance_ratio_gate_passes() {
-        let posterior = make_posterior(0.5, 10.0); // variance = 10, ratio = 10/100 = 0.1 < 0.5
+    fn test_kl_divergence_gate_passes() {
+        // v5.6: Use KL divergence instead of variance ratio
+        // Small posterior variance = large covariance contraction = high KL
+        let posterior = make_posterior(0.5, 10.0);
         let prior_cov_9d = make_prior_cov_9d();
         let inputs = make_inputs(&posterior, &prior_cov_9d);
         let config = QualityGateConfig::default();
 
-        let result = check_variance_ratio(&inputs, &config);
-        assert!(result.is_none());
+        let result = check_kl_divergence(&inputs, &config);
+        assert!(result.is_none(), "Low posterior variance should give high KL (pass)");
     }
 
     #[test]
-    fn test_variance_ratio_gate_fails() {
-        let posterior = make_posterior(0.5, 80.0); // variance = 80, ratio = 80/100 = 0.8 > 0.5
+    fn test_kl_divergence_gate_fails() {
+        // v5.6: Use KL divergence instead of variance ratio
+        // High posterior variance ≈ prior = low KL
+        let posterior = make_posterior(0.5, 95.0); // Close to prior variance of 100
         let prior_cov_9d = make_prior_cov_9d();
         let inputs = make_inputs(&posterior, &prior_cov_9d);
         let config = QualityGateConfig::default();
 
-        let result = check_variance_ratio(&inputs, &config);
+        let result = check_kl_divergence(&inputs, &config);
         assert!(matches!(
             result,
             Some(InconclusiveReason::DataTooNoisy { .. })
-        ));
+        ), "Posterior ≈ prior should give low KL (fail)");
     }
 
     #[test]

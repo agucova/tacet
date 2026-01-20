@@ -827,6 +827,25 @@ pub struct Diagnostics {
 
     /// v5.4: Whether λ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
     pub lambda_mixing_ok: bool,
+
+    // =========================================================================
+    // v5.6 Gibbs sampler κ (kappa) diagnostics - robust t-likelihood
+    // =========================================================================
+
+    /// v5.6: Posterior mean of likelihood precision κ.
+    pub kappa_mean: f64,
+
+    /// v5.6: Posterior standard deviation of κ.
+    pub kappa_sd: f64,
+
+    /// v5.6: Coefficient of variation of κ (kappa_sd / kappa_mean).
+    pub kappa_cv: f64,
+
+    /// v5.6: Effective sample size of κ chain.
+    pub kappa_ess: f64,
+
+    /// v5.6: Whether κ chain mixed well (CV ≥ 0.1 AND ESS ≥ 20).
+    pub kappa_mixing_ok: bool,
 }
 
 impl Diagnostics {
@@ -870,6 +889,12 @@ impl Diagnostics {
             lambda_cv: 0.0,
             lambda_ess: 0.0,
             lambda_mixing_ok: true,
+            // v5.6 kappa diagnostics
+            kappa_mean: 1.0,
+            kappa_sd: 0.0,
+            kappa_cv: 0.0,
+            kappa_ess: 0.0,
+            kappa_mixing_ok: true,
         }
     }
 
@@ -957,6 +982,19 @@ pub enum IssueCode {
     /// indicating the posterior may be unreliable. This typically occurs with
     /// very small or very large effects where the posterior is concentrated.
     LambdaMixingPoor,
+
+    /// v5.6: Gibbs sampler's kappa chain did not mix well.
+    ///
+    /// The likelihood precision variable κ showed poor mixing (CV < 0.1 or ESS < 20),
+    /// indicating the posterior may be unreliable.
+    KappaMixingPoor,
+
+    /// v5.6: Likelihood covariance was inflated (kappa_mean < 0.3).
+    ///
+    /// The robust t-likelihood inflated covariance by ~1/κ_mean to accommodate
+    /// data that doesn't match the estimated Σₙ. Effect estimates remain valid
+    /// but uncertainty was increased for robustness.
+    LikelihoodInflated,
 }
 
 // ============================================================================

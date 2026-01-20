@@ -67,6 +67,24 @@ pub struct Posterior {
     /// `None` if not using Gibbs sampler.
     /// When `Some(false)`, indicates potential posterior unreliability.
     pub lambda_mixing_ok: Option<bool>,
+
+    // ==================== v5.6 Gibbs sampler kappa fields ====================
+
+    /// v5.6: Posterior mean of likelihood precision κ.
+    /// `None` if not using Gibbs sampler.
+    pub kappa_mean: Option<f64>,
+
+    /// v5.6: Coefficient of variation of κ.
+    /// `None` if not using Gibbs sampler.
+    pub kappa_cv: Option<f64>,
+
+    /// v5.6: Effective sample size of κ chain.
+    /// `None` if not using Gibbs sampler.
+    pub kappa_ess: Option<f64>,
+
+    /// v5.6: Whether the Gibbs sampler's kappa chain mixed well.
+    /// `None` if not using Gibbs sampler.
+    pub kappa_mixing_ok: Option<bool>,
 }
 
 impl Posterior {
@@ -91,6 +109,10 @@ impl Posterior {
             narrow_weight_post: None, // Default: no mixture prior
             lambda_mean: None,        // v5.4: no Gibbs sampler
             lambda_mixing_ok: None,   // v5.4: no Gibbs sampler
+            kappa_mean: None,         // v5.6: no Gibbs sampler
+            kappa_cv: None,           // v5.6: no Gibbs sampler
+            kappa_ess: None,          // v5.6: no Gibbs sampler
+            kappa_mixing_ok: None,    // v5.6: no Gibbs sampler
         }
     }
 
@@ -116,10 +138,15 @@ impl Posterior {
             narrow_weight_post: Some(narrow_weight_post),
             lambda_mean: None,      // v5.4: no Gibbs sampler
             lambda_mixing_ok: None, // v5.4: no Gibbs sampler
+            kappa_mean: None,       // v5.6: no Gibbs sampler
+            kappa_cv: None,         // v5.6: no Gibbs sampler
+            kappa_ess: None,        // v5.6: no Gibbs sampler
+            kappa_mixing_ok: None,  // v5.6: no Gibbs sampler
         }
     }
 
-    /// Create a new posterior with Gibbs sampler diagnostics (v5.4).
+    /// Create a new posterior with Gibbs sampler diagnostics (v5.4, v5.6).
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with_gibbs(
         delta_post: Vector9,
         lambda_post: Matrix9,
@@ -130,6 +157,10 @@ impl Posterior {
         n: usize,
         lambda_mean: f64,
         lambda_mixing_ok: bool,
+        kappa_mean: f64,
+        kappa_cv: f64,
+        kappa_ess: f64,
+        kappa_mixing_ok: bool,
     ) -> Self {
         Self {
             delta_post,
@@ -142,6 +173,10 @@ impl Posterior {
             narrow_weight_post: None, // Not used with Gibbs
             lambda_mean: Some(lambda_mean),
             lambda_mixing_ok: Some(lambda_mixing_ok),
+            kappa_mean: Some(kappa_mean),
+            kappa_cv: Some(kappa_cv),
+            kappa_ess: Some(kappa_ess),
+            kappa_mixing_ok: Some(kappa_mixing_ok),
         }
     }
 

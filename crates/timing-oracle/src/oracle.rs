@@ -1629,6 +1629,12 @@ fn build_diagnostics(
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: true,
+        // v5.6 kappa diagnostics
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
     }
 }
 

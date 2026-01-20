@@ -1,4 +1,4 @@
-//! Gibbs sampler for Student's t prior inference (spec v5.4).
+//! Gibbs sampler for Student's t prior inference (spec v5.4, v5.6).
 //!
 //! This module implements Bayesian inference using a Student's t prior with
 //! degrees of freedom ν=4, represented as a scale mixture of Gaussians:
@@ -8,9 +8,18 @@
 //! λ ~ Gamma(ν/2, ν/2)
 //! ```
 //!
+//! v5.6 adds a robust t-likelihood with precision parameter κ that prevents
+//! false certainty when Σₙ is misestimated:
+//!
+//! ```text
+//! Δ | δ, κ ~ N(δ, Σₙ/κ)
+//! κ ~ Gamma(ν_ℓ/2, ν_ℓ/2) where ν_ℓ = 8
+//! ```
+//!
 //! The posterior is computed via Gibbs sampling, alternating between:
-//! 1. δ | λ, Δ ~ N(μ(λ), Q(λ)⁻¹)
+//! 1. δ | λ, κ, Δ ~ N(μ(λ,κ), Q(λ,κ)⁻¹)
 //! 2. λ | δ ~ Gamma((ν+9)/2, (ν + δᵀR⁻¹δ/σ²)/2)
+//! 3. κ | δ, Δ ~ Gamma((ν_ℓ+9)/2, (ν_ℓ + s)/2) where s = (Δ-δ)ᵀΣₙ⁻¹(Δ-δ)
 //!
 //! This replaces the v5.2 mixture prior, fixing the correlation-induced
 //! failure mode where high inter-decile correlations caused pathological
@@ -34,6 +43,9 @@ use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
 /// Degrees of freedom for the Student's t prior (ν = 4).
 pub const NU: f64 = 4.0;
 
+/// Degrees of freedom for robust t-likelihood (ν_ℓ = 8, spec §3.4.2 v5.6).
+pub const NU_L: f64 = 8.0;
+
 /// Total number of Gibbs iterations.
 pub const N_GIBBS: usize = 256;
 
@@ -48,6 +60,12 @@ const LAMBDA_MIN: f64 = 1e-10;
 
 /// Maximum λ value to prevent numerical issues.
 const LAMBDA_MAX: f64 = 1e10;
+
+/// Minimum κ value to prevent numerical issues (v5.6).
+const KAPPA_MIN: f64 = 1e-10;
+
+/// Maximum κ value to prevent numerical issues (v5.6).
+const KAPPA_MAX: f64 = 1e10;
 
 /// Result of Gibbs sampling inference.
 #[derive(Clone, Debug)]
@@ -78,6 +96,25 @@ pub struct GibbsResult {
 
     /// True if mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20.
     pub lambda_mixing_ok: bool,
+
+    // =========================================================================
+    // v5.6 Kappa diagnostics - robust t-likelihood precision
+    // =========================================================================
+
+    /// v5.6: Posterior mean of likelihood precision κ.
+    pub kappa_mean: f64,
+
+    /// v5.6: Posterior standard deviation of κ.
+    pub kappa_sd: f64,
+
+    /// v5.6: Coefficient of variation: κ_sd / κ_mean.
+    pub kappa_cv: f64,
+
+    /// v5.6: Effective sample size of κ chain.
+    pub kappa_ess: f64,
+
+    /// v5.6: Whether κ mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20.
+    pub kappa_mixing_ok: bool,
 
     /// 2D GLS projection β = (μ, τ) for interpretability.
     pub beta_proj: Vector2,
@@ -126,6 +163,8 @@ impl GibbsSampler {
     /// * `delta_obs` - Observed quantile differences Δ
     /// * `sigma_n` - Likelihood covariance Σ_n
     /// * `theta` - Effect threshold for leak probability
+    ///
+    /// v5.6: Extended to sample (δ, λ, κ) for robust t-likelihood.
     pub fn run(&mut self, delta_obs: &Vector9, sigma_n: &Matrix9, theta: f64) -> GibbsResult {
         // Precompute Cholesky of Σ_n for efficiency
         let sigma_n_chol = match Cholesky::new(*sigma_n) {
@@ -141,9 +180,6 @@ impl GibbsSampler {
         // This avoids creating a Matrix9 on the stack 256 times
         let sigma_n_inv = Self::invert_via_cholesky(&sigma_n_chol);
 
-        // Precompute Σ_n⁻¹ Δ for efficiency (used in every iteration)
-        let sigma_n_inv_delta = sigma_n_chol.solve(delta_obs);
-
         // Precompute R⁻¹ for efficiency (constant throughout Gibbs run)
         // This avoids creating a Matrix9 on the stack 256 times
         let r_inv = self.compute_r_inverse();
@@ -151,39 +187,48 @@ impl GibbsSampler {
         // Storage for retained samples
         let mut retained_deltas: Vec<Vector9> = Vec::with_capacity(N_KEEP);
         let mut retained_lambdas: Vec<f64> = Vec::with_capacity(N_KEEP);
+        let mut retained_kappas: Vec<f64> = Vec::with_capacity(N_KEEP);
 
-        // Initialize λ = 1.0 (prior mean for Gamma(ν/2, ν/2))
+        // Initialize: λ⁽⁰⁾ = 1, κ⁽⁰⁾ = 1 (spec §3.4.4 v5.6)
         let mut lambda = 1.0;
+        let mut kappa = 1.0;
 
-        // Main Gibbs loop
+        // Main Gibbs loop (spec §3.4.4 v5.6)
         for t in 0..N_GIBBS {
-            // Sample δ | λ, Δ
-            let delta = self.sample_delta_given_lambda(
+            // Step 1: δ | λ, κ, Δ (spec §3.4.4 Conditional 1)
+            // Note: sigma_n_inv_delta is recomputed inside to account for κ scaling
+            let delta = self.sample_delta_given_lambda_kappa(
                 &sigma_n_inv,
                 &r_inv,
-                &sigma_n_inv_delta,
+                delta_obs,
+                &sigma_n_chol,
                 lambda,
+                kappa,
             );
 
-            // Sample λ | δ
+            // Step 2: λ | δ (unchanged, spec §3.4.4 Conditional 2)
             lambda = self.sample_lambda_given_delta(&delta);
+
+            // Step 3: κ | δ, Δ (NEW, spec §3.4.4 Conditional 3)
+            kappa = self.sample_kappa_given_delta(delta_obs, &delta, &sigma_n_chol);
 
             // Store if past burn-in
             if t >= N_BURN {
                 retained_deltas.push(delta);
                 retained_lambdas.push(lambda);
+                retained_kappas.push(kappa);
             }
         }
 
         // Compute posterior summaries
-        self.compute_summaries(&retained_deltas, &retained_lambdas, sigma_n, theta)
+        self.compute_summaries(&retained_deltas, &retained_lambdas, &retained_kappas, sigma_n, theta)
     }
 
-    /// Sample δ | λ, Δ from the conditional Gaussian.
+    /// Sample δ | λ, κ, Δ from the conditional Gaussian (spec §3.4.4 v5.6).
     ///
-    /// Q(λ) = Σ_n⁻¹ + (λ/σ²) R⁻¹
-    /// μ(λ) = Q(λ)⁻¹ Σ_n⁻¹ Δ
-    /// δ | λ, Δ ~ N(μ(λ), Q(λ)⁻¹)
+    /// v5.6: Q(λ, κ) = κΣ_n⁻¹ + (λ/σ²) R⁻¹
+    /// μ(λ, κ) = Q(λ, κ)⁻¹ κΣ_n⁻¹ Δ
+    /// δ | λ, κ, Δ ~ N(μ(λ, κ), Q(λ, κ)⁻¹)
     ///
     /// **Spec compliance note (§3.4.4):** The spec requires that Σ_n⁻¹ and R⁻¹ be
     /// "computed via Cholesky solves, not explicit matrix inversion". We form
@@ -194,31 +239,35 @@ impl GibbsSampler {
     ///
     /// Note: sigma_n_inv and r_inv are precomputed once before the Gibbs loop
     /// to avoid repeated stack allocations.
-    fn sample_delta_given_lambda(
+    fn sample_delta_given_lambda_kappa(
         &mut self,
         sigma_n_inv: &Matrix9,
         r_inv: &Matrix9,
-        sigma_n_inv_delta: &Vector9,
+        delta_obs: &Vector9,
+        sigma_n_chol: &Cholesky<f64, nalgebra::Const<9>>,
         lambda: f64,
+        kappa: f64,
     ) -> Vector9 {
         let scale_factor = lambda / (self.sigma * self.sigma);
 
-        // Build Q(λ) = Σ_n⁻¹ + (λ/σ²) R⁻¹
-        // sigma_n_inv and r_inv are precomputed, so this just does addition/scaling
-        let q = sigma_n_inv + r_inv * scale_factor;
+        // v5.6: Q(λ, κ) = κΣ_n⁻¹ + (λ/σ²) R⁻¹
+        let q = sigma_n_inv * kappa + r_inv * scale_factor;
 
-        // Cholesky of Q(λ)
+        // Cholesky of Q(λ, κ)
         let q_chol = match Cholesky::new(q) {
             Some(c) => c,
             None => {
                 // Fallback: add jitter
                 let jittered = q + Matrix9::identity() * 1e-8;
-                Cholesky::new(jittered).expect("Q(λ) must be SPD")
+                Cholesky::new(jittered).expect("Q(λ, κ) must be SPD")
             }
         };
 
-        // Posterior mean: μ = Q⁻¹ Σ_n⁻¹ Δ
-        let mu = q_chol.solve(sigma_n_inv_delta);
+        // v5.6: Posterior mean: μ = Q⁻¹ κΣ_n⁻¹ Δ
+        // First compute κΣ_n⁻¹ Δ
+        let sigma_n_inv_delta = sigma_n_chol.solve(delta_obs);
+        let kappa_sigma_n_inv_delta = sigma_n_inv_delta * kappa;
+        let mu = q_chol.solve(&kappa_sigma_n_inv_delta);
 
         // Sample: δ = μ + L_Q⁻ᵀ z where z ~ N(0, I₉)
         // Since Q = L_Q L_Qᵀ, we have Q⁻¹ = L_Q⁻ᵀ L_Q⁻¹
@@ -257,11 +306,48 @@ impl GibbsSampler {
         sample.clamp(LAMBDA_MIN, LAMBDA_MAX)
     }
 
+    /// Sample κ | δ, Δ from the conditional Gamma (spec §3.4.4 Conditional 3 v5.6).
+    ///
+    /// s = (Δ - δ)ᵀ Σₙ⁻¹ (Δ - δ)
+    /// κ | δ, Δ ~ Gamma((ν_ℓ + 9)/2, (ν_ℓ + s)/2)
+    ///
+    /// This samples the likelihood precision that allows the model to accommodate
+    /// data that doesn't match the estimated Σₙ, preventing false certainty.
+    fn sample_kappa_given_delta(
+        &mut self,
+        delta_obs: &Vector9,
+        delta: &Vector9,
+        sigma_n_chol: &Cholesky<f64, nalgebra::Const<9>>,
+    ) -> f64 {
+        // Compute residual: r = Δ - δ
+        let residual = delta_obs - delta;
+
+        // Compute s = rᵀ Σₙ⁻¹ r via Cholesky solve
+        // Σₙ = L L', so Σₙ⁻¹ r = L⁻ᵀ L⁻¹ r
+        // s = rᵀ Σₙ⁻¹ r = ||L⁻¹ r||²
+        let y = sigma_n_chol.solve(&residual);
+        let s = residual.dot(&y);
+
+        // Gamma parameters (shape-rate, spec §3.4.4)
+        let shape = (NU_L + 9.0) / 2.0; // (8 + 9) / 2 = 8.5
+        let rate = (NU_L + s) / 2.0;
+
+        // Sample from Gamma(shape, rate)
+        // rand_distr uses shape-scale, so scale = 1/rate
+        let scale = 1.0 / rate;
+        let gamma = Gamma::new(shape, scale).unwrap();
+        let sample = gamma.sample(&mut self.rng);
+
+        // Clamp to prevent numerical issues
+        sample.clamp(KAPPA_MIN, KAPPA_MAX)
+    }
+
     /// Compute posterior summaries from retained samples.
     fn compute_summaries(
         &self,
         retained_deltas: &[Vector9],
         retained_lambdas: &[f64],
+        retained_kappas: &[f64],
         sigma_n: &Matrix9,
         theta: f64,
     ) -> GibbsResult {
@@ -319,6 +405,22 @@ impl GibbsSampler {
         let lambda_ess = compute_ess(retained_lambdas);
         let lambda_mixing_ok = lambda_cv >= 0.1 && lambda_ess >= 20.0;
 
+        // v5.6: Kappa diagnostics (parallel to lambda)
+        let kappa_mean = retained_kappas.iter().sum::<f64>() / n;
+        let kappa_var = retained_kappas
+            .iter()
+            .map(|&k| math::sq(k - kappa_mean))
+            .sum::<f64>()
+            / (n - 1.0);
+        let kappa_sd = math::sqrt(kappa_var);
+        let kappa_cv = if kappa_mean > 0.0 {
+            kappa_sd / kappa_mean
+        } else {
+            0.0
+        };
+        let kappa_ess = compute_ess(retained_kappas);
+        let kappa_mixing_ok = kappa_cv >= 0.1 && kappa_ess >= 20.0;
+
         // 2D projection
         let (beta_proj, beta_proj_cov, projection_mismatch_q) =
             self.compute_2d_projection(&delta_post, &lambda_post, sigma_n);
@@ -333,6 +435,11 @@ impl GibbsSampler {
             lambda_cv,
             lambda_ess,
             lambda_mixing_ok,
+            kappa_mean,
+            kappa_sd,
+            kappa_cv,
+            kappa_ess,
+            kappa_mixing_ok,
             beta_proj,
             beta_proj_cov,
             projection_mismatch_q,
@@ -624,5 +731,67 @@ mod tests {
         // ESS should be less than N due to autocorrelation
         assert!(ess < 100.0);
         assert!(ess > 0.0);
+    }
+
+    #[test]
+    fn test_kappa_diagnostics() {
+        // v5.6: Test kappa diagnostics similar to lambda diagnostics
+        let l_r = Matrix9::identity();
+        let sigma_n = Matrix9::identity() * 100.0;
+        let delta = Vector9::from_row_slice(&[50.0; 9]);
+        let sigma_t = 50.0;
+        let theta = 10.0;
+
+        let result = run_gibbs_inference(&delta, &sigma_n, sigma_t, &l_r, theta, 42);
+
+        // Kappa mean should be positive
+        assert!(result.kappa_mean > 0.0, "kappa_mean should be positive");
+
+        // Kappa SD should be positive
+        assert!(result.kappa_sd > 0.0, "kappa_sd should be positive");
+
+        // Kappa ESS should be reasonable (between 1 and N_KEEP)
+        assert!(
+            result.kappa_ess >= 1.0,
+            "kappa_ess should be >= 1, got {}",
+            result.kappa_ess
+        );
+        assert!(
+            result.kappa_ess <= N_KEEP as f64,
+            "kappa_ess should be <= N_KEEP"
+        );
+
+        // CV should be positive when SD > 0
+        assert!(result.kappa_cv >= 0.0, "kappa_cv should be non-negative");
+    }
+
+    #[test]
+    fn test_kappa_responds_to_residual_magnitude() {
+        // v5.6: κ should be < 1 when residuals are larger than expected under Σₙ.
+        // When the observed data differs from the sampled δ significantly,
+        // the Gamma posterior for κ should shift toward smaller values.
+
+        let l_r = Matrix9::identity();
+        let sigma_n = Matrix9::identity(); // Small Σₙ
+        let sigma_t = 50.0;
+        let theta = 10.0;
+
+        // Small effect: residuals ≈ small relative to Σₙ → κ ≈ 1
+        let delta_small = Vector9::from_row_slice(&[1.0; 9]);
+        let result_small = run_gibbs_inference(&delta_small, &sigma_n, sigma_t, &l_r, theta, 42);
+
+        // Large effect: same Σₙ but much larger observed Δ → κ < 1
+        // (The observed data is far from what the model expects)
+        let delta_large = Vector9::from_row_slice(&[100.0; 9]);
+        let result_large = run_gibbs_inference(&delta_large, &sigma_n, sigma_t, &l_r, theta, 42);
+
+        // When residuals are large relative to Σₙ, kappa should be smaller
+        // to inflate the likelihood covariance for robustness
+        assert!(
+            result_large.kappa_mean < result_small.kappa_mean,
+            "Large residuals should give smaller kappa: {} vs {}",
+            result_large.kappa_mean,
+            result_small.kappa_mean
+        );
     }
 }

@@ -392,6 +392,30 @@ pub fn analyze_single_pass(
         });
     }
 
+    // v5.6: Emit KappaMixingPoor when kappa chain mixing is bad
+    if !bayes_result.kappa_mixing_ok {
+        quality_issues.push(QualityIssue {
+            code: IssueCode::KappaMixingPoor,
+            message: format!(
+                "κ chain mixing poor (CV={:.2}, ESS={:.0})",
+                bayes_result.kappa_cv, bayes_result.kappa_ess
+            ),
+            guidance: "Posterior may be unreliable; consider longer time budget.".to_string(),
+        });
+    }
+
+    // v5.6: Emit LikelihoodInflated when kappa_mean < 0.3
+    if bayes_result.kappa_mean < 0.3 {
+        quality_issues.push(QualityIssue {
+            code: IssueCode::LikelihoodInflated,
+            message: format!(
+                "Likelihood covariance inflated ~{:.1}x due to data/model mismatch",
+                1.0 / bayes_result.kappa_mean
+            ),
+            guidance: "Uncertainty was increased for robustness. Effect estimates remain valid.".to_string(),
+        });
+    }
+
     // Build diagnostics
     // Use block_size from covariance estimation (spec §3.3.2 compliant)
     let block_length = cov_estimate.block_size;
@@ -430,6 +454,12 @@ pub fn analyze_single_pass(
         lambda_cv: bayes_result.lambda_cv,
         lambda_ess: bayes_result.lambda_ess,
         lambda_mixing_ok: bayes_result.lambda_mixing_ok,
+        // v5.6 kappa diagnostics
+        kappa_mean: bayes_result.kappa_mean,
+        kappa_sd: bayes_result.kappa_sd,
+        kappa_cv: bayes_result.kappa_cv,
+        kappa_ess: bayes_result.kappa_ess,
+        kappa_mixing_ok: bayes_result.kappa_mixing_ok,
     };
 
     // Step 10: Make decision based on quality check and posterior (v5.5 threshold elevation rule)
@@ -476,6 +506,7 @@ pub fn analyze_single_pass(
                 theta_tick,
                 config.theta_ns,
                 n, // Single-pass has fixed samples
+                block_length, // v5.6: block_length for n_eff computation
             );
 
             Outcome::Inconclusive {
@@ -590,6 +621,12 @@ fn make_default_diagnostics(timer_resolution_ns: f64) -> Diagnostics {
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: false,
+        // v5.6 kappa diagnostics
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: false,
     }
 }
 

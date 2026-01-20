@@ -134,6 +134,23 @@ pub struct BayesResult {
 
     /// True if mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20 (v5.4 Gibbs).
     pub lambda_mixing_ok: bool,
+
+    // ==================== v5.6 Gibbs sampler kappa diagnostics ====================
+
+    /// v5.6: Posterior mean of likelihood precision κ.
+    pub kappa_mean: f64,
+
+    /// v5.6: Posterior standard deviation of κ.
+    pub kappa_sd: f64,
+
+    /// v5.6: Coefficient of variation: κ_sd / κ_mean.
+    pub kappa_cv: f64,
+
+    /// v5.6: Effective sample size of κ chain.
+    pub kappa_ess: f64,
+
+    /// v5.6: Whether κ mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20.
+    pub kappa_mixing_ok: bool,
 }
 
 /// Compute Bayesian posterior for timing leak analysis using 9D model (single Gaussian prior).
@@ -205,6 +222,12 @@ pub fn compute_bayes_factor(
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: true,
+        // v5.6 kappa fields - not used in single Gaussian mode
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
     }
 }
 
@@ -318,6 +341,12 @@ pub fn compute_bayes_factor_mixture(
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: true,
+        // v5.6 kappa fields - not used in mixture mode
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
     }
 }
 
@@ -378,6 +407,12 @@ pub fn compute_bayes_gibbs(
         lambda_cv: gibbs_result.lambda_cv,
         lambda_ess: gibbs_result.lambda_ess,
         lambda_mixing_ok: gibbs_result.lambda_mixing_ok,
+        // v5.6 kappa diagnostics
+        kappa_mean: gibbs_result.kappa_mean,
+        kappa_sd: gibbs_result.kappa_sd,
+        kappa_cv: gibbs_result.kappa_cv,
+        kappa_ess: gibbs_result.kappa_ess,
+        kappa_mixing_ok: gibbs_result.kappa_mixing_ok,
     }
 }
 
@@ -761,6 +796,12 @@ fn neutral_result(sigma_n: &Matrix9, lambda0: &Matrix9) -> BayesResult {
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: true,
+        // v5.6 kappa fields
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
     }
 }
 
@@ -787,6 +828,12 @@ fn neutral_result_mixture(sigma_n: &Matrix9, lambda0_narrow: &Matrix9, lambda0_s
         lambda_cv: 0.0,
         lambda_ess: 0.0,
         lambda_mixing_ok: true,
+        // v5.6 kappa fields
+        kappa_mean: 1.0,
+        kappa_sd: 0.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
     }
 }
 

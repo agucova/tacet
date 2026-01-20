@@ -1005,11 +1005,14 @@ mod proptests {
             let result = compute_deciles_inplace(&mut test_data);
 
             for i in 0..9 {
-                let diff = (reference[i] - result[i]).abs();
+                let r = reference[i];
+                let t = result[i];
+                // Use total_cmp for exact equality (handles inf == inf), then check tolerance
+                let equal = r.total_cmp(&t).is_eq() || (r - t).abs() < 1e-10;
                 prop_assert!(
-                    diff < 1e-10,
+                    equal,
                     "Decile {} mismatch on small array (n={}): sort={}, multiselect={}",
-                    i, data.len(), reference[i], result[i]
+                    i, data.len(), r, t
                 );
             }
         }

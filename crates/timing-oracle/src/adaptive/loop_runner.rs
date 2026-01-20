@@ -350,6 +350,7 @@ pub fn run_adaptive(
                 theta_tick,
                 theta_user,
                 config.max_samples,
+                calibration.block_length, // v5.6: block_length for n_eff computation
             );
 
             return AdaptiveOutcome::ThresholdElevated {
@@ -441,6 +442,11 @@ fn compute_posterior_from_state(
         n,
         bayes_result.lambda_mean,
         bayes_result.lambda_mixing_ok,
+        // v5.6: kappa diagnostics
+        bayes_result.kappa_mean,
+        bayes_result.kappa_cv,
+        bayes_result.kappa_ess,
+        bayes_result.kappa_mixing_ok,
     ))
 }
 
@@ -555,6 +561,7 @@ pub fn adaptive_step(
                 theta_tick,
                 theta_user,
                 config.max_samples,
+                calibration.block_length, // v5.6: block_length for n_eff computation
             );
 
             return Ok(Some(AdaptiveOutcome::ThresholdElevated {

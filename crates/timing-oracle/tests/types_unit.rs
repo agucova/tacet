@@ -10,8 +10,8 @@
 //! - Serialization round-trips
 
 use timing_oracle::{
-    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
-    MeasurementQuality, Outcome, UnreliablePolicy,
+    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason, IssueCode,
+    MeasurementQuality, Outcome, QualityIssue, UnreliablePolicy,
 };
 
 // ============================================================================
@@ -894,4 +894,65 @@ fn attacker_model_description() {
         AttackerModel::Research.description().contains("research")
             || AttackerModel::Research.description().contains("any")
     );
+}
+
+// ============================================================================
+// IssueCode tests (v5.6)
+// ============================================================================
+
+#[test]
+fn issue_code_kappa_mixing_poor_exists() {
+    // v5.6: Verify the new IssueCode variant exists and serializes correctly
+    let issue = QualityIssue {
+        code: IssueCode::KappaMixingPoor,
+        message: "κ chain mixing poor (CV=0.05, ESS=10)".to_string(),
+        guidance: "Posterior may be unreliable; consider longer time budget.".to_string(),
+    };
+
+    let json = serde_json::to_string(&issue).unwrap();
+    assert!(json.contains("KappaMixingPoor"));
+
+    let deserialized: QualityIssue = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.code, IssueCode::KappaMixingPoor);
+}
+
+#[test]
+fn issue_code_likelihood_inflated_exists() {
+    // v5.6: Verify the new IssueCode variant exists and serializes correctly
+    let issue = QualityIssue {
+        code: IssueCode::LikelihoodInflated,
+        message: "Likelihood covariance inflated ~5.0x due to data/model mismatch".to_string(),
+        guidance: "Uncertainty was increased for robustness. Effect estimates remain valid."
+            .to_string(),
+    };
+
+    let json = serde_json::to_string(&issue).unwrap();
+    assert!(json.contains("LikelihoodInflated"));
+
+    let deserialized: QualityIssue = serde_json::from_str(&json).unwrap();
+    assert_eq!(deserialized.code, IssueCode::LikelihoodInflated);
+}
+
+#[test]
+fn issue_code_json_roundtrip_all_variants() {
+    // Test all IssueCode variants serialize and deserialize correctly
+    let variants = vec![
+        IssueCode::ThresholdElevated,
+        IssueCode::LambdaMixingPoor,
+        IssueCode::KappaMixingPoor,
+        IssueCode::LikelihoodInflated,
+    ];
+
+    for code in variants {
+        let issue = QualityIssue {
+            code,
+            message: "test message".to_string(),
+            guidance: "test guidance".to_string(),
+        };
+
+        let json = serde_json::to_string(&issue).unwrap();
+        let deserialized: QualityIssue = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.code, issue.code);
+        assert_eq!(deserialized.message, "test message");
+    }
 }

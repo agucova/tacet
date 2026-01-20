@@ -303,10 +303,41 @@ impl Calibration {
         }
     }
 
-    /// Scale sigma_rate to get covariance for n samples.
+    /// Compute effective sample size accounting for dependence (spec §3.3.2 v5.6).
+    ///
+    /// Under strong temporal dependence, n samples do not provide n independent observations.
+    /// The effective sample size approximates the number of effectively independent blocks.
+    ///
+    /// n_eff = max(1, floor(n / block_length))
+    ///
+    /// where block_length is the estimated dependence length from Politis-White selector.
+    pub fn n_eff(&self, n: usize) -> usize {
+        if self.block_length == 0 {
+            return n.max(1);
+        }
+        (n / self.block_length).max(1)
+    }
+
+    /// Scale sigma_rate to get covariance for n samples using effective sample size (v5.6).
+    ///
+    /// Σ_n = Σ_rate / n_eff
+    ///
+    /// where n_eff = max(1, floor(n / block_length)) to correctly account for reduced
+    /// information under temporal dependence.
+    pub fn covariance_for_n(&self, n: usize) -> Matrix9 {
+        if n == 0 {
+            return self.sigma_rate; // Avoid division by zero
+        }
+        let n_eff = self.n_eff(n);
+        self.sigma_rate / (n_eff as f64)
+    }
+
+    /// Scale sigma_rate to get covariance using raw n samples (ignoring dependence).
     ///
     /// Σ_n = Σ_rate / n
-    pub fn covariance_for_n(&self, n: usize) -> Matrix9 {
+    ///
+    /// Use this only when you need the raw scaling without n_eff correction.
+    pub fn covariance_for_n_raw(&self, n: usize) -> Matrix9 {
         if n == 0 {
             return self.sigma_rate; // Avoid division by zero
         }
@@ -1040,14 +1071,39 @@ mod tests {
     #[test]
     fn test_covariance_scaling() {
         let cal = make_test_calibration();
+        // make_test_calibration uses sigma_rate[(0,0)] = 1000.0 and block_length = 10
 
-        // At n=1000, covariance should be sigma_rate / 1000
+        // v5.6: covariance_for_n uses n_eff = n / block_length
+        // At n=1000 with block_length=10: n_eff = 100
+        // sigma_n[(0,0)] = sigma_rate[(0,0)] / n_eff = 1000 / 100 = 10.0
         let cov_1000 = cal.covariance_for_n(1000);
-        assert!((cov_1000[(0, 0)] - 1.0).abs() < 1e-10);
+        assert!(
+            (cov_1000[(0, 0)] - 10.0).abs() < 1e-10,
+            "expected 10.0, got {}",
+            cov_1000[(0, 0)]
+        );
 
-        // At n=2000, covariance should be half
+        // At n=2000 with block_length=10: n_eff = 200
+        // sigma_n[(0,0)] = 1000 / 200 = 5.0
         let cov_2000 = cal.covariance_for_n(2000);
-        assert!((cov_2000[(0, 0)] - 0.5).abs() < 1e-10);
+        assert!(
+            (cov_2000[(0, 0)] - 5.0).abs() < 1e-10,
+            "expected 5.0, got {}",
+            cov_2000[(0, 0)]
+        );
+    }
+
+    #[test]
+    fn test_n_eff() {
+        let cal = make_test_calibration();
+        // make_test_calibration uses block_length = 10
+
+        // n_eff = max(1, floor(n / block_length))
+        assert_eq!(cal.n_eff(100), 10);
+        assert_eq!(cal.n_eff(1000), 100);
+        assert_eq!(cal.n_eff(10), 1);
+        assert_eq!(cal.n_eff(5), 1); // Clamped to 1 when n < block_length
+        assert_eq!(cal.n_eff(0), 1); // Edge case: n=0 returns 1
     }
 
     #[test]
