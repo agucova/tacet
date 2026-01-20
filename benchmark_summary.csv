@@ -1,3 +1,9 @@
 tool,effect_pattern,effect_sigma_mult,noise_model,n_datasets,detection_rate,ci_low,ci_high,median_time_ms,median_samples
-timing-oracle,shift,0,iid,3,0.0000,0.0000,0.5615,71,1000
-timing-oracle,shift,0.1,iid,3,0.0000,0.0000,0.5615,71,1000
+timing-oracle,shift,0,iid,10,0.0000,0.0000,0.2775,1032,10000
+timing-oracle,shift,0.5,iid,10,1.0000,0.7225,1.0000,750,10000
+timing-oracle,shift,1,iid,10,1.0000,0.7225,1.0000,788,10000
+timing-oracle,shift,2,iid,10,1.0000,0.7225,1.0000,860,10000
+timing-oracle,tail,0,iid,10,0.0000,0.0000,0.2775,941,10000
+timing-oracle,tail,0.5,iid,10,1.0000,0.7225,1.0000,925,10000
+timing-oracle,tail,1,iid,10,1.0000,0.7225,1.0000,818,10000
+timing-oracle,tail,2,iid,10,1.0000,0.7225,1.0000,928,10000

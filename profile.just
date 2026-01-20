@@ -1,5 +1,7 @@
 # Profiling commands
 
+profile_dir := env("PROFILE_DIR", "/var/tmp/timing-oracle-profile")
+
 profile-dir:
     @echo "Profile output dir: {{profile_dir}}"
 
@@ -65,40 +67,38 @@ all: tests bench
 
 [group('profile')]
 summary target="bench":
-    set -euo pipefail
-    python3 - <<'PY'
-from collections import Counter
-import os
-import sys
+    #!/usr/bin/env python3
+    from collections import Counter
+    import os
+    import sys
 
-profile_dir = "{{profile_dir}}"
-target = "{{target}}"
-path = os.path.join(profile_dir, f"{target}.folded")
+    profile_dir = "{{profile_dir}}"
+    target = "{{target}}"
+    path = os.path.join(profile_dir, target + ".folded")
 
-if not os.path.exists(path):
-    print(f"Missing {path}. Run: just profile {target}")
-    sys.exit(1)
+    if not os.path.exists(path):
+        print("Missing " + path + ". Run: just profile " + target)
+        sys.exit(1)
 
-counter = Counter()
-
-with open(path) as handle:
+    counter = Counter()
     total = 0
-    for line in handle:
-        line = line.strip()
-        if not line:
-            continue
-        stack, count = line.rsplit(" ", 1)
-        count = int(count)
-        total += count
-        leaf = stack.split(";")[-1]
-        counter[leaf] += count
 
-print(f"Total samples: {total}")
-print("Top leaf functions:")
-for name, count in counter.most_common(20):
-    pct = (count / total * 100.0) if total else 0.0
-    print(f"{count:8d} {pct:5.1f}% {name}")
-PY
+    with open(path) as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            stack, count = line.rsplit(" ", 1)
+            count = int(count)
+            total += count
+            leaf = stack.split(";")[-1]
+            counter[leaf] += count
+
+    print("Total samples:", total)
+    print("Top leaf functions:")
+    for name, count in counter.most_common(20):
+        pct = (count / total * 100.0) if total else 0.0
+        print("%8d %5.1f%% %s" % (count, pct, name))
 
 [group('profile')]
 clean:

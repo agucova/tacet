@@ -1,4 +1,4 @@
-# timing-oracle Specification (v5.5)
+# timing-oracle Specification (v5.6)
 
 This document is the authoritative specification for timing-oracle, a Bayesian timing side-channel detection system. It defines the statistical methodology, abstract types, and requirements that implementations MUST follow to be conformant.
 
@@ -302,7 +302,14 @@ Diagnostics = {
   lambda_sd: Float,                 // Posterior SD of λ
   lambda_cv: Float,                 // Coefficient of variation: λ_sd / λ_mean
   lambda_ess: Float,                // Effective sample size of λ chain
-  lambda_mixing_ok: Bool            // See §3.4.4
+  lambda_mixing_ok: Bool,           // See §3.4.4
+
+  // Robust likelihood diagnostics
+  kappa_mean: Float,                // Posterior mean of κ
+  kappa_sd: Float,                  // Posterior SD of κ
+  kappa_cv: Float,                  // Coefficient of variation: κ_sd / κ_mean
+  kappa_ess: Float,                 // Effective sample size of κ chain
+  kappa_mixing_ok: Bool             // See §3.4.4
 }
 
 QualityIssue = {
@@ -316,7 +323,7 @@ IssueCode =
   | DiscreteTimer | SmallSampleDiscrete | HighGeneratorCost
   | LowUniqueInputs | QuantilesFiltered | ThresholdElevated
   | ThresholdClamped | HighWinsorRate | ProjectionMismatch
-  | LambdaMixingPoor
+  | LambdaMixingPoor | KappaMixingPoor | LikelihoodInflated
 ```
 
 ---
@@ -557,13 +564,29 @@ $$
 \Sigma_{\text{rate}} = \hat{\Sigma}_{\text{cal}} \cdot n_{\text{cal}}
 $$
 
-During the adaptive loop, with $n$ total samples per class:
+**Effective sample size (n_eff) — normative:**
+
+Under strong temporal dependence, n samples do not provide n independent observations. Implementations MUST define the effective sample size using the selected block length (dependence length estimate):
 
 $$
-\Sigma_n = \Sigma_{\text{rate}} / n
+n_{\text{eff}} := \max\left(1,\ \left\lfloor \frac{n}{\hat{b}} \right\rfloor\right)
 $$
 
-This allows cheap posterior updates without re-bootstrapping.
+where $\hat{b}$ is the block length from the Politis-White selector (or platform-specific floor). This approximates the number of effectively independent blocks and prevents anti-conservative 1/n variance scaling when dependence is high.
+
+Implementations MUST report:
+- `Diagnostics.dependence_length` = $\hat{b}$
+- `Diagnostics.effective_sample_size` = $n_{\text{eff}}$
+
+**Covariance scaling during adaptive loop:**
+
+During the adaptive loop, with $n$ total samples per class and $n_{\text{eff}}$ as defined above:
+
+$$
+\Sigma_n = \Sigma_{\text{rate}} / n_{\text{eff}}
+$$
+
+This allows cheap posterior updates without re-bootstrapping, while correctly accounting for reduced information under dependence.
 
 **Numerical stability:**
 
@@ -599,7 +622,7 @@ A critical design element is distinguishing between what the user *wants* to det
 
 **Floor-rate constant:**
 
-Under the model's scaling assumption Σ_n = Σ_rate/n, the measurement floor scales as 1/√n. Implementations MUST compute a floor-rate constant once at calibration based on the 9D decision functional m(δ) = max_k |δ_k|.
+Under the model's scaling assumption Σ_n = Σ_rate/n_eff, the measurement floor scales as 1/√n_eff. Implementations MUST compute a floor-rate constant once at calibration based on the 9D decision functional m(δ) = max_k |δ_k|.
 
 Draw Z₀ ~ N(0, Σ_rate) via Monte Carlo (SHOULD use 50,000 samples) and compute:
 
@@ -611,11 +634,13 @@ This is the 95th percentile of the max absolute value under unit sample size.
 
 **Measurement floor (dynamic):**
 
-During the adaptive loop with $n$ samples per class:
+During the adaptive loop with $n$ samples per class and $n_{\text{eff}}$ effective samples (see §3.3.2):
 
 $$
-\theta_{\text{floor,stat}}(n) = \frac{c_{\text{floor}}}{\sqrt{n}}
+\theta_{\text{floor,stat}}(n) = \frac{c_{\text{floor}}}{\sqrt{n_{\text{eff}}}}
 $$
+
+**Rationale for using n_eff:** If dependence reduces information, the floor should not pretend you gained √n resolution. Using n_eff ensures the floor honestly reflects achievable precision.
 
 The tick floor is fixed once batching is determined:
 
@@ -841,13 +866,33 @@ $$
 
 This is unconstrained—the model can represent any quantile-difference pattern, unlike a low-rank projection.
 
-#### 3.4.2 Likelihood
+#### 3.4.2 Likelihood (Robust t-likelihood via scale mixture)
+
+Timing summary statistics Δ may deviate from the Gaussian approximation when Σₙ is underestimated (e.g., high dependence, interference bursts, discrete timers). To prevent pathological posterior certainty under covariance misestimation, implementations MUST use a robust likelihood with a single scalar precision factor κ.
 
 $$
-\Delta \mid \delta \sim \mathcal{N}(\delta, \Sigma_n)
+\Delta \mid \delta, \kappa \sim \mathcal{N}\!\left(\delta, \frac{\Sigma_n}{\kappa}\right)
 $$
 
-where Σ_n = Σ_rate / n is the scaled covariance. This is the minimal mean-structure assumption: the covariance is estimated; the mean is unconstrained.
+$$
+\kappa \sim \text{Gamma}\!\left(\frac{\nu_\ell}{2}, \frac{\nu_\ell}{2}\right)
+$$
+
+Marginally, this gives a multivariate t-distribution:
+
+$$
+\Delta \mid \delta \sim t_{\nu_\ell}(\delta, \Sigma_n)
+$$
+
+where Σ_n = Σ_rate / n_eff is the scaled covariance (see §3.3.2 for n_eff definition).
+
+**Gamma parameterization:** shape–rate. E[κ] = 1.
+
+**Degrees of freedom for likelihood (ν_ℓ) — normative default:**
+
+Implementations MUST use ν_ℓ := 8 unless overridden by a calibration-driven conservatism escalation policy (§3.8).
+
+**Rationale:** When Σₙ is underestimated (common when dependence is worse than calibration captured), κ is pulled downward and inflates uncertainty automatically, preventing pathological certainty (P(leak) → 0 or 1) from artifacts.
 
 #### 3.4.3 Prior (Student's *t* via scale mixture)
 
@@ -897,46 +942,46 @@ The Student's *t* prior makes the effective scale λ continuous. The posterior o
 
 #### 3.4.4 Posterior Inference (Deterministic Gibbs Sampling)
 
-Because the prior is Student's *t*, the marginal posterior p(δ | Δ) is not available in closed form. Implementations MUST approximate the posterior using a **deterministic Gibbs sampler** over (δ, λ).
+Because the prior is Student's *t* and the likelihood uses a robust t-distribution (§3.4.2), the marginal posterior p(δ | Δ) is not available in closed form. Implementations MUST approximate the posterior using a **deterministic Gibbs sampler** over (δ, λ, κ).
 
 **Gibbs conditionals:**
 
-**Conditional 1: δ | λ, Δ (Gaussian)**
+**Conditional 1: δ | λ, κ, Δ (Gaussian)**
 
-Given λ, the prior covariance is:
+Given λ (prior precision multiplier) and κ (likelihood precision multiplier), the prior covariance is:
 
 $$
 \Lambda_0(\lambda) = \frac{\sigma^2}{\lambda} R
 $$
 
-The posterior is conjugate Gaussian:
+The effective likelihood covariance is Σₙ/κ. The posterior is conjugate Gaussian:
 
 $$
-\delta \mid \lambda, \Delta \sim \mathcal{N}(\mu(\lambda), \Lambda(\lambda))
+\delta \mid \lambda, \kappa, \Delta \sim \mathcal{N}(\mu(\lambda, \kappa), \Lambda(\lambda, \kappa))
 $$
 
 where:
 
 $$
-\Lambda(\lambda) = \left(\Sigma_n^{-1} + \Lambda_0(\lambda)^{-1}\right)^{-1} = \left(\Sigma_n^{-1} + \frac{\lambda}{\sigma^2} R^{-1}\right)^{-1}
+\Lambda(\lambda, \kappa) = \left(\kappa \Sigma_n^{-1} + \Lambda_0(\lambda)^{-1}\right)^{-1} = \left(\kappa \Sigma_n^{-1} + \frac{\lambda}{\sigma^2} R^{-1}\right)^{-1}
 $$
 
 $$
-\mu(\lambda) = \Lambda(\lambda) \Sigma_n^{-1} \Delta
+\mu(\lambda, \kappa) = \Lambda(\lambda, \kappa) \cdot \kappa \Sigma_n^{-1} \Delta
 $$
 
 **Sampling without explicit inverses — normative:**
 
-Let Q(λ) := Σₙ⁻¹ + (λ/σ²)R⁻¹. Note that Σₙ⁻¹ and R⁻¹ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
+Let Q(λ, κ) := κΣₙ⁻¹ + (λ/σ²)R⁻¹. Note that Σₙ⁻¹ and R⁻¹ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
 
 $$
-L L^\top = Q(\lambda)
+L L^\top = Q(\lambda, \kappa)
 $$
 
 The posterior mean is computed by solving:
 
 $$
-Q(\lambda) \mu(\lambda) = \Sigma_n^{-1} \Delta
+Q(\lambda, \kappa) \mu(\lambda, \kappa) = \kappa \Sigma_n^{-1} \Delta
 $$
 
 via forward-backward substitution (two triangular solves).
@@ -944,7 +989,7 @@ via forward-backward substitution (two triangular solves).
 To sample δ:
 
 $$
-\delta = \mu(\lambda) + L^{-\top} z, \quad z \sim \mathcal{N}(0, I_9)
+\delta = \mu(\lambda, \kappa) + L^{-\top} z, \quad z \sim \mathcal{N}(0, I_9)
 $$
 
 where L⁻ᵀz MUST be computed via a single triangular solve (backward substitution), not by forming L⁻¹.
@@ -965,6 +1010,26 @@ $$
 
 **Derivation:** Combining the Gamma(ν/2, ν/2) prior on λ with the Gaussian likelihood contribution exp(−(λ/2σ²)δᵀR⁻¹δ) yields a Gamma posterior with shape increased by d/2 and rate increased by q/(2σ²).
 
+**Conditional 3: κ | δ, Δ (Gamma) — normative**
+
+The likelihood precision multiplier κ is sampled conditional on δ and Δ. Let d = 9 and define the Mahalanobis residual:
+
+$$
+s := (\Delta - \delta)^\top \Sigma_n^{-1} (\Delta - \delta)
+$$
+
+The conditional posterior is:
+
+$$
+\kappa \mid \delta, \Delta \sim \text{Gamma}\left(\text{shape} = \frac{\nu_\ell + d}{2}, \; \text{rate} = \frac{\nu_\ell + s}{2}\right)
+$$
+
+where ν_ℓ = 8 is the likelihood degrees of freedom (see §3.4.2).
+
+**Derivation:** Combining the Gamma(ν_ℓ/2, ν_ℓ/2) prior on κ with the Gaussian likelihood contribution exp(−(κ/2)(Δ−δ)ᵀΣₙ⁻¹(Δ−δ)) yields a Gamma posterior with shape increased by d/2 and rate increased by s/2.
+
+**Interpretation:** When the observed residual s is large relative to expectations under Σₙ (indicating potential covariance misestimation), κ is pulled below 1, effectively inflating the likelihood covariance and preventing false certainty.
+
 **Gibbs schedule — normative:**
 
 Implementations MUST use the following deterministic schedule:
@@ -980,18 +1045,19 @@ Implementations MUST use the following deterministic schedule:
 The Gibbs sampler MUST be initialized at:
 
 $$
-\lambda^{(0)} = 1
+\lambda^{(0)} = 1, \quad \kappa^{(0)} = 1
 $$
 
-**Rationale:** Under the Gamma(ν/2, ν/2) prior, E[λ] = 1. Starting at the prior mean provides a neutral initialization.
+**Rationale:** Under the Gamma priors, E[λ] = E[κ] = 1. Starting at the prior means provides a neutral initialization.
 
 **Iteration order:**
 
 For t = 1, ..., N_gibbs:
-1. Sample δ^(t) ~ p(δ | λ^(t-1), Δ)
+1. Sample δ^(t) ~ p(δ | λ^(t-1), κ^(t-1), Δ)
 2. Sample λ^(t) ~ p(λ | δ^(t))
+3. Sample κ^(t) ~ p(κ | δ^(t), Δ)
 
-Retain {(δ^(t), λ^(t))}_{t=N_burn+1}^{N_gibbs}.
+Retain {(δ^(t), λ^(t), κ^(t))}_{t=N_burn+1}^{N_gibbs}.
 
 **RNG seeding:**
 
@@ -1026,9 +1092,28 @@ where ρ̂_k is the lag-k autocorrelation of the λ chain, summed until ρ̂_k <
 
 When `lambda_mixing_ok = false`, implementations SHOULD emit a quality issue with code `LambdaMixingPoor` and guidance suggesting the user increase Gibbs iterations (if configurable) or noting that the posterior may be unreliable.
 
+**κ mixing diagnostics — normative:**
+
+Implementations SHOULD compute κ mixing diagnostics and SHOULD set `kappa_mixing_ok = false` when either:
+
+1. **Low coefficient of variation:** kappa_cv < 0.1, indicating κ barely moved from initialization
+2. **Low effective sample size:** kappa_ess < 20, indicating high autocorrelation
+
+ESS computation follows the same formula as for λ.
+
+**Likelihood inflation warning:**
+
+Implementations SHOULD emit `QualityIssue::LikelihoodInflated` (non-blocking) when:
+
+- `kappa_mean < 0.3`
+
+This indicates that the run appears inconsistent with the estimated Σₙ and that uncertainty was inflated for robustness. The guidance SHOULD note that the likelihood covariance was effectively scaled up by ~1/κ_mean to maintain calibration.
+
+When `kappa_mixing_ok = false`, implementations SHOULD emit a quality issue with code `KappaMixingPoor`.
+
 **Verdict-blocking status:**
 
-This diagnostic MUST NOT be verdict-blocking. Poor λ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
+These diagnostics MUST NOT be verdict-blocking. Poor λ or κ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
 
 #### 3.4.5 Decision Functional and Leak Probability
 
@@ -1149,11 +1234,11 @@ Bayesian methods don't have this problem. The posterior probability is valid reg
 
 Quality gates detect when data is too poor to reach a confident decision. When any gate triggers, the outcome MUST be Inconclusive.
 
-**Gate 1: Posterior ≈ Prior (Data Too Noisy)**
+**Gate 1: Low Information Gain (Posterior ≈ Prior) — verdict-blocking**
 
-If measurement uncertainty is high, the posterior barely moves from the prior.
+Gate 1 MUST trigger Inconclusive when the data provides insufficient information relative to the prior. Implementations MUST compute the KL divergence between Gaussian surrogates of the prior and posterior.
 
-**Prior covariance reference:**
+**Prior surrogate (Gaussian):**
 
 Under the Student's *t* prior with ν = 4, the marginal prior covariance is:
 
@@ -1161,34 +1246,47 @@ $$
 \Lambda_0^{\text{marginal}} := \text{Cov}(\delta) = 2\sigma^2 R
 $$
 
-**Posterior covariance estimate:**
+The prior surrogate is N(0, Λ₀^marginal).
 
-Estimate Λ_post from the Gibbs samples:
+**Posterior surrogate (Gaussian):**
+
+Estimate μ_post and Λ_post from the Gibbs samples:
+
+$$
+\mu_{\text{post}} = \delta_{\text{post}} = \frac{1}{N_{\text{keep}}} \sum_s \delta^{(s)}
+$$
 
 $$
 \Lambda_{\text{post}} \approx \frac{1}{N_{\text{keep}}-1} \sum_s (\delta^{(s)} - \delta_{\text{post}})(\delta^{(s)} - \delta_{\text{post}})^\top
 $$
 
-**Log-det ratio computation — normative:**
+The posterior surrogate is N(μ_post, Λ_post).
 
-Implementations MUST use a deterministic computation pathway:
+**KL divergence computation — normative:**
 
-1. Attempt Cholesky factorization of Λ_post
-2. **If Cholesky succeeds:** Compute log-det from the Cholesky diagonal:
-   $$\log|\Lambda_{\text{post}}| = 2 \sum_i \log(L_{ii})$$
-   Then compute:
-   $$\rho := \log \frac{|\Lambda_{\text{post}}|}{|\Lambda_0^{\text{marginal}}|}$$
-3. **If Cholesky fails:** Fall back to the trace ratio:
-   $$\rho_{\text{trace}} := \frac{\text{tr}(\Lambda_{\text{post}})}{\text{tr}(\Lambda_0^{\text{marginal}})}$$
-   Trigger gate if ρ_trace > 0.5.
+The KL divergence from the prior surrogate to the posterior surrogate is:
 
-If ρ > log(0.5) (equivalently, |Λ_post|/|Λ₀^marginal| > 0.5), trigger Inconclusive with reason `DataTooNoisy`.
+$$
+\mathrm{KL} = \frac{1}{2}\left(
+\mathrm{tr}\left((\Lambda_0^{\text{marginal}})^{-1}\Lambda_{\text{post}}\right)
++ \mu_{\text{post}}^\top(\Lambda_0^{\text{marginal}})^{-1}\mu_{\text{post}}
+- d + \ln\frac{|\Lambda_0^{\text{marginal}}|}{|\Lambda_{\text{post}}|}
+\right)
+$$
 
-**Rationale for deterministic fallback:** With 192 Gibbs samples in 9D, Λ_post can be borderline SPD in unlucky cases. The explicit fallback ensures consistent behavior across platforms.
+where d = 9.
 
-**Exception for decisive probabilities**: If P(leak) > 0.995 or P(leak) < 0.005, AND the projection mismatch Q < 1000 × Q_thresh, implementations MAY bypass this gate and allow a verdict. This handles slow operations (e.g., modular exponentiation) or unusual timing patterns (e.g., branch-dependent timing) where high autocorrelation limits effective sample size, but the effect is so large that the verdict is unambiguous.
+Implementations MUST compute KL deterministically using Cholesky solves (no explicit inverses). If Λ_post is not SPD, implementations MUST apply a deterministic diagonal jitter ladder (starting at 10⁻¹⁰, increasing by factors of 10) until Cholesky succeeds; if still failing after jitter reaches 10⁻⁴, implementations MUST fall back to a diagonal approximation (conservative).
 
-Moderate Q values (e.g., Q ~ 100–1000) can occur with real timing leaks that have unusual patterns. The Q check filters only truly pathological cases: astronomical Q values (e.g., Q > 10000 × Q_thresh) indicate measurement artifacts rather than genuine timing differences. Such cases MUST still return Inconclusive.
+**Trigger condition (normative default):**
+
+Trigger gate when KL < KL_min where KL_min := 0.7 nats.
+
+When triggered, return Inconclusive with reason `DataTooNoisy`.
+
+**Rationale:** KL correctly accounts for both mean shift (information learned about the location of δ) and covariance contraction (information learned about uncertainty). Unlike a pure log-det ratio, KL captures cases where the posterior mean moved significantly even if covariance contracted only modestly.
+
+Implementations SHOULD validate KL_min via the null calibration tests (§3.8) and MAY apply deterministic escalation if FPR_gated exceeds targets.
 
 **Gate 2: Learning Rate Collapsed**
 
@@ -1618,16 +1716,20 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | q̂_F(k), q̂_R(k) | Empirical quantiles for Fixed and Random classes |
 | X | 9 × 2 projection basis [**1** ∣ **b**_tail] |
 | β_proj | 2D projection: (μ, τ)ᵀ |
-| Σ_n | Covariance matrix at sample size n |
-| Σ_rate | Covariance rate: Σ_n = Σ_rate / n |
+| Σ_n | Covariance matrix at sample size n: Σ_n = Σ_rate / n_eff |
+| Σ_rate | Covariance rate |
+| n_eff | Effective sample size: n_eff = floor(n / b̂) |
 | R | Prior correlation matrix: Corr(Σ_rate) |
 | ν | Student's *t* degrees of freedom (fixed at 4) |
 | σ | Student's *t* prior scale (calibrated via exceedance target) |
-| λ | Latent precision multiplier in scale-mixture representation |
+| λ | Latent prior precision multiplier in scale-mixture representation |
+| κ | Latent likelihood precision multiplier (robust t-likelihood) |
+| ν_ℓ | Likelihood degrees of freedom (fixed at 8) |
 | t_ν(0, Σ) | Multivariate Student's *t* with ν df, location 0, scale matrix Σ |
 | Λ₀^marginal | Marginal prior covariance: (ν/(ν−2))σ²R = 2σ²R for ν=4 |
 | Λ_post | Posterior covariance of δ (estimated from Gibbs samples) |
-| Q(λ) | Precision matrix in Gibbs: Σₙ⁻¹ + (λ/σ²)R⁻¹ |
+| Q(λ, κ) | Precision matrix in Gibbs: κΣₙ⁻¹ + (λ/σ²)R⁻¹ |
+| s | Mahalanobis residual for κ conditional: (Δ−δ)ᵀΣₙ⁻¹(Δ−δ) |
 | δ_post | Posterior mean of δ (from Gibbs samples) |
 | L_R | Cholesky factor of R (L_R L_Rᵀ = R) |
 | N_gibbs | Total Gibbs iterations |
@@ -1636,7 +1738,7 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | C | AR(1) correlation matrix in test cases (C_ij = ρ^{\|i−j\|}) |
 | θ_user | User-requested threshold |
 | θ_floor | Measurement floor (smallest resolvable effect) |
-| c_floor | Floor-rate constant: θ_floor,stat = c_floor / √n |
+| c_floor | Floor-rate constant: θ_floor,stat = c_floor / √n_eff |
 | θ_tick | Timer resolution component of floor |
 | θ_eff | Effective threshold used for inference |
 | m(δ) | Decision functional: max_k \|δ_k\| |
@@ -1646,10 +1748,12 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | MDE | Minimum detectable effect |
 | n | Samples per class |
 | B | Bootstrap iterations |
-| ESS | Effective sample size |
+| ESS | Effective sample size (Gibbs chain) |
 | SE_k | Standard error of k-th quantile difference |
 | SE_med | Median of SE_k over k ∈ {1,...,9} |
 | λ_shrink | Shrinkage parameter for correlation matrix regularization |
+| KL | KL divergence: KL(posterior ∥ prior) for Gate 1 |
+| KL_min | Minimum KL threshold for conclusive verdict (default 0.7 nats) |
 
 ---
 
@@ -1666,7 +1770,8 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Gibbs iterations (N_gibbs) | 256 | MUST | Sufficient mixing for 10D |
 | Gibbs burn-in (N_burn) | 64 | MUST | Conservative |
 | Gibbs retained (N_keep) | 192 | MUST | MC variance control |
-| Gibbs initialization (λ⁽⁰⁾) | 1 | MUST | Prior mean |
+| Gibbs initialization (λ⁽⁰⁾, κ⁽⁰⁾) | 1 | MUST | Prior means |
+| Likelihood df (ν_ℓ) | 8 | MUST | Robustness to Σₙ misestimation |
 | Prior exceedance target (π₀) | 0.62 | SHOULD | Genuine uncertainty |
 | Prior calibration MC draws | 50,000 | SHOULD | Stable σ calibration |
 | σ search lower bound | 0.05 · θ_eff | MUST | Prevent degenerate narrow prior |
@@ -1677,7 +1782,7 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Calibration samples | 5,000 | SHOULD | Initial covariance estimation |
 | Pass threshold | 0.05 | SHOULD | 95% confidence of no leak |
 | Fail threshold | 0.95 | SHOULD | 95% confidence of leak |
-| Variance ratio gate | 0.5 | SHOULD | Posterior ≈ prior detection |
+| KL_min (nats) | 0.7 | MUST | Minimum information gain for conclusive verdict |
 | Projection mismatch percentile | 99th | SHOULD | Q_proj_thresh from bootstrap |
 | Block length cap | min(3√T, T/3) | SHOULD | Prevent degenerate blocks |
 | Discrete threshold | 10% unique | SHOULD | Trigger discrete mode |
@@ -1692,6 +1797,9 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Condition number threshold | 10⁴ | SHOULD | Trigger robust shrinkage |
 | λ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
 | λ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
+| κ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
+| κ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
+| Likelihood inflation threshold | 0.3 | SHOULD | κ_mean triggering LikelihoodInflated |
 
 ---
 
@@ -1733,6 +1841,45 @@ These constants define conformant implementations. Implementations MAY use diffe
 ---
 
 ## Appendix D: Changelog
+
+### v5.6 (from v5.5)
+
+**Robust t-likelihood with κ (§3.4.2, §3.4.4):**
+
+- **Added:** Robust t-likelihood via scale mixture: Δ | δ, κ ~ N(δ, Σₙ/κ) with κ ~ Gamma(ν_ℓ/2, ν_ℓ/2)
+- **Added:** Likelihood degrees of freedom ν_ℓ = 8 (normative default)
+- **Added:** κ conditional in Gibbs sampler (Conditional 3)
+- **Added:** Gibbs now samples over (δ, λ, κ) instead of (δ, λ)
+- **Changed:** Q(λ) → Q(λ, κ) = κΣₙ⁻¹ + (λ/σ²)R⁻¹
+- **Rationale:** When Σₙ is underestimated (common under high dependence, interference, discrete timers), κ is pulled below 1, automatically inflating uncertainty and preventing pathological posterior certainty.
+
+**Effective sample size (n_eff) for Σ scaling (§3.3.2, §3.3.4):**
+
+- **Added:** n_eff := max(1, floor(n / b̂)) where b̂ is the block length
+- **Changed:** Σₙ = Σ_rate / n_eff (was Σ_rate / n)
+- **Changed:** θ_floor,stat = c_floor / √n_eff (was c_floor / √n)
+- **Rationale:** Under strong dependence, n samples do not provide n independent observations. Using n_eff honestly reflects achievable precision and prevents anti-conservative variance scaling.
+
+**KL-based Gate 1 (§3.5.2):**
+
+- **Changed:** Gate 1 now uses KL divergence between Gaussian surrogates instead of log-det ratio
+- **Removed:** "Exception for decisive probabilities" bypass (was allowing verdicts when P > 0.995 or P < 0.005)
+- **Added:** KL_min = 0.7 nats as normative threshold for minimum information gain
+- **Rationale:** KL correctly accounts for both mean shift and covariance contraction. With κ in the likelihood, "decisive but suspicious" cases should no longer occur, eliminating the need for the bypass.
+
+**κ diagnostics (§2.8, §3.4.4):**
+
+- **Added:** kappa_mean, kappa_sd, kappa_cv, kappa_ess, kappa_mixing_ok to Diagnostics
+- **Added:** KappaMixingPoor, LikelihoodInflated issue codes
+- **Added:** LikelihoodInflated warning when kappa_mean < 0.3
+- **Rationale:** Users should see why P(leak) isn't decisive when κ inflates uncertainty.
+
+**Notation updates (Appendix A, B):**
+
+- **Added:** κ, ν_ℓ, n_eff, s, KL, KL_min to notation table
+- **Changed:** Q(λ) → Q(λ, κ) in notation
+- **Added:** κ-related constants to Appendix B
+- **Replaced:** Variance ratio gate (0.5) with KL_min (0.7 nats)
 
 ### v5.5 (from v5.4)
 

@@ -96,20 +96,41 @@ unsafe extern "C" fn early_exit_operation(_ctx: *mut c_void, input: *const u8, i
 
 /// Branch-based timing (LEAKY - should fail)
 /// Repeated ITERATIONS times to ensure measurable timing on coarse timers.
+///
+/// Note: Simple conditionals like `if x { a } else { b }` get optimized to
+/// constant-time CSEL instructions on ARM64. To create an actual timing leak,
+/// we need asymmetric work that can't be converted to conditional select.
 unsafe extern "C" fn branch_operation(_ctx: *mut c_void, input: *const u8, input_size: usize) {
     let data = std::slice::from_raw_parts(input, input_size);
     for _ in 0..ITERATIONS {
         let mut sum = 0u64;
         for &byte in data {
-            // Data-dependent branch - this is a timing leak!
+            // Data-dependent branch with asymmetric work - this is a timing leak!
+            // The heavy path does extra computation that can't be optimized away.
             if byte > 127 {
-                sum += byte as u64;
+                // Heavy path: do extra work that prevents CSEL optimization
+                sum = sum.wrapping_add(do_heavy_work(byte));
             } else {
-                sum += 1;
+                // Light path: minimal work
+                sum = sum.wrapping_add(1);
             }
         }
         std::hint::black_box(sum);
     }
+}
+
+/// Heavy work function that can't be inlined or optimized to constant-time.
+/// Does multiple dependent operations to create measurable timing difference.
+#[inline(never)]
+fn do_heavy_work(byte: u8) -> u64 {
+    let mut result = byte as u64;
+    // Multiple dependent operations that can't be parallelized or optimized away
+    for _ in 0..10 {
+        result = result.wrapping_mul(result).wrapping_add(1);
+        result = result.rotate_left(7);
+        std::hint::black_box(result);
+    }
+    result
 }
 
 /// No-op operation (very fast, likely unmeasurable)
