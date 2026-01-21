@@ -121,6 +121,45 @@ pub struct Config {
     /// Default: Auto.
     pub iterations_per_sample: IterationsPerSample,
 
+    /// Pin the measurement thread to its current CPU core.
+    ///
+    /// Reduces timing noise from thread migration between cores, which can
+    /// cause cache invalidation and expose different core frequencies.
+    /// Enabled by default.
+    ///
+    /// - **Linux**: Enforced via `sched_setaffinity` (no privileges needed)
+    /// - **macOS**: Advisory hint via `thread_policy_set` (kernel may ignore)
+    ///
+    /// Set to `false` if CPU pinning causes issues on your system.
+    ///
+    /// Default: true.
+    pub cpu_affinity: bool,
+
+    /// Elevate thread priority during measurement.
+    ///
+    /// Attempts to reduce preemption by other processes by raising the
+    /// measurement thread's priority. This is best-effort and fails silently
+    /// if privileges are insufficient.
+    ///
+    /// - **Linux**: Lowers nice value and sets `SCHED_BATCH` policy
+    /// - **macOS**: Lowers nice value and sets thread precedence hint
+    ///
+    /// Set to `false` if priority elevation causes issues on your system.
+    ///
+    /// Default: true.
+    pub thread_priority: bool,
+
+    /// Duration of frequency stabilization spin-wait in milliseconds.
+    ///
+    /// Before measurement begins, a brief busy-wait loop runs to let the CPU
+    /// frequency ramp up and stabilize. Many CPUs start in low-power mode and
+    /// take several milliseconds to reach their turbo/boost frequency.
+    ///
+    /// Set to `0` to disable frequency stabilization.
+    ///
+    /// Default: 5 ms.
+    pub frequency_stabilization_ms: u64,
+
     // =========================================================================
     // Bayesian inference configuration
     // =========================================================================
@@ -207,6 +246,9 @@ impl Default for Config {
             warmup: 1_000,
             outlier_percentile: 0.9999,
             iterations_per_sample: IterationsPerSample::Auto,
+            cpu_affinity: true,
+            thread_priority: true,
+            frequency_stabilization_ms: 5,
 
             // Bayesian inference
             prior_no_leak: 0.75,
@@ -385,6 +427,41 @@ impl Config {
     /// Set the iterations per sample.
     pub fn iterations_per_sample(mut self, iterations: IterationsPerSample) -> Self {
         self.iterations_per_sample = iterations;
+        self
+    }
+
+    /// Enable or disable CPU affinity pinning.
+    ///
+    /// When enabled (default), the measurement thread is pinned to its
+    /// current CPU to reduce noise from thread migration.
+    ///
+    /// - **Linux**: Enforced via `sched_setaffinity`
+    /// - **macOS**: Advisory hint via `thread_policy_set`
+    pub fn cpu_affinity(mut self, enabled: bool) -> Self {
+        self.cpu_affinity = enabled;
+        self
+    }
+
+    /// Enable or disable thread priority elevation.
+    ///
+    /// When enabled (default), attempts to raise thread priority to reduce
+    /// preemption during measurement. Fails silently if insufficient privileges.
+    ///
+    /// - **Linux**: Lowers nice value, sets `SCHED_BATCH`
+    /// - **macOS**: Lowers nice value, sets thread precedence hint
+    pub fn thread_priority(mut self, enabled: bool) -> Self {
+        self.thread_priority = enabled;
+        self
+    }
+
+    /// Set the frequency stabilization duration in milliseconds.
+    ///
+    /// A brief spin-wait loop runs before measurement to let the CPU
+    /// frequency ramp up and stabilize. Set to 0 to disable.
+    ///
+    /// Default: 5 ms.
+    pub fn frequency_stabilization_ms(mut self, ms: u64) -> Self {
+        self.frequency_stabilization_ms = ms;
         self
     }
 

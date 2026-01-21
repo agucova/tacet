@@ -1,28 +1,17 @@
 [package]
 name = "timing-oracle-c"
 version = "0.1.0"
-edition = "2021"
-description = "C/C++ FFI wrapper for timing-oracle"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/timing-oracle/timing-oracle"
-documentation = "https://docs.rs/timing-oracle-c"
-readme = "README.md"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "C bindings for timing-oracle with support for C measurement loops"
 
 [lib]
-# rlib is needed for integration tests to import the crate
-crate-type = ["staticlib", "cdylib", "rlib"]
+crate-type = ["staticlib", "cdylib"]
 
 [dependencies]
-timing-oracle-core = { path = "../timing-oracle-core", default-features = false }
-libc = { version = "0.2", default-features = false }
-libm = "0.2"
+timing-oracle-core = { path = "../timing-oracle-core" }
 
 [build-dependencies]
-cc = "1.0"
-
-[features]
-default = ["std"]
-std = ["timing-oracle-core/std", "libc/std"]
-
-[dev-dependencies]
-rand = "0.8"
+cbindgen = "0.29"

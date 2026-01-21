@@ -4,7 +4,7 @@
 // for timing side channels.
 //
 // Build the Rust library first:
-//   cargo build -p timing-oracle-go --release
+//   cargo build -p timing-oracle-uniffi --release
 //
 // Then run this example:
 //   go run ./examples/simple

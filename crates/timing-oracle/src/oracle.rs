@@ -388,6 +388,78 @@ impl TimingOracle {
         self
     }
 
+    /// Enable or disable CPU affinity pinning.
+    ///
+    /// When enabled (default), the measurement thread is pinned to its
+    /// current CPU to reduce noise from thread migration between cores.
+    ///
+    /// - **Linux**: Enforced via `sched_setaffinity` (no privileges needed)
+    /// - **macOS**: Advisory hint via `thread_policy_set` (kernel may ignore)
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel};
+    ///
+    /// // Disable CPU affinity if it causes issues
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    ///     .cpu_affinity(false)
+    ///     .test(inputs, |data| operation(data));
+    /// ```
+    pub fn cpu_affinity(mut self, enabled: bool) -> Self {
+        self.config.cpu_affinity = enabled;
+        self
+    }
+
+    /// Enable or disable thread priority elevation.
+    ///
+    /// When enabled (default), attempts to raise thread priority to reduce
+    /// preemption during measurement. This is best-effort and fails silently
+    /// if privileges are insufficient.
+    ///
+    /// - **Linux**: Lowers nice value and sets `SCHED_BATCH` policy
+    /// - **macOS**: Lowers nice value and sets thread precedence hint
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel};
+    ///
+    /// // Disable priority elevation if it causes issues
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    ///     .thread_priority(false)
+    ///     .test(inputs, |data| operation(data));
+    /// ```
+    pub fn thread_priority(mut self, enabled: bool) -> Self {
+        self.config.thread_priority = enabled;
+        self
+    }
+
+    /// Set the frequency stabilization duration in milliseconds.
+    ///
+    /// Before measurement begins, a brief spin-wait loop runs to let the CPU
+    /// frequency ramp up and stabilize. Many CPUs start in low-power mode and
+    /// take several milliseconds to reach their turbo/boost frequency.
+    ///
+    /// Set to `0` to disable frequency stabilization.
+    ///
+    /// Default: 5 ms.
+    ///
+    /// # Example
+    ///
+    /// ```ignore
+    /// use timing_oracle::{TimingOracle, AttackerModel};
+    ///
+    /// // Increase stabilization time for laptops with aggressive power management
+    /// let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    ///     .frequency_stabilization_ms(10)
+    ///     .test(inputs, |data| operation(data));
+    /// ```
+    pub fn frequency_stabilization_ms(mut self, ms: u64) -> Self {
+        self.config.frequency_stabilization_ms = ms;
+        self
+    }
+
     /// Get the current configuration.
     pub fn config(&self) -> &Config {
         &self.config
@@ -495,6 +567,51 @@ impl TimingOracle {
         F: FnMut(&T),
     {
         let start_time = Instant::now();
+
+        // Pin to current CPU to reduce migration noise (RAII - auto-restores on drop)
+        let _affinity_guard = if self.config.cpu_affinity {
+            match crate::measurement::affinity::AffinityGuard::try_pin() {
+                crate::measurement::affinity::AffinityResult::Pinned(guard) => Some(guard),
+                crate::measurement::affinity::AffinityResult::NotPinned { reason } => {
+                    tracing::debug!("CPU affinity not available: {}", reason);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Elevate thread priority to reduce preemption (RAII - auto-restores on drop)
+        let _priority_guard = if self.config.thread_priority {
+            match crate::measurement::priority::PriorityGuard::try_elevate() {
+                crate::measurement::priority::PriorityResult::Elevated(guard) => Some(guard),
+                crate::measurement::priority::PriorityResult::NotElevated { reason } => {
+                    tracing::debug!("Thread priority elevation not available: {}", reason);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Frequency stabilization: spin-wait to let CPU ramp up to stable frequency
+        if self.config.frequency_stabilization_ms > 0 {
+            let stabilization_duration =
+                Duration::from_millis(self.config.frequency_stabilization_ms);
+            let stabilization_start = Instant::now();
+            let mut counter = 0u64;
+            while stabilization_start.elapsed() < stabilization_duration {
+                // Busy-wait with minimal work to keep CPU active
+                counter = counter.wrapping_add(1);
+                std::hint::black_box(counter);
+            }
+            tracing::debug!(
+                "Frequency stabilization complete ({} ms, {} iterations)",
+                self.config.frequency_stabilization_ms,
+                counter
+            );
+        }
+
         let mut rng: rand::rngs::StdRng = if let Some(seed) = self.config.measurement_seed {
             SeedableRng::seed_from_u64(seed)
         } else {

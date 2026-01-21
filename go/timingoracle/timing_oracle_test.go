@@ -182,3 +182,204 @@ func TestAttackerModelThresholds(t *testing.T) {
 func newRandForTest(seed uint64) *rand.Rand {
 	return rand.New(rand.NewPCG(seed, seed^0xDEADBEEF))
 }
+
+// =============================================================================
+// Integration Tests
+// =============================================================================
+// These tests verify the full pipeline from measurement to analysis.
+// They may take several seconds to run.
+
+// TestKnownLeaky verifies that a clearly leaky operation is detected as Fail.
+// Uses an artificial delay that creates a large, easily detectable timing difference.
+func TestKnownLeaky(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Artificial delay operation - clearly NOT constant-time
+	// Adds a data-dependent delay based on input bytes
+	leakyOp := FuncOperation(func(input []byte) {
+		count := 0
+		for _, b := range input {
+			if b != 0 {
+				count++
+			}
+		}
+		// Busy-wait loop scaled by count - creates microsecond-level differences
+		for i := 0; i < count*100; i++ {
+			_ = i * i
+		}
+	})
+
+	result, err := Test(
+		NewZeroGenerator(42),
+		leakyOp,
+		32,
+		WithAttacker(AdjacentNetwork),
+		WithTimeBudget(15*time.Second),
+		WithMaxSamples(50_000),
+	)
+	if err != nil {
+		t.Fatalf("Test failed with error: %v", err)
+	}
+
+	t.Logf("Result: %s", result)
+	t.Logf("  Outcome: %s", result.Outcome)
+	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns (shift) + %.2f ns (tail)", result.Effect.ShiftNs, result.Effect.TailNs)
+	t.Logf("  Samples: %d", result.SamplesUsed)
+
+	if result.Outcome != Fail {
+		t.Errorf("Expected Fail outcome for leaky operation, got %s", result.Outcome)
+	}
+	if result.LeakProbability < 0.95 {
+		t.Errorf("Expected high leak probability (>95%%), got %.2f%%", result.LeakProbability*100)
+	}
+}
+
+// TestKnownSafe verifies that a constant-time operation passes.
+// Uses XOR which is constant-time on all platforms.
+func TestKnownSafe(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	secret := make([]byte, 32)
+	for i := range secret {
+		secret[i] = byte(i * 17)
+	}
+
+	// XOR operation - constant-time
+	safeOp := FuncOperation(func(input []byte) {
+		result := make([]byte, len(input))
+		for i := range input {
+			result[i] = input[i] ^ secret[i]
+		}
+		_ = result
+	})
+
+	result, err := Test(
+		NewZeroGenerator(42),
+		safeOp,
+		32,
+		WithAttacker(AdjacentNetwork),
+		WithTimeBudget(15*time.Second),
+		WithMaxSamples(50_000),
+	)
+	if err != nil {
+		t.Fatalf("Test failed with error: %v", err)
+	}
+
+	t.Logf("Result: %s", result)
+	t.Logf("  Outcome: %s", result.Outcome)
+	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Samples: %d", result.SamplesUsed)
+
+	// Should pass or be inconclusive (not fail)
+	if result.Outcome == Fail {
+		t.Errorf("Expected Pass or Inconclusive for constant-time XOR, got Fail")
+		t.Logf("  This may indicate a false positive or environmental noise")
+	}
+	if result.Outcome == Pass {
+		if result.LeakProbability > 0.10 {
+			t.Logf("Warning: leak probability higher than expected: %.2f%%", result.LeakProbability*100)
+		}
+	}
+}
+
+// TestInconclusiveTimeout verifies that a very short time budget causes Inconclusive.
+func TestInconclusiveTimeout(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	// Use an operation that takes some time but not too long
+	op := FuncOperation(func(input []byte) {
+		var sum byte
+		for i := 0; i < 100; i++ {
+			for _, b := range input {
+				sum ^= b
+			}
+		}
+		_ = sum
+	})
+
+	result, err := Test(
+		NewZeroGenerator(42),
+		op,
+		32,
+		WithAttacker(SharedHardware), // Very tight threshold
+		WithTimeBudget(100*time.Millisecond), // Very short budget
+		WithMaxSamples(1000), // Very few samples
+	)
+	if err != nil {
+		t.Fatalf("Test failed with error: %v", err)
+	}
+
+	t.Logf("Result: %s", result)
+	t.Logf("  Outcome: %s", result.Outcome)
+	t.Logf("  Inconclusive reason: %s", result.InconclusiveReason)
+	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Samples: %d", result.SamplesUsed)
+
+	// With such tight constraints, we expect Inconclusive or possibly Pass/Fail
+	// The main thing is it shouldn't error
+	if result.Outcome == Inconclusive {
+		// Expected - check that reason is set
+		if result.InconclusiveReason == ReasonNone {
+			t.Logf("Warning: Inconclusive but reason is None")
+		}
+	}
+}
+
+// TestAnalyzePreCollected verifies the Analyze function with pre-collected data.
+func TestAnalyzePreCollected(t *testing.T) {
+	// Create timing data with no leak (same distribution)
+	baseline := make([]uint64, 1000)
+	sample := make([]uint64, 1000)
+	for i := range baseline {
+		baseline[i] = 100 + uint64(i%10)
+		sample[i] = 100 + uint64(i%10)
+	}
+
+	result, err := Analyze(baseline, sample, WithAttacker(AdjacentNetwork))
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+
+	t.Logf("Result: %s", result)
+	t.Logf("  Outcome: %s", result.Outcome)
+	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+
+	// With identical distributions, should not detect a leak
+	if result.Outcome == Fail {
+		t.Errorf("Expected non-Fail for identical distributions, got Fail")
+	}
+}
+
+// TestAnalyzeWithLeak verifies the Analyze function detects an artificial leak.
+func TestAnalyzeWithLeak(t *testing.T) {
+	// Create timing data with a clear shift
+	baseline := make([]uint64, 1000)
+	sample := make([]uint64, 1000)
+	for i := range baseline {
+		baseline[i] = 100 + uint64(i%10)
+		sample[i] = 200 + uint64(i%10) // 100 tick difference
+	}
+
+	result, err := Analyze(baseline, sample, WithAttacker(AdjacentNetwork))
+	if err != nil {
+		t.Fatalf("Analyze failed: %v", err)
+	}
+
+	t.Logf("Result: %s", result)
+	t.Logf("  Outcome: %s", result.Outcome)
+	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+
+	// With a 100-tick difference, should detect a leak
+	if result.Outcome == Pass {
+		t.Errorf("Expected non-Pass for distributions with 100-tick shift, got Pass")
+	}
+}

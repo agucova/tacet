@@ -213,26 +213,62 @@ pub fn system_check() -> Vec<SystemWarning> {
 }
 
 /// Check CPU frequency governor on Linux.
+///
+/// Tries multiple sysfs paths to handle different kernel configurations:
+/// - Standard per-CPU path: `/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor`
+/// - Policy-based path: `/sys/devices/system/cpu/cpufreq/policy0/scaling_governor`
+///
+/// On systems without cpufreq (common on ARM64 cloud instances where firmware
+/// handles frequency scaling), silently returns None.
 #[cfg(target_os = "linux")]
 fn check_cpu_governor_linux() -> Option<SystemWarning> {
-    let governor_path = "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor";
+    // Try multiple possible paths for the governor file
+    // Different kernel versions and configurations use different paths
+    let governor_paths = [
+        // Standard per-CPU path (most common)
+        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor",
+        // Policy-based path (some newer kernels, especially with intel_pstate)
+        "/sys/devices/system/cpu/cpufreq/policy0/scaling_governor",
+    ];
 
-    match std::fs::read_to_string(governor_path) {
-        Ok(governor) => {
-            let governor = governor.trim().to_lowercase();
-            if governor != "performance" {
-                Some(SystemWarning::CpuGovernorNotPerformance {
-                    current: governor,
-                    recommended: "performance".to_string(),
-                })
-            } else {
-                None
+    // Try each path in order
+    for path in &governor_paths {
+        match std::fs::read_to_string(path) {
+            Ok(governor) => {
+                let governor = governor.trim().to_lowercase();
+                if governor != "performance" {
+                    return Some(SystemWarning::CpuGovernorNotPerformance {
+                        current: governor,
+                        recommended: "performance".to_string(),
+                    });
+                } else {
+                    return None; // Governor is "performance", all good
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // Path doesn't exist, try next one
+                continue;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                // Permission denied - worth warning about
+                return Some(SystemWarning::CpuGovernorUnreadable {
+                    reason: format!("Permission denied reading {}", path),
+                });
+            }
+            Err(_) => {
+                // Other error, try next path
+                continue;
             }
         }
-        Err(e) => Some(SystemWarning::CpuGovernorUnreadable {
-            reason: e.to_string(),
-        }),
     }
+
+    // No paths worked - cpufreq likely not available on this system
+    // This is common on:
+    // - ARM64 cloud instances (AWS Graviton, Ampere, etc.) where firmware handles scaling
+    // - Virtual machines without cpufreq passthrough
+    // - Embedded systems without cpufreq support
+    // Silently skip - nothing actionable for the user
+    None
 }
 
 /// Placeholder for macOS power settings check.

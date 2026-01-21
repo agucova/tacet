@@ -3,7 +3,7 @@
 // This library uses Bayesian statistical analysis to detect timing side channels
 // in cryptographic and security-sensitive code. The measurement loop runs in pure
 // Go for minimal overhead, while the statistical analysis is performed by a Rust
-// library via CGo FFI.
+// library via UniFFI.
 //
 // # Usage
 //
@@ -44,16 +44,24 @@
 //
 // The library separates concerns for optimal performance:
 //   - Measurement loop: Pure Go with platform-specific assembly timers
-//   - Statistical analysis: Rust library via CGo (called only between batches)
+//   - Statistical analysis: Rust library via UniFFI (called only between batches)
 //
 // This design ensures no FFI overhead during timing-critical measurement.
 package timingoracle
 
 import (
+	"errors"
 	"math/rand/v2"
 	"time"
 
-	"github.com/agucova/timing-oracle/go/timingoracle/internal/ffi"
+	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
+)
+
+// Errors
+var (
+	ErrInvalidConfig     = errors.New("timingoracle: invalid configuration")
+	ErrCalibrationFailed = errors.New("timingoracle: calibration failed")
+	ErrInternalError     = errors.New("timingoracle: internal error")
 )
 
 // Test runs a timing side-channel analysis on the given operation.
@@ -100,16 +108,16 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 	)
 
 	// Phase 1b: Run calibration analysis (single FFI call)
-	ffiConfig := cfg.toFFI()
-	calibration, err := ffi.Calibrate(calBaseline, calSample, &ffiConfig)
+	uniffiConfig := cfg.toUniFFI()
+	calibration, err := uniffi.CalibrateSamples(calBaseline, calSample, uniffiConfig)
 	if err != nil {
 		return nil, ErrCalibrationFailed
 	}
-	defer calibration.Free()
+	defer calibration.Destroy()
 
 	// Phase 2: Adaptive loop
-	state := ffi.NewAdaptiveState()
-	defer state.Free()
+	state := uniffi.NewAdaptiveState()
+	defer state.Destroy()
 
 	startTime := time.Now()
 
@@ -121,7 +129,7 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 			return &Result{
 				Outcome:            Inconclusive,
 				InconclusiveReason: ReasonTimeBudgetExceeded,
-				SamplesUsed:        state.TotalBaseline(),
+				SamplesUsed:        int(state.TotalBaseline()),
 				ElapsedTime:        elapsed,
 				LeakProbability:    state.CurrentProbability(),
 			}, nil
@@ -134,24 +142,33 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 		)
 
 		// Run adaptive step (single FFI call)
-		ffiResult, decision, err := ffi.AdaptiveStep(
-			calibration, batchBaseline, batchSample,
-			&ffiConfig, elapsed.Seconds(), state,
+		stepResult, err := uniffi.AdaptiveStepBatch(
+			calibration,
+			state,
+			batchBaseline,
+			batchSample,
+			uniffiConfig,
+			elapsed.Seconds(),
 		)
 		if err != nil {
 			return nil, ErrInternalError
 		}
 
-		if decision {
-			return resultFromFFI(ffiResult), nil
+		// Check if we have a decision
+		switch v := stepResult.(type) {
+		case uniffi.AdaptiveStepResultContinue:
+			// Continue - no decision yet
+		case uniffi.AdaptiveStepResultDecision:
+			// Decision reached
+			return resultFromUniFFI(v.Result), nil
 		}
 
 		// Check sample budget
-		if state.TotalBaseline() >= cfg.maxSamples {
+		if state.TotalBaseline() >= uint64(cfg.maxSamples) {
 			return &Result{
 				Outcome:            Inconclusive,
 				InconclusiveReason: ReasonSampleBudgetExceeded,
-				SamplesUsed:        state.TotalBaseline(),
+				SamplesUsed:        int(state.TotalBaseline()),
 				ElapsedTime:        time.Since(startTime),
 				LeakProbability:    state.CurrentProbability(),
 			}, nil
@@ -175,18 +192,18 @@ func Analyze(baseline, sample []uint64, opts ...Option) (*Result, error) {
 		opt(cfg)
 	}
 
-	ffiConfig := cfg.toFFI()
-	ffiResult, err := ffi.Analyze(baseline, sample, &ffiConfig)
+	uniffiConfig := cfg.toUniFFI()
+	uniffiResult, err := uniffi.Analyze(baseline, sample, uniffiConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	return resultFromFFI(ffiResult), nil
+	return resultFromUniFFI(uniffiResult), nil
 }
 
 // Version returns the library version string.
 func Version() string {
-	return ffi.Version()
+	return uniffi.Version()
 }
 
 // TimerName returns the name of the platform timer being used.

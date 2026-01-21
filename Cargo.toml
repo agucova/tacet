@@ -4,8 +4,8 @@ members = [
     "crates/timing-oracle",
     "crates/timing-oracle-core",
     "crates/timing-oracle-macros",
+    "crates/timing-oracle-uniffi",
     "crates/timing-oracle-c",
-    "crates/timing-oracle-go",
     "crates/timing-oracle-bench",
 ]
 exclude = [

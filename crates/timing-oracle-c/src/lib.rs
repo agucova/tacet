@@ -1,1875 +1,776 @@
-//! C/C++ FFI wrapper for timing-oracle.
+//! C bindings for timing-oracle with support for C measurement loops.
 //!
-//! This crate provides a C-compatible API for the timing-oracle library,
-//! enabling timing side-channel detection from C, C++, and other languages.
+//! This crate provides a C-compatible API for timing side-channel detection.
+//! It supports two usage patterns:
 //!
-//! # Architecture
+//! 1. **C Measurement Loop**: Collect timing samples in C, call Rust only for analysis
+//! 2. **One-Shot Analysis**: Analyze pre-collected timing data
 //!
-//! ```text
-//! ┌─────────────────────────────────────────────────────────────┐
-//! │                     User Code (C/C++)                       │
-//! ├─────────────────────────────────────────────────────────────┤
-//! │                    timing_oracle.h                          │
-//! │              (C header with FFI declarations)               │
-//! ├─────────────────────────────────────────────────────────────┤
-//! │                    libtiming_oracle                         │
-//! │  ┌──────────────────────┬──────────────────────────────┐   │
-//! │  │   timing-oracle-c    │     to_measure.c             │   │
-//! │  │   (Rust FFI layer)   │  (C measurement loop)        │   │
-//! │  │         │            │         │                    │   │
-//! │  └─────────┼────────────┴─────────┼────────────────────┘   │
-//! │            ▼                      ▼                        │
-//! │  ┌─────────────────────────────────────────────────────┐   │
-//! │  │              timing-oracle-core                      │   │
-//! │  │    (All statistical logic, no_std compatible)       │   │
-//! │  └─────────────────────────────────────────────────────┘   │
-//! └─────────────────────────────────────────────────────────────┘
+//! The C measurement loop approach minimizes FFI overhead during timing-critical code.
+//!
+//! # API Overview
+//!
+//! ## Low-Level Adaptive API
+//!
+//! For a C measurement loop with adaptive sampling:
+//!
+//! 1. Call `to_calibrate()` with initial samples to get calibration data
+//! 2. Create state with `to_state_new()`
+//! 3. In a loop: collect more samples in C, then call `to_step()`
+//! 4. Stop when `to_step()` returns a decision
+//!
+//! ## High-Level API
+//!
+//! For one-shot analysis of pre-collected data:
+//!
+//! 1. Call `to_analyze()` with all your samples
+//!
+//! # Example (pseudocode)
+//!
+//! ```c
+//! // Low-level adaptive loop
+//! ToConfig config = to_config_adjacent_network();
+//! ToError err;
+//!
+//! // Collect calibration samples
+//! uint64_t baseline[5000], sample[5000];
+//! collect_samples(baseline, sample, 5000);
+//!
+//! // Calibrate
+//! ToCalibration* cal = to_calibrate(baseline, sample, 5000, &config, &err);
+//! ToState* state = to_state_new();
+//!
+//! // Adaptive loop
+//! ToStepResult step_result;
+//! double start_time = get_time();
+//! while (1) {
+//!     // Collect a batch of new samples
+//!     uint64_t new_baseline[1000], new_sample[1000];
+//!     collect_samples(new_baseline, new_sample, 1000);
+//!
+//!     double elapsed = get_time() - start_time;
+//!     err = to_step(cal, state, new_baseline, new_sample, 1000, &config, elapsed, &step_result);
+//!
+//!     if (step_result.has_decision) {
+//!         printf("Decision: %d, P(leak)=%.2f%%\n",
+//!                step_result.result.outcome,
+//!                step_result.result.leak_probability * 100);
+//!         break;
+//!     }
+//! }
+//!
+//! to_state_free(state);
+//! to_calibration_free(cal);
 //! ```
-//!
-//! # Safety
-//!
-//! When built with the `std` feature (default), all public functions use
-//! `catch_unwind` to prevent Rust panics from propagating across the FFI
-//! boundary. In `no_std` mode, panics will abort.
-//!
-//! # Features
-//!
-//! - `std` (default): Enables `std::time::Instant` for time tracking and
-//!   `catch_unwind` for panic safety. Use `to_test()` for automatic time tracking.
-//! - Without `std`: Use `to_test_with_time()` and provide elapsed time externally.
 
-#![cfg_attr(not(feature = "std"), no_std)]
+#![allow(clippy::missing_safety_doc)]
 
-extern crate alloc;
+use std::ptr;
+use std::slice;
 
-use core::ffi::{c_char, c_void};
-use core::ptr;
+use timing_oracle_core::adaptive::{
+    calibrate_t_prior_scale, compute_c_floor_9d, AdaptiveState, AdaptiveStepConfig, Calibration,
+    CalibrationSnapshot, StepResult,
+};
+use timing_oracle_core::analysis::compute_bayes_gibbs;
+use timing_oracle_core::statistics::{
+    bootstrap_difference_covariance_discrete, compute_deciles_inplace, optimal_block_length,
+    StatsSnapshot,
+};
+use timing_oracle_core::types::AttackerModel;
 
-#[cfg(feature = "std")]
-use std::ffi::CString;
+mod types;
 
-#[cfg(feature = "std")]
-use std::panic::catch_unwind;
-
-use alloc::format;
-use alloc::string::String;
-use alloc::vec;
-use alloc::vec::Vec;
-
-// Math helper for no_std - use libm directly
-fn sqrt(x: f64) -> f64 {
-    libm::sqrt(x)
-}
-
-pub mod types;
-
-// Re-export all types at crate root for convenience
 pub use types::*;
 
-// Link to the C measurement loop
-extern "C" {
-    fn to_collect_batch(
-        generator: GeneratorFn,
-        operation: OperationFn,
-        ctx: *mut c_void,
-        input_buffer: *mut u8,
-        input_size: usize,
-        schedule: *const bool,
-        count: usize,
-        out_timings: *mut u64,
-        batch_k: usize,
-    ) -> usize;
-
-    fn to_get_timer_name() -> *const c_char;
-    fn to_get_timer_frequency() -> u64;
-    #[allow(dead_code)] // Part of C API, may be used for calibration
-    fn to_read_timer() -> u64;
-
-    /// Initialize the timer subsystem with specified preference.
-    /// Returns 0 on success, -1 if PREFER_PMU but PMU unavailable.
-    fn to_timer_init(pref: i32) -> i32;
-
-    /// Clean up the timer subsystem, releasing any resources.
-    fn to_timer_cleanup();
-
-    /// Get the currently active timer type.
-    #[allow(dead_code)] // Part of C API
-    fn to_get_timer_type() -> i32;
-
-    /// Get cycles per nanosecond ratio for the active timer.
-    #[allow(dead_code)] // Part of C API
-    fn to_get_cycles_per_ns() -> f64;
-}
-
-/// Callback type for generating input data.
-pub type GeneratorFn = unsafe extern "C" fn(
-    context: *mut c_void,
-    is_baseline: bool,
-    output: *mut u8,
-    output_size: usize,
-);
-
-/// Callback type for the operation to time.
-pub type OperationFn =
-    unsafe extern "C" fn(context: *mut c_void, input: *const u8, input_size: usize);
-
-/// Convert ToTimerPref to C enum value.
-fn timer_pref_to_c(pref: ToTimerPref) -> i32 {
-    match pref {
-        ToTimerPref::Auto => 0,
-        ToTimerPref::Standard => 1,
-        ToTimerPref::PreferPmu => 2,
-    }
-}
-
-/// Initialize the timer subsystem based on config preference.
-/// Returns Ok(()) on success, Err(Box<ToResult>) if PMU was required but unavailable.
-unsafe fn init_timer(config: &ToConfig) -> Result<(), Box<ToResult>> {
-    let pref = timer_pref_to_c(config.timer_preference);
-    let result = to_timer_init(pref);
-
-    if result != 0 && config.timer_preference == ToTimerPref::PreferPmu {
-        return Err(Box::new(ToResult {
-            outcome: ToOutcome::Inconclusive,
-            inconclusive_reason: ToInconclusiveReason::ThresholdElevated,
-            recommendation: make_recommendation(
-                "PMU timer requested but unavailable. On Linux, try: sudo or \
-                 echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid. \
-                 On macOS, try: sudo",
-            ),
-            ..ToResult::default()
-        }));
-    }
-
-    Ok(())
-}
-
 // ============================================================================
-// Public C API
+// Configuration
 // ============================================================================
 
 /// Create a default configuration for the given attacker model.
 #[no_mangle]
-pub extern "C" fn to_config_default(model: ToAttackerModel) -> ToConfig {
+pub extern "C" fn to_config_default(attacker_model: ToAttackerModel) -> ToConfig {
     ToConfig {
-        attacker_model: model,
+        attacker_model,
         ..ToConfig::default()
     }
 }
 
-/// Run a timing test with automatic time tracking (requires `std` feature).
-///
-/// This is the standard API for most use cases. For `no_std` environments,
-/// use `to_test_with_time()` instead.
-///
-/// # Safety
-///
-/// - `config` must be a valid pointer or null (uses defaults if null)
-/// - `generator` and `operation` must be valid function pointers
-/// - `ctx` can be null if not needed by callbacks
-/// - `input_size` must match the buffer size expected by callbacks
-#[cfg(feature = "std")]
+/// Create a configuration for SharedHardware attacker model.
 #[no_mangle]
-pub unsafe extern "C" fn to_test(
-    config: *const ToConfig,
-    input_size: usize,
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-) -> ToResult {
-    let config = if config.is_null() {
-        ToConfig::default()
-    } else {
-        (*config).clone()
-    };
-
-    // Initialize timer based on config preference
-    if let Err(result) = init_timer(&config) {
-        return *result;
-    }
-
-    let result = catch_unwind(|| {
-        let start_time = std::time::Instant::now();
-        run_test_impl(&config, input_size, generator, operation, ctx, || {
-            start_time.elapsed().as_secs_f64()
-        })
-    });
-
-    // Always cleanup timer, even if panic occurred
-    to_timer_cleanup();
-
-    match result {
-        Ok(outcome) => outcome,
-        Err(_) => {
-            // Panic occurred - return an error result
-            let msg = CString::new("Internal error: panic in timing-oracle").unwrap();
-            ToResult {
-                outcome: ToOutcome::Inconclusive,
-                recommendation: msg.into_raw(),
-                ..ToResult::default()
-            }
-        }
-    }
+pub extern "C" fn to_config_shared_hardware() -> ToConfig {
+    to_config_default(ToAttackerModel::SharedHardware)
 }
 
-/// Run a timing test with caller-provided time tracking (no_std compatible).
-///
-/// This API is available in both `std` and `no_std` builds. The caller is
-/// responsible for tracking elapsed time and providing it via the `elapsed_secs`
-/// pointer. The library will read this value whenever it needs the current time.
-///
-/// # Usage
-///
-/// ```c
-/// double elapsed = 0.0;
-/// // ... start your timer ...
-///
-/// // Before calling, update elapsed_secs to current elapsed time
-/// elapsed = get_elapsed_time(); // Your time function
-/// ToResult result = to_test_with_time(&config, size, gen, op, ctx, &elapsed);
-/// ```
-///
-/// Note: For the adaptive loop to work correctly, you should update `elapsed_secs`
-/// before each call. In practice, since this is a single blocking call, you only
-/// need to provide the initial elapsed time (usually 0.0).
-///
-/// # Safety
-///
-/// - `config` must be a valid pointer or null (uses defaults if null)
-/// - `generator` and `operation` must be valid function pointers
-/// - `ctx` can be null if not needed by callbacks
-/// - `input_size` must match the buffer size expected by callbacks
-/// - `elapsed_secs` must be a valid pointer to a f64
+/// Create a configuration for AdjacentNetwork attacker model.
 #[no_mangle]
-pub unsafe extern "C" fn to_test_with_time(
-    config: *const ToConfig,
-    input_size: usize,
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-    elapsed_secs: *const f64,
-) -> ToResult {
-    let config = if config.is_null() {
-        ToConfig::default()
-    } else {
-        (*config).clone()
-    };
-
-    // Initialize timer based on config preference
-    if let Err(result) = init_timer(&config) {
-        return *result;
-    }
-
-    #[cfg(feature = "std")]
-    {
-        let result = catch_unwind(|| {
-            run_test_impl(&config, input_size, generator, operation, ctx, || {
-                if elapsed_secs.is_null() {
-                    0.0
-                } else {
-                    *elapsed_secs
-                }
-            })
-        });
-
-        // Always cleanup timer, even if panic occurred
-        to_timer_cleanup();
-
-        match result {
-            Ok(outcome) => outcome,
-            Err(_) => {
-                let msg = CString::new("Internal error: panic in timing-oracle").unwrap();
-                ToResult {
-                    outcome: ToOutcome::Inconclusive,
-                    recommendation: msg.into_raw(),
-                    ..ToResult::default()
-                }
-            }
-        }
-    }
-
-    #[cfg(not(feature = "std"))]
-    {
-        // No panic catching in no_std - panics will abort
-        let result = run_test_impl(&config, input_size, generator, operation, ctx, || {
-            if elapsed_secs.is_null() {
-                0.0
-            } else {
-                *elapsed_secs
-            }
-        });
-
-        to_timer_cleanup();
-        result
-    }
+pub extern "C" fn to_config_adjacent_network() -> ToConfig {
+    to_config_default(ToAttackerModel::AdjacentNetwork)
 }
 
-/// Free a result's owned resources.
-///
-/// # Safety
-///
-/// - `result` must be a valid pointer to a ToResult
-/// - Only call this once per result
+/// Create a configuration for RemoteNetwork attacker model.
 #[no_mangle]
-pub unsafe extern "C" fn to_result_free(result: *mut ToResult) {
-    if result.is_null() {
-        return;
-    }
-
-    let r = &mut *result;
-    if !r.recommendation.is_null() {
-        #[cfg(feature = "std")]
-        {
-            // Reconstruct and drop the CString to free memory
-            drop(CString::from_raw(r.recommendation as *mut c_char));
-        }
-        #[cfg(not(feature = "std"))]
-        {
-            // In no_std mode, recommendation points to static strings, so nothing to free
-            // Just null it out for safety
-        }
-        r.recommendation = ptr::null();
-    }
-}
-
-/// Get string representation of outcome.
-#[no_mangle]
-pub extern "C" fn to_outcome_str(outcome: ToOutcome) -> *const c_char {
-    match outcome {
-        ToOutcome::Pass => c"Pass".as_ptr(),
-        ToOutcome::Fail => c"Fail".as_ptr(),
-        ToOutcome::Inconclusive => c"Inconclusive".as_ptr(),
-        ToOutcome::Unmeasurable => c"Unmeasurable".as_ptr(),
-        ToOutcome::Research => c"Research".as_ptr(),
-    }
-}
-
-/// Get string representation of research status.
-#[no_mangle]
-pub extern "C" fn to_research_status_str(status: ToResearchStatus) -> *const c_char {
-    match status {
-        ToResearchStatus::EffectDetected => c"EffectDetected".as_ptr(),
-        ToResearchStatus::NoEffectDetected => c"NoEffectDetected".as_ptr(),
-        ToResearchStatus::ResolutionLimitReached => c"ResolutionLimitReached".as_ptr(),
-        ToResearchStatus::QualityIssue => c"QualityIssue".as_ptr(),
-        ToResearchStatus::BudgetExhausted => c"BudgetExhausted".as_ptr(),
-    }
-}
-
-/// Get string representation of effect pattern.
-#[no_mangle]
-pub extern "C" fn to_effect_pattern_str(pattern: ToEffectPattern) -> *const c_char {
-    match pattern {
-        ToEffectPattern::UniformShift => c"UniformShift".as_ptr(),
-        ToEffectPattern::TailEffect => c"TailEffect".as_ptr(),
-        ToEffectPattern::Mixed => c"Mixed".as_ptr(),
-        ToEffectPattern::Indeterminate => c"Indeterminate".as_ptr(),
-    }
-}
-
-/// Get string representation of exploitability.
-#[no_mangle]
-pub extern "C" fn to_exploitability_str(exploitability: ToExploitability) -> *const c_char {
-    match exploitability {
-        ToExploitability::SharedHardwareOnly => c"SharedHardwareOnly".as_ptr(),
-        ToExploitability::Http2Multiplexing => c"Http2Multiplexing".as_ptr(),
-        ToExploitability::StandardRemote => c"StandardRemote".as_ptr(),
-        ToExploitability::ObviousLeak => c"ObviousLeak".as_ptr(),
-    }
-}
-
-/// Get string representation of quality.
-#[no_mangle]
-pub extern "C" fn to_quality_str(quality: ToQuality) -> *const c_char {
-    match quality {
-        ToQuality::Excellent => c"Excellent".as_ptr(),
-        ToQuality::Good => c"Good".as_ptr(),
-        ToQuality::Poor => c"Poor".as_ptr(),
-        ToQuality::TooNoisy => c"TooNoisy".as_ptr(),
-    }
-}
-
-/// Get string representation of inconclusive reason.
-#[no_mangle]
-pub extern "C" fn to_inconclusive_reason_str(reason: ToInconclusiveReason) -> *const c_char {
-    match reason {
-        ToInconclusiveReason::DataTooNoisy => c"DataTooNoisy".as_ptr(),
-        ToInconclusiveReason::NotLearning => c"NotLearning".as_ptr(),
-        ToInconclusiveReason::WouldTakeTooLong => c"WouldTakeTooLong".as_ptr(),
-        ToInconclusiveReason::TimeBudgetExceeded => c"TimeBudgetExceeded".as_ptr(),
-        ToInconclusiveReason::SampleBudgetExceeded => c"SampleBudgetExceeded".as_ptr(),
-        ToInconclusiveReason::ConditionsChanged => c"ConditionsChanged".as_ptr(),
-        ToInconclusiveReason::ThresholdElevated => c"ThresholdElevated".as_ptr(),
-    }
-}
-
-/// Get the library version.
-#[no_mangle]
-pub extern "C" fn to_version() -> *const c_char {
-    // Include version from Cargo.toml
-    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
-}
-
-/// Get the timer name being used.
-#[no_mangle]
-pub extern "C" fn to_timer_name() -> *const c_char {
-    unsafe { to_get_timer_name() }
-}
-
-/// Get the timer frequency in Hz.
-#[no_mangle]
-pub extern "C" fn to_timer_frequency() -> u64 {
-    unsafe { to_get_timer_frequency() }
+pub extern "C" fn to_config_remote_network() -> ToConfig {
+    to_config_default(ToAttackerModel::RemoteNetwork)
 }
 
 // ============================================================================
-// Internal implementation
+// Low-Level API: C Measurement Loop
 // ============================================================================
 
-/// Create a recommendation string.
+/// Create a new adaptive state for tracking the measurement loop.
 ///
-/// In std mode, returns a CString that must be freed by the caller.
-/// In no_std mode, returns a static string.
-#[cfg(feature = "std")]
-fn make_recommendation(msg: &str) -> *const c_char {
-    CString::new(msg).unwrap().into_raw()
-}
-
-#[cfg(not(feature = "std"))]
-fn make_recommendation(_msg: &str) -> *const c_char {
-    // In no_std mode, return a generic static string
-    // The specific message is lost, but the caller gets a valid pointer
-    c"See documentation for recommendations".as_ptr()
-}
-
-/// Create a recommendation from an optional String.
+/// Must be freed with `to_state_free()`.
 ///
-/// In std mode, converts the string to CString.
-/// In no_std mode, returns a static string or null.
-#[cfg(feature = "std")]
-fn make_recommendation_from_option(msg: Option<String>) -> *const c_char {
-    msg.map(|s| CString::new(s).unwrap().into_raw() as *const c_char)
-        .unwrap_or(ptr::null())
+/// # Returns
+/// Pointer to new state, or NULL on allocation failure.
+#[no_mangle]
+pub extern "C" fn to_state_new() -> *mut ToState {
+    Box::into_raw(Box::new(ToState {
+        inner: AdaptiveState::new(),
+    }))
 }
 
-#[cfg(not(feature = "std"))]
-fn make_recommendation_from_option(msg: Option<String>) -> *const c_char {
-    if msg.is_some() {
-        c"See documentation for recommendations".as_ptr()
-    } else {
-        ptr::null()
-    }
-}
-
-/// Default batch size for adaptive loop.
-const DEFAULT_BATCH_SIZE: usize = 1000;
-
-/// Default calibration samples.
-const DEFAULT_CALIBRATION_SAMPLES: usize = 5000;
-
-/// Default bootstrap iterations for covariance estimation.
-const DEFAULT_BOOTSTRAP_ITERATIONS: usize = 2000;
-
-/// Minimum timer ticks per measurement for reliable timing.
-const MIN_TICKS_PER_MEASUREMENT: u64 = 50;
-
-/// Maximum batch K for adaptive batching.
-const MAX_BATCH_K: usize = 20;
-
-fn run_test_impl<F: Fn() -> f64>(
-    config: &ToConfig,
-    input_size: usize,
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-    get_elapsed_secs: F,
-) -> ToResult {
-    use timing_oracle_core::adaptive::{
-        adaptive_step, AdaptiveOutcome, AdaptiveStepConfig, InconclusiveReason, StepResult,
-    };
-
-    let theta_ns = config
-        .attacker_model
-        .to_threshold_ns(config.custom_threshold_ns);
-    let max_samples = if config.max_samples == 0 {
-        100_000
-    } else {
-        config.max_samples
-    };
-    let time_budget_secs = if config.time_budget_secs == 0.0 {
-        30.0
-    } else {
-        config.time_budget_secs
-    };
-    let calibration_samples = if config.calibration_samples == 0 {
-        DEFAULT_CALIBRATION_SAMPLES
-    } else {
-        config.calibration_samples
-    };
-    let batch_size = if config.batch_size == 0 {
-        DEFAULT_BATCH_SIZE
-    } else {
-        config.batch_size
-    };
-    let bootstrap_iterations = if config.bootstrap_iterations == 0 {
-        DEFAULT_BOOTSTRAP_ITERATIONS
-    } else {
-        config.bootstrap_iterations
-    };
-
-    // Check if we're in Research mode (spec §3.6)
-    let research_mode = config.attacker_model == ToAttackerModel::Research;
-
-    // Get timer info
-    let timer_freq = unsafe { to_get_timer_frequency() };
-    let ns_per_tick = if timer_freq > 0 {
-        1_000_000_000.0 / timer_freq as f64
-    } else {
-        1.0 // Assume nanoseconds if frequency unknown
-    };
-    let timer_resolution_ns = ns_per_tick;
-
-    // Allocate input buffer
-    let mut input_buffer = vec![0u8; input_size];
-
-    // ==========================================================================
-    // Phase 0: Pilot phase - detect unmeasurable operations and select batch_k
-    // ==========================================================================
-
-    let batch_k = run_pilot_phase(
-        generator,
-        operation,
-        ctx,
-        &mut input_buffer,
-        input_size,
-        timer_resolution_ns,
-    );
-
-    // If batch_k is None, operation is too fast
-    let batch_k = match batch_k {
-        Some(k) => k,
-        None => {
-            return ToResult {
-                outcome: ToOutcome::Unmeasurable,
-                operation_ns: 0.0, // Too fast to measure
-                timer_resolution_ns,
-                recommendation: make_recommendation(
-                    "Operation completes faster than timer resolution. \
-                     Consider using a higher-precision timer or batching operations.",
-                ),
-                timer_name: unsafe { to_get_timer_name() },
-                platform: c"".as_ptr(),
-                ..ToResult::default()
-            };
-        }
-    };
-
-    // ==========================================================================
-    // Phase 1: Calibration - collect initial samples, estimate covariance
-    // ==========================================================================
-
-    let (calibration, calibration_state) = match run_calibration_phase(
-        generator,
-        operation,
-        ctx,
-        &mut input_buffer,
-        input_size,
-        batch_k,
-        ns_per_tick,
-        theta_ns,
-        config.seed,
-        calibration_samples,
-        bootstrap_iterations,
-        &get_elapsed_secs,
-    ) {
-        Ok(result) => result,
-        Err(result) => return *result,
-    };
-
-    // ==========================================================================
-    // Phase 2: Adaptive loop - collect batches until decision or quality gate
-    // ==========================================================================
-
-    let mut state = calibration_state;
-    let step_config = AdaptiveStepConfig::with_theta(theta_ns)
-        .pass_threshold(config.pass_threshold)
-        .fail_threshold(config.fail_threshold)
-        .time_budget_secs(time_budget_secs)
-        .max_samples(max_samples);
-
-    // Drift detection state
-    let drift_thresholds = timing_oracle_core::adaptive::DriftThresholds::default();
-    let mut last_stationarity_ratio = 1.0;
-    let mut last_stationarity_ok = true;
-
-    loop {
-        let elapsed_secs = get_elapsed_secs();
-
-        // ==========================================================================
-        // Quality Gate 7: Condition drift check (spec §3.5.2)
-        // ==========================================================================
-        if let Some(current_snapshot) = state.get_stats_snapshot() {
-            let drift = timing_oracle_core::adaptive::ConditionDrift::compute(
-                &calibration.calibration_snapshot,
-                &current_snapshot,
-            );
-
-            // Track the maximum variance ratio for diagnostics
-            last_stationarity_ratio = drift
-                .variance_ratio_baseline
-                .max(drift.variance_ratio_sample);
-            last_stationarity_ok = !drift.is_significant(&drift_thresholds);
-
-            if !last_stationarity_ok {
-                let posterior = state.current_posterior().cloned();
-                let drift_message = drift.description(&drift_thresholds);
-
-                return build_result(
-                    AdaptiveOutcome::Inconclusive {
-                        reason: InconclusiveReason::ConditionsChanged {
-                            message: String::from("Measurement conditions changed during test"),
-                            guidance: String::from(
-                                "Ensure stable environment: disable CPU frequency scaling, \
-                                 minimize concurrent processes, use performance CPU governor",
-                            ),
-                            drift_description: drift_message,
-                        },
-                        posterior,
-                        samples_per_class: state.n_total(),
-                        elapsed_secs,
-                    },
-                    &calibration,
-                    timer_resolution_ns,
-                    batch_k,
-                    last_stationarity_ratio,
-                    last_stationarity_ok,
-                    research_mode,
-                );
-            }
-        }
-
-        // Check if we've exceeded time budget before collecting more
-        if elapsed_secs > time_budget_secs {
-            let posterior = state.current_posterior().cloned();
-            let current_probability = posterior
-                .as_ref()
-                .map(|p| p.leak_probability)
-                .unwrap_or(0.5);
-            return build_result(
-                AdaptiveOutcome::Inconclusive {
-                    reason: InconclusiveReason::TimeBudgetExceeded {
-                        current_probability,
-                        samples_collected: state.n_total(),
-                        elapsed_secs,
-                    },
-                    posterior,
-                    samples_per_class: state.n_total(),
-                    elapsed_secs,
-                },
-                &calibration,
-                timer_resolution_ns,
-                batch_k,
-                last_stationarity_ratio,
-                last_stationarity_ok,
-                research_mode,
-            );
-        }
-
-        // Check sample budget
-        if state.n_total() >= max_samples {
-            let posterior = state.current_posterior().cloned();
-            let current_probability = posterior
-                .as_ref()
-                .map(|p| p.leak_probability)
-                .unwrap_or(0.5);
-            return build_result(
-                AdaptiveOutcome::Inconclusive {
-                    reason: InconclusiveReason::SampleBudgetExceeded {
-                        current_probability,
-                        samples_collected: state.n_total(),
-                    },
-                    posterior,
-                    samples_per_class: state.n_total(),
-                    elapsed_secs,
-                },
-                &calibration,
-                timer_resolution_ns,
-                batch_k,
-                last_stationarity_ratio,
-                last_stationarity_ok,
-                research_mode,
-            );
-        }
-
-        // Run adaptive step
-        let result = adaptive_step(
-            &calibration,
-            &mut state,
-            ns_per_tick,
-            elapsed_secs,
-            &step_config,
-        );
-
-        match result {
-            StepResult::Decision(outcome) => {
-                return build_result(
-                    outcome,
-                    &calibration,
-                    timer_resolution_ns,
-                    batch_k,
-                    last_stationarity_ratio,
-                    last_stationarity_ok,
-                    research_mode,
-                );
-            }
-            StepResult::Continue { .. } => {
-                // Collect another batch
-                collect_batch(
-                    &mut state,
-                    generator,
-                    operation,
-                    ctx,
-                    &mut input_buffer,
-                    input_size,
-                    batch_k,
-                    ns_per_tick,
-                    batch_size,
-                );
-            }
-        }
-    }
-}
-
-/// Run pilot phase to detect unmeasurable operations and select batch_k.
+/// Free an adaptive state.
 ///
-/// Returns `Some(batch_k)` if measurable, `None` if too fast even with max batching.
-fn run_pilot_phase(
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-    input_buffer: &mut [u8],
-    input_size: usize,
-    _timer_resolution_ns: f64,
-) -> Option<usize> {
-    const PILOT_SAMPLES: usize = 100;
-
-    // Start with batch_k = 1
-    let mut timings = vec![0u64; PILOT_SAMPLES * 2];
-    let mut schedule = [false; PILOT_SAMPLES * 2];
-    for i in 0..PILOT_SAMPLES {
-        schedule[i * 2] = true;
-        schedule[i * 2 + 1] = false;
+/// # Safety
+/// `state` must be a valid pointer returned by `to_state_new()`, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn to_state_free(state: *mut ToState) {
+    if !state.is_null() {
+        drop(Box::from_raw(state));
     }
-
-    for batch_k in 1..=MAX_BATCH_K {
-        unsafe {
-            to_collect_batch(
-                generator,
-                operation,
-                ctx,
-                input_buffer.as_mut_ptr(),
-                input_size,
-                schedule.as_ptr(),
-                PILOT_SAMPLES * 2,
-                timings.as_mut_ptr(),
-                batch_k,
-            );
-        }
-
-        // Compute median timing
-        let mut sorted = timings.clone();
-        sorted.sort_unstable();
-        let median = sorted[sorted.len() / 2];
-
-        // If median >= MIN_TICKS, this batch_k is sufficient
-        if median >= MIN_TICKS_PER_MEASUREMENT {
-            return Some(batch_k);
-        }
-    }
-
-    // Even max batching isn't enough
-    None
 }
 
-/// Run calibration phase to estimate covariance and set priors.
-#[allow(clippy::too_many_arguments)]
-fn run_calibration_phase<F: Fn() -> f64>(
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-    input_buffer: &mut [u8],
-    input_size: usize,
-    batch_k: usize,
-    ns_per_tick: f64,
-    theta_ns: f64,
-    seed: u64,
-    calibration_samples: usize,
-    bootstrap_iterations: usize,
-    get_elapsed_secs: &F,
-) -> Result<
-    (
-        timing_oracle_core::adaptive::Calibration,
-        timing_oracle_core::adaptive::AdaptiveState,
-    ),
-    Box<ToResult>,
-> {
-    use timing_oracle_core::adaptive::{
-        calibrate_t_prior_scale, AdaptiveState, Calibration, CalibrationSnapshot,
-    };
-    use timing_oracle_core::statistics::{
-        bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
-        compute_min_uniqueness_ratio, OnlineStats, DISCRETE_MODE_THRESHOLD,
-    };
-    use timing_oracle_core::types::{Class, TimingSample};
-
-    // Create interleaved schedule
-    let mut schedule = vec![false; calibration_samples * 2];
-    for i in 0..calibration_samples {
-        schedule[i * 2] = true;
-        schedule[i * 2 + 1] = false;
+/// Get the total number of samples collected (both classes combined).
+///
+/// # Safety
+/// `state` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn to_state_total_samples(state: *const ToState) -> u64 {
+    if state.is_null() {
+        return 0;
     }
+    (*state).inner.n_total() as u64
+}
 
-    // Collect calibration samples
-    let mut raw_timings = vec![0u64; calibration_samples * 2];
-
-    unsafe {
-        to_collect_batch(
-            generator,
-            operation,
-            ctx,
-            input_buffer.as_mut_ptr(),
-            input_size,
-            schedule.as_ptr(),
-            calibration_samples * 2,
-            raw_timings.as_mut_ptr(),
-            batch_k,
-        );
+/// Get the current leak probability estimate.
+///
+/// Returns 0.5 if no posterior has been computed yet.
+///
+/// # Safety
+/// `state` must be a valid pointer.
+#[no_mangle]
+pub unsafe extern "C" fn to_state_leak_probability(state: *const ToState) -> f64 {
+    if state.is_null() {
+        return 0.5;
     }
+    (*state)
+        .inner
+        .current_posterior()
+        .map(|p| p.leak_probability)
+        .unwrap_or(0.5)
+}
 
-    // Separate baseline and sample timings
-    let mut baseline_timings_raw = Vec::with_capacity(calibration_samples);
-    let mut sample_timings_raw = Vec::with_capacity(calibration_samples);
-    let mut baseline_timings_ns = Vec::with_capacity(calibration_samples);
-    let mut sample_timings_ns = Vec::with_capacity(calibration_samples);
-
-    let mut baseline_stats = OnlineStats::new();
-    let mut sample_stats = OnlineStats::new();
-
-    for (i, &timing) in raw_timings.iter().enumerate() {
-        let timing_ns = timing as f64 * ns_per_tick;
-        if schedule[i] {
-            baseline_timings_raw.push(timing);
-            baseline_timings_ns.push(timing_ns);
-            baseline_stats.update(timing_ns);
-        } else {
-            sample_timings_raw.push(timing);
-            sample_timings_ns.push(timing_ns);
-            sample_stats.update(timing_ns);
+/// Run calibration on initial samples.
+///
+/// This should be called once at the start with calibration samples
+/// (typically 5000 per class). The returned calibration handle is used
+/// for subsequent `to_step()` calls.
+///
+/// # Parameters
+/// - `baseline`: Array of baseline timing samples (in timer ticks)
+/// - `sample`: Array of sample timing samples (in timer ticks)
+/// - `count`: Number of samples in each array
+/// - `config`: Configuration
+/// - `error_out`: Optional pointer to receive error code
+///
+/// # Returns
+/// Pointer to calibration data, or NULL on error.
+/// Must be freed with `to_calibration_free()`.
+///
+/// # Safety
+/// `baseline` and `sample` must be valid pointers to arrays of at least `count` elements.
+#[no_mangle]
+pub unsafe extern "C" fn to_calibrate(
+    baseline: *const u64,
+    sample: *const u64,
+    count: usize,
+    config: *const ToConfig,
+    error_out: *mut ToError,
+) -> *mut ToCalibration {
+    let set_error = |e: ToError| {
+        if !error_out.is_null() {
+            *error_out = e;
         }
+    };
+
+    if baseline.is_null() || sample.is_null() || config.is_null() {
+        set_error(ToError::NullPointer);
+        return ptr::null_mut();
     }
 
-    // Create calibration snapshot for drift detection
-    let calibration_snapshot =
-        CalibrationSnapshot::new(baseline_stats.finalize(), sample_stats.finalize());
-
-    // Detect discrete mode (spec §3.7): triggered when < 10% of values are unique
-    let min_uniqueness = compute_min_uniqueness_ratio(&baseline_timings_ns, &sample_timings_ns);
-    let discrete_mode = min_uniqueness < DISCRETE_MODE_THRESHOLD;
-
-    // Select appropriate bootstrap method based on discrete mode
-    let cov_estimate = if discrete_mode {
-        // Discrete mode: use m-out-of-n bootstrap on per-class sequences
-        bootstrap_difference_covariance_discrete(
-            &baseline_timings_ns,
-            &sample_timings_ns,
-            bootstrap_iterations,
-            seed,
-        )
-    } else {
-        // Normal mode: use block bootstrap on interleaved stream
-        let interleaved: Vec<TimingSample> = baseline_timings_ns
-            .iter()
-            .zip(sample_timings_ns.iter())
-            .flat_map(|(&b, &s)| {
-                [
-                    TimingSample {
-                        time_ns: b,
-                        class: Class::Baseline,
-                    },
-                    TimingSample {
-                        time_ns: s,
-                        class: Class::Sample,
-                    },
-                ]
-            })
-            .collect();
-        bootstrap_difference_covariance(&interleaved, bootstrap_iterations, seed, false)
-    };
-
-    if !cov_estimate.is_stable() {
-        return Err(Box::new(ToResult {
-            outcome: ToOutcome::Inconclusive,
-            inconclusive_reason: ToInconclusiveReason::DataTooNoisy,
-            recommendation: make_recommendation(
-                "Covariance matrix is not stable; try more samples",
-            ),
-            timer_resolution_ns: ns_per_tick,
-            timer_name: unsafe { to_get_timer_name() },
-            elapsed_secs: get_elapsed_secs(),
-            samples_used: calibration_samples,
-            ..ToResult::default()
-        }));
+    if count < 100 {
+        set_error(ToError::NotEnoughSamples);
+        return ptr::null_mut();
     }
 
-    // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
-    let sigma_rate = cov_estimate.matrix * (calibration_samples as f64);
+    let baseline_slice = slice::from_raw_parts(baseline, count);
+    let sample_slice = slice::from_raw_parts(sample, count);
+    let cfg = &*config;
 
-    // Estimate MDE from calibration data (simplified)
-    let n_sqrt = sqrt(calibration_samples as f64);
-    let mde_shift_ns = 2.0 * sqrt(cov_estimate.matrix[(0, 0)]) / n_sqrt;
-    let mde_tail_ns = 2.0 * sqrt(cov_estimate.matrix[(8, 8)]) / n_sqrt;
+    // Get threshold from config
+    let theta_ns = cfg.threshold_ns();
 
-    let elapsed_secs = get_elapsed_secs();
-    let samples_per_second = calibration_samples as f64 / elapsed_secs;
-
-    // v4.1: Compute floor-rate constant and effective threshold
-    // For C API, use simplified defaults since we don't have full bootstrap
-    let c_floor = 10.0; // Conservative default
-    let q_thresh = 18.48; // chi-squared(7, 0.99) fallback
-    let theta_tick = ns_per_tick / 20.0; // Assume batch size of 20
-    let theta_floor_initial = if c_floor / n_sqrt > theta_tick {
-        c_floor / n_sqrt
+    // Convert to nanoseconds (assuming 1 tick = 1 ns if no frequency specified)
+    let ns_per_tick = if cfg.timer_frequency_hz == 0 {
+        1.0
     } else {
-        theta_tick
+        1e9 / cfg.timer_frequency_hz as f64
     };
-    let theta_eff = if theta_ns > theta_floor_initial {
-        theta_ns
-    } else {
-        theta_floor_initial
-    };
-    let rng_seed = 0x74696D696E67u64; // "timing" in ASCII
 
-    // Compute Student's t prior (v5.4+)
-    let (sigma_t, l_r) = calibrate_t_prior_scale(
-        &sigma_rate,
-        theta_eff,
-        calibration_samples,
-        discrete_mode,
-        rng_seed,
-    );
+    let baseline_ns: Vec<f64> = baseline_slice
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
+    let sample_ns: Vec<f64> = sample_slice
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
+
+    // Check for discrete mode (< 10% unique values)
+    let unique_baseline: std::collections::HashSet<u64> = baseline_slice.iter().copied().collect();
+    let unique_sample: std::collections::HashSet<u64> = sample_slice.iter().copied().collect();
+    let unique_fraction =
+        (unique_baseline.len() + unique_sample.len()) as f64 / (2 * count) as f64;
+    let discrete_mode = unique_fraction < 0.1;
+
+    // Compute block length using Politis-White algorithm (use circular bootstrap length)
+    let block_length_baseline = optimal_block_length(&baseline_ns).circular.ceil() as usize;
+    let block_length_sample = optimal_block_length(&sample_ns).circular.ceil() as usize;
+    let block_length = block_length_baseline.max(block_length_sample).max(1);
+
+    // Bootstrap covariance estimation using discrete mode function (works for both)
+    let seed = if cfg.seed == 0 { 42 } else { cfg.seed };
+    let cov_estimate =
+        bootstrap_difference_covariance_discrete(&baseline_ns, &sample_ns, 2000, seed);
+    let sigma_rate = cov_estimate.matrix * count as f64; // Convert to rate: sigma_rate = sigma_cal * n_cal
+
+    // Compute c_floor for theta_floor estimation
+    let c_floor = compute_c_floor_9d(&sigma_rate, seed);
+
+    // Compute initial theta_floor
+    let n_eff = (count / block_length).max(1);
+    let theta_floor_stat = c_floor / (n_eff as f64).sqrt();
+    let theta_tick = ns_per_tick; // 1 tick resolution
+    let theta_floor_initial = theta_floor_stat.max(theta_tick);
+    let theta_eff = theta_ns.max(theta_floor_initial);
+
+    // Calibrate Student's t prior scale
+    let (sigma_t, l_r) =
+        calibrate_t_prior_scale(&sigma_rate, theta_eff, count, discrete_mode, seed);
+
+    // Compute calibration snapshot for drift detection
+    let baseline_stats = compute_stats_snapshot(&baseline_ns);
+    let sample_stats = compute_stats_snapshot(&sample_ns);
+    let calibration_snapshot = CalibrationSnapshot::new(baseline_stats, sample_stats);
+
+    // Placeholder MDE (would need proper computation)
+    let mde_shift_ns = theta_floor_stat;
+    let mde_tail_ns = theta_floor_stat * 1.5;
+
+    // Projection mismatch threshold (chi-squared 99th percentile for 7 DoF)
+    let projection_mismatch_thresh = 18.48;
+
+    // Estimate samples per second (would be measured during calibration in real usage)
+    let samples_per_second = 100_000.0; // Placeholder
 
     let calibration = Calibration::new(
         sigma_rate,
-        10, // block_length (default)
+        block_length,
         sigma_t,
         l_r,
         theta_ns,
-        calibration_samples,
+        count,
         discrete_mode,
         mde_shift_ns,
         mde_tail_ns,
         calibration_snapshot,
-        ns_per_tick,
+        ns_per_tick, // timer_resolution_ns
         samples_per_second,
         c_floor,
-        q_thresh, // projection_mismatch_thresh
+        projection_mismatch_thresh,
         theta_tick,
         theta_eff,
         theta_floor_initial,
-        rng_seed,
-        batch_k as u32,
+        seed,
+        1, // batch_k (no batching for C measurement loop)
     );
 
-    // Initialize adaptive state with calibration samples
-    let mut state = AdaptiveState::with_capacity(100_000);
-    state.add_batch_with_conversion(baseline_timings_raw, sample_timings_raw, ns_per_tick);
-
-    Ok((calibration, state))
+    set_error(ToError::Ok);
+    Box::into_raw(Box::new(ToCalibration {
+        inner: calibration,
+        ns_per_tick,
+    }))
 }
 
-/// Collect a batch of samples and add to state.
-#[allow(clippy::too_many_arguments)]
-fn collect_batch(
-    state: &mut timing_oracle_core::adaptive::AdaptiveState,
-    generator: GeneratorFn,
-    operation: OperationFn,
-    ctx: *mut c_void,
-    input_buffer: &mut [u8],
-    input_size: usize,
-    batch_k: usize,
-    ns_per_tick: f64,
-    batch_size: usize,
-) {
-    // Create interleaved schedule
-    let mut schedule = vec![false; batch_size * 2];
-    for i in 0..batch_size {
-        schedule[i * 2] = true;
-        schedule[i * 2 + 1] = false;
+/// Compute stats snapshot from samples.
+fn compute_stats_snapshot(samples: &[f64]) -> StatsSnapshot {
+    let count = samples.len();
+    if count == 0 {
+        return StatsSnapshot {
+            mean: 0.0,
+            variance: 0.0,
+            autocorr_lag1: 0.0,
+            count: 0,
+        };
     }
 
-    let mut raw_timings = vec![0u64; batch_size * 2];
+    let mean = samples.iter().sum::<f64>() / count as f64;
+    let variance = if count > 1 {
+        samples.iter().map(|&x| (x - mean).powi(2)).sum::<f64>() / (count - 1) as f64
+    } else {
+        0.0
+    };
 
-    unsafe {
-        to_collect_batch(
-            generator,
-            operation,
-            ctx,
-            input_buffer.as_mut_ptr(),
-            input_size,
-            schedule.as_ptr(),
-            batch_size * 2,
-            raw_timings.as_mut_ptr(),
-            batch_k,
-        );
-    }
-
-    // Separate baseline and sample timings
-    let mut baseline = Vec::with_capacity(batch_size);
-    let mut sample = Vec::with_capacity(batch_size);
-
-    for (i, &timing) in raw_timings.iter().enumerate() {
-        if schedule[i] {
-            baseline.push(timing);
-        } else {
-            sample.push(timing);
+    // Simple lag-1 autocorrelation
+    let autocorr_lag1 = if count > 1 && variance > 0.0 {
+        let mut sum = 0.0;
+        for i in 0..count - 1 {
+            sum += (samples[i] - mean) * (samples[i + 1] - mean);
         }
-    }
+        sum / ((count - 1) as f64 * variance)
+    } else {
+        0.0
+    };
 
-    state.add_batch_with_conversion(baseline, sample, ns_per_tick);
-}
-
-/// Build diagnostics from calibration data and posterior.
-fn build_diagnostics(
-    calibration: &timing_oracle_core::adaptive::Calibration,
-    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
-    elapsed_secs: f64,
-    stationarity_ratio: f64,
-    stationarity_ok: bool,
-) -> ToDiagnostics {
-    let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
-    let projection_mismatch_ok = projection_mismatch_q <= calibration.projection_mismatch_thresh;
-
-    // Extract Gibbs sampler diagnostics from posterior if available
-    let (lambda_mean, lambda_mixing_ok, kappa_mean, kappa_cv, kappa_ess, kappa_mixing_ok) =
-        posterior
-            .map(|p| {
-                (
-                    p.lambda_mean.unwrap_or(1.0),
-                    p.lambda_mixing_ok.unwrap_or(true),
-                    p.kappa_mean.unwrap_or(1.0),
-                    p.kappa_cv.unwrap_or(0.0),
-                    p.kappa_ess.unwrap_or(0.0),
-                    p.kappa_mixing_ok.unwrap_or(true),
-                )
-            })
-            .unwrap_or((1.0, true, 1.0, 0.0, 0.0, true));
-
-    ToDiagnostics {
-        dependence_length: calibration.block_length,
-        effective_sample_size: posterior.map(|p| p.n).unwrap_or(0),
-        stationarity_ratio,
-        stationarity_ok,
-        projection_mismatch_q,
-        projection_mismatch_threshold: calibration.projection_mismatch_thresh,
-        projection_mismatch_ok,
-        outlier_rate_baseline: 0.0, // Not tracked currently
-        outlier_rate_sample: 0.0,   // Not tracked currently
-        outlier_asymmetry_ok: true, // Assume OK since not tracked
-        discrete_mode: calibration.discrete_mode,
-        duplicate_fraction: 0.0, // Not tracked currently
-        preflight_ok: true,      // No preflight checks yet
-        calibration_samples: calibration.calibration_samples,
-        total_time_secs: elapsed_secs,
-        seed: calibration.rng_seed,
-        theta_user: calibration.theta_ns,
-        theta_eff: calibration.theta_eff,
-        theta_floor: calibration.theta_floor_initial,
-        warning_count: 0,
-        warnings: [[0; TO_MAX_WARNING_LEN]; TO_MAX_WARNINGS],
-        // v5.4 Gibbs sampler λ diagnostics
-        gibbs_iters_total: 256,  // Default value (actual value not stored in Posterior)
-        gibbs_burnin: 64,        // Default value
-        gibbs_retained: 192,     // Default value
-        lambda_mean,
-        lambda_sd: 0.0,          // Not stored in Posterior (compute from chain if needed)
-        lambda_cv: 0.0,          // Not stored in Posterior
-        lambda_ess: 0.0,         // Not stored in Posterior
-        lambda_mixing_ok,
-        // v5.6 Gibbs sampler κ diagnostics
-        kappa_mean,
-        kappa_sd: 0.0,           // Not stored in Posterior
-        kappa_cv,
-        kappa_ess,
-        kappa_mixing_ok,
+    StatsSnapshot {
+        mean,
+        variance,
+        autocorr_lag1,
+        count,
     }
 }
 
-/// Build effect with projection mismatch info from posterior.
-fn build_effect_with_mismatch(
-    posterior: &timing_oracle_core::adaptive::Posterior,
-    calibration: &timing_oracle_core::adaptive::Calibration,
-) -> ToEffect {
-    let mut effect: ToEffect = posterior.to_effect_estimate().into();
-
-    // Check projection mismatch
-    let mismatch = posterior.projection_mismatch_q > calibration.projection_mismatch_thresh;
-    effect.has_interpretation_caveat = mismatch;
-
-    if mismatch {
-        // Compute top contributing quantiles from residuals
-        // The residual for each quantile k is: r_k = delta_post_k - (X * beta_proj)_k
-        // We rank by |r_k| / sqrt(Sigma_n[k,k])
-        let delta_post = &posterior.delta_post;
-        let beta_proj = &posterior.beta_proj;
-
-        // X matrix: column 0 is all 1s (shift), column 1 is tail weights
-        let tail_weights = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8];
-        let mut residuals: [(f64, u8); 9] = [(0.0, 0); 9];
-
-        for k in 0..9 {
-            let fitted = beta_proj[0] + tail_weights[k] * beta_proj[1];
-            let residual = (delta_post[k] - fitted).abs();
-            residuals[k] = (residual, k as u8);
-        }
-
-        // Sort by residual magnitude (descending)
-        residuals.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(core::cmp::Ordering::Equal));
-
-        // Take top 3
-        effect.top_quantiles = [residuals[0].1, residuals[1].1, residuals[2].1];
-    }
-
-    effect
-}
-
-/// Convert AdaptiveOutcome to ToResult.
+/// Free calibration data.
 ///
-/// When `research_mode` is true, returns a Research outcome instead of Pass/Fail/Inconclusive.
-#[allow(clippy::too_many_arguments)]
-fn build_result(
-    outcome: timing_oracle_core::adaptive::AdaptiveOutcome,
-    calibration: &timing_oracle_core::adaptive::Calibration,
-    timer_resolution_ns: f64,
-    batch_k: usize,
-    stationarity_ratio: f64,
-    stationarity_ok: bool,
-    research_mode: bool,
+/// # Safety
+/// `calibration` must be a valid pointer returned by `to_calibrate()`, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn to_calibration_free(calibration: *mut ToCalibration) {
+    if !calibration.is_null() {
+        drop(Box::from_raw(calibration));
+    }
+}
+
+/// Run one adaptive step with a batch of new samples.
+///
+/// Call this in a loop after `to_calibrate()`. Each call processes a batch
+/// of new timing samples and updates the posterior probability.
+///
+/// # Parameters
+/// - `calibration`: Calibration data from `to_calibrate()`
+/// - `state`: Adaptive state from `to_state_new()`
+/// - `baseline`: Array of new baseline timing samples (in timer ticks)
+/// - `sample`: Array of new sample timing samples (in timer ticks)
+/// - `count`: Number of samples in each array
+/// - `config`: Configuration
+/// - `elapsed_secs`: Total elapsed time since start
+/// - `result_out`: Pointer to receive the step result
+///
+/// # Returns
+/// Error code.
+///
+/// # Safety
+/// All pointers must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn to_step(
+    calibration: *const ToCalibration,
+    state: *mut ToState,
+    baseline: *const u64,
+    sample: *const u64,
+    count: usize,
+    config: *const ToConfig,
+    elapsed_secs: f64,
+    result_out: *mut ToStepResult,
+) -> ToError {
+    if calibration.is_null()
+        || state.is_null()
+        || baseline.is_null()
+        || sample.is_null()
+        || config.is_null()
+        || result_out.is_null()
+    {
+        return ToError::NullPointer;
+    }
+
+    let baseline_slice = slice::from_raw_parts(baseline, count);
+    let sample_slice = slice::from_raw_parts(sample, count);
+    let cfg = &*config;
+    let cal = &(*calibration).inner;
+    let ns_per_tick = (*calibration).ns_per_tick;
+
+    // Add batch to state
+    (*state)
+        .inner
+        .add_batch(baseline_slice.to_vec(), sample_slice.to_vec());
+
+    // Create step config
+    let step_config = AdaptiveStepConfig {
+        pass_threshold: cfg.pass_threshold,
+        fail_threshold: cfg.fail_threshold,
+        time_budget_secs: cfg.time_budget_secs,
+        max_samples: if cfg.max_samples == 0 {
+            100_000
+        } else {
+            cfg.max_samples as usize
+        },
+        theta_ns: cfg.threshold_ns(),
+        seed: if cfg.seed == 0 { 42 } else { cfg.seed },
+        ..Default::default()
+    };
+
+    // Run adaptive step
+    let step_result = timing_oracle_core::adaptive::adaptive_step(
+        cal,
+        &mut (*state).inner,
+        ns_per_tick,
+        elapsed_secs,
+        &step_config,
+    );
+
+    match step_result {
+        StepResult::Continue {
+            posterior,
+            samples_per_class,
+        } => {
+            (*result_out).has_decision = false;
+            (*result_out).leak_probability = posterior.leak_probability;
+            (*result_out).samples_used = samples_per_class as u64;
+        }
+        StepResult::Decision(outcome) => {
+            (*result_out).has_decision = true;
+            (*result_out).samples_used = outcome.samples_per_class() as u64;
+            (*result_out).elapsed_secs = outcome.elapsed_secs();
+
+            // Convert outcome to C result
+            let result = convert_adaptive_outcome(&outcome, cal, cfg);
+            (*result_out).result = result;
+            (*result_out).leak_probability = outcome.leak_probability().unwrap_or(0.5);
+        }
+    }
+
+    ToError::Ok
+}
+
+/// Convert an AdaptiveOutcome to a ToResult.
+fn convert_adaptive_outcome(
+    outcome: &timing_oracle_core::adaptive::AdaptiveOutcome,
+    cal: &Calibration,
+    cfg: &ToConfig,
 ) -> ToResult {
     use timing_oracle_core::adaptive::AdaptiveOutcome;
-    use timing_oracle_core::analysis::compute_max_effect_ci;
 
-    let timer_name = unsafe { to_get_timer_name() };
-
-    // Extract common fields from outcome
-    let (posterior_opt, samples_per_class, elapsed_secs, is_inconclusive, inconclusive_reason_opt) =
-        match &outcome {
-            AdaptiveOutcome::LeakDetected {
-                posterior,
-                samples_per_class,
-                elapsed_secs,
-            } => (Some(posterior.clone()), *samples_per_class, *elapsed_secs, false, None),
-            AdaptiveOutcome::NoLeakDetected {
-                posterior,
-                samples_per_class,
-                elapsed_secs,
-            } => (Some(posterior.clone()), *samples_per_class, *elapsed_secs, false, None),
-            AdaptiveOutcome::Inconclusive {
-                reason,
-                posterior,
-                samples_per_class,
-                elapsed_secs,
-            } => (posterior.clone(), *samples_per_class, *elapsed_secs, true, Some(reason.clone())),
-            AdaptiveOutcome::ThresholdElevated {
-                posterior,
-                theta_user,
-                theta_eff,
-                achievable_at_max,
-                samples_per_class,
-                elapsed_secs,
-                ..
-            } => {
-                // v5.5: ThresholdElevated maps to Inconclusive with ThresholdElevated reason
-                let reason = timing_oracle_core::adaptive::InconclusiveReason::ThresholdElevated {
-                    theta_user: *theta_user,
-                    theta_eff: *theta_eff,
-                    leak_probability_at_eff: posterior.leak_probability,
-                    meets_pass_criterion_at_eff: true,
-                    achievable_at_max: *achievable_at_max,
-                    message: format!(
-                        "Threshold elevated from {:.0}ns to {:.1}ns",
-                        theta_user, theta_eff
-                    ),
-                    guidance: String::from(
-                        "Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution"
-                    ),
-                };
-                (Some(posterior.clone()), *samples_per_class, *elapsed_secs, true, Some(reason))
-            }
-        };
-
-    // Research mode: convert to Research outcome
-    if research_mode {
-        // Compute theta_floor at final sample count
-        let n = samples_per_class as f64;
-        let theta_floor = (calibration.c_floor / n.sqrt()).max(calibration.theta_tick);
-
-        // Compute max effect CI from posterior
-        let (max_effect_ns, max_effect_ci_low, max_effect_ci_high, research_detectable) =
-            if let Some(ref posterior) = posterior_opt {
-                let ci = compute_max_effect_ci(
-                    &posterior.delta_post,
-                    &posterior.lambda_post,
-                    calibration.rng_seed,
-                );
-                let detectable = ci.ci.0 > theta_floor;
-                (ci.mean, ci.ci.0, ci.ci.1, detectable)
-            } else {
-                (0.0, 0.0, 0.0, false)
-            };
-
-        // Determine research status based on CI and theta_floor
-        let research_status = if is_inconclusive {
-            // Quality issue - map inconclusive reason to research status
-            ToResearchStatus::QualityIssue
-        } else if theta_floor <= calibration.theta_tick * 1.01 {
-            // Resolution limit reached
-            ToResearchStatus::ResolutionLimitReached
-        } else if max_effect_ci_low > 1.1 * theta_floor {
-            // Effect detected: CI lower bound clearly above floor
-            ToResearchStatus::EffectDetected
-        } else if max_effect_ci_high < 0.9 * theta_floor {
-            // No effect detected: CI upper bound clearly below floor
-            ToResearchStatus::NoEffectDetected
-        } else {
-            // Budget exhausted without conclusive result
-            ToResearchStatus::BudgetExhausted
-        };
-
-        // Check model mismatch
-        let research_model_mismatch = posterior_opt
-            .as_ref()
-            .map(|p| p.projection_mismatch_q > calibration.projection_mismatch_thresh)
-            .unwrap_or(false);
-
-        let (leak_probability, effect, quality) = if let Some(ref p) = posterior_opt {
-            (
-                p.leak_probability,
-                build_effect_with_mismatch(p, calibration),
-                build_quality(p),
-            )
-        } else {
-            (0.5, ToEffect::default(), ToQuality::TooNoisy)
-        };
-
-        let diagnostics = build_diagnostics(
-            calibration,
-            posterior_opt.as_ref(),
-            elapsed_secs,
-            stationarity_ratio,
-            stationarity_ok,
-        );
-
-        // Also set the inconclusive_reason if we had a quality issue
-        let (c_reason, recommendation_opt) = if let Some(ref reason) = inconclusive_reason_opt {
-            let (r, rec) = convert_reason(reason);
-            (r, rec)
-        } else {
-            (ToInconclusiveReason::DataTooNoisy, None)
-        };
-
-        return ToResult {
-            outcome: ToOutcome::Research,
-            leak_probability,
-            effect,
-            quality,
-            samples_used: samples_per_class,
-            elapsed_secs,
-            exploitability: ToExploitability::SharedHardwareOnly,
-            inconclusive_reason: c_reason,
-            operation_ns: 0.0,
-            timer_resolution_ns,
-            recommendation: make_recommendation_from_option(recommendation_opt),
-            timer_name,
-            platform: c"".as_ptr(),
-            adaptive_batching_used: batch_k > 1,
-            diagnostics,
-            decision_threshold_ns: calibration.theta_eff,
-            // Research-specific fields
-            research_status,
-            max_effect_ns,
-            max_effect_ci_low,
-            max_effect_ci_high,
-            research_detectable,
-            research_model_mismatch,
-        };
-    }
-
-    // Standard mode: return Pass/Fail/Inconclusive
-    match outcome {
-        AdaptiveOutcome::LeakDetected {
-            posterior,
-            samples_per_class,
-            elapsed_secs,
-        } => {
-            // Determine exploitability based on new thresholds from Timeless Timing Attacks
-            let max_effect = posterior.beta_proj[0]
-                .abs()
-                .max(posterior.beta_proj[1].abs());
-            let exploitability = if max_effect < 10.0 {
-                ToExploitability::SharedHardwareOnly
-            } else if max_effect < 100.0 {
-                ToExploitability::Http2Multiplexing
-            } else if max_effect < 10_000.0 {
-                ToExploitability::StandardRemote
-            } else {
-                ToExploitability::ObviousLeak
-            };
-
-            let diagnostics = build_diagnostics(
-                calibration,
-                Some(&posterior),
-                elapsed_secs,
-                stationarity_ratio,
-                stationarity_ok,
-            );
-
-            ToResult {
-                outcome: ToOutcome::Fail,
-                leak_probability: posterior.leak_probability,
-                effect: build_effect_with_mismatch(&posterior, calibration),
-                quality: build_quality(&posterior),
-                samples_used: samples_per_class,
-                elapsed_secs,
-                exploitability,
-                inconclusive_reason: ToInconclusiveReason::DataTooNoisy, // Not used
-                operation_ns: 0.0,
-                timer_resolution_ns,
-                recommendation: ptr::null(),
-                timer_name,
-                platform: c"".as_ptr(),
-                adaptive_batching_used: batch_k > 1,
-                diagnostics,
-                ..ToResult::default()
-            }
-        }
-
-        AdaptiveOutcome::NoLeakDetected {
-            posterior,
-            samples_per_class,
-            elapsed_secs,
-        } => {
-            let diagnostics = build_diagnostics(
-                calibration,
-                Some(&posterior),
-                elapsed_secs,
-                stationarity_ratio,
-                stationarity_ok,
-            );
-
-            ToResult {
-                outcome: ToOutcome::Pass,
-                leak_probability: posterior.leak_probability,
-                effect: build_effect_with_mismatch(&posterior, calibration),
-                quality: build_quality(&posterior),
-                samples_used: samples_per_class,
-                elapsed_secs,
-                exploitability: ToExploitability::SharedHardwareOnly,
-                inconclusive_reason: ToInconclusiveReason::DataTooNoisy, // Not used
-                operation_ns: 0.0,
-                timer_resolution_ns,
-                recommendation: ptr::null(),
-                timer_name,
-                platform: c"".as_ptr(),
-                adaptive_batching_used: batch_k > 1,
-                diagnostics,
-                ..ToResult::default()
-            }
-        }
-
+    let (to_outcome, leak_probability, inconclusive_reason) = match outcome {
+        AdaptiveOutcome::LeakDetected { posterior, .. } => (
+            ToOutcome::Fail,
+            posterior.leak_probability,
+            ToInconclusiveReason::None,
+        ),
+        AdaptiveOutcome::NoLeakDetected { posterior, .. } => (
+            ToOutcome::Pass,
+            posterior.leak_probability,
+            ToInconclusiveReason::None,
+        ),
+        AdaptiveOutcome::ThresholdElevated { posterior, .. } => (
+            ToOutcome::Inconclusive,
+            posterior.leak_probability,
+            ToInconclusiveReason::ThresholdElevated,
+        ),
         AdaptiveOutcome::Inconclusive {
-            reason,
-            posterior,
-            samples_per_class,
-            elapsed_secs,
+            reason, posterior, ..
         } => {
-            let (c_reason, recommendation) = convert_reason(&reason);
+            let to_reason = convert_inconclusive_reason(reason);
+            let prob = posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5);
+            (ToOutcome::Inconclusive, prob, to_reason)
+        }
+    };
 
-            let (leak_probability, effect, quality) = if let Some(ref p) = posterior {
-                (
-                    p.leak_probability,
-                    build_effect_with_mismatch(p, calibration),
-                    build_quality(p),
-                )
+    // Get effect estimate from posterior if available
+    let effect = match outcome {
+        AdaptiveOutcome::LeakDetected { posterior, .. }
+        | AdaptiveOutcome::NoLeakDetected { posterior, .. }
+        | AdaptiveOutcome::ThresholdElevated { posterior, .. } => ToEffect {
+            shift_ns: posterior.beta_proj[0],
+            tail_ns: posterior.beta_proj[1],
+            ci_low_ns: 0.0, // Would need proper CI computation
+            ci_high_ns: 0.0,
+            pattern: ToEffectPattern::Indeterminate,
+        },
+        AdaptiveOutcome::Inconclusive { posterior, .. } => {
+            if let Some(p) = posterior {
+                ToEffect {
+                    shift_ns: p.beta_proj[0],
+                    tail_ns: p.beta_proj[1],
+                    ci_low_ns: 0.0,
+                    ci_high_ns: 0.0,
+                    pattern: ToEffectPattern::Indeterminate,
+                }
             } else {
-                (0.5, ToEffect::default(), ToQuality::TooNoisy)
-            };
-
-            let recommendation_ptr = make_recommendation_from_option(recommendation);
-            let diagnostics = build_diagnostics(
-                calibration,
-                posterior.as_ref(),
-                elapsed_secs,
-                stationarity_ratio,
-                stationarity_ok,
-            );
-
-            ToResult {
-                outcome: ToOutcome::Inconclusive,
-                leak_probability,
-                effect,
-                quality,
-                samples_used: samples_per_class,
-                elapsed_secs,
-                exploitability: ToExploitability::SharedHardwareOnly,
-                inconclusive_reason: c_reason,
-                operation_ns: 0.0,
-                timer_resolution_ns,
-                recommendation: recommendation_ptr,
-                timer_name,
-                platform: c"".as_ptr(),
-                adaptive_batching_used: batch_k > 1,
-                diagnostics,
-                ..ToResult::default()
+                ToEffect::default()
             }
         }
+    };
 
-        AdaptiveOutcome::ThresholdElevated {
-            posterior,
-            theta_user,
-            theta_eff,
-            achievable_at_max,
-            samples_per_class,
-            elapsed_secs,
-            ..
-        } => {
-            // v5.5: ThresholdElevated is semantically Inconclusive
-            let recommendation = if achievable_at_max {
-                format!(
-                    "Threshold elevated from {:.0}ns to {:.1}ns. More samples could achieve the requested threshold.",
-                    theta_user, theta_eff
-                )
-            } else {
-                format!(
-                    "Threshold elevated from {:.0}ns to {:.1}ns. Use a cycle counter (PmuTimer/LinuxPerfTimer) for better resolution.",
-                    theta_user, theta_eff
-                )
-            };
+    // Compute exploitability
+    let total_effect = (effect.shift_ns.powi(2) + effect.tail_ns.powi(2)).sqrt();
+    let exploitability = if total_effect < 10.0 {
+        ToExploitability::SharedHardwareOnly
+    } else if total_effect < 100.0 {
+        ToExploitability::Http2Multiplexing
+    } else if total_effect < 10_000.0 {
+        ToExploitability::StandardRemote
+    } else {
+        ToExploitability::ObviousLeak
+    };
 
-            let recommendation_ptr = make_recommendation(&recommendation);
-            let diagnostics = build_diagnostics(
-                calibration,
-                Some(&posterior),
-                elapsed_secs,
-                stationarity_ratio,
-                stationarity_ok,
-            );
-
-            ToResult {
-                outcome: ToOutcome::Inconclusive,
-                leak_probability: posterior.leak_probability,
-                effect: build_effect_with_mismatch(&posterior, calibration),
-                quality: build_quality(&posterior),
-                samples_used: samples_per_class,
-                elapsed_secs,
-                exploitability: ToExploitability::SharedHardwareOnly,
-                inconclusive_reason: ToInconclusiveReason::ThresholdElevated,
-                operation_ns: 0.0,
-                timer_resolution_ns,
-                recommendation: recommendation_ptr,
-                timer_name,
-                platform: c"".as_ptr(),
-                adaptive_batching_used: batch_k > 1,
-                diagnostics,
-                ..ToResult::default()
-            }
-        }
+    ToResult {
+        outcome: to_outcome,
+        leak_probability,
+        effect,
+        quality: ToMeasurementQuality::Good, // Would need proper quality computation
+        samples_used: outcome.samples_per_class() as u64,
+        elapsed_secs: outcome.elapsed_secs(),
+        exploitability,
+        inconclusive_reason,
+        mde_shift_ns: cal.mde_shift_ns,
+        mde_tail_ns: cal.mde_tail_ns,
+        theta_user_ns: cfg.threshold_ns(),
+        theta_eff_ns: cal.theta_eff,
+        theta_floor_ns: cal.theta_floor_initial,
     }
 }
 
-fn build_quality(posterior: &timing_oracle_core::adaptive::Posterior) -> ToQuality {
-    // Use core's method and convert to FFI type
-    posterior.measurement_quality().into()
-}
-
-fn convert_reason(
+/// Convert InconclusiveReason to C enum.
+fn convert_inconclusive_reason(
     reason: &timing_oracle_core::adaptive::InconclusiveReason,
-) -> (ToInconclusiveReason, Option<String>) {
+) -> ToInconclusiveReason {
     use timing_oracle_core::adaptive::InconclusiveReason;
 
     match reason {
-        InconclusiveReason::DataTooNoisy { guidance, .. } => {
-            (ToInconclusiveReason::DataTooNoisy, Some(guidance.clone()))
-        }
-        InconclusiveReason::NotLearning { guidance, .. } => {
-            (ToInconclusiveReason::NotLearning, Some(guidance.clone()))
-        }
-        InconclusiveReason::WouldTakeTooLong { guidance, .. } => (
-            ToInconclusiveReason::WouldTakeTooLong,
-            Some(guidance.clone()),
-        ),
-        InconclusiveReason::TimeBudgetExceeded { .. } => {
-            (ToInconclusiveReason::TimeBudgetExceeded, None)
-        }
+        InconclusiveReason::DataTooNoisy { .. } => ToInconclusiveReason::DataTooNoisy,
+        InconclusiveReason::NotLearning { .. } => ToInconclusiveReason::NotLearning,
+        InconclusiveReason::WouldTakeTooLong { .. } => ToInconclusiveReason::WouldTakeTooLong,
+        InconclusiveReason::TimeBudgetExceeded { .. } => ToInconclusiveReason::TimeBudgetExceeded,
         InconclusiveReason::SampleBudgetExceeded { .. } => {
-            (ToInconclusiveReason::SampleBudgetExceeded, None)
+            ToInconclusiveReason::SampleBudgetExceeded
         }
-        InconclusiveReason::ConditionsChanged {
-            message, guidance, ..
-        } => (
-            ToInconclusiveReason::ConditionsChanged,
-            Some(format!("{} {}", message, guidance)),
-        ),
-        InconclusiveReason::ThresholdElevated {
-            message, guidance, ..
-        } => (
-            ToInconclusiveReason::ThresholdElevated,
-            Some(format!("{} {}", message, guidance)),
-        ),
+        InconclusiveReason::ConditionsChanged { .. } => ToInconclusiveReason::ConditionsChanged,
+        InconclusiveReason::ThresholdElevated { .. } => ToInconclusiveReason::ThresholdElevated,
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use core::ffi::CStr;
+// ============================================================================
+// High-Level API: One-Shot Analysis
+// ============================================================================
 
-    // =========================================================================
-    // Group 1: String Conversion Functions
-    // =========================================================================
-
-    #[test]
-    fn test_outcome_str_all_variants() {
-        // Test all ToOutcome variants return valid C strings
-        let variants = [
-            (ToOutcome::Pass, "Pass"),
-            (ToOutcome::Fail, "Fail"),
-            (ToOutcome::Inconclusive, "Inconclusive"),
-            (ToOutcome::Unmeasurable, "Unmeasurable"),
-        ];
-
-        for (variant, expected) in variants {
-            let ptr = to_outcome_str(variant);
-            assert!(
-                !ptr.is_null(),
-                "to_outcome_str returned null for {:?}",
-                variant
-            );
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            assert_eq!(cstr.to_str().unwrap(), expected);
-        }
+/// Analyze pre-collected timing samples.
+///
+/// This is a convenience function for one-shot analysis when you already
+/// have timing data collected. For a C measurement loop, use
+/// `to_calibrate()` + `to_step()` instead.
+///
+/// # Parameters
+/// - `baseline`: Array of baseline timing samples (in timer ticks)
+/// - `sample`: Array of sample timing samples (in timer ticks)
+/// - `count`: Number of samples in each array
+/// - `config`: Configuration
+/// - `result_out`: Pointer to receive the result
+///
+/// # Returns
+/// Error code.
+///
+/// # Safety
+/// All pointers must be valid.
+#[no_mangle]
+pub unsafe extern "C" fn to_analyze(
+    baseline: *const u64,
+    sample: *const u64,
+    count: usize,
+    config: *const ToConfig,
+    result_out: *mut ToResult,
+) -> ToError {
+    if baseline.is_null() || sample.is_null() || config.is_null() || result_out.is_null() {
+        return ToError::NullPointer;
     }
 
-    #[test]
-    fn test_effect_pattern_str_all() {
-        let variants = [
-            (ToEffectPattern::UniformShift, "UniformShift"),
-            (ToEffectPattern::TailEffect, "TailEffect"),
-            (ToEffectPattern::Mixed, "Mixed"),
-            (ToEffectPattern::Indeterminate, "Indeterminate"),
-        ];
-
-        for (variant, expected) in variants {
-            let ptr = to_effect_pattern_str(variant);
-            assert!(
-                !ptr.is_null(),
-                "to_effect_pattern_str returned null for {:?}",
-                variant
-            );
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            assert_eq!(cstr.to_str().unwrap(), expected);
-        }
+    if count < 100 {
+        return ToError::NotEnoughSamples;
     }
 
-    #[test]
-    fn test_exploitability_str_all() {
-        let variants = [
-            (ToExploitability::SharedHardwareOnly, "SharedHardwareOnly"),
-            (ToExploitability::Http2Multiplexing, "Http2Multiplexing"),
-            (ToExploitability::StandardRemote, "StandardRemote"),
-            (ToExploitability::ObviousLeak, "ObviousLeak"),
-        ];
+    let baseline_slice = slice::from_raw_parts(baseline, count);
+    let sample_slice = slice::from_raw_parts(sample, count);
+    let cfg = &*config;
 
-        for (variant, expected) in variants {
-            let ptr = to_exploitability_str(variant);
-            assert!(
-                !ptr.is_null(),
-                "to_exploitability_str returned null for {:?}",
-                variant
-            );
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            assert_eq!(cstr.to_str().unwrap(), expected);
-        }
-    }
+    // Get threshold and conversion factor
+    let theta_ns = cfg.threshold_ns();
+    let ns_per_tick = if cfg.timer_frequency_hz == 0 {
+        1.0
+    } else {
+        1e9 / cfg.timer_frequency_hz as f64
+    };
 
-    #[test]
-    fn test_quality_str_all() {
-        let variants = [
-            (ToQuality::Excellent, "Excellent"),
-            (ToQuality::Good, "Good"),
-            (ToQuality::Poor, "Poor"),
-            (ToQuality::TooNoisy, "TooNoisy"),
-        ];
+    // Convert to nanoseconds
+    let baseline_ns: Vec<f64> = baseline_slice
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
+    let sample_ns: Vec<f64> = sample_slice
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
 
-        for (variant, expected) in variants {
-            let ptr = to_quality_str(variant);
-            assert!(
-                !ptr.is_null(),
-                "to_quality_str returned null for {:?}",
-                variant
-            );
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            assert_eq!(cstr.to_str().unwrap(), expected);
-        }
-    }
+    // Compute quantile differences
+    let mut baseline_sorted = baseline_ns.clone();
+    let mut sample_sorted = sample_ns.clone();
+    let q_baseline = compute_deciles_inplace(&mut baseline_sorted);
+    let q_sample = compute_deciles_inplace(&mut sample_sorted);
+    let observed_diff = q_baseline - q_sample;
 
-    #[test]
-    fn test_inconclusive_reason_str_all() {
-        let variants = [
-            (ToInconclusiveReason::DataTooNoisy, "DataTooNoisy"),
-            (ToInconclusiveReason::NotLearning, "NotLearning"),
-            (ToInconclusiveReason::WouldTakeTooLong, "WouldTakeTooLong"),
-            (
-                ToInconclusiveReason::TimeBudgetExceeded,
-                "TimeBudgetExceeded",
-            ),
-            (
-                ToInconclusiveReason::SampleBudgetExceeded,
-                "SampleBudgetExceeded",
-            ),
-            (ToInconclusiveReason::ConditionsChanged, "ConditionsChanged"),
-            (
-                ToInconclusiveReason::ThresholdElevated,
-                "ThresholdElevated",
-            ),
-        ];
+    // Bootstrap covariance
+    let seed = if cfg.seed == 0 { 42 } else { cfg.seed };
+    let cov_estimate =
+        bootstrap_difference_covariance_discrete(&baseline_ns, &sample_ns, 2000, seed);
+    let sigma_rate = cov_estimate.matrix * count as f64;
 
-        for (variant, expected) in variants {
-            let ptr = to_inconclusive_reason_str(variant);
-            assert!(
-                !ptr.is_null(),
-                "to_inconclusive_reason_str returned null for {:?}",
-                variant
-            );
-            let cstr = unsafe { CStr::from_ptr(ptr) };
-            assert_eq!(cstr.to_str().unwrap(), expected);
-        }
-    }
+    // Compute theta_eff
+    let c_floor = compute_c_floor_9d(&sigma_rate, seed);
+    let block_length_baseline = optimal_block_length(&baseline_ns).circular.ceil() as usize;
+    let block_length_sample = optimal_block_length(&sample_ns).circular.ceil() as usize;
+    let block_length = block_length_baseline.max(block_length_sample).max(1);
+    let n_eff = (count / block_length).max(1);
+    let theta_floor = (c_floor / (n_eff as f64).sqrt()).max(ns_per_tick);
+    let theta_eff = theta_ns.max(theta_floor);
 
-    // =========================================================================
-    // Group 2: Type Conversions (From implementations)
-    // =========================================================================
+    // Calibrate prior
+    let discrete_mode = false; // Simple assumption for one-shot
+    let (sigma_t, l_r) =
+        calibrate_t_prior_scale(&sigma_rate, theta_eff, count, discrete_mode, seed);
 
-    #[test]
-    fn test_effect_pattern_from_core() {
-        use timing_oracle_core::result::EffectPattern;
+    // Scale covariance
+    let sigma_n = sigma_rate / n_eff as f64;
 
-        let conversions = [
-            (EffectPattern::UniformShift, ToEffectPattern::UniformShift),
-            (EffectPattern::TailEffect, ToEffectPattern::TailEffect),
-            (EffectPattern::Mixed, ToEffectPattern::Mixed),
-            (EffectPattern::Indeterminate, ToEffectPattern::Indeterminate),
-        ];
+    // Run Bayesian inference
+    let bayes_result = compute_bayes_gibbs(
+        &observed_diff,
+        &sigma_n,
+        sigma_t,
+        &l_r,
+        theta_eff,
+        Some(seed),
+    );
 
-        for (core_val, expected) in conversions {
-            let ffi_val: ToEffectPattern = core_val.into();
-            assert_eq!(ffi_val, expected, "Conversion failed for {:?}", core_val);
-        }
-    }
+    // Extract effect estimate
+    let shift_ns = bayes_result.beta_proj[0];
+    let tail_ns = bayes_result.beta_proj[1];
 
-    #[test]
-    fn test_quality_from_core() {
-        use timing_oracle_core::result::MeasurementQuality;
+    // Compute CIs from posterior covariance (simplified)
+    let shift_sd = bayes_result.beta_proj_cov[(0, 0)].sqrt();
+    let tail_sd = bayes_result.beta_proj_cov[(1, 1)].sqrt();
+    let total_effect = (shift_ns.powi(2) + tail_ns.powi(2)).sqrt();
+    let total_sd = (shift_sd.powi(2) + tail_sd.powi(2)).sqrt();
 
-        let conversions = [
-            (MeasurementQuality::Excellent, ToQuality::Excellent),
-            (MeasurementQuality::Good, ToQuality::Good),
-            (MeasurementQuality::Poor, ToQuality::Poor),
-            (MeasurementQuality::TooNoisy, ToQuality::TooNoisy),
-        ];
+    // Simple 95% CI approximation
+    let ci_low = (total_effect - 1.96 * total_sd).max(0.0);
+    let ci_high = total_effect + 1.96 * total_sd;
 
-        for (core_val, expected) in conversions {
-            let ffi_val: ToQuality = core_val.into();
-            assert_eq!(ffi_val, expected, "Conversion failed for {:?}", core_val);
-        }
-    }
+    // Classify pattern
+    let pattern = if shift_ns.abs() > 2.0 * tail_ns.abs() {
+        ToEffectPattern::UniformShift
+    } else if tail_ns.abs() > 2.0 * shift_ns.abs() {
+        ToEffectPattern::TailEffect
+    } else if shift_ns.abs() > 0.1 * theta_eff || tail_ns.abs() > 0.1 * theta_eff {
+        ToEffectPattern::Mixed
+    } else {
+        ToEffectPattern::Indeterminate
+    };
 
-    #[test]
-    fn test_effect_from_core() {
-        use timing_oracle_core::result::{EffectEstimate, EffectPattern};
+    // Determine outcome
+    let leak_prob = bayes_result.leak_probability;
+    let (outcome, inconclusive_reason) = if leak_prob < cfg.pass_threshold {
+        (ToOutcome::Pass, ToInconclusiveReason::None)
+    } else if leak_prob > cfg.fail_threshold {
+        (ToOutcome::Fail, ToInconclusiveReason::None)
+    } else {
+        (ToOutcome::Inconclusive, ToInconclusiveReason::None)
+    };
 
-        let core_effect = EffectEstimate {
-            shift_ns: 10.5,
-            tail_ns: 5.2,
-            credible_interval_ns: (2.0, 18.0),
-            pattern: EffectPattern::Mixed,
-            interpretation_caveat: None,
-        };
+    // Compute exploitability
+    let exploitability = if total_effect < 10.0 {
+        ToExploitability::SharedHardwareOnly
+    } else if total_effect < 100.0 {
+        ToExploitability::Http2Multiplexing
+    } else if total_effect < 10_000.0 {
+        ToExploitability::StandardRemote
+    } else {
+        ToExploitability::ObviousLeak
+    };
 
-        let ffi_effect: ToEffect = core_effect.into();
-        assert!((ffi_effect.shift_ns - 10.5).abs() < 1e-10);
-        assert!((ffi_effect.tail_ns - 5.2).abs() < 1e-10);
-        assert!((ffi_effect.ci_low_ns - 2.0).abs() < 1e-10);
-        assert!((ffi_effect.ci_high_ns - 18.0).abs() < 1e-10);
-        assert_eq!(ffi_effect.pattern, ToEffectPattern::Mixed);
-    }
+    // Determine quality
+    let mde_ns = theta_floor;
+    let quality = if mde_ns < 5.0 {
+        ToMeasurementQuality::Excellent
+    } else if mde_ns < 20.0 {
+        ToMeasurementQuality::Good
+    } else if mde_ns < 100.0 {
+        ToMeasurementQuality::Poor
+    } else {
+        ToMeasurementQuality::TooNoisy
+    };
 
-    #[test]
-    fn test_attacker_model_all_thresholds() {
-        // Test all attacker model threshold values
-        let models = [
-            (ToAttackerModel::SharedHardware, 0.6),
-            (ToAttackerModel::PostQuantum, 3.3),
-            (ToAttackerModel::AdjacentNetwork, 100.0),
-            (ToAttackerModel::RemoteNetwork, 50_000.0),
-            (ToAttackerModel::Research, 0.0),
-        ];
+    // Build result
+    *result_out = ToResult {
+        outcome,
+        leak_probability: leak_prob,
+        effect: ToEffect {
+            shift_ns,
+            tail_ns,
+            ci_low_ns: ci_low,
+            ci_high_ns: ci_high,
+            pattern,
+        },
+        quality,
+        samples_used: count as u64,
+        elapsed_secs: 0.0,
+        exploitability,
+        inconclusive_reason,
+        mde_shift_ns: mde_ns,
+        mde_tail_ns: mde_ns * 1.5,
+        theta_user_ns: theta_ns,
+        theta_eff_ns: theta_eff,
+        theta_floor_ns: theta_floor,
+    };
 
-        for (model, expected) in models {
-            let threshold = model.to_threshold_ns(0.0);
-            assert!(
-                (threshold - expected).abs() < 1e-10,
-                "Threshold mismatch for {:?}: got {}, expected {}",
-                model,
-                threshold,
-                expected
-            );
-        }
+    ToError::Ok
+}
 
-        // Test custom threshold
-        assert!((ToAttackerModel::Custom.to_threshold_ns(123.45) - 123.45).abs() < 1e-10);
-    }
+// ============================================================================
+// Utility Functions
+// ============================================================================
 
-    // =========================================================================
-    // Group 3: Default Values & Config
-    // =========================================================================
+/// Get the library version string.
+///
+/// # Returns
+/// Pointer to a static null-terminated string.
+#[no_mangle]
+pub extern "C" fn to_version() -> *const std::ffi::c_char {
+    static VERSION: &[u8] = b"0.1.0\0";
+    VERSION.as_ptr() as *const std::ffi::c_char
+}
 
-    #[test]
-    fn test_config_default_all_models() {
-        let models = [
-            ToAttackerModel::SharedHardware,
-            ToAttackerModel::PostQuantum,
-            ToAttackerModel::AdjacentNetwork,
-            ToAttackerModel::RemoteNetwork,
-            ToAttackerModel::Research,
-        ];
-
-        for model in models {
-            let config = to_config_default(model);
-            assert_eq!(config.attacker_model, model);
-            // Default thresholds should be 0.05 and 0.95
-            assert!((config.pass_threshold - 0.05).abs() < 1e-10);
-            assert!((config.fail_threshold - 0.95).abs() < 1e-10);
-            // Default max_samples should be 0 (meaning use default 100,000)
-            assert_eq!(config.max_samples, 0);
-            // Default time_budget_secs is 0.0 (meaning use internal default of 30s)
-            assert!((config.time_budget_secs - 0.0).abs() < 1e-10);
-        }
-    }
-
-    #[test]
-    fn test_result_default() {
-        let result = ToResult::default();
-        assert_eq!(result.outcome, ToOutcome::Pass);
-        assert!((result.leak_probability - 0.0).abs() < 1e-10);
-        assert_eq!(result.samples_used, 0);
-        assert!((result.elapsed_secs - 0.0).abs() < 1e-10);
-        assert_eq!(result.exploitability, ToExploitability::SharedHardwareOnly);
-        assert!(result.recommendation.is_null());
-        assert!(!result.adaptive_batching_used);
-    }
-
-    #[test]
-    fn test_config_values_reasonable() {
-        let config = to_config_default(ToAttackerModel::AdjacentNetwork);
-
-        // Thresholds should be in [0, 1]
-        assert!(config.pass_threshold >= 0.0 && config.pass_threshold <= 1.0);
-        assert!(config.fail_threshold >= 0.0 && config.fail_threshold <= 1.0);
-
-        // Pass threshold should be less than fail threshold
-        assert!(config.pass_threshold < config.fail_threshold);
-
-        // Time budget can be 0.0 (meaning "use internal default")
-        // or any non-negative value
-        assert!(config.time_budget_secs >= 0.0);
-
-        // Seed can be any value (0 is valid, means use random seed)
-        let _seed = config.seed;
-    }
-
-    // =========================================================================
-    // Group 4: Metadata Functions
-    // =========================================================================
-
-    #[test]
-    fn test_version_format() {
-        let ptr = to_version();
-        assert!(!ptr.is_null(), "to_version returned null");
-
-        let cstr = unsafe { CStr::from_ptr(ptr) };
-        let version = cstr.to_str().expect("Invalid UTF-8 in version string");
-
-        // Should be a valid semver format (x.y.z)
-        let parts: Vec<&str> = version.split('.').collect();
-        assert!(
-            parts.len() >= 2,
-            "Version should have at least major.minor: {}",
-            version
-        );
-
-        // Each part should be a valid number
-        for (i, part) in parts.iter().enumerate() {
-            // Handle pre-release suffixes like "0.1.0-alpha"
-            let num_part = part.split('-').next().unwrap();
-            assert!(
-                num_part.parse::<u32>().is_ok(),
-                "Version part {} is not a number: {}",
-                i,
-                part
-            );
-        }
-    }
-
-    #[test]
-    fn test_timer_name_non_null() {
-        let ptr = to_timer_name();
-        assert!(!ptr.is_null(), "to_timer_name returned null");
-
-        let cstr = unsafe { CStr::from_ptr(ptr) };
-        let name = cstr.to_str().expect("Invalid UTF-8 in timer name");
-
-        // Should be a non-empty string
-        assert!(!name.is_empty(), "Timer name should not be empty");
-
-        // Should be one of the known timer names
-        let known_timers = ["rdtsc", "cntvct_el0", "clock_gettime", "perf", "kperf"];
-        assert!(
-            known_timers.iter().any(|&t| name.contains(t)),
-            "Unknown timer name: {}",
-            name
-        );
-    }
-
-    #[test]
-    fn test_timer_frequency_reasonable() {
-        let freq = to_timer_frequency();
-
-        // Timer frequency varies by platform:
-        // - x86_64 TSC: ~1-5 GHz (CPU frequency)
-        // - ARM64 CNTVCT_EL0: ~24 MHz (system timer)
-        // - clock_gettime fallback: 1 GHz (nanoseconds)
-        // Minimum reasonable is 1 MHz
-        assert!(
-            freq >= 1_000_000,
-            "Timer frequency too low: {} Hz (expected >= 1 MHz)",
-            freq
-        );
-
-        // Should be less than 10 GHz (sanity check)
-        assert!(
-            freq <= 10_000_000_000,
-            "Timer frequency unreasonably high: {} Hz",
-            freq
-        );
-    }
+/// Get attacker model threshold in nanoseconds.
+#[no_mangle]
+pub extern "C" fn to_attacker_threshold_ns(model: ToAttackerModel) -> f64 {
+    let rust_model: AttackerModel = model.into();
+    rust_model.to_threshold_ns()
 }

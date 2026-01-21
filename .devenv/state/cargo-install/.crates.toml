@@ -6,3 +6,5 @@
     "flamegraph",
 ]
 "samply 0.13.1 (registry+https://github.com/rust-lang/crates.io-index)" = ["samply"]
+"uniffi-bindgen-cpp 0.7.4+v0.28.3 (git+https://github.com/NordSecurity/uniffi-bindgen-cpp?tag=0.7.4+v0.28.3#97ecfea479d6db9d4ad660371ac0b55338271b15)" = ["uniffi-bindgen-cpp"]
+"uniffi-bindgen-go 0.4.0+v0.28.3 (git+https://github.com/NordSecurity/uniffi-bindgen-go?tag=v0.4.0 v0.28.3#a083e4aacd15e0748fabc0243008664d0faa7efd)" = ["uniffi-bindgen-go"]

@@ -1,0 +1,102 @@
+package timing_oracle_uniffi
+
+import (
+	"testing"
+)
+
+func TestVersion(t *testing.T) {
+	version := Version()
+	if version == "" {
+		t.Error("Version() returned empty string")
+	}
+	t.Logf("Version: %s", version)
+}
+
+func TestConfigDefault(t *testing.T) {
+	config := ConfigDefault(AttackerModelAdjacentNetwork{})
+	if config.PassThreshold <= 0 || config.PassThreshold >= 1 {
+		t.Errorf("Expected PassThreshold in (0,1), got %f", config.PassThreshold)
+	}
+	if config.FailThreshold <= 0 || config.FailThreshold >= 1 {
+		t.Errorf("Expected FailThreshold in (0,1), got %f", config.FailThreshold)
+	}
+	t.Logf("Config: %+v", config)
+}
+
+func TestConfigPresets(t *testing.T) {
+	tests := []struct {
+		name   string
+		config Config
+	}{
+		{"SharedHardware", ConfigSharedHardware()},
+		{"AdjacentNetwork", ConfigAdjacentNetwork()},
+		{"RemoteNetwork", ConfigRemoteNetwork()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.config.PassThreshold <= 0 || tt.config.PassThreshold >= 1 {
+				t.Errorf("Expected PassThreshold in (0,1), got %f", tt.config.PassThreshold)
+			}
+			t.Logf("Config: %+v", tt.config)
+		})
+	}
+}
+
+func TestNewAdaptiveState(t *testing.T) {
+	state := NewAdaptiveState()
+	if state == nil {
+		t.Fatal("NewAdaptiveState() returned nil")
+	}
+	defer state.Destroy()
+
+	if state.TotalBaseline() != 0 {
+		t.Errorf("Expected TotalBaseline() == 0, got %d", state.TotalBaseline())
+	}
+	if state.TotalSample() != 0 {
+		t.Errorf("Expected TotalSample() == 0, got %d", state.TotalSample())
+	}
+	if state.BatchCount() != 0 {
+		t.Errorf("Expected BatchCount() == 0, got %d", state.BatchCount())
+	}
+	t.Logf("AdaptiveState: baseline=%d sample=%d batches=%d prob=%f",
+		state.TotalBaseline(), state.TotalSample(), state.BatchCount(), state.CurrentProbability())
+}
+
+func TestAnalyzeSimple(t *testing.T) {
+	// Create simple timing data (all same values - no leak)
+	baseline := make([]uint64, 1000)
+	sample := make([]uint64, 1000)
+	for i := range baseline {
+		baseline[i] = 100
+		sample[i] = 100
+	}
+
+	config := ConfigAdjacentNetwork()
+	result, err := Analyze(baseline, sample, config)
+	if err != nil {
+		t.Fatalf("Analyze() failed: %v", err)
+	}
+
+	t.Logf("Result: outcome=%v prob=%f quality=%v",
+		result.Outcome, result.LeakProbability, result.Quality)
+}
+
+func TestCalibrateSamples(t *testing.T) {
+	// Create simple timing data
+	baseline := make([]uint64, 5000)
+	sample := make([]uint64, 5000)
+	for i := range baseline {
+		baseline[i] = uint64(100 + i%10)
+		sample[i] = uint64(100 + i%10)
+	}
+
+	config := ConfigAdjacentNetwork()
+	calibration, err := CalibrateSamples(baseline, sample, config)
+	if err != nil {
+		t.Fatalf("CalibrateSamples() failed: %v", err)
+	}
+	defer calibration.Destroy()
+
+	t.Logf("Calibration succeeded")
+}

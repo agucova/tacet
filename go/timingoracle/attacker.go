@@ -1,6 +1,8 @@
 package timingoracle
 
-import "github.com/agucova/timing-oracle/go/timingoracle/internal/ffi"
+import (
+	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
+)
 
 // AttackerModel represents the threat model for timing analysis.
 // Choose based on your deployment scenario.
@@ -69,20 +71,20 @@ func (m AttackerModel) ThresholdNs() float64 {
 	}
 }
 
-// toFFI converts to the internal FFI type.
-func (m AttackerModel) toFFI() ffi.AttackerModel {
+// toUniFFI converts to the UniFFI attacker model type.
+func (m AttackerModel) toUniFFI() uniffi.AttackerModel {
 	switch m {
 	case SharedHardware:
-		return ffi.AttackerSharedHardware
+		return uniffi.AttackerModelSharedHardware{}
 	case PostQuantum:
-		return ffi.AttackerPostQuantum
+		return uniffi.AttackerModelPostQuantum{}
 	case AdjacentNetwork:
-		return ffi.AttackerAdjacentNetwork
+		return uniffi.AttackerModelAdjacentNetwork{}
 	case RemoteNetwork:
-		return ffi.AttackerRemoteNetwork
+		return uniffi.AttackerModelRemoteNetwork{}
 	case Research:
-		return ffi.AttackerResearch
+		return uniffi.AttackerModelResearch{}
 	default:
-		return ffi.AttackerCustom
+		return uniffi.AttackerModelAdjacentNetwork{}
 	}
 }

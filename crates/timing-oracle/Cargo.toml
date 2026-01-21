@@ -26,14 +26,16 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 tracing = "0.1"
 indicatif = { version = "0.17", optional = true }
+thread-priority = "1.2.0"
 
-# Platform-specific cycle counters
+# Platform-specific cycle counters and affinity support
 [target.'cfg(target_os = "macos")'.dependencies]
 kperf-rs = { version = "0.1.1", optional = true }
-libc = { version = "0.2", optional = true }
+libc = "0.2"  # Required for CPU affinity pinning
 
 [target.'cfg(target_os = "linux")'.dependencies]
 perf_event2 = { package = "perf-event2", version = "0.7", optional = true }
+libc = "0.2"  # Required for CPU affinity pinning
 
 [dev-dependencies]
 aes-gcm = "0.10.3"
@@ -97,5 +99,5 @@ macros = ["dep:timing-oracle-macros"]
 progress-bars = ["dep:indicatif"]
 
 # Internal features - use default features instead
-kperf = ["dep:kperf-rs", "dep:libc"]
+kperf = ["dep:kperf-rs"]  # libc is always available for CPU affinity
 perf = ["dep:perf_event2"]

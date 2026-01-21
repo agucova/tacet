@@ -740,7 +740,7 @@ $$
 
 chosen adaptively (start at 10⁻¹⁰, increase on Cholesky failure).
 
-**Robustness fallback (fragile regimes):** In fragile regimes (§3.3) or when cond(R) > 10⁴, implementations SHOULD apply shrinkage:
+**Robustness fallback (fragile regimes) — normative:** In fragile regimes (§3.3) or when cond(R) > 10⁴, implementations MUST apply shrinkage:
 
 $$
 R \leftarrow (1-\lambda_{\text{shrink}})R + \lambda_{\text{shrink}} I, \quad \lambda_{\text{shrink}} \in [0.01, 0.2]
@@ -1190,6 +1190,13 @@ where:
 $$
 A := (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1}
 $$
+
+**Conditioning stability for Σ_n — normative:** In fragile regimes (§3.3), Σ_n may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to Σ_n before use in the Gibbs sampler and GLS projection:
+
+- If cond(Σ_n) > 10⁴ but ≤ 10⁶: Apply shrinkage Σ_n ← (1−λ)Σ_n + λ·diag(Σ_n) with λ ∈ [0.1, 0.95] based on condition severity
+- If cond(Σ_n) > 10⁶ or Cholesky fails: Fall back to identity matrix (equivalent to OLS weighting)
+
+When using regularized Σ_n, the projection covariance MUST be scaled by residual variance: Cov(β_proj) = (X'X)⁻¹ × (Q_proj / 7) where Q_proj is the projection mismatch statistic. This ensures accurate standard errors for pattern classification.
 
 **Posterior for projection summary:**
 
@@ -1793,8 +1800,10 @@ These constants define conformant implementations. Implementations MAY use diffe
 | CI hysteresis (Research) | 10% | SHOULD | Margin for detection decisions |
 | Default RNG seed | 0x74696D696E67 | SHOULD | "timing" in ASCII |
 | R jitter (ε) | 10⁻¹⁰–10⁻⁶ | MUST | Ensure SPD |
-| R shrinkage (λ_shrink) | 0.01–0.2 | SHOULD | Robustness under fragile regimes |
-| Condition number threshold | 10⁴ | SHOULD | Trigger robust shrinkage |
+| R shrinkage (λ_shrink) | 0.01–0.2 | MUST | Robustness under fragile regimes |
+| Condition number threshold (R) | 10⁴ | MUST | Trigger R shrinkage |
+| Condition number threshold (Σ_n) | 10⁴ | MUST | Trigger Σ_n shrinkage |
+| Σ_n OLS fallback threshold | 10⁶ | MUST | Fall back to identity matrix |
 | λ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
 | λ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
 | κ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |

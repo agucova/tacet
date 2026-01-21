@@ -18,6 +18,7 @@ mod example
 mod doc
 mod quality
 mod profile
+mod bindings
 
 # ============================================================================
 # TOP-LEVEL COMMANDS

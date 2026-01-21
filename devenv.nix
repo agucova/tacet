@@ -142,6 +142,11 @@ in
     components = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" "rust-src" ];
   };
 
+  languages.go.enable = true;
+
+  # C++ toolchain for building/testing C++ bindings
+  languages.cplusplus.enable = true;
+
   # Python is provided via tlsfuzzer Nix package
   # No need for uv/pip - all deps are in Nix
 

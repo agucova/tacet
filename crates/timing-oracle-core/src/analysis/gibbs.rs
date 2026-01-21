@@ -67,6 +67,10 @@ const KAPPA_MIN: f64 = 1e-10;
 /// Maximum κ value to prevent numerical issues (v5.6).
 const KAPPA_MAX: f64 = 1e10;
 
+/// Condition number threshold for triggering robust shrinkage (§3.3.5).
+/// When exceeded, apply shrinkage to prevent GLS instability.
+const CONDITION_NUMBER_THRESHOLD: f64 = 1e4;
+
 /// Result of Gibbs sampling inference.
 #[derive(Clone, Debug)]
 pub struct GibbsResult {
@@ -166,15 +170,14 @@ impl GibbsSampler {
     ///
     /// v5.6: Extended to sample (δ, λ, κ) for robust t-likelihood.
     pub fn run(&mut self, delta_obs: &Vector9, sigma_n: &Matrix9, theta: f64) -> GibbsResult {
-        // Precompute Cholesky of Σ_n for efficiency
-        let sigma_n_chol = match Cholesky::new(*sigma_n) {
-            Some(c) => c,
-            None => {
-                // Fallback: add jitter
-                let jittered = *sigma_n + Matrix9::identity() * 1e-6;
-                Cholesky::new(jittered).expect("Σ_n must be SPD")
-            }
-        };
+        // Apply condition-number-based regularization to sigma_n (§3.3.5).
+        // This prevents posterior instability when sigma_n is ill-conditioned,
+        // which occurs in discrete timer mode with high quantization.
+        let sigma_n_reg = regularize_sigma_n(sigma_n);
+
+        // Precompute Cholesky of regularized Σ_n for efficiency
+        let sigma_n_chol =
+            Cholesky::new(sigma_n_reg).expect("regularize_sigma_n should ensure SPD");
 
         // Precompute Σ_n⁻¹ for efficiency (constant throughout Gibbs run)
         // This avoids creating a Matrix9 on the stack 256 times
@@ -456,13 +459,15 @@ impl GibbsSampler {
         // Design matrix X: [1, decile_weights]
         let x = build_design_matrix();
 
+        // Apply condition-number-based regularization to sigma_n (§3.3.5).
+        // This prevents GLS instability when sigma_n is ill-conditioned,
+        // which occurs in discrete timer mode with high quantization.
+        let sigma_n_reg = regularize_sigma_n(sigma_n);
+
         // GLS projection: β = (X'Σ⁻¹X)⁻¹ X'Σ⁻¹ δ
-        // Use sigma_n as the weighting matrix
-        let sigma_n_chol = Cholesky::new(*sigma_n);
-        let sigma_n_chol = match sigma_n_chol {
-            Some(c) => c,
-            None => Cholesky::new(*sigma_n + Matrix9::identity() * 1e-8).unwrap(),
-        };
+        // Use regularized sigma_n as the weighting matrix
+        let sigma_n_chol = Cholesky::new(sigma_n_reg)
+            .expect("regularize_sigma_n should ensure SPD");
 
         // Compute X'Σ⁻¹X
         let sigma_inv_x = {
@@ -496,14 +501,17 @@ impl GibbsSampler {
         let xt_sigma_inv_delta = x.transpose() * sigma_inv_delta;
         let beta_proj = xtsx_inv * xt_sigma_inv_delta;
 
-        // Projection covariance: (X'Σ⁻¹X)⁻¹ for now
-        // A more accurate version would propagate lambda_post
-        let beta_proj_cov = xtsx_inv;
-
         // Projection mismatch Q = ||δ - Xβ||²_Σ⁻¹
         let residual = delta_post - &x * &beta_proj;
         let sigma_inv_residual = sigma_n_chol.solve(&residual);
         let projection_mismatch_q = residual.dot(&sigma_inv_residual);
+
+        // Projection covariance: (X'Σ⁻¹X)⁻¹ × σ²_resid
+        // When using regularized Σ (especially unit diagonal), the standard
+        // (X'Σ⁻¹X)⁻¹ underestimates variance. Scale by residual variance estimate.
+        // σ²_resid = Q / (9-2) for 9 quantiles and 2 parameters.
+        let residual_var = (projection_mismatch_q / 7.0).max(1.0);
+        let beta_proj_cov = xtsx_inv * residual_var;
 
         (beta_proj, beta_proj_cov, projection_mismatch_q)
     }
@@ -563,6 +571,76 @@ impl GibbsSampler {
         }
         r_inv
     }
+}
+
+/// Estimate condition number of a symmetric positive semi-definite matrix.
+///
+/// Uses Cholesky factorization when available: for SPD matrices,
+/// cond(A) = cond(L)² ≈ (max(L_ii) / min(L_ii))².
+/// Falls back to diagonal ratio which underestimates for high correlations.
+fn estimate_condition_number(m: &Matrix9) -> f64 {
+    // Try Cholesky factorization for accurate condition number
+    if let Some(chol) = Cholesky::new(*m) {
+        let l = chol.l();
+        let diag: [f64; 9] = core::array::from_fn(|i| l[(i, i)].abs());
+        let max_l = diag.iter().cloned().fold(0.0_f64, f64::max);
+        let min_l = diag.iter().cloned().fold(f64::INFINITY, f64::min);
+
+        if min_l < 1e-12 {
+            return f64::INFINITY;
+        }
+
+        // cond(A) = cond(L)² for Cholesky L such that A = LL'
+        let cond_l = max_l / min_l;
+        return cond_l * cond_l;
+    }
+
+    // Cholesky failed: matrix is definitely ill-conditioned
+    f64::INFINITY
+}
+
+/// Regularize covariance matrix for GLS stability (§3.3.5).
+///
+/// Applies condition-number-based shrinkage when the matrix is ill-conditioned:
+/// Σ ← (1-λ)Σ + λ·diag(Σ) where λ scales with condition severity.
+/// For extremely ill-conditioned matrices, uses diagonal-only (OLS) as fallback.
+fn regularize_sigma_n(sigma_n: &Matrix9) -> Matrix9 {
+    let cond = estimate_condition_number(sigma_n);
+
+    if cond <= CONDITION_NUMBER_THRESHOLD {
+        // Well-conditioned: return as-is (add minimal jitter if needed)
+        if Cholesky::new(*sigma_n).is_some() {
+            return *sigma_n;
+        }
+    }
+
+    // Extract diagonal for shrinkage target
+    let diag_sigma = Matrix9::from_diagonal(&sigma_n.diagonal());
+
+    // For extremely ill-conditioned matrices (cond > 10^6), use unit diagonal (OLS).
+    // This gives up on modeling correlations but guarantees stable GLS.
+    if cond > CONDITION_NUMBER_THRESHOLD * 1e2 || cond.is_infinite() {
+        return Matrix9::identity();
+    }
+
+    // Moderately ill-conditioned: use aggressive shrinkage
+    // Scale lambda with log of condition number excess
+    let log_excess = (cond / CONDITION_NUMBER_THRESHOLD).ln().max(0.0);
+    let lambda = (0.1 + 0.2 * log_excess).min(0.95); // Range: 10% to 95%
+
+    // Shrink toward diagonal: (1-λ)Σ + λ·diag(Σ)
+    let regularized = *sigma_n * (1.0 - lambda) + diag_sigma * lambda;
+
+    // Ensure SPD with increasing jitter if needed
+    for &eps in &[1e-10, 1e-9, 1e-8, 1e-7, 1e-6, 1e-5] {
+        let jittered = regularized + Matrix9::identity() * eps;
+        if Cholesky::new(jittered).is_some() {
+            return jittered;
+        }
+    }
+
+    // Final fallback: use diagonal only
+    diag_sigma + Matrix9::identity() * 1e-6
 }
 
 /// Build the design matrix X for 2D projection.

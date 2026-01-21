@@ -3,20 +3,20 @@ package timingoracle
 import (
 	"time"
 
-	"github.com/agucova/timing-oracle/go/timingoracle/internal/ffi"
+	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
 )
 
 // Config holds the configuration for timing analysis.
 type Config struct {
-	attackerModel       AttackerModel
-	customThresholdNs   float64
-	maxSamples          int
-	timeBudget          time.Duration
-	passThreshold       float64
-	failThreshold       float64
-	seed                uint64
-	calibrationSamples  int
-	batchSize           int
+	attackerModel        AttackerModel
+	customThresholdNs    float64
+	maxSamples           int
+	timeBudget           time.Duration
+	passThreshold        float64
+	failThreshold        float64
+	seed                 uint64
+	calibrationSamples   int
+	batchSize            int
 	disableAdaptiveBatch bool
 }
 
@@ -113,21 +113,22 @@ func WithoutAdaptiveBatching() Option {
 	}
 }
 
-// toFFI converts the config to FFI types.
-func (c *Config) toFFI() ffi.Config {
-	model := c.attackerModel.toFFI()
+// toUniFFI converts the config to UniFFI types.
+func (c *Config) toUniFFI() uniffi.Config {
+	var model uniffi.AttackerModel
 	if c.customThresholdNs > 0 {
-		model = ffi.AttackerCustom
+		model = uniffi.AttackerModelCustom{ThresholdNs: c.customThresholdNs}
+	} else {
+		model = c.attackerModel.toUniFFI()
 	}
 
-	return ffi.Config{
-		AttackerModel:     model,
-		CustomThresholdNs: c.customThresholdNs,
-		MaxSamples:        c.maxSamples,
-		TimeBudgetSecs:    c.timeBudget.Seconds(),
-		PassThreshold:     c.passThreshold,
-		FailThreshold:     c.failThreshold,
-		Seed:              c.seed,
-		TimerFrequencyHz:  timerFrequency(),
+	return uniffi.Config{
+		AttackerModel:    model,
+		MaxSamples:       uint64(c.maxSamples),
+		TimeBudgetSecs:   c.timeBudget.Seconds(),
+		PassThreshold:    c.passThreshold,
+		FailThreshold:    c.failThreshold,
+		Seed:             c.seed,
+		TimerFrequencyHz: timerFrequency(),
 	}
 }

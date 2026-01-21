@@ -50,6 +50,8 @@
 //!     .test(...);
 //! ```
 
+pub mod affinity;
+pub mod priority;
 mod collector;
 mod cycle_timer;
 mod outlier;

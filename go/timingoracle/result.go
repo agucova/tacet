@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/agucova/timing-oracle/go/timingoracle/internal/ffi"
+	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
 )
 
 // Outcome represents the test result.
@@ -112,27 +112,27 @@ func (p EffectPattern) String() string {
 type Exploitability int
 
 const (
-	// Negligible: < 100 ns - very difficult to exploit.
-	Negligible Exploitability = iota
-	// PossibleLAN: 100-500 ns - may be exploitable on LAN with many measurements.
-	PossibleLAN
-	// LikelyLAN: 500 ns - 20 us - likely exploitable on LAN.
-	LikelyLAN
-	// PossibleRemote: > 20 us - potentially exploitable over the internet.
-	PossibleRemote
+	// SharedHardwareOnly: < 10 ns - requires shared hardware (SGX, containers) to exploit.
+	SharedHardwareOnly Exploitability = iota
+	// HTTP2Multiplexing: 10-100 ns - exploitable via HTTP/2 request multiplexing.
+	HTTP2Multiplexing
+	// StandardRemote: 100 ns - 10 us - exploitable with standard remote timing.
+	StandardRemote
+	// ObviousLeak: > 10 us - obvious leak, trivially exploitable.
+	ObviousLeak
 )
 
 // String returns the string representation of exploitability.
 func (e Exploitability) String() string {
 	switch e {
-	case Negligible:
-		return "Negligible"
-	case PossibleLAN:
-		return "PossibleLAN"
-	case LikelyLAN:
-		return "LikelyLAN"
-	case PossibleRemote:
-		return "PossibleRemote"
+	case SharedHardwareOnly:
+		return "SharedHardwareOnly"
+	case HTTP2Multiplexing:
+		return "HTTP2Multiplexing"
+	case StandardRemote:
+		return "StandardRemote"
+	case ObviousLeak:
+		return "ObviousLeak"
 	default:
 		return "Unknown"
 	}
@@ -322,59 +322,143 @@ func (r *Result) String() string {
 	}
 }
 
-// fromFFI converts from FFI result to public Result.
-func resultFromFFI(r *ffi.Result) *Result {
+// resultFromUniFFI converts from UniFFI AnalysisResult to public Result.
+func resultFromUniFFI(r uniffi.AnalysisResult) *Result {
 	result := &Result{
-		Outcome:            Outcome(r.Outcome),
-		LeakProbability:    r.LeakProbability,
+		Outcome:         outcomeFromUniFFI(r.Outcome),
+		LeakProbability: r.LeakProbability,
 		Effect: Effect{
 			ShiftNs: r.Effect.ShiftNs,
 			TailNs:  r.Effect.TailNs,
-			CILow:   r.Effect.CILowNs,
-			CIHigh:  r.Effect.CIHighNs,
-			Pattern: EffectPattern(r.Effect.Pattern),
+			CILow:   r.Effect.CredibleInterval.Low,
+			CIHigh:  r.Effect.CredibleInterval.High,
+			Pattern: effectPatternFromUniFFI(r.Effect.Pattern),
 		},
-		Quality:            Quality(r.Quality),
-		SamplesUsed:        r.SamplesUsed,
-		ElapsedTime:        time.Duration(r.ElapsedSecs * float64(time.Second)),
-		Exploitability:     Exploitability(r.Exploitability),
-		InconclusiveReason: InconclusiveReason(r.InconclusiveReason),
-		MDEShiftNs:         r.MDEShiftNs,
-		MDETailNs:          r.MDETailNs,
-		TimerResolutionNs:  r.TimerResolutionNs,
-		ThetaUserNs:        r.ThetaUserNs,
-		ThetaEffNs:         r.ThetaEffNs,
-		ThetaFloorNs:       r.ThetaFloorNs,
+		Quality:             qualityFromUniFFI(r.Quality),
+		SamplesUsed:         int(r.SamplesUsed),
+		ElapsedTime:         time.Duration(r.ElapsedSecs * float64(time.Second)),
+		Exploitability:      exploitabilityFromUniFFI(r.Exploitability),
+		InconclusiveReason:  inconclusiveReasonFromUniFFI(r.InconclusiveReason),
+		MDEShiftNs:          r.MdeShiftNs,
+		MDETailNs:           r.MdeTailNs,
+		TimerResolutionNs:   r.TimerResolutionNs,
+		ThetaUserNs:         r.ThetaUserNs,
+		ThetaEffNs:          r.ThetaEffNs,
+		ThetaFloorNs:        r.ThetaFloorNs,
 		DecisionThresholdNs: r.DecisionThresholdNs,
-		Recommendation:     r.Recommendation,
+		Recommendation:      r.Recommendation,
 	}
 
-	// Convert diagnostics if available
-	if r.HasDiagnostics && r.Diagnostics != nil {
-		result.Diagnostics = &Diagnostics{
-			DependenceLength:      r.Diagnostics.DependenceLength,
-			EffectiveSampleSize:   r.Diagnostics.EffectiveSampleSize,
-			StationarityRatio:     r.Diagnostics.StationarityRatio,
-			StationarityOK:        r.Diagnostics.StationarityOK,
-			ProjectionMismatchQ:   r.Diagnostics.ProjectionMismatchQ,
-			ProjectionMismatchOK:  r.Diagnostics.ProjectionMismatchOK,
-			DiscreteMode:          r.Diagnostics.DiscreteMode,
-			TimerResolutionNs:     r.Diagnostics.TimerResolutionNs,
-			GibbsItersTotal:       r.Diagnostics.GibbsItersTotal,
-			GibbsBurnin:           r.Diagnostics.GibbsBurnin,
-			GibbsRetained:         r.Diagnostics.GibbsRetained,
-			LambdaMean:            r.Diagnostics.LambdaMean,
-			LambdaSD:              r.Diagnostics.LambdaSD,
-			LambdaCV:              r.Diagnostics.LambdaCV,
-			LambdaESS:             r.Diagnostics.LambdaESS,
-			LambdaMixingOK:        r.Diagnostics.LambdaMixingOK,
-			KappaMean:             r.Diagnostics.KappaMean,
-			KappaSD:               r.Diagnostics.KappaSD,
-			KappaCV:               r.Diagnostics.KappaCV,
-			KappaESS:              r.Diagnostics.KappaESS,
-			KappaMixingOK:         r.Diagnostics.KappaMixingOK,
-		}
+	// Convert diagnostics (always available, value type in UniFFI)
+	d := r.Diagnostics
+	result.Diagnostics = &Diagnostics{
+		DependenceLength:     int(d.DependenceLength),
+		EffectiveSampleSize:  int(d.EffectiveSampleSize),
+		StationarityRatio:    d.StationarityRatio,
+		StationarityOK:       d.StationarityOk,
+		ProjectionMismatchQ:  d.ProjectionMismatchQ,
+		ProjectionMismatchOK: d.ProjectionMismatchOk,
+		DiscreteMode:         d.DiscreteMode,
+		TimerResolutionNs:    d.TimerResolutionNs,
+		GibbsItersTotal:      int(d.GibbsItersTotal),
+		GibbsBurnin:          int(d.GibbsBurnin),
+		GibbsRetained:        int(d.GibbsRetained),
+		LambdaMean:           d.LambdaMean,
+		LambdaSD:             d.LambdaSd,
+		LambdaCV:             d.LambdaCv,
+		LambdaESS:            d.LambdaEss,
+		LambdaMixingOK:       d.LambdaMixingOk,
+		KappaMean:            d.KappaMean,
+		KappaSD:              d.KappaSd,
+		KappaCV:              d.KappaCv,
+		KappaESS:             d.KappaEss,
+		KappaMixingOK:        d.KappaMixingOk,
 	}
 
 	return result
+}
+
+// Helper conversion functions
+
+func outcomeFromUniFFI(o uniffi.Outcome) Outcome {
+	switch o {
+	case uniffi.OutcomePass:
+		return Pass
+	case uniffi.OutcomeFail:
+		return Fail
+	case uniffi.OutcomeInconclusive:
+		return Inconclusive
+	case uniffi.OutcomeUnmeasurable:
+		return Unmeasurable
+	default:
+		return Inconclusive
+	}
+}
+
+func qualityFromUniFFI(q uniffi.MeasurementQuality) Quality {
+	switch q {
+	case uniffi.MeasurementQualityExcellent:
+		return Excellent
+	case uniffi.MeasurementQualityGood:
+		return Good
+	case uniffi.MeasurementQualityPoor:
+		return Poor
+	case uniffi.MeasurementQualityTooNoisy:
+		return TooNoisy
+	default:
+		return Poor
+	}
+}
+
+func exploitabilityFromUniFFI(e uniffi.Exploitability) Exploitability {
+	switch e {
+	case uniffi.ExploitabilitySharedHardwareOnly:
+		return SharedHardwareOnly
+	case uniffi.ExploitabilityHttp2Multiplexing:
+		return HTTP2Multiplexing
+	case uniffi.ExploitabilityStandardRemote:
+		return StandardRemote
+	case uniffi.ExploitabilityObviousLeak:
+		return ObviousLeak
+	default:
+		return SharedHardwareOnly
+	}
+}
+
+func effectPatternFromUniFFI(p uniffi.EffectPattern) EffectPattern {
+	switch p {
+	case uniffi.EffectPatternUniformShift:
+		return UniformShift
+	case uniffi.EffectPatternTailEffect:
+		return TailEffect
+	case uniffi.EffectPatternMixed:
+		return Mixed
+	case uniffi.EffectPatternIndeterminate:
+		return Indeterminate
+	default:
+		return Indeterminate
+	}
+}
+
+func inconclusiveReasonFromUniFFI(r uniffi.InconclusiveReason) InconclusiveReason {
+	switch r.(type) {
+	case uniffi.InconclusiveReasonNone:
+		return ReasonNone
+	case uniffi.InconclusiveReasonDataTooNoisy:
+		return ReasonDataTooNoisy
+	case uniffi.InconclusiveReasonNotLearning:
+		return ReasonNotLearning
+	case uniffi.InconclusiveReasonWouldTakeTooLong:
+		return ReasonWouldTakeTooLong
+	case uniffi.InconclusiveReasonTimeBudgetExceeded:
+		return ReasonTimeBudgetExceeded
+	case uniffi.InconclusiveReasonSampleBudgetExceeded:
+		return ReasonSampleBudgetExceeded
+	case uniffi.InconclusiveReasonConditionsChanged:
+		return ReasonConditionsChanged
+	case uniffi.InconclusiveReasonThresholdElevated:
+		return ReasonThresholdElevated
+	default:
+		return ReasonNone
+	}
 }
