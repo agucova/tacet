@@ -122,15 +122,15 @@ impl AffinityGuard {
             }
 
             // Create new mask with only current CPU
-            let mut new_mask = MaybeUninit::<libc::cpu_set_t>::uninit();
-            libc::CPU_ZERO(new_mask.as_mut_ptr());
-            libc::CPU_SET(current_cpu as usize, new_mask.as_mut_ptr());
+            let mut new_mask: libc::cpu_set_t = std::mem::zeroed();
+            libc::CPU_ZERO(&mut new_mask);
+            libc::CPU_SET(current_cpu as usize, &mut new_mask);
 
             // Set affinity to current CPU only
             let result = libc::sched_setaffinity(
                 0, // current thread
                 std::mem::size_of::<libc::cpu_set_t>(),
-                new_mask.as_ptr(),
+                &new_mask,
             );
 
             if result != 0 {
