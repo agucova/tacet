@@ -1,7 +1,0 @@
-/Users/agucova/repos/timing-oracle/.devenv/flake.json
-/Users/agucova/repos/timing-oracle/.devenv.flake.nix
-/Users/agucova/repos/timing-oracle/.env
-/Users/agucova/repos/timing-oracle/devenv.local.nix
-/Users/agucova/repos/timing-oracle/devenv.lock
-/Users/agucova/repos/timing-oracle/devenv.nix
-/Users/agucova/repos/timing-oracle/devenv.yaml
