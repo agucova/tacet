@@ -158,6 +158,11 @@ in
     silent
     tlsfuzzer
     # Note: Mona (Crosby box test) is implemented in pure Rust - no external tool needed
+
+    # C binding tests
+    cmocka
+    cmake
+    pkg-config
   ];
 
   env = {

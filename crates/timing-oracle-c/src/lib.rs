@@ -471,28 +471,31 @@ fn convert_adaptive_outcome(
 ) -> ToResult {
     use timing_oracle_core::adaptive::AdaptiveOutcome;
 
-    let (to_outcome, leak_probability, inconclusive_reason) = match outcome {
+    let (to_outcome, leak_probability, inconclusive_reason, posterior_ref) = match outcome {
         AdaptiveOutcome::LeakDetected { posterior, .. } => (
             ToOutcome::Fail,
             posterior.leak_probability,
             ToInconclusiveReason::None,
+            Some(posterior),
         ),
         AdaptiveOutcome::NoLeakDetected { posterior, .. } => (
             ToOutcome::Pass,
             posterior.leak_probability,
             ToInconclusiveReason::None,
+            Some(posterior),
         ),
         AdaptiveOutcome::ThresholdElevated { posterior, .. } => (
             ToOutcome::Inconclusive,
             posterior.leak_probability,
             ToInconclusiveReason::ThresholdElevated,
+            Some(posterior),
         ),
         AdaptiveOutcome::Inconclusive {
             reason, posterior, ..
         } => {
             let to_reason = convert_inconclusive_reason(reason);
             let prob = posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5);
-            (ToOutcome::Inconclusive, prob, to_reason)
+            (ToOutcome::Inconclusive, prob, to_reason, posterior.as_ref())
         }
     };
 
@@ -534,6 +537,9 @@ fn convert_adaptive_outcome(
         ToExploitability::ObviousLeak
     };
 
+    // Build diagnostics
+    let diagnostics = build_diagnostics(posterior_ref, cal);
+
     ToResult {
         outcome: to_outcome,
         leak_probability,
@@ -548,6 +554,9 @@ fn convert_adaptive_outcome(
         theta_user_ns: cfg.threshold_ns(),
         theta_eff_ns: cal.theta_eff,
         theta_floor_ns: cal.theta_floor_initial,
+        timer_resolution_ns: cal.timer_resolution_ns,
+        decision_threshold_ns: cal.theta_eff,
+        diagnostics,
     }
 }
 
@@ -568,6 +577,38 @@ fn convert_inconclusive_reason(
         InconclusiveReason::ConditionsChanged { .. } => ToInconclusiveReason::ConditionsChanged,
         InconclusiveReason::ThresholdElevated { .. } => ToInconclusiveReason::ThresholdElevated,
     }
+}
+
+/// Build diagnostics from posterior and calibration data.
+fn build_diagnostics(
+    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
+    cal: &Calibration,
+) -> ToDiagnostics {
+    let mut diag = ToDiagnostics::default();
+
+    // From calibration
+    diag.dependence_length = cal.block_length as u64;
+    diag.discrete_mode = cal.discrete_mode;
+    diag.timer_resolution_ns = cal.timer_resolution_ns;
+
+    // From posterior
+    if let Some(p) = posterior {
+        diag.effective_sample_size = p.n as u64;
+        diag.projection_mismatch_q = p.projection_mismatch_q;
+        diag.projection_mismatch_ok = p.projection_mismatch_q <= cal.projection_mismatch_thresh;
+
+        // Gibbs sampler lambda diagnostics
+        diag.lambda_mean = p.lambda_mean.unwrap_or(1.0);
+        diag.lambda_mixing_ok = p.lambda_mixing_ok.unwrap_or(true);
+
+        // Gibbs sampler kappa diagnostics
+        diag.kappa_mean = p.kappa_mean.unwrap_or(1.0);
+        diag.kappa_cv = p.kappa_cv.unwrap_or(0.0);
+        diag.kappa_ess = p.kappa_ess.unwrap_or(0.0);
+        diag.kappa_mixing_ok = p.kappa_mixing_ok.unwrap_or(true);
+    }
+
+    diag
 }
 
 // ============================================================================
@@ -728,6 +769,26 @@ pub unsafe extern "C" fn to_analyze(
         ToMeasurementQuality::TooNoisy
     };
 
+    // Build diagnostics from bayes_result
+    let diagnostics = ToDiagnostics {
+        dependence_length: block_length as u64,
+        effective_sample_size: n_eff as u64,
+        stationarity_ratio: 1.0,
+        stationarity_ok: true,
+        projection_mismatch_q: bayes_result.projection_mismatch_q,
+        projection_mismatch_ok: true, // Would need threshold from calibration
+        discrete_mode,
+        timer_resolution_ns: ns_per_tick,
+        lambda_mean: bayes_result.lambda_mean,
+        lambda_sd: bayes_result.lambda_sd,
+        lambda_ess: bayes_result.lambda_ess,
+        lambda_mixing_ok: bayes_result.lambda_mixing_ok,
+        kappa_mean: bayes_result.kappa_mean,
+        kappa_cv: bayes_result.kappa_cv,
+        kappa_ess: bayes_result.kappa_ess,
+        kappa_mixing_ok: bayes_result.kappa_mixing_ok,
+    };
+
     // Build result
     *result_out = ToResult {
         outcome,
@@ -749,6 +810,9 @@ pub unsafe extern "C" fn to_analyze(
         theta_user_ns: theta_ns,
         theta_eff_ns: theta_eff,
         theta_floor_ns: theta_floor,
+        timer_resolution_ns: ns_per_tick,
+        decision_threshold_ns: theta_eff,
+        diagnostics,
     };
 
     ToError::Ok

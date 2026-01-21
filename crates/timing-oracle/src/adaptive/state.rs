@@ -231,6 +231,7 @@ mod tests {
             Matrix9::identity(),              // lambda_post (dummy 9D)
             Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(4.0, 0.0, 0.0, 1.0), // beta_proj_cov
+            Vec::new(),                       // beta_draws
             0.75,                             // leak_probability
             5.0,                              // projection_mismatch_q
             1000,                             // n
@@ -289,6 +290,7 @@ mod tests {
             Matrix9::identity(),              // lambda_post (dummy 9D)
             Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(4.0, 0.0, 0.0, 1.0), // beta_proj_cov
+            Vec::new(),                       // beta_draws
             0.75,                             // leak_probability
             5.0,                              // projection_mismatch_q
             100,                              // n

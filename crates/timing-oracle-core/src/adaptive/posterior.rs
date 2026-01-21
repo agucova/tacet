@@ -7,10 +7,15 @@
 //! For interpretability, the 9D posterior is projected to 2D (shift, tail)
 //! using GLS: β_proj = (X'Σ_n⁻¹X)⁻¹ X'Σ_n⁻¹ δ_post
 
-use crate::analysis::effect::classify_pattern;
+extern crate alloc;
+use alloc::vec::Vec;
+
 use crate::math::sqrt;
-use crate::result::{EffectEstimate, MeasurementQuality};
+use crate::result::{EffectEstimate, EffectPattern, MeasurementQuality};
 use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
+
+// Note: classify_pattern from analysis::effect is no longer used here.
+// We now use classify_pattern_from_draws() which uses β draws directly.
 
 /// Posterior distribution parameters for the 9D effect vector δ.
 ///
@@ -33,8 +38,12 @@ pub struct Posterior {
     /// - β[1] = τ (tail effect)
     pub beta_proj: Vector2,
 
-    /// 2D projection covariance.
+    /// 2D projection covariance (empirical, from draws).
     pub beta_proj_cov: Matrix2,
+
+    /// Retained β draws for dominance-based classification (spec §3.4.6).
+    /// Each draw is β^(s) = A·δ^(s) where A is the GLS projection matrix.
+    pub beta_draws: Vec<Vector2>,
 
     /// Leak probability: P(max_k |δ_k| > θ | Δ).
     /// Computed via Monte Carlo integration over the 9D posterior.
@@ -78,11 +87,13 @@ pub struct Posterior {
 
 impl Posterior {
     /// Create a new posterior with given parameters.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         delta_post: Vector9,
         lambda_post: Matrix9,
         beta_proj: Vector2,
         beta_proj_cov: Matrix2,
+        beta_draws: Vec<Vector2>,
         leak_probability: f64,
         projection_mismatch_q: f64,
         n: usize,
@@ -92,6 +103,7 @@ impl Posterior {
             lambda_post,
             beta_proj,
             beta_proj_cov,
+            beta_draws,
             leak_probability,
             projection_mismatch_q,
             n,
@@ -111,6 +123,7 @@ impl Posterior {
         lambda_post: Matrix9,
         beta_proj: Vector2,
         beta_proj_cov: Matrix2,
+        beta_draws: Vec<Vector2>,
         leak_probability: f64,
         projection_mismatch_q: f64,
         n: usize,
@@ -126,6 +139,7 @@ impl Posterior {
             lambda_post,
             beta_proj,
             beta_proj_cov,
+            beta_draws,
             leak_probability,
             projection_mismatch_q,
             n,
@@ -173,9 +187,10 @@ impl Posterior {
     /// Build an EffectEstimate from this posterior.
     ///
     /// This computes the credible interval and classifies the effect pattern
-    /// based on the 2D projection.
+    /// using dominance-based classification from the β draws (spec §3.4.6).
     pub fn to_effect_estimate(&self) -> EffectEstimate {
-        let pattern = classify_pattern(&self.beta_proj, &self.beta_proj_cov);
+        // Classify pattern using dominance-based approach from draws
+        let pattern = self.classify_pattern_from_draws();
 
         // Compute credible interval from posterior covariance
         let shift_std = self.shift_se();
@@ -193,6 +208,110 @@ impl Posterior {
             credible_interval_ns: (ci_low, ci_high),
             pattern,
             interpretation_caveat: None,
+        }
+    }
+
+    /// Classify effect pattern using dominance-based approach from β draws (spec §3.4.6).
+    ///
+    /// Uses posterior draws to compute dominance probabilities rather than
+    /// relying on "statistical significance" (|effect| > 2×SE), which is
+    /// brittle under covariance regularization.
+    ///
+    /// Classification rules (dominance is primary):
+    /// - UniformShift: shift dominates tail (|μ| ≥ 5|τ| with ≥80% probability)
+    /// - TailEffect: tail dominates shift (|τ| ≥ 5|μ| with ≥80% probability)
+    /// - Mixed: both practically significant and neither dominates
+    /// - Indeterminate: effect too small or uncertain to classify
+    fn classify_pattern_from_draws(&self) -> EffectPattern {
+        // Dominance ratio threshold: one effect must be 5x larger to dominate
+        const DOMINANCE_RATIO: f64 = 5.0;
+        // Probability threshold for dominance classification
+        const DOMINANCE_PROB: f64 = 0.80;
+        // Threshold for effect to be "practically significant" (absolute, in ns)
+        // Effects smaller than this are considered noise
+        const MIN_SIGNIFICANT_NS: f64 = 10.0;
+
+        if self.beta_draws.is_empty() {
+            // Fallback to point estimate if no draws available
+            return self.classify_pattern_point_estimate();
+        }
+
+        let n = self.beta_draws.len() as f64;
+
+        // Count draws where each condition holds
+        let mut shift_significant_count = 0;
+        let mut tail_significant_count = 0;
+        let mut shift_dominates_count = 0;
+        let mut tail_dominates_count = 0;
+
+        for beta in &self.beta_draws {
+            let shift_abs = beta[0].abs();
+            let tail_abs = beta[1].abs();
+
+            // Check if components are practically significant (absolute threshold)
+            if shift_abs > MIN_SIGNIFICANT_NS {
+                shift_significant_count += 1;
+            }
+            if tail_abs > MIN_SIGNIFICANT_NS {
+                tail_significant_count += 1;
+            }
+
+            // Check dominance (with safety for near-zero values)
+            if tail_abs < 1e-12 || shift_abs >= DOMINANCE_RATIO * tail_abs {
+                shift_dominates_count += 1;
+            }
+            if shift_abs < 1e-12 || tail_abs >= DOMINANCE_RATIO * shift_abs {
+                tail_dominates_count += 1;
+            }
+        }
+
+        // Compute probabilities
+        let p_shift_significant = shift_significant_count as f64 / n;
+        let p_tail_significant = tail_significant_count as f64 / n;
+        let p_shift_dominates = shift_dominates_count as f64 / n;
+        let p_tail_dominates = tail_dominates_count as f64 / n;
+
+        // Classification: dominance is the primary criterion
+        // If one component dominates in most draws, that determines the pattern
+        if p_shift_dominates >= DOMINANCE_PROB {
+            EffectPattern::UniformShift
+        } else if p_tail_dominates >= DOMINANCE_PROB {
+            EffectPattern::TailEffect
+        } else if p_shift_significant >= DOMINANCE_PROB && p_tail_significant >= DOMINANCE_PROB {
+            // Neither dominates but both are significant -> Mixed
+            EffectPattern::Mixed
+        } else {
+            EffectPattern::Indeterminate
+        }
+    }
+
+    /// Fallback classification using point estimates when no draws available.
+    fn classify_pattern_point_estimate(&self) -> EffectPattern {
+        const DOMINANCE_RATIO: f64 = 5.0;
+
+        let shift_abs = self.shift_ns().abs();
+        let tail_abs = self.tail_ns().abs();
+        let shift_se = self.shift_se();
+        let tail_se = self.tail_se();
+
+        // Check statistical significance (|effect| > 2×SE)
+        let shift_significant = shift_abs > 2.0 * shift_se;
+        let tail_significant = tail_abs > 2.0 * tail_se;
+
+        match (shift_significant, tail_significant) {
+            (true, false) => EffectPattern::UniformShift,
+            (false, true) => EffectPattern::TailEffect,
+            (true, true) => {
+                // Both significant - check dominance
+                if shift_abs > tail_abs * DOMINANCE_RATIO {
+                    EffectPattern::UniformShift
+                } else if tail_abs > shift_abs * DOMINANCE_RATIO {
+                    EffectPattern::TailEffect
+                } else {
+                    EffectPattern::Mixed
+                }
+            }
+            (false, false) => EffectPattern::Indeterminate,
         }
     }
 
@@ -223,6 +342,7 @@ mod tests {
             lambda_post,
             beta_proj,
             beta_proj_cov,
+            Vec::new(), // beta_draws
             0.75,
             0.5,
             1000,
@@ -249,6 +369,7 @@ mod tests {
             lambda_post,
             beta_proj,
             beta_proj_cov,
+            Vec::new(), // beta_draws
             0.5,
             1.0,
             500,

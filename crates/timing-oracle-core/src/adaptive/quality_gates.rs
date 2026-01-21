@@ -667,6 +667,7 @@ mod tests {
             Matrix9::identity() * variance,
             Vector2::new(5.0, 3.0),
             Matrix2::new(variance, 0.0, 0.0, variance),
+            Vec::new(), // beta_draws
             leak_prob,
             1.0, // projection_mismatch_q
             1000,

@@ -483,6 +483,7 @@ fn compute_posterior(
         bayes_result.lambda_post,
         bayes_result.beta_proj,
         bayes_result.beta_proj_cov,
+        bayes_result.beta_draws,
         bayes_result.leak_probability,
         bayes_result.projection_mismatch_q,
         n,
@@ -550,6 +551,7 @@ mod tests {
             Matrix9::identity(),
             Vector2::new(10.0, 5.0),
             Matrix2::new(1.0, 0.0, 0.0, 1.0),
+            Vec::new(), // beta_draws
             leak_prob,
             1.0, // projection_mismatch_q
             1000,

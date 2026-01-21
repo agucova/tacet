@@ -203,6 +203,11 @@ pub struct CalibrationConfig {
 
     /// Whether to skip preflight checks.
     pub skip_preflight: bool,
+
+    /// Force discrete mode regardless of uniqueness ratio.
+    /// When true, uses m-out-of-n bootstrap with mid-quantiles even if
+    /// timer has high resolution. Primarily for testing.
+    pub force_discrete_mode: bool,
 }
 
 impl Default for CalibrationConfig {
@@ -215,6 +220,7 @@ impl Default for CalibrationConfig {
             alpha: 0.01,
             seed: DEFAULT_SEED,
             skip_preflight: false,
+            force_discrete_mode: false,
         }
     }
 }
@@ -267,10 +273,11 @@ pub fn calibrate(
         .collect();
 
     // Check discrete mode (spec Section 2.4): < 10% unique values
+    // Or forced via config for testing discrete mode on high-resolution timers
     let unique_baseline = count_unique(&baseline_ns);
     let unique_sample = count_unique(&sample_ns);
     let min_uniqueness = (unique_baseline as f64 / n as f64).min(unique_sample as f64 / n as f64);
-    let discrete_mode = min_uniqueness < 0.10;
+    let discrete_mode = config.force_discrete_mode || min_uniqueness < 0.10;
 
     // Create acquisition stream for joint bootstrap (spec Section 2.3.1)
     // The stream preserves acquisition order which is critical for correct
@@ -619,6 +626,7 @@ mod tests {
             alpha: 0.01,
             seed: 42,
             skip_preflight: true, // Skip in tests for speed
+            force_discrete_mode: false,
         };
 
         let result = calibrate(&baseline, &sample, 1.0, &config);

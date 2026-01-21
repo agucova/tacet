@@ -73,8 +73,12 @@ pub struct BayesResult {
     /// - β[1] = τ (tail effect): Upper quantiles shift more than lower
     pub beta_proj: Vector2,
 
-    /// 2D projection covariance.
+    /// 2D projection covariance (empirical, from draws).
     pub beta_proj_cov: Matrix2,
+
+    /// Retained β draws for dominance-based classification (spec §3.4.6).
+    /// Each draw is β^(s) = A·δ^(s) where A is the GLS projection matrix.
+    pub beta_draws: Vec<Vector2>,
 
     /// Projection mismatch Q statistic: r'Σ_n⁻¹r where r = δ_post - Xβ_proj.
     /// High values indicate the 2D model doesn't capture the full pattern.
@@ -166,6 +170,7 @@ pub fn compute_bayes_gibbs(
         lambda_post: gibbs_result.lambda_post,
         beta_proj: gibbs_result.beta_proj,
         beta_proj_cov: gibbs_result.beta_proj_cov,
+        beta_draws: gibbs_result.beta_draws,
         projection_mismatch_q: gibbs_result.projection_mismatch_q,
         effect_magnitude_ci: gibbs_result.effect_magnitude_ci,
         is_clamped: false,

@@ -226,15 +226,10 @@ fn compute_credible_interval(mean: f64, variance: f64) -> (f64, f64) {
 /// its posterior standard error: |effect| > 2×SE
 ///
 /// Classification rules:
-/// - UniformShift: |μ| > 2σ_μ, |τ| ≤ 2σ_τ (or |μ| >> |τ| when both significant)
-/// - TailEffect: |τ| > 2σ_τ, |μ| ≤ 2σ_μ (or |τ| >> |μ| when both significant)
-/// - Mixed: Both significant and comparable in magnitude
+/// - UniformShift: |μ| > 2σ_μ, |τ| ≤ 2σ_τ
+/// - TailEffect: |τ| > 2σ_τ, |μ| ≤ 2σ_μ
+/// - Mixed: Both significant
 /// - Indeterminate: Neither significant
-///
-/// When both effects are significant, a dominance rule applies: if one effect
-/// is at least 10x larger than the other, classify by the dominant effect.
-/// This prevents noise-induced artifacts from causing Mixed classification
-/// when one effect clearly dominates.
 ///
 /// # Arguments
 ///
@@ -252,28 +247,10 @@ pub fn classify_pattern(beta_mean: &Vector2, beta_cov: &Matrix2) -> EffectPatter
     let shift_significant = shift.abs() > 2.0 * shift_se;
     let tail_significant = tail.abs() > 2.0 * tail_se;
 
-    // Dominance threshold: if one effect is 10x larger, it dominates
-    const DOMINANCE_RATIO: f64 = 10.0;
-
     match (shift_significant, tail_significant) {
         (true, false) => EffectPattern::UniformShift,
         (false, true) => EffectPattern::TailEffect,
-        (true, true) => {
-            // Both significant - check for dominance
-            let shift_abs = shift.abs();
-            let tail_abs = tail.abs();
-
-            if shift_abs > tail_abs * DOMINANCE_RATIO {
-                // Shift dominates - classify as UniformShift despite significant tail
-                EffectPattern::UniformShift
-            } else if tail_abs > shift_abs * DOMINANCE_RATIO {
-                // Tail dominates - classify as TailEffect despite significant shift
-                EffectPattern::TailEffect
-            } else {
-                // Truly mixed - both significant and comparable
-                EffectPattern::Mixed
-            }
-        }
+        (true, true) => EffectPattern::Mixed,
         // When neither effect is statistically significant, return Indeterminate
         (false, false) => EffectPattern::Indeterminate,
     }

@@ -165,6 +165,73 @@ pub enum ToEffectPattern {
 }
 
 // ============================================================================
+// Diagnostics
+// ============================================================================
+
+/// Diagnostics information for debugging and quality assessment.
+///
+/// Mirrors the diagnostics available in UniFFI bindings.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct ToDiagnostics {
+    /// Block length used for bootstrap resampling.
+    pub dependence_length: u64,
+    /// Effective sample size accounting for autocorrelation.
+    pub effective_sample_size: u64,
+    /// Ratio of post-test variance to calibration variance.
+    pub stationarity_ratio: f64,
+    /// Whether stationarity check passed.
+    pub stationarity_ok: bool,
+    /// Projection mismatch Q statistic.
+    pub projection_mismatch_q: f64,
+    /// Whether projection mismatch is acceptable.
+    pub projection_mismatch_ok: bool,
+    /// Whether discrete mode was used (low timer resolution).
+    pub discrete_mode: bool,
+    /// Timer resolution in nanoseconds.
+    pub timer_resolution_ns: f64,
+    /// Posterior mean of latent scale lambda.
+    pub lambda_mean: f64,
+    /// Posterior standard deviation of lambda.
+    pub lambda_sd: f64,
+    /// Effective sample size of lambda chain.
+    pub lambda_ess: f64,
+    /// Whether lambda chain mixed well.
+    pub lambda_mixing_ok: bool,
+    /// Posterior mean of likelihood precision kappa.
+    pub kappa_mean: f64,
+    /// Coefficient of variation of kappa.
+    pub kappa_cv: f64,
+    /// Effective sample size of kappa chain.
+    pub kappa_ess: f64,
+    /// Whether kappa chain mixed well.
+    pub kappa_mixing_ok: bool,
+}
+
+impl Default for ToDiagnostics {
+    fn default() -> Self {
+        Self {
+            dependence_length: 0,
+            effective_sample_size: 0,
+            stationarity_ratio: 1.0,
+            stationarity_ok: true,
+            projection_mismatch_q: 0.0,
+            projection_mismatch_ok: true,
+            discrete_mode: false,
+            timer_resolution_ns: 0.0,
+            lambda_mean: 1.0,
+            lambda_sd: 0.0,
+            lambda_ess: 0.0,
+            lambda_mixing_ok: true,
+            kappa_mean: 1.0,
+            kappa_cv: 0.0,
+            kappa_ess: 0.0,
+            kappa_mixing_ok: true,
+        }
+    }
+}
+
+// ============================================================================
 // Effect Estimate
 // ============================================================================
 
@@ -230,6 +297,12 @@ pub struct ToResult {
     pub theta_eff_ns: f64,
     /// Measurement floor in nanoseconds.
     pub theta_floor_ns: f64,
+    /// Timer resolution in nanoseconds.
+    pub timer_resolution_ns: f64,
+    /// Threshold at which decision was made in nanoseconds.
+    pub decision_threshold_ns: f64,
+    /// Detailed diagnostics.
+    pub diagnostics: ToDiagnostics,
 }
 
 impl Default for ToResult {
@@ -248,6 +321,9 @@ impl Default for ToResult {
             theta_user_ns: 0.0,
             theta_eff_ns: 0.0,
             theta_floor_ns: 0.0,
+            timer_resolution_ns: 0.0,
+            decision_threshold_ns: 0.0,
+            diagnostics: ToDiagnostics::default(),
         }
     }
 }

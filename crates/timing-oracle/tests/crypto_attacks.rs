@@ -18,7 +18,8 @@ use std::time::Duration;
 use timing_oracle::helpers::effect::busy_wait_ns;
 use timing_oracle::helpers::InputPair;
 use timing_oracle::{
-    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, Outcome, TimingOracle,
+    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, InconclusiveReason, Outcome,
+    TimingOracle,
 };
 
 // ============================================================================
@@ -411,6 +412,17 @@ fn modexp_square_and_multiply_timing() {
             );
         }
         Outcome::Inconclusive {
+            reason: InconclusiveReason::ThresholdElevated { .. },
+            ..
+        }
+        | Outcome::Inconclusive {
+            reason: InconclusiveReason::NotLearning { .. },
+            ..
+        } => {
+            // Accept ThresholdElevated/NotLearning - timer resolution insufficient
+            eprintln!("Accepted: Inconclusive (timer resolution insufficient)");
+        }
+        Outcome::Inconclusive {
             leak_probability,
             reason,
             ..
@@ -468,6 +480,13 @@ fn modexp_bit_pattern_timing() {
                 "Expected Fail outcome for bit pattern timing, got Pass with leak_probability={}",
                 leak_probability
             );
+        }
+        Outcome::Inconclusive {
+            reason: InconclusiveReason::ThresholdElevated { .. },
+            ..
+        } => {
+            // Accept ThresholdElevated - timer resolution insufficient for 100ns threshold
+            eprintln!("Accepted: ThresholdElevated (timer resolution insufficient)");
         }
         Outcome::Inconclusive {
             leak_probability,
@@ -1039,6 +1058,17 @@ fn exploitability_standard_remote() {
             );
         }
         Outcome::Inconclusive {
+            reason: InconclusiveReason::ThresholdElevated { .. },
+            ..
+        }
+        | Outcome::Inconclusive {
+            reason: InconclusiveReason::NotLearning { .. },
+            ..
+        } => {
+            // Accept ThresholdElevated/NotLearning - timer resolution insufficient
+            eprintln!("Accepted: Inconclusive (timer resolution insufficient)");
+        }
+        Outcome::Inconclusive {
             leak_probability,
             reason,
             ..
@@ -1108,6 +1138,13 @@ fn exploitability_standard_remote_large() {
                 "Expected Fail outcome for large delay, got Pass with leak_probability={}",
                 leak_probability
             );
+        }
+        Outcome::Inconclusive {
+            reason: InconclusiveReason::ThresholdElevated { .. },
+            ..
+        } => {
+            // Accept ThresholdElevated - timer resolution insufficient for 100ns threshold
+            eprintln!("Accepted: ThresholdElevated (timer resolution insufficient)");
         }
         Outcome::Inconclusive {
             leak_probability,

@@ -24,7 +24,7 @@ fn detects_early_exit_comparison() {
         .fail_threshold(0.85)
         .time_budget(Duration::from_secs(30))
         .test(inputs, |data| {
-            early_exit_compare(&secret, data);
+            std::hint::black_box(early_exit_compare(&secret, data));
         });
 
     // Print the outcome for debugging

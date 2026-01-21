@@ -264,6 +264,78 @@ typedef struct ToEffect {
 } ToEffect;
 
 /**
+ * Diagnostics information for debugging and quality assessment.
+ *
+ * Mirrors the diagnostics available in UniFFI bindings.
+ */
+typedef struct ToDiagnostics {
+  /**
+   * Block length used for bootstrap resampling.
+   */
+  uint64_t dependence_length;
+  /**
+   * Effective sample size accounting for autocorrelation.
+   */
+  uint64_t effective_sample_size;
+  /**
+   * Ratio of post-test variance to calibration variance.
+   */
+  double stationarity_ratio;
+  /**
+   * Whether stationarity check passed.
+   */
+  bool stationarity_ok;
+  /**
+   * Projection mismatch Q statistic.
+   */
+  double projection_mismatch_q;
+  /**
+   * Whether projection mismatch is acceptable.
+   */
+  bool projection_mismatch_ok;
+  /**
+   * Whether discrete mode was used (low timer resolution).
+   */
+  bool discrete_mode;
+  /**
+   * Timer resolution in nanoseconds.
+   */
+  double timer_resolution_ns;
+  /**
+   * Posterior mean of latent scale lambda.
+   */
+  double lambda_mean;
+  /**
+   * Posterior standard deviation of lambda.
+   */
+  double lambda_sd;
+  /**
+   * Effective sample size of lambda chain.
+   */
+  double lambda_ess;
+  /**
+   * Whether lambda chain mixed well.
+   */
+  bool lambda_mixing_ok;
+  /**
+   * Posterior mean of likelihood precision kappa.
+   */
+  double kappa_mean;
+  /**
+   * Coefficient of variation of kappa.
+   */
+  double kappa_cv;
+  /**
+   * Effective sample size of kappa chain.
+   */
+  double kappa_ess;
+  /**
+   * Whether kappa chain mixed well.
+   */
+  bool kappa_mixing_ok;
+} ToDiagnostics;
+
+/**
  * Complete analysis result.
  */
 typedef struct ToResult {
@@ -319,6 +391,18 @@ typedef struct ToResult {
    * Measurement floor in nanoseconds.
    */
   double theta_floor_ns;
+  /**
+   * Timer resolution in nanoseconds.
+   */
+  double timer_resolution_ns;
+  /**
+   * Threshold at which decision was made in nanoseconds.
+   */
+  double decision_threshold_ns;
+  /**
+   * Detailed diagnostics.
+   */
+  struct ToDiagnostics diagnostics;
 } ToResult;
 
 /**

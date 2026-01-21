@@ -433,6 +433,7 @@ fn compute_posterior_from_state(
         bayes_result.lambda_post,
         bayes_result.beta_proj,
         bayes_result.beta_proj_cov,
+        bayes_result.beta_draws,
         bayes_result.leak_probability,
         bayes_result.projection_mismatch_q,
         n,
@@ -647,6 +648,7 @@ mod tests {
             Matrix9::identity(),              // lambda_post (dummy 9D)
             Vector2::new(10.0, 5.0),          // beta_proj
             Matrix2::new(1.0, 0.0, 0.0, 1.0), // beta_proj_cov
+            Vec::new(),                       // beta_draws
             0.95,                             // leak_probability
             5.0,                              // projection_mismatch_q
             1000,                             // n

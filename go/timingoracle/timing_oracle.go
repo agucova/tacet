@@ -3,7 +3,7 @@
 // This library uses Bayesian statistical analysis to detect timing side channels
 // in cryptographic and security-sensitive code. The measurement loop runs in pure
 // Go for minimal overhead, while the statistical analysis is performed by a Rust
-// library via UniFFI.
+// library via CGo.
 //
 // # Usage
 //
@@ -34,17 +34,17 @@
 // # Attacker Models
 //
 // Choose an attacker model based on your threat scenario:
-//   - SharedHardware (θ=0.6ns): SGX, containers, cross-VM attacks
-//   - PostQuantum (θ=3.3ns): Post-quantum crypto implementations
-//   - AdjacentNetwork (θ=100ns): LAN services, HTTP/2 APIs
-//   - RemoteNetwork (θ=50μs): Internet-exposed services
-//   - Research (θ→0): Detect any difference (not for CI)
+//   - SharedHardware (theta=0.6ns): SGX, containers, cross-VM attacks
+//   - PostQuantum (theta=3.3ns): Post-quantum crypto implementations
+//   - AdjacentNetwork (theta=100ns): LAN services, HTTP/2 APIs
+//   - RemoteNetwork (theta=50us): Internet-exposed services
+//   - Research (theta->0): Detect any difference (not for CI)
 //
 // # Architecture
 //
 // The library separates concerns for optimal performance:
 //   - Measurement loop: Pure Go with platform-specific assembly timers
-//   - Statistical analysis: Rust library via UniFFI (called only between batches)
+//   - Statistical analysis: Rust library via CGo (called only between batches)
 //
 // This design ensures no FFI overhead during timing-critical measurement.
 package timingoracle
@@ -54,7 +54,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
+	"github.com/agucova/timing-oracle/go/timingoracle/internal/ffi"
 )
 
 // Errors
@@ -107,17 +107,20 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 		cfg.calibrationSamples, batchK, rng,
 	)
 
-	// Phase 1b: Run calibration analysis (single FFI call)
-	uniffiConfig := cfg.toUniFFI()
-	calibration, err := uniffi.CalibrateSamples(calBaseline, calSample, uniffiConfig)
+	// Phase 1b: Run calibration analysis (single CGo call)
+	ffiCfg := cfg.toFFI()
+	calibration, err := ffi.Calibrate(calBaseline, calSample, ffiCfg)
 	if err != nil {
 		return nil, ErrCalibrationFailed
 	}
-	defer calibration.Destroy()
+	defer calibration.Free()
 
 	// Phase 2: Adaptive loop
-	state := uniffi.NewAdaptiveState()
-	defer state.Destroy()
+	state := ffi.NewState()
+	if state == nil {
+		return nil, ErrInternalError
+	}
+	defer state.Free()
 
 	startTime := time.Now()
 
@@ -129,9 +132,9 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 			return &Result{
 				Outcome:            Inconclusive,
 				InconclusiveReason: ReasonTimeBudgetExceeded,
-				SamplesUsed:        int(state.TotalBaseline()),
+				SamplesUsed:        int(state.TotalSamples() / 2), // Per class
 				ElapsedTime:        elapsed,
-				LeakProbability:    state.CurrentProbability(),
+				LeakProbability:    state.LeakProbability(),
 			}, nil
 		}
 
@@ -141,13 +144,13 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 			cfg.batchSize, batchK, rng,
 		)
 
-		// Run adaptive step (single FFI call)
-		stepResult, err := uniffi.AdaptiveStepBatch(
+		// Run adaptive step (single CGo call)
+		stepResult, err := ffi.Step(
 			calibration,
 			state,
 			batchBaseline,
 			batchSample,
-			uniffiConfig,
+			ffiCfg,
 			elapsed.Seconds(),
 		)
 		if err != nil {
@@ -155,22 +158,18 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 		}
 
 		// Check if we have a decision
-		switch v := stepResult.(type) {
-		case uniffi.AdaptiveStepResultContinue:
-			// Continue - no decision yet
-		case uniffi.AdaptiveStepResultDecision:
-			// Decision reached
-			return resultFromUniFFI(v.Result), nil
+		if stepResult.HasDecision && stepResult.Result != nil {
+			return resultFromFFI(stepResult.Result), nil
 		}
 
 		// Check sample budget
-		if state.TotalBaseline() >= uint64(cfg.maxSamples) {
+		if state.TotalSamples()/2 >= uint64(cfg.maxSamples) {
 			return &Result{
 				Outcome:            Inconclusive,
 				InconclusiveReason: ReasonSampleBudgetExceeded,
-				SamplesUsed:        int(state.TotalBaseline()),
+				SamplesUsed:        int(state.TotalSamples() / 2),
 				ElapsedTime:        time.Since(startTime),
-				LeakProbability:    state.CurrentProbability(),
+				LeakProbability:    state.LeakProbability(),
 			}, nil
 		}
 	}
@@ -192,18 +191,18 @@ func Analyze(baseline, sample []uint64, opts ...Option) (*Result, error) {
 		opt(cfg)
 	}
 
-	uniffiConfig := cfg.toUniFFI()
-	uniffiResult, err := uniffi.Analyze(baseline, sample, uniffiConfig)
+	ffiCfg := cfg.toFFI()
+	ffiResult, err := ffi.Analyze(baseline, sample, ffiCfg)
 	if err != nil {
 		return nil, err
 	}
 
-	return resultFromUniFFI(uniffiResult), nil
+	return resultFromFFI(ffiResult), nil
 }
 
 // Version returns the library version string.
 func Version() string {
-	return uniffi.Version()
+	return ffi.Version()
 }
 
 // TimerName returns the name of the platform timer being used.
@@ -224,4 +223,174 @@ func TimerResolutionNs() float64 {
 // WarmupOperation is exported for use in custom measurement loops.
 func WarmupOperation(op Operation, inputSize int, iterations int) {
 	warmupOperation(op, inputSize, iterations)
+}
+
+// toFFI converts Go config to FFI config
+func (c *Config) toFFI() *ffi.Config {
+	var model ffi.AttackerModel
+	switch c.attackerModel {
+	case SharedHardware:
+		model = ffi.SharedHardware
+	case PostQuantum:
+		model = ffi.PostQuantum
+	case AdjacentNetwork:
+		model = ffi.AdjacentNetwork
+	case RemoteNetwork:
+		model = ffi.RemoteNetwork
+	case Research:
+		model = ffi.Research
+	default:
+		model = ffi.AdjacentNetwork
+	}
+
+	return &ffi.Config{
+		AttackerModel:     model,
+		CustomThresholdNs: c.customThresholdNs,
+		MaxSamples:        uint64(c.maxSamples),
+		TimeBudgetSecs:    c.timeBudget.Seconds(),
+		PassThreshold:     c.passThreshold,
+		FailThreshold:     c.failThreshold,
+		Seed:              c.seed,
+		TimerFrequencyHz:  timerFrequency(),
+	}
+}
+
+// resultFromFFI converts FFI result to public Result
+func resultFromFFI(r *ffi.Result) *Result {
+	if r == nil {
+		return nil
+	}
+
+	result := &Result{
+		Outcome:         outcomeFromFFI(r.Outcome),
+		LeakProbability: r.LeakProbability,
+		Effect: Effect{
+			ShiftNs: r.Effect.ShiftNs,
+			TailNs:  r.Effect.TailNs,
+			CILow:   r.Effect.CILow,
+			CIHigh:  r.Effect.CIHigh,
+			Pattern: effectPatternFromFFI(r.Effect.Pattern),
+		},
+		Quality:            qualityFromFFI(r.Quality),
+		SamplesUsed:        r.SamplesUsed,
+		ElapsedTime:        r.ElapsedTime,
+		Exploitability:     exploitabilityFromFFI(r.Exploitability),
+		InconclusiveReason: inconclusiveReasonFromFFI(r.InconclusiveReason),
+		MDEShiftNs:         r.MDEShiftNs,
+		MDETailNs:          r.MDETailNs,
+		ThetaUserNs:        r.ThetaUserNs,
+		ThetaEffNs:         r.ThetaEffNs,
+		ThetaFloorNs:       r.ThetaFloorNs,
+	}
+
+	// Convert diagnostics if available
+	if r.Diagnostics != nil {
+		result.Diagnostics = &Diagnostics{
+			DependenceLength:     r.Diagnostics.DependenceLength,
+			EffectiveSampleSize:  r.Diagnostics.EffectiveSampleSize,
+			StationarityRatio:    r.Diagnostics.StationarityRatio,
+			StationarityOK:       r.Diagnostics.StationarityOK,
+			ProjectionMismatchQ:  r.Diagnostics.ProjectionMismatchQ,
+			ProjectionMismatchOK: r.Diagnostics.ProjectionMismatchOK,
+			DiscreteMode:         r.Diagnostics.DiscreteMode,
+			TimerResolutionNs:    r.Diagnostics.TimerResolutionNs,
+			LambdaMean:           r.Diagnostics.LambdaMean,
+			LambdaSD:             r.Diagnostics.LambdaSD,
+			LambdaCV:             0, // Not in C API, compute if needed
+			LambdaESS:            r.Diagnostics.LambdaESS,
+			LambdaMixingOK:       r.Diagnostics.LambdaMixingOK,
+			KappaMean:            r.Diagnostics.KappaMean,
+			KappaSD:              0, // Not in C API
+			KappaCV:              r.Diagnostics.KappaCV,
+			KappaESS:             r.Diagnostics.KappaESS,
+			KappaMixingOK:        r.Diagnostics.KappaMixingOK,
+		}
+	}
+
+	return result
+}
+
+// Conversion helpers
+
+func outcomeFromFFI(o ffi.Outcome) Outcome {
+	switch o {
+	case ffi.Pass:
+		return Pass
+	case ffi.Fail:
+		return Fail
+	case ffi.Inconclusive:
+		return Inconclusive
+	case ffi.Unmeasurable:
+		return Unmeasurable
+	default:
+		return Inconclusive
+	}
+}
+
+func qualityFromFFI(q ffi.Quality) Quality {
+	switch q {
+	case ffi.Excellent:
+		return Excellent
+	case ffi.Good:
+		return Good
+	case ffi.Poor:
+		return Poor
+	case ffi.TooNoisy:
+		return TooNoisy
+	default:
+		return Poor
+	}
+}
+
+func exploitabilityFromFFI(e ffi.Exploitability) Exploitability {
+	switch e {
+	case ffi.SharedHardwareOnly:
+		return SharedHardwareOnly
+	case ffi.HTTP2Multiplexing:
+		return HTTP2Multiplexing
+	case ffi.StandardRemote:
+		return StandardRemote
+	case ffi.ObviousLeak:
+		return ObviousLeak
+	default:
+		return SharedHardwareOnly
+	}
+}
+
+func effectPatternFromFFI(p ffi.EffectPattern) EffectPattern {
+	switch p {
+	case ffi.UniformShift:
+		return UniformShift
+	case ffi.TailEffect:
+		return TailEffect
+	case ffi.Mixed:
+		return Mixed
+	case ffi.Indeterminate:
+		return Indeterminate
+	default:
+		return Indeterminate
+	}
+}
+
+func inconclusiveReasonFromFFI(r ffi.InconclusiveReason) InconclusiveReason {
+	switch r {
+	case ffi.ReasonNone:
+		return ReasonNone
+	case ffi.ReasonDataTooNoisy:
+		return ReasonDataTooNoisy
+	case ffi.ReasonNotLearning:
+		return ReasonNotLearning
+	case ffi.ReasonWouldTakeTooLong:
+		return ReasonWouldTakeTooLong
+	case ffi.ReasonTimeBudgetExceeded:
+		return ReasonTimeBudgetExceeded
+	case ffi.ReasonSampleBudgetExceeded:
+		return ReasonSampleBudgetExceeded
+	case ffi.ReasonConditionsChanged:
+		return ReasonConditionsChanged
+	case ffi.ReasonThresholdElevated:
+		return ReasonThresholdElevated
+	default:
+		return ReasonNone
+	}
 }

@@ -2,8 +2,6 @@ package timingoracle
 
 import (
 	"time"
-
-	uniffi "github.com/agucova/timing-oracle/bindings/go/timing_oracle_uniffi"
 )
 
 // Config holds the configuration for timing analysis.
@@ -110,25 +108,5 @@ func WithBatchSize(n int) Option {
 func WithoutAdaptiveBatching() Option {
 	return func(c *Config) {
 		c.disableAdaptiveBatch = true
-	}
-}
-
-// toUniFFI converts the config to UniFFI types.
-func (c *Config) toUniFFI() uniffi.Config {
-	var model uniffi.AttackerModel
-	if c.customThresholdNs > 0 {
-		model = uniffi.AttackerModelCustom{ThresholdNs: c.customThresholdNs}
-	} else {
-		model = c.attackerModel.toUniFFI()
-	}
-
-	return uniffi.Config{
-		AttackerModel:    model,
-		MaxSamples:       uint64(c.maxSamples),
-		TimeBudgetSecs:   c.timeBudget.Seconds(),
-		PassThreshold:    c.passThreshold,
-		FailThreshold:    c.failThreshold,
-		Seed:             c.seed,
-		TimerFrequencyHz: timerFrequency(),
 	}
 }

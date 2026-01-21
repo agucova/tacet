@@ -122,6 +122,7 @@ mod tests {
             Matrix9::identity(),
             beta_proj,
             beta_proj_cov,
+            Vec::new(), // beta_draws
             leak_prob,
             1.0,
             100,

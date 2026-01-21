@@ -23,7 +23,6 @@ use crate::adaptive::{
     calibrate, run_adaptive, AdaptiveConfig, AdaptiveOutcome, AdaptiveState, Calibration,
     CalibrationConfig, InconclusiveReason as AdaptiveInconclusiveReason,
 };
-use crate::analysis::classify_pattern;
 use crate::analysis::compute_max_effect_ci;
 use crate::config::Config;
 use crate::constants::DEFAULT_SEED;
@@ -828,6 +827,7 @@ impl TimingOracle {
             alpha: 0.01,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
             skip_preflight,
+            force_discrete_mode: self.config.force_discrete_mode,
         };
 
         let calibration = match calibrate(
@@ -1648,7 +1648,8 @@ use crate::adaptive::Posterior;
 /// When batching is enabled (batch_k > 1), the posterior contains batch totals.
 /// This function divides by batch_k to report per-call effect sizes.
 fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64, batch_k: u32) -> EffectEstimate {
-    let pattern = classify_pattern(&posterior.beta_proj, &posterior.beta_proj_cov);
+    // Use the posterior's draw-based classification for robustness
+    let pattern = posterior.to_effect_estimate().pattern;
     let k = batch_k.max(1) as f64; // Prevent division by zero
 
     // Compute credible interval from posterior covariance

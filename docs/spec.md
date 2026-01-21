@@ -184,11 +184,11 @@ EffectEstimate = {
 }
 
 EffectPattern =
-  | UniformShift   // μ significant, τ ≈ 0
-  | TailEffect     // μ ≈ 0, τ significant
-  | Mixed          // Both significant
+  | UniformShift   // Shift dominates: P(|μ| ≥ 5|τ|) ≥ 0.80
+  | TailEffect     // Tail dominates: P(|τ| ≥ 5|μ|) ≥ 0.80
+  | Mixed          // Neither dominates, both significant
   | Complex        // Projection mismatch high
-  | Indeterminate  // Neither significant
+  | Indeterminate  // Neither component significant
 
 TopQuantile = {
   quantile_p: Float,     // e.g., 0.9 for 90th percentile
@@ -1194,24 +1194,45 @@ $$
 **Conditioning stability for Σ_n — normative:** In fragile regimes (§3.3), Σ_n may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to Σ_n before use in the Gibbs sampler and GLS projection:
 
 - If cond(Σ_n) > 10⁴ but ≤ 10⁶: Apply shrinkage Σ_n ← (1−λ)Σ_n + λ·diag(Σ_n) with λ ∈ [0.1, 0.95] based on condition severity
-- If cond(Σ_n) > 10⁶ or Cholesky fails: Fall back to identity matrix (equivalent to OLS weighting)
+- If cond(Σ_n) > 10⁶ or Cholesky fails: Fall back to diagonal matrix diag(Σ_n) (weighted OLS, preserves per-quantile variances)
 
-When using regularized Σ_n, the projection covariance MUST be scaled by residual variance: Cov(β_proj) = (X'X)⁻¹ × (Q_proj / 7) where Q_proj is the projection mismatch statistic. This ensures accurate standard errors for pattern classification.
+**Posterior for projection summary — normative:**
 
-**Posterior for projection summary:**
+Implementations MUST compute β projection statistics empirically from Gibbs draws rather than analytically. This ensures robustness when Σ_n is regularized.
 
-Compute the projection using the posterior mean δ_post:
+For each retained δ^(s) draw from the Gibbs sampler, compute β^(s) = A·δ^(s). Then:
 
-- Mean: β_proj,post = A δ_post
-- Covariance: Cov(β_proj | Δ) = A Λ_post Aᵀ
+- **Mean**: β_proj = (1/S) Σ_s β^(s)  (empirical mean of projected draws)
+- **Covariance**: Cov(β_proj) = sample_cov(β^(s))  (empirical covariance of projected draws)
 
-where Λ_post is the sample covariance of the Gibbs draws.
+Retain all β^(s) draws for pattern classification (see below).
 
 The projection gives interpretable components:
 - **Shift (μ)**: Uniform timing difference affecting all quantiles equally
 - **Tail (τ)**: Upper quantiles affected more than lower (or vice versa)
 
 **Important:** The 2D projection is for reporting only. Decisions MUST be based on the 9D posterior. When the projection doesn't fit well (see §3.5.3), implementations MUST add an interpretation caveat and provide alternative explanations.
+
+**Pattern Classification via Posterior Draws — normative:**
+
+Pattern classification MUST use dominance probabilities computed from retained Gibbs draws, not point estimates or significance tests. This approach is robust to covariance regularization and discrete mode quantization.
+
+For each retained δ draw, compute β = A·δ to get a projected (μ, τ) sample. The classification uses the following probabilities computed over all draws:
+
+- **P_shift_dominates**: Fraction of draws where |μ| ≥ 5|τ| (shift dominates tail)
+- **P_tail_dominates**: Fraction of draws where |τ| ≥ 5|μ| (tail dominates shift)
+- **P_shift_significant**: Fraction of draws where |μ| > 10ns (absolute threshold)
+- **P_tail_significant**: Fraction of draws where |τ| > 10ns (absolute threshold)
+
+Classification rules (applied in order):
+1. **UniformShift**: P_shift_dominates ≥ 0.80
+2. **TailEffect**: P_tail_dominates ≥ 0.80
+3. **Mixed**: P_shift_significant ≥ 0.80 AND P_tail_significant ≥ 0.80
+4. **Indeterminate**: Otherwise
+
+The 5× dominance ratio and 80% probability threshold are robust defaults. The absolute 10ns significance threshold prevents noise from triggering "significant" classifications.
+
+**Rationale:** Significance-based classification (|effect| > 2×SE) is brittle when covariance is regularized or in discrete mode, because standard errors may be poorly estimated. Dominance-based classification using draws directly reflects posterior uncertainty about which component is larger.
 
 ### 3.5 Adaptive Sampling Loop
 
@@ -1803,7 +1824,7 @@ These constants define conformant implementations. Implementations MAY use diffe
 | R shrinkage (λ_shrink) | 0.01–0.2 | MUST | Robustness under fragile regimes |
 | Condition number threshold (R) | 10⁴ | MUST | Trigger R shrinkage |
 | Condition number threshold (Σ_n) | 10⁴ | MUST | Trigger Σ_n shrinkage |
-| Σ_n OLS fallback threshold | 10⁶ | MUST | Fall back to identity matrix |
+| Σ_n OLS fallback threshold | 10⁶ | MUST | Fall back to diagonal matrix |
 | λ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
 | λ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
 | κ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
