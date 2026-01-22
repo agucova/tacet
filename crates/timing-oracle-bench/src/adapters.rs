@@ -13,6 +13,7 @@
 //! each adapter handles format conversion if needed.
 
 use crate::{BlockedData, GeneratedDataset};
+use rand::prelude::*;
 use timing_oracle::{AttackerModel, Class, Outcome, TimingOracle};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
@@ -1246,8 +1247,25 @@ fn ad_two_sample(sample1: &[u64], sample2: &[u64]) -> (f64, f64) {
         .collect();
     combined.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
 
-    // Handle ties by averaging ranks
-    // For simplicity, we'll use the midrank method
+    // Shuffle tied elements to avoid bias from stable sort grouping sample1 before sample2.
+    // Without this, heavily quantized data causes systematic deviation in cumulative counts.
+    // Use deterministic seed based on data for reproducibility.
+    let seed = sample1.iter().take(10).fold(0u64, |acc, &x| acc.wrapping_add(x));
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        while j < n && combined[j].0 == combined[i].0 {
+            j += 1;
+        }
+        // Shuffle elements within this tie group
+        if j - i > 1 {
+            combined[i..j].shuffle(&mut rng);
+        }
+        i = j;
+    }
+
+    // Handle ties by averaging ranks (midrank method)
     let mut ranks: Vec<(f64, usize)> = Vec::with_capacity(n);
     let mut i = 0;
     while i < n {
@@ -2600,6 +2618,26 @@ mod tests {
         let (a2, p) = ad_two_sample(&sample1, &sample2);
         assert!(a2 > 10.0, "Non-overlapping samples should have large A², got {}", a2);
         assert!(p < 0.001, "Non-overlapping samples should have tiny p-value, got {}", p);
+    }
+
+    #[test]
+    fn test_ad_test_heavily_quantized_same_distribution() {
+        // Heavily quantized data (simulating coarse timer resolution) from the same distribution.
+        // This tests the fix for the stable sort bug that caused 100% FPR with tied values.
+        // Before the fix, A² would be astronomically large due to systematic bias.
+        let n = 5000;
+        // Only 5 unique values, each appearing 1000 times per sample
+        let values = [1000u64, 1042, 1084, 1126, 1168];
+        let sample1: Vec<u64> = (0..n).map(|i| values[i % values.len()]).collect();
+        let sample2: Vec<u64> = (0..n).map(|i| values[i % values.len()]).collect();
+
+        let (a2, p) = ad_two_sample(&sample1, &sample2);
+        // With identical distributions and proper tie handling, p-value should be high
+        assert!(
+            p > 0.01,
+            "Heavily quantized same-distribution data should not be rejected at α=0.01, got A²={:.2}, p={:.6}",
+            a2, p
+        );
     }
 
     #[test]

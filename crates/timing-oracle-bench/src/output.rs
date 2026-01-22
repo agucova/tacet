@@ -149,10 +149,10 @@ fn fpr_table(results: &SweepResults) -> String {
         })
         .collect();
 
-    // Filter to null effect
+    // Filter to null effect (effect_sigma_mult == 0 means no effect regardless of pattern)
     let fpr_summaries: Vec<&PointSummary> = summaries
         .iter()
-        .filter(|s| s.effect_sigma_mult == 0.0 && s.effect_pattern == "null")
+        .filter(|s| s.effect_sigma_mult == 0.0)
         .collect();
 
     let mut table = String::new();
