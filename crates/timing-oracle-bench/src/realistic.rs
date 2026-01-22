@@ -156,21 +156,25 @@ pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
 ///
 /// This is called outside the timed region so RNG overhead doesn't affect measurements.
 /// Returns 0 for null effects or when apply_effect is false.
+///
+/// IMPORTANT: This function ensures identical code paths for baseline and test when
+/// effect is Null. Both execute the same match statement and get 0, with the result
+/// masked by apply_effect using branchless multiplication. This avoids introducing
+/// harness-induced timing differences that could cause false positives in sensitive
+/// statistical tests.
 #[inline(never)]
 fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
     use rand::Rng;
     use rand_distr::{Distribution, Normal};
-
-    if !apply_effect {
-        return 0;
-    }
 
     // Thread-local RNG for stochastic effects
     thread_local! {
         static RNG: std::cell::RefCell<rand::rngs::ThreadRng> = std::cell::RefCell::new(rand::thread_rng());
     }
 
-    match effect {
+    // ALWAYS compute the delay (same code path for baseline and test)
+    // This ensures no branch prediction or instruction cache differences
+    let delay = match effect {
         BenchmarkEffect::Null => 0,
         BenchmarkEffect::FixedDelay { delay_ns } => *delay_ns,
         BenchmarkEffect::ThetaMultiple { theta_ns, multiplier } => {
@@ -180,60 +184,76 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
         BenchmarkEffect::HammingWeight { .. } => 0,
         BenchmarkEffect::Bimodal { slow_prob, slow_delay_ns } => {
             if *slow_delay_ns == 0 {
-                return 0;
+                0
+            } else {
+                RNG.with(|rng| {
+                    if rng.borrow_mut().gen::<f64>() < *slow_prob {
+                        *slow_delay_ns
+                    } else {
+                        0
+                    }
+                })
             }
-            RNG.with(|rng| {
-                if rng.borrow_mut().gen::<f64>() < *slow_prob {
-                    *slow_delay_ns
-                } else {
-                    0
-                }
-            })
         }
         BenchmarkEffect::VariableDelay { mean_ns, std_ns } => {
             if *mean_ns == 0 {
-                return 0;
+                0
+            } else {
+                RNG.with(|rng| {
+                    let normal = Normal::new(*mean_ns as f64, *std_ns as f64)
+                        .unwrap_or_else(|_| Normal::new(0.0, 1.0).unwrap());
+                    let delay: f64 = normal.sample(&mut *rng.borrow_mut());
+                    delay.max(0.0) as u64
+                })
             }
-            RNG.with(|rng| {
-                let normal = Normal::new(*mean_ns as f64, *std_ns as f64)
-                    .unwrap_or_else(|_| Normal::new(0.0, 1.0).unwrap());
-                let delay: f64 = normal.sample(&mut *rng.borrow_mut());
-                delay.max(0.0) as u64
-            })
         }
         BenchmarkEffect::TailEffect { base_delay_ns, tail_prob, tail_mult } => {
             if *base_delay_ns == 0 {
-                return 0;
+                0
+            } else {
+                RNG.with(|rng| {
+                    let is_tail = rng.borrow_mut().gen::<f64>() < *tail_prob;
+                    if is_tail {
+                        (*base_delay_ns as f64 * *tail_mult) as u64
+                    } else {
+                        *base_delay_ns
+                    }
+                })
             }
-            RNG.with(|rng| {
-                let is_tail = rng.borrow_mut().gen::<f64>() < *tail_prob;
-                if is_tail {
-                    (*base_delay_ns as f64 * *tail_mult) as u64
-                } else {
-                    *base_delay_ns
-                }
-            })
         }
-    }
+    };
+
+    // Branchless masking: multiply by 1 if apply_effect, 0 otherwise
+    // This ensures identical instructions executed regardless of apply_effect
+    delay.wrapping_mul(apply_effect as u64)
 }
 
 /// Measure a single operation with optional effect injection using precise timer.
 ///
-/// IMPORTANT: This function ensures constant-time code paths when effect_delay is 0.
-/// Both baseline and test classes execute identical code: `busy_wait_ns(base_ns + effect_delay)`.
-/// When effect_delay is 0 (baseline or null effect), both run `busy_wait_ns(base_ns)`.
+/// IMPORTANT: For Null effects, this function guarantees identical code paths for
+/// baseline and test by bypassing compute_effect_delay entirely. This ensures
+/// FPR measurements are not contaminated by harness-induced timing differences.
 #[inline(never)]
 fn measure_operation(timer: &mut BoxedTimer, base_ns: u64, apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
-    // Compute effect delay OUTSIDE the measured region
-    // This ensures RNG calls don't affect timing measurements
-    let effect_delay = compute_effect_delay(apply_effect, effect);
+    // For Null effects, use a dedicated constant-time path that's identical
+    // for both baseline and test. This avoids any code path differences from
+    // the complex compute_effect_delay function.
+    let effect_delay = if matches!(effect, BenchmarkEffect::Null) {
+        // Null effect: both baseline and test execute this exact path
+        // No branching on apply_effect, no complex match statements
+        //
+        // black_box prevents the compiler from optimizing based on apply_effect,
+        // ensuring identical code generation regardless of its value
+        let _ = std::hint::black_box(apply_effect);
+        0u64
+    } else {
+        // Non-null effects: compute the actual delay
+        // Code path differences here are acceptable since we're injecting real effects
+        compute_effect_delay(apply_effect, effect)
+    };
 
     // Use BoxedTimer::measure_cycles and convert to nanoseconds
     let cycles = timer.measure_cycles(|| {
-        // CONSTANT-TIME: Both classes execute identical code path
-        // - Baseline: busy_wait_ns(base_ns + 0)
-        // - Test with effect=0: busy_wait_ns(base_ns + 0)
-        // - Test with effect>0: busy_wait_ns(base_ns + effect_delay)
         busy_wait_ns(base_ns + effect_delay);
     });
 
@@ -479,5 +499,152 @@ mod tests {
             "Timer resolution {} ns is too coarse",
             dataset.timer_resolution_ns
         );
+    }
+
+    // ========================================================================
+    // Unit tests for compute_effect_delay
+    // ========================================================================
+
+    #[test]
+    fn test_compute_effect_delay_null() {
+        // Null effect should always return 0
+        assert_eq!(compute_effect_delay(true, &BenchmarkEffect::Null), 0);
+        assert_eq!(compute_effect_delay(false, &BenchmarkEffect::Null), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_fixed() {
+        let effect = BenchmarkEffect::FixedDelay { delay_ns: 1000 };
+
+        // apply_effect=true should return the delay
+        assert_eq!(compute_effect_delay(true, &effect), 1000);
+
+        // apply_effect=false should return 0 (branchless masking)
+        assert_eq!(compute_effect_delay(false, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_theta_multiple() {
+        let effect = BenchmarkEffect::ThetaMultiple {
+            theta_ns: 100.0,
+            multiplier: 2.5,
+        };
+
+        // 100 * 2.5 = 250
+        assert_eq!(compute_effect_delay(true, &effect), 250);
+        assert_eq!(compute_effect_delay(false, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_bimodal() {
+        let effect = BenchmarkEffect::Bimodal {
+            slow_prob: 1.0, // Always slow for deterministic test
+            slow_delay_ns: 5000,
+        };
+
+        // With slow_prob=1.0, should always return the slow delay
+        assert_eq!(compute_effect_delay(true, &effect), 5000);
+        assert_eq!(compute_effect_delay(false, &effect), 0);
+
+        // With slow_prob=0.0, should always return 0
+        let effect_never_slow = BenchmarkEffect::Bimodal {
+            slow_prob: 0.0,
+            slow_delay_ns: 5000,
+        };
+        assert_eq!(compute_effect_delay(true, &effect_never_slow), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_bimodal_zero_delay() {
+        // Edge case: slow_delay_ns=0 should return 0 regardless of probability
+        let effect = BenchmarkEffect::Bimodal {
+            slow_prob: 1.0,
+            slow_delay_ns: 0,
+        };
+        assert_eq!(compute_effect_delay(true, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_tail_effect() {
+        // With tail_prob=1.0, always returns tail delay
+        let effect = BenchmarkEffect::TailEffect {
+            base_delay_ns: 1000,
+            tail_prob: 1.0,
+            tail_mult: 3.0,
+        };
+        assert_eq!(compute_effect_delay(true, &effect), 3000); // 1000 * 3.0
+        assert_eq!(compute_effect_delay(false, &effect), 0);
+
+        // With tail_prob=0.0, always returns base delay
+        let effect_no_tail = BenchmarkEffect::TailEffect {
+            base_delay_ns: 1000,
+            tail_prob: 0.0,
+            tail_mult: 3.0,
+        };
+        assert_eq!(compute_effect_delay(true, &effect_no_tail), 1000);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_tail_effect_zero_base() {
+        // Edge case: base_delay_ns=0 should return 0
+        let effect = BenchmarkEffect::TailEffect {
+            base_delay_ns: 0,
+            tail_prob: 1.0,
+            tail_mult: 3.0,
+        };
+        assert_eq!(compute_effect_delay(true, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_variable() {
+        // With std=0, should return exactly the mean
+        let effect = BenchmarkEffect::VariableDelay {
+            mean_ns: 500,
+            std_ns: 0,
+        };
+        assert_eq!(compute_effect_delay(true, &effect), 500);
+        assert_eq!(compute_effect_delay(false, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_variable_zero_mean() {
+        // Edge case: mean_ns=0 should return 0
+        let effect = BenchmarkEffect::VariableDelay {
+            mean_ns: 0,
+            std_ns: 100,
+        };
+        assert_eq!(compute_effect_delay(true, &effect), 0);
+    }
+
+    #[test]
+    fn test_compute_effect_delay_early_exit_and_hamming() {
+        // These effects return 0 (they affect code paths, not delays)
+        let early_exit = BenchmarkEffect::EarlyExit { max_delay_ns: 128 };
+        let hamming = BenchmarkEffect::HammingWeight { ns_per_bit: 10.0 };
+
+        assert_eq!(compute_effect_delay(true, &early_exit), 0);
+        assert_eq!(compute_effect_delay(true, &hamming), 0);
+    }
+
+    #[test]
+    fn test_branchless_masking_consistency() {
+        // Verify that apply_effect=false ALWAYS returns 0 for all effect types
+        let effects: Vec<BenchmarkEffect> = vec![
+            BenchmarkEffect::Null,
+            BenchmarkEffect::FixedDelay { delay_ns: 999 },
+            BenchmarkEffect::ThetaMultiple { theta_ns: 100.0, multiplier: 5.0 },
+            BenchmarkEffect::Bimodal { slow_prob: 1.0, slow_delay_ns: 888 },
+            BenchmarkEffect::VariableDelay { mean_ns: 777, std_ns: 0 },
+            BenchmarkEffect::TailEffect { base_delay_ns: 666, tail_prob: 1.0, tail_mult: 2.0 },
+        ];
+
+        for effect in &effects {
+            assert_eq!(
+                compute_effect_delay(false, effect),
+                0,
+                "apply_effect=false should return 0 for {:?}",
+                effect
+            );
+        }
     }
 }

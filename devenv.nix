@@ -147,8 +147,21 @@ in
   # C++ toolchain for building/testing C++ bindings
   languages.cplusplus.enable = true;
 
-  # Python is provided via tlsfuzzer Nix package
-  # No need for uv/pip - all deps are in Nix
+  # Python for analysis notebooks and tlsfuzzer
+  languages.python = {
+    enable = true;
+    package = pkgs.python3;
+    venv.enable = true;
+    venv.requirements = ''
+      pandas
+      numpy
+      matplotlib
+      seaborn
+      scipy
+      jupyter
+      nbconvert
+    '';
+  };
 
   packages = with pkgs; [
     cargo-nextest
