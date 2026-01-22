@@ -12,6 +12,7 @@
 //! - [`runner`]: Legacy benchmark runner for FPR, power, and efficiency tests
 //! - [`sweep`]: New comprehensive benchmark sweep infrastructure
 //! - [`output`]: CSV and markdown report generation
+//! - [`checkpoint`]: Incremental CSV writing and checkpoint-based resumability
 //!
 //! # Quick Start
 //!
@@ -62,6 +63,7 @@
 //! ```
 
 pub mod adapters;
+pub mod checkpoint;
 pub mod dudect_stats;
 pub mod output;
 pub mod realistic;
@@ -87,3 +89,4 @@ pub use realistic::{
     RealisticBlockedData, RealisticConfig, RealisticDataset,
 };
 pub use sweep::{BenchmarkPreset, BenchmarkResult, PointSummary, SweepConfig, SweepResults, SweepRunner};
+pub use checkpoint::{IncrementalCsvWriter, WorkItemKey};

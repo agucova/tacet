@@ -29,6 +29,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use timing_oracle_bench::adapters::ToolAdapter;
+use timing_oracle_bench::checkpoint::IncrementalCsvWriter;
 use timing_oracle_bench::output::{to_markdown, write_csv, write_summary_csv};
 use timing_oracle_bench::sweep::{SweepConfig, SweepRunner};
 use timing_oracle_bench::{
@@ -100,6 +101,21 @@ struct Args {
     /// Base operation time in nanoseconds for realistic mode (default: 1000 = 1μs)
     #[arg(long, default_value = "1000")]
     realistic_base_ns: u64,
+
+    /// Disable incremental CSV writes (write all results at the end instead).
+    ///
+    /// By default, results are written to disk immediately after each tool
+    /// completes, enabling survival of interrupted runs. Use this flag to
+    /// disable incremental writes and write all results only at the end.
+    #[arg(long)]
+    no_incremental: bool,
+
+    /// Resume from an interrupted benchmark.
+    ///
+    /// Loads existing results from the output CSV and skips completed work items.
+    /// Implies --incremental.
+    #[arg(long)]
+    resume: bool,
 }
 
 fn main() {
@@ -239,6 +255,11 @@ fn main() {
     } else {
         println!("  Mode: synthetic");
     }
+    if args.resume {
+        println!("  Checkpoint: RESUME (loading existing results)");
+    } else if !args.no_incremental {
+        println!("  Checkpoint: INCREMENTAL (writing results as they complete)");
+    }
     let tool_names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
     let num_tools = tools.len();
 
@@ -254,6 +275,28 @@ fn main() {
     // Create runner
     let runner = SweepRunner::new(tools);
 
+    // Set up checkpoint for incremental writes and resumability
+    // Incremental is the default; --no-incremental disables it
+    let use_checkpoint = !args.no_incremental || args.resume;
+    let checkpoint_path = args.output.join("benchmark_results.csv");
+    let checkpoint = if use_checkpoint {
+        match IncrementalCsvWriter::new(&checkpoint_path, args.resume) {
+            Ok(writer) => {
+                let resumed = writer.resumed_count;
+                if resumed > 0 {
+                    println!("  Resuming: {} results loaded from checkpoint", resumed);
+                }
+                Some(Arc::new(writer))
+            }
+            Err(e) => {
+                eprintln!("Failed to create checkpoint file: {}", e);
+                std::process::exit(1);
+            }
+        }
+    } else {
+        None
+    };
+
     // Set up progress bar
     let total_work = config.total_datasets() * runner.num_tools();
     let progress_bar = ProgressBar::new(total_work as u64);
@@ -265,19 +308,38 @@ fn main() {
     );
     progress_bar.enable_steady_tick(std::time::Duration::from_millis(100));
 
-    let last_update = Arc::new(AtomicU64::new(0));
+    // Set initial progress position if resuming
+    if let Some(ref cp) = checkpoint {
+        progress_bar.set_position(cp.resumed_count as u64);
+    }
+
+    let last_update = Arc::new(AtomicU64::new(
+        checkpoint.as_ref().map(|c| c.resumed_count as u64).unwrap_or(0),
+    ));
     let start = Instant::now();
 
-    // Run benchmark
-    let results = runner.run(&config, |progress, task| {
-        let current = (progress * total_work as f64) as u64;
-        let last = last_update.load(Ordering::Relaxed);
-        if current > last {
-            last_update.store(current, Ordering::Relaxed);
-            progress_bar.set_position(current);
-            progress_bar.set_message(task.to_string());
-        }
-    });
+    // Run benchmark (with or without checkpoint)
+    let results = if let Some(cp) = checkpoint.clone() {
+        runner.run_with_checkpoint(&config, Some(cp), |progress, task| {
+            let current = (progress * total_work as f64) as u64;
+            let last = last_update.load(Ordering::Relaxed);
+            if current > last {
+                last_update.store(current, Ordering::Relaxed);
+                progress_bar.set_position(current);
+                progress_bar.set_message(task.to_string());
+            }
+        })
+    } else {
+        runner.run(&config, |progress, task| {
+            let current = (progress * total_work as f64) as u64;
+            let last = last_update.load(Ordering::Relaxed);
+            if current > last {
+                last_update.store(current, Ordering::Relaxed);
+                progress_bar.set_position(current);
+                progress_bar.set_message(task.to_string());
+            }
+        })
+    };
 
     progress_bar.finish_with_message("Complete!");
 
@@ -286,13 +348,19 @@ fn main() {
 
     // Write outputs
     if !args.no_csv {
-        let csv_path = args.output.join("benchmark_results.csv");
-        if let Err(e) = write_csv(&results, &csv_path) {
-            eprintln!("Failed to write CSV: {}", e);
+        // Skip raw CSV if checkpoint was used (already written incrementally)
+        if !use_checkpoint {
+            let csv_path = args.output.join("benchmark_results.csv");
+            if let Err(e) = write_csv(&results, &csv_path) {
+                eprintln!("Failed to write CSV: {}", e);
+            } else {
+                println!("Wrote raw results to: {}", csv_path.display());
+            }
         } else {
-            println!("Wrote raw results to: {}", csv_path.display());
+            println!("Raw results already written to: {}", checkpoint_path.display());
         }
 
+        // Summary is always written at the end (needs all results for aggregation)
         let summary_path = args.output.join("benchmark_summary.csv");
         if let Err(e) = write_summary_csv(&results, &summary_path) {
             eprintln!("Failed to write summary CSV: {}", e);

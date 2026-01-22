@@ -25,10 +25,12 @@
 //! ```
 
 use crate::adapters::ToolAdapter;
+use crate::checkpoint::{IncrementalCsvWriter, WorkItemKey};
 use crate::realistic::{collect_realistic_dataset, realistic_to_generated, RealisticConfig};
 use crate::synthetic::{generate_benchmark_dataset, BenchmarkConfig, EffectPattern, NoiseModel};
 use crate::GeneratedDataset;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use timing_oracle::BenchmarkEffect;
 
@@ -645,6 +647,208 @@ impl SweepRunner {
 
         // Report final progress
         progress(1.0, "Complete");
+
+        results.total_time = start.elapsed();
+        results
+    }
+
+    /// Run the benchmark sweep with incremental checkpoint support.
+    ///
+    /// This method enables resumability by:
+    /// 1. Writing results to CSV as they complete (via IncrementalCsvWriter)
+    /// 2. Skipping work items that are already in the checkpoint file
+    ///
+    /// # Arguments
+    /// * `config` - Sweep configuration
+    /// * `checkpoint` - Optional checkpoint writer for incremental saves and resume
+    /// * `progress` - Optional callback receiving (progress_fraction, current_task)
+    ///
+    /// # Returns
+    /// Aggregated results from all tools and configurations (including resumed results)
+    pub fn run_with_checkpoint<F>(
+        &self,
+        config: &SweepConfig,
+        checkpoint: Option<Arc<IncrementalCsvWriter>>,
+        mut progress: F,
+    ) -> SweepResults
+    where
+        F: FnMut(f64, &str),
+    {
+        let start = Instant::now();
+        let mut results = SweepResults::new(config.clone());
+
+        // Step 1: Collect dataset configs
+        let dataset_configs: Vec<(EffectPattern, f64, NoiseModel, usize)> = config
+            .iter_configs()
+            .flat_map(|(pattern, mult, noise)| {
+                (0..config.datasets_per_point).map(move |dataset_id| (pattern, mult, noise, dataset_id))
+            })
+            .collect();
+
+        // Step 2: Generate all datasets first (parallel for synthetic, sequential for realistic)
+        progress(0.0, "Generating datasets...");
+
+        #[cfg(feature = "parallel")]
+        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> = if config.use_realistic {
+            dataset_configs
+                .iter()
+                .map(|&(pattern, mult, noise, dataset_id)| {
+                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
+                    (pattern, mult, noise, dataset_id, dataset)
+                })
+                .collect()
+        } else {
+            dataset_configs
+                .par_iter()
+                .map(|&(pattern, mult, noise, dataset_id)| {
+                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
+                    (pattern, mult, noise, dataset_id, dataset)
+                })
+                .collect()
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> = dataset_configs
+            .iter()
+            .map(|&(pattern, mult, noise, dataset_id)| {
+                let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
+                (pattern, mult, noise, dataset_id, dataset)
+            })
+            .collect();
+
+        // Wrap datasets in Arc for sharing across threads
+        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, Arc<GeneratedDataset>)> = datasets
+            .into_iter()
+            .map(|(p, m, n, id, d)| (p, m, n, id, Arc::new(d)))
+            .collect();
+
+        progress(0.05, "Running tools...");
+
+        // Step 3: Create (dataset × tool) work items, filtering already-completed items
+        let all_work_items: Vec<(usize, usize)> = (0..datasets.len())
+            .flat_map(|dataset_idx| {
+                (0..self.tools.len()).map(move |tool_idx| (dataset_idx, tool_idx))
+            })
+            .collect();
+
+        let total_work = all_work_items.len();
+        let resumed_count = checkpoint.as_ref().map(|c| c.resumed_count).unwrap_or(0);
+
+        // Filter out completed work items if resuming
+        let work_items: Vec<(usize, usize)> = if let Some(ref writer) = checkpoint {
+            all_work_items
+                .into_iter()
+                .filter(|&(dataset_idx, tool_idx)| {
+                    let (pattern, mult, noise, dataset_id, _) = &datasets[dataset_idx];
+                    let noise_name = if config.use_realistic {
+                        format!("{}-realistic", noise.name())
+                    } else {
+                        noise.name()
+                    };
+                    let key = WorkItemKey::new(
+                        self.tools[tool_idx].name(),
+                        &pattern.name(),
+                        *mult,
+                        &noise_name,
+                        *dataset_id,
+                    );
+                    !writer.is_completed(&key)
+                })
+                .collect()
+        } else {
+            all_work_items
+        };
+
+        let remaining_work = work_items.len();
+        if resumed_count > 0 {
+            progress(
+                resumed_count as f64 / total_work as f64,
+                &format!("Resuming ({} already complete)...", resumed_count),
+            );
+        }
+
+        let completed = AtomicUsize::new(resumed_count);
+
+        // Step 4: Process all (dataset × tool) pairs
+        #[cfg(feature = "parallel")]
+        let all_results: Vec<BenchmarkResult> = if config.use_realistic {
+            // Sequential for realistic mode
+            work_items
+                .iter()
+                .map(|&(dataset_idx, tool_idx)| {
+                    let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+
+                    // Write incrementally if checkpoint enabled
+                    if let Some(ref writer) = checkpoint {
+                        if let Err(e) = writer.write_result(&result) {
+                            eprintln!("Warning: Failed to write checkpoint: {}", e);
+                        }
+                    }
+
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    progress(
+                        done as f64 / total_work as f64,
+                        &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
+                    );
+                    result
+                })
+                .collect()
+        } else {
+            // Parallel for synthetic mode
+            work_items
+                .par_iter()
+                .map(|&(dataset_idx, tool_idx)| {
+                    let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+
+                    // Write incrementally if checkpoint enabled
+                    if let Some(ref writer) = checkpoint {
+                        if let Err(e) = writer.write_result(&result) {
+                            eprintln!("Warning: Failed to write checkpoint: {}", e);
+                        }
+                    }
+
+                    completed.fetch_add(1, Ordering::Relaxed);
+                    result
+                })
+                .collect()
+        };
+
+        #[cfg(not(feature = "parallel"))]
+        let all_results: Vec<BenchmarkResult> = work_items
+            .iter()
+            .map(|&(dataset_idx, tool_idx)| {
+                let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+
+                // Write incrementally if checkpoint enabled
+                if let Some(ref writer) = checkpoint {
+                    if let Err(e) = writer.write_result(&result) {
+                        eprintln!("Warning: Failed to write checkpoint: {}", e);
+                    }
+                }
+
+                let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                progress(
+                    done as f64 / total_work as f64,
+                    &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
+                );
+                result
+            })
+            .collect();
+
+        // Collect results
+        for result in all_results {
+            results.results.push(result);
+        }
+
+        // Report final progress
+        if remaining_work > 0 {
+            progress(1.0, "Complete");
+        } else {
+            progress(1.0, "All work already complete (nothing to do)");
+        }
 
         results.total_time = start.elapsed();
         results
