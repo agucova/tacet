@@ -1,13 +1,17 @@
 <p align="center">
-  <img src="website/public/logo.svg" alt="Tacet" width="300" />
+  <img src="website/public/logo-dark-bg.svg" alt="tacet" width="340" />
 </p>
 
 <p align="center">
-  <strong>Detect timing side channels with statistically rigorous methods.</strong>
-</p>
-
-<p align="center">
+  <strong>Detect timing side channels with statistically rigorous methods.</strong><br>
   Available for Rust, JavaScript/TypeScript, C/C++, and Go.
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/tacet"><img src="https://img.shields.io/crates/v/tacet" alt="crates.io"></a>
+  <a href="https://www.npmjs.com/package/@tacet/js"><img src="https://img.shields.io/npm/v/@tacet/js" alt="npm"></a>
+  <a href="https://jsr.io/@tacet/js"><img src="https://jsr.io/badges/@tacet/js" alt="JSR"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
 </p>
 
 ---
