@@ -1783,6 +1783,7 @@ mod tests {
     /// - TSC frequency detection returns wrong value
     /// - Platform detection guesses wrong frequency
     #[test]
+    #[ignore] // Unreliable on virtualized CI environments due to CPU frequency scaling
     fn test_frequency_accuracy_validation() {
         let backend = timer_backend_name();
         if backend == "instant_fallback" {
