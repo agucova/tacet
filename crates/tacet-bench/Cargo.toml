@@ -1,6 +1,6 @@
 [package]
 name = "tacet-bench"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Benchmark comparison infrastructure for tacet"
 license = "MIT OR Apache-2.0"

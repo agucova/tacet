@@ -56,7 +56,7 @@ fn uniqueness_ratio_boundary_10_percent() {
     // Use 90 unique values, each repeated ~11 times (990 samples) + 10 more of value 0
     let data_9pct: Vec<f64> = (0..90)
         .flat_map(|i| vec![i as f64; 11])
-        .chain(std::iter::repeat(0.0).take(10))
+        .chain(std::iter::repeat_n(0.0, 10))
         .collect();
     assert_eq!(data_9pct.len(), 1000);
 

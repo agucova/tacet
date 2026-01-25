@@ -1,0 +1,82 @@
+---
+// API Language Switcher component
+// Pill-style navigation for switching between language-specific API pages
+
+interface Props {
+	currentLanguage: 'rust' | 'javascript' | 'c' | 'cpp' | 'go';
+}
+
+const { currentLanguage } = Astro.props;
+
+const languages = [
+	{ id: 'rust', label: 'Rust', path: '/api/rust' },
+	{ id: 'javascript', label: 'JavaScript', path: '/api/javascript' },
+	{ id: 'c', label: 'C', path: '/api/c' },
+	{ id: 'cpp', label: 'C++', path: '/api/cpp' },
+	{ id: 'go', label: 'Go', path: '/api/go' },
+] as const;
+---
+
+<nav class="api-language-switcher" aria-label="API language navigation">
+	{
+		languages.map((lang) => (
+			<a
+				href={lang.path}
+				class:list={['lang-pill', { active: lang.id === currentLanguage }]}
+				aria-current={lang.id === currentLanguage ? 'page' : undefined}
+				data-lang-id={lang.id}
+			>
+				{lang.label}
+			</a>
+		))
+	}
+</nav>
+
+<script>
+	import { setPreferredLanguage, type Language } from '../scripts/language-preference';
+
+	// Update preference when clicking API navigation
+	document.querySelectorAll('.api-language-switcher a').forEach((link) => {
+		link.addEventListener('click', (e) => {
+			const target = e.currentTarget as HTMLElement;
+			const langId = target.getAttribute('data-lang-id');
+			if (langId) {
+				setPreferredLanguage(langId as Language);
+			}
+		});
+	});
+</script>
+
+<style>
+	.api-language-switcher {
+		display: flex;
+		gap: 0.5rem;
+		margin-bottom: 2rem;
+		padding-bottom: 1rem;
+		border-bottom: 1px solid var(--sl-color-hairline);
+		flex-wrap: wrap;
+	}
+
+	.lang-pill {
+		font-family: var(--__sl-font);
+		font-size: 0.9375rem;
+		padding: 0.5rem 1rem;
+		background: var(--sl-color-bg-sidebar);
+		border: 1px solid var(--sl-color-hairline);
+		border-radius: 20px;
+		color: var(--sl-color-text);
+		text-decoration: none;
+		transition: all 0.2s ease;
+	}
+
+	.lang-pill:hover {
+		border-color: var(--sl-color-accent);
+		color: var(--sl-color-text);
+	}
+
+	.lang-pill.active {
+		background: var(--sl-color-accent);
+		color: var(--sl-color-bg);
+		border-color: var(--sl-color-accent);
+	}
+</style>

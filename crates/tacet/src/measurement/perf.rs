@@ -50,6 +50,11 @@
 #[cfg(target_os = "linux")]
 use std::sync::atomic::{compiler_fence, Ordering};
 
+#[cfg(all(target_os = "linux", feature = "perf-mmap"))]
+use super::perf_mmap::MmapState;
+
+use super::error::{MeasurementError, MeasurementResult};
+
 /// Error type for perf initialization failures.
 #[derive(Debug, Clone)]
 pub enum PerfError {
@@ -102,10 +107,13 @@ impl std::error::Error for PerfError {}
 /// - Only works on Linux
 #[cfg(target_os = "linux")]
 pub struct LinuxPerfTimer {
-    /// The underlying perf_event counter
+    /// The underlying perf_event counter (used for syscall fallback)
     counter: ::perf_event2::Counter,
     /// Estimated cycles per nanosecond (CPU frequency in GHz)
     cycles_per_ns: f64,
+    /// mmap-based PMU access state (ARM64 Linux only, requires perf-mmap feature)
+    #[cfg(feature = "perf-mmap")]
+    mmap_state: Option<MmapState>,
 }
 
 #[cfg(target_os = "linux")]
@@ -140,9 +148,20 @@ impl LinuxPerfTimer {
         // Calibrate cycles per nanosecond
         let cycles_per_ns = Self::calibrate(&mut counter);
 
+        // Try to setup mmap-based PMU access (non-fatal if fails)
+        #[cfg(feature = "perf-mmap")]
+        let mmap_state = Self::try_setup_mmap().ok();
+
+        #[cfg(feature = "perf-mmap")]
+        if mmap_state.is_some() {
+            tracing::info!("perf-mmap enabled: using zero-overhead userspace PMU reads");
+        }
+
         Ok(Self {
             counter,
             cycles_per_ns,
+            #[cfg(feature = "perf-mmap")]
+            mmap_state,
         })
     }
 
@@ -201,20 +220,47 @@ impl LinuxPerfTimer {
 
     /// Measure execution time in cycles.
     ///
-    /// Returns 0 if the measurement fails (e.g., reset or read error).
+    /// On ARM64 Linux with the `perf-mmap` feature enabled, this uses zero-overhead
+    /// userspace PMU reads via the `mrs` instruction. Otherwise, falls back to
+    /// syscall-based reads.
+    ///
+    /// # Errors
+    ///
+    /// - `RetryExhausted`: mmap seqlock retry limit exceeded (1000 attempts)
+    /// - `SyscallFailed`: perf_event reset or read syscall failed
+    ///
+    /// When a measurement fails, the entire sample should be skipped rather than
+    /// using a sentinel value. Invalid samples corrupt statistical analysis.
     #[inline]
-    pub fn measure_cycles<F, T>(&mut self, f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, f: F) -> MeasurementResult
     where
         F: FnOnce() -> T,
     {
-        // Reset to establish baseline - if this fails, we can't measure accurately
+        #[cfg(feature = "perf-mmap")]
+        if let Some(ref mmap) = self.mmap_state {
+            // Zero-overhead mmap path (no syscalls)
+            //
+            // Propagate errors from read_counter() - if retry exhausted, caller
+            // must skip this sample. The index validation (index==0 check) prevents
+            // garbage values from multiplexing/migration.
+            let start = mmap.read_counter()?;
+            compiler_fence(Ordering::SeqCst);
+            std::hint::black_box(f());
+            compiler_fence(Ordering::SeqCst);
+            let end = mmap.read_counter()?;
+            return Ok(end.saturating_sub(start));
+        }
+
+        // Fallback: syscall-based read
         if self.counter.reset().is_err() {
-            return 0;
+            return Err(MeasurementError::SyscallFailed);
         }
         compiler_fence(Ordering::SeqCst);
         std::hint::black_box(f());
         compiler_fence(Ordering::SeqCst);
-        self.counter.read().unwrap_or(0)
+        self.counter
+            .read()
+            .map_err(|_| MeasurementError::SyscallFailed)
     }
 
     /// Convert cycles to nanoseconds.
@@ -231,6 +277,79 @@ impl LinuxPerfTimer {
     /// Get the timer resolution in nanoseconds (~0.3ns for 3GHz CPU).
     pub fn resolution_ns(&self) -> f64 {
         1.0 / self.cycles_per_ns
+    }
+
+    /// Try to setup mmap-based PMU access (ARM64 Linux only).
+    ///
+    /// This is a best-effort attempt that silently fails if:
+    /// - Kernel too old (<5.12)
+    /// - Sysctl disabled (perf_user_access == 0)
+    /// - Insufficient privileges
+    /// - mmap fails
+    /// - Virtualized environment without PMU
+    ///
+    /// Returns Ok(MmapState) on success, Err on any failure (graceful degradation).
+    #[cfg(feature = "perf-mmap")]
+    fn try_setup_mmap() -> Result<MmapState, Box<dyn std::error::Error>> {
+        use perf_event_open_sys::bindings::{perf_event_attr, PERF_COUNT_HW_CPU_CYCLES, PERF_TYPE_HARDWARE};
+        use std::os::unix::io::RawFd;
+
+        // Prepare perf_event_attr structure
+        let mut attr = unsafe { std::mem::zeroed::<perf_event_attr>() };
+        attr.type_ = PERF_TYPE_HARDWARE;
+        attr.size = std::mem::size_of::<perf_event_attr>() as u32;
+        attr.config = PERF_COUNT_HW_CPU_CYCLES as u64;
+        attr.__bindgen_anon_3.config1 = 0x3; // bit 0: userspace, bit 1: 64-bit counter
+        attr.__bindgen_anon_1.sample_period = 0;
+        attr.set_disabled(0);
+        attr.set_exclude_kernel(1);
+        attr.set_exclude_hv(1);
+
+        // Get current CPU to avoid multiplexing when thread is pinned.
+        // If the thread has been pinned via sched_setaffinity, binding the
+        // perf_event to the same specific CPU prevents the kernel from
+        // multiplexing it with events on other CPUs.
+        #[cfg(target_os = "linux")]
+        let cpu = unsafe {
+            let cpu_id = libc::sched_getcpu();
+            if cpu_id < 0 { -1 } else { cpu_id }
+        };
+        #[cfg(not(target_os = "linux"))]
+        let cpu = -1;
+
+        // Open perf event
+        let fd = unsafe {
+            libc::syscall(
+                libc::SYS_perf_event_open,
+                &attr as *const _,
+                0,  // pid (0 = current thread)
+                cpu, // cpu (specific CPU on Linux, -1 elsewhere)
+                -1, // group_fd (-1 = no group)
+                0,  // flags
+            )
+        };
+
+        if fd < 0 {
+            let err = std::io::Error::last_os_error();
+            tracing::debug!("perf_event_open for mmap failed: {}", err);
+            return Err(err.into());
+        }
+
+        let fd = fd as RawFd;
+
+        // Setup mmap
+        match unsafe { MmapState::new(fd) } {
+            Ok(mmap_state) => {
+                tracing::info!("ARM64 userspace PMU access enabled via mmap (perf-mmap feature)");
+                Ok(mmap_state)
+            }
+            Err(e) => {
+                tracing::debug!("mmap setup failed: {}", e);
+                // Close the fd before returning error
+                unsafe { libc::close(fd) };
+                Err(Box::new(e))
+            }
+        }
     }
 }
 
@@ -260,13 +379,13 @@ impl LinuxPerfTimer {
         Err(PerfError::UnsupportedPlatform)
     }
 
-    /// Stub measurement (always returns 0).
+    /// Stub measurement (always returns error).
     #[inline]
-    pub fn measure_cycles<F, T>(&mut self, _f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, _f: F) -> MeasurementResult
     where
         F: FnOnce() -> T,
     {
-        0
+        Err(MeasurementError::SyscallFailed)
     }
 
     /// Stub conversion (returns cycles as-is).

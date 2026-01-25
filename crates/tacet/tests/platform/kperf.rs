@@ -66,7 +66,7 @@ fn test_pmu_measure_cycles_nonzero() {
                     x = x.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(x)
-            });
+            }).expect("PMU measurement should not fail in test");
 
             assert!(
                 cycles > 0,
@@ -163,7 +163,7 @@ fn test_pmu_measurement_consistency() {
                         x = x.wrapping_add(std::hint::black_box(i));
                     }
                     std::hint::black_box(x)
-                });
+                }).expect("PMU measurement should not fail in test");
                 samples.push(cycles as f64);
             }
 
@@ -201,7 +201,8 @@ fn test_pmu_error_handling() {
     match PmuTimer::new() {
         Ok(mut pmu_timer) => {
             // Normal measurement should work
-            let cycles = pmu_timer.measure_cycles(|| 42u64);
+            let cycles = pmu_timer.measure_cycles(|| 42u64)
+                .expect("PMU measurement should not fail in test");
             // Note: This could be 0 if the operation is too fast, but shouldn't panic
             eprintln!("Trivial operation: {} cycles", cycles);
         }
@@ -237,7 +238,8 @@ fn test_pmu_vs_standard_timer() {
             let mut pmu_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
                 let cycles =
-                    pmu_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
+                    pmu_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)))
+                    .expect("PMU measurement should not fail in test");
                 pmu_samples.push(cycles);
             }
 
@@ -245,7 +247,8 @@ fn test_pmu_vs_standard_timer() {
             let mut std_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
                 let cycles =
-                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
+                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)))
+                    .expect("Standard timer measurement should not fail in test");
                 std_samples.push(cycles);
             }
 

@@ -51,6 +51,8 @@
 
 use std::sync::atomic::{compiler_fence, Ordering};
 
+use super::error::{MeasurementError, MeasurementResult};
+
 /// Error type for PMU initialization failures.
 #[derive(Debug, Clone)]
 pub enum PmuError {
@@ -241,24 +243,29 @@ impl PmuTimer {
 
     /// Measure execution time in cycles.
     ///
-    /// Returns 0 if the measurement fails (e.g., read error).
+    /// # Errors
+    ///
+    /// Returns `SyscallFailed` if counter read fails.
     #[inline]
-    pub fn measure_cycles<F, T>(&mut self, f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, f: F) -> MeasurementResult
     where
         F: FnOnce() -> T,
     {
         // NOTE: We avoid calling counter.reset() because kperf-rs's reset() calls
         // kperf_reset() which is a GLOBAL reset that stops all kpc counting.
         // Instead, we read before and after and compute the delta.
-        let start = match self.counter.read() {
-            Ok(c) => c,
-            Err(_) => return 0,
-        };
+        let start = self
+            .counter
+            .read()
+            .map_err(|_| MeasurementError::SyscallFailed)?;
         compiler_fence(Ordering::SeqCst);
         std::hint::black_box(f());
         compiler_fence(Ordering::SeqCst);
-        let end = self.counter.read().unwrap_or(start);
-        end.saturating_sub(start)
+        let end = self
+            .counter
+            .read()
+            .map_err(|_| MeasurementError::SyscallFailed)?;
+        Ok(end.saturating_sub(start))
     }
 
     /// Convert cycles to nanoseconds.
@@ -302,11 +309,11 @@ impl PmuTimer {
     }
 
     #[inline]
-    pub fn measure_cycles<F, T>(&mut self, _f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, _f: F) -> MeasurementResult
     where
         F: FnOnce() -> T,
     {
-        0
+        Err(MeasurementError::SyscallFailed)
     }
 
     #[inline]

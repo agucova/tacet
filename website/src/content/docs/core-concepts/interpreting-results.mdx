@@ -22,8 +22,8 @@ Every test returns one of four outcomes:
 
 ### Handling all outcomes
 
-<Tabs>
-<TabItem label="Rust">
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
@@ -51,7 +51,7 @@ match outcome {
 }
 ```
 </TabItem>
-<TabItem label="Go">
+<TabItem label="Go" icon="seti:go">
 ```go
 inputs := tacet.NewInputPair(
     func() []byte { return make([]byte, 32) },
@@ -73,7 +73,7 @@ case *tacet.Unmeasurable:
 }
 ```
 </TabItem>
-<TabItem label="C">
+<TabItem label="C" icon="seti:c">
 ```c
 tacet_outcome_t outcome;
 tacet_test(oracle, inputs, measure_fn, &outcome);
@@ -127,11 +127,47 @@ With classical t-tests (like DudeCT), running more samples can increase false po
 
 You can adjust these thresholds for stricter or more lenient testing:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .pass_threshold(0.01)   // Require P < 1% for pass (stricter)
     .fail_threshold(0.99)   // Require P > 99% for fail (stricter)
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .passThreshold(0.01)   // Require P < 1% for pass (stricter)
+  .failThreshold(0.99)   // Require P > 99% for fail (stricter)
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+ToConfig cfg = to_config_default(AdjacentNetwork);
+cfg.pass_threshold = 0.01;  // Require P < 1% for pass (stricter)
+cfg.fail_threshold = 0.99;  // Require P > 99% for fail (stricter)
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto oracle = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .passThreshold(0.01)   // Require P < 1% for pass (stricter)
+    .failThreshold(0.99);  // Require P > 99% for fail (stricter)
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+result, err := tacet.Test(
+    gen, op, inputSize,
+    tacet.WithAttacker(tacet.AdjacentNetwork),
+    tacet.WithPassThreshold(0.01),  // Require P < 1% for pass (stricter)
+    tacet.WithFailThreshold(0.99),  // Require P > 99% for fail (stricter)
+)
+```
+</TabItem>
+</Tabs>
 
 ## Effect decomposition
 
@@ -143,15 +179,64 @@ When a leak is detected, the `effect` field breaks down the timing difference in
 
 - **Tail (τ)**: Upper quantiles (slower measurements) are affected more than lower quantiles. Typical cause: cache misses that only occur for certain inputs.
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
-Outcome::Fail { effect, .. } => {
-    println!("Shift: {:.1}ns", effect.shift_ns);
-    println!("Tail: {:.1}ns", effect.tail_ns);
-    println!("95% CI: [{:.1}, {:.1}]ns",
-             effect.credible_interval_ns.0,
-             effect.credible_interval_ns.1);
+match outcome {
+    Outcome::Fail { effect, .. } => {
+        println!("Shift: {:.1}ns", effect.shift_ns);
+        println!("Tail: {:.1}ns", effect.tail_ns);
+        println!("95% CI: [{:.1}, {:.1}]ns",
+                 effect.credible_interval_ns.0,
+                 effect.credible_interval_ns.1);
+    }
+    _ => {}
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+if (result.isFail()) {
+    const effect = result.effect;
+    console.log(`Shift: ${effect.shiftNs.toFixed(1)}ns`);
+    console.log(`Tail: ${effect.tailNs.toFixed(1)}ns`);
+    console.log(`95% CI: [${effect.credibleIntervalNs[0].toFixed(1)}, ${effect.credibleIntervalNs[1].toFixed(1)}]ns`);
+}
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == Fail) {
+    printf("Shift: %.1f ns\n", result.effect.shift_ns);
+    printf("Tail: %.1f ns\n", result.effect.tail_ns);
+    printf("95%% CI: [%.1f, %.1f] ns\n",
+           result.effect.credible_interval_lower_ns,
+           result.effect.credible_interval_upper_ns);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (result.outcome == ToOutcome::Fail) {
+    std::cout << "Shift: " << result.effect.shift_ns << " ns\n";
+    std::cout << "Tail: " << result.effect.tail_ns << " ns\n";
+    std::cout << "95% CI: [" << result.effect.credible_interval_lower_ns
+              << ", " << result.effect.credible_interval_upper_ns << "] ns\n";
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+if result.Outcome == tacet.Fail {
+    fmt.Printf("Shift: %.1f ns\n", result.Effect.ShiftNs)
+    fmt.Printf("Tail: %.1f ns\n", result.Effect.TailNs)
+    fmt.Printf("95%% CI: [%.1f, %.1f] ns\n",
+        result.Effect.CredibleIntervalLowerNs,
+        result.Effect.CredibleIntervalUpperNs)
+}
+```
+</TabItem>
+</Tabs>
 
 ### Effect patterns
 
@@ -195,33 +280,141 @@ An `Inconclusive` outcome means the test couldn't reach a confident decision. Th
 | `SampleBudgetExceeded` | Hit sample limit | Increase `max_samples` |
 | `WouldTakeTooLong` | Projected time to conclusion exceeds budget | Accept uncertainty or increase budget |
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
-Outcome::Inconclusive { reason, leak_probability, .. } => {
-    match reason {
-        InconclusiveReason::DataTooNoisy => {
-            eprintln!("Environment too noisy for reliable measurement");
+match outcome {
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        match reason {
+            InconclusiveReason::DataTooNoisy => {
+                eprintln!("Environment too noisy for reliable measurement");
+            }
+            InconclusiveReason::TimeBudgetExceeded => {
+                eprintln!("Need more time; current estimate: P={:.0}%", leak_probability * 100.0);
+            }
+            _ => {
+                eprintln!("Inconclusive: {:?}", reason);
+            }
         }
-        InconclusiveReason::TimeBudgetExceeded => {
-            eprintln!("Need more time; current estimate: P={:.0}%", leak_probability * 100.0);
-        }
-        _ => {
-            eprintln!("Inconclusive: {:?}", reason);
-        }
+    }
+    _ => {}
+}
+```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+if (result.isInconclusive()) {
+    const reason = result.inconclusiveReason;
+    if (reason === 'DataTooNoisy') {
+        console.error('Environment too noisy for reliable measurement');
+    } else if (reason === 'TimeBudgetExceeded') {
+        console.error(`Need more time; current estimate: P=${(result.leakProbability * 100).toFixed(0)}%`);
+    } else {
+        console.error(`Inconclusive: ${reason}`);
     }
 }
 ```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == Inconclusive) {
+    if (strcmp(result.inconclusive.reason, "DataTooNoisy") == 0) {
+        fprintf(stderr, "Environment too noisy for reliable measurement\n");
+    } else if (strcmp(result.inconclusive.reason, "TimeBudgetExceeded") == 0) {
+        fprintf(stderr, "Need more time; current estimate: P=%.0f%%\n",
+                result.leak_probability * 100.0);
+    } else {
+        fprintf(stderr, "Inconclusive: %s\n", result.inconclusive.reason);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (result.outcome == ToOutcome::Inconclusive) {
+    std::string reason = result.inconclusive.reason;
+    if (reason == "DataTooNoisy") {
+        std::cerr << "Environment too noisy for reliable measurement\n";
+    } else if (reason == "TimeBudgetExceeded") {
+        std::cerr << "Need more time; current estimate: P="
+                  << (result.leak_probability * 100) << "%\n";
+    } else {
+        std::cerr << "Inconclusive: " << reason << "\n";
+    }
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+if result.Outcome == tacet.Inconclusive {
+    switch result.InconclusiveReason {
+    case "DataTooNoisy":
+        fmt.Fprintf(os.Stderr, "Environment too noisy for reliable measurement\n")
+    case "TimeBudgetExceeded":
+        fmt.Fprintf(os.Stderr, "Need more time; current estimate: P=%.0f%%\n",
+            result.LeakProbability*100)
+    default:
+        fmt.Fprintf(os.Stderr, "Inconclusive: %s\n", result.InconclusiveReason)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ## Handling unmeasurable results
 
 An `Unmeasurable` outcome means the operation completes faster than the timer can reliably measure:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
-Outcome::Unmeasurable { operation_ns, threshold_ns, recommendation, .. } => {
-    println!("Operation takes ~{:.0}ns, need >{:.0}ns to measure",
-             operation_ns, threshold_ns);
-    println!("{}", recommendation);
+match outcome {
+    Outcome::Unmeasurable { operation_ns, threshold_ns, recommendation, .. } => {
+        println!("Operation takes ~{:.0}ns, need >{:.0}ns to measure",
+                 operation_ns, threshold_ns);
+        println!("{}", recommendation);
+    }
+    _ => {}
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+if (result.isUnmeasurable()) {
+    console.log(`Operation takes ~${result.operationNs.toFixed(0)}ns, need >${result.thresholdNs.toFixed(0)}ns to measure`);
+    console.log(result.recommendation);
+}
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == Unmeasurable) {
+    printf("Operation takes ~%.0f ns, need >%.0f ns to measure\n",
+           result.unmeasurable.operation_ns,
+           result.unmeasurable.threshold_ns);
+    printf("%s\n", result.unmeasurable.recommendation);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (result.outcome == ToOutcome::Unmeasurable) {
+    std::cout << "Operation takes ~" << result.unmeasurable.operation_ns
+              << "ns, need >" << result.unmeasurable.threshold_ns << "ns to measure\n";
+    std::cout << result.unmeasurable.recommendation << "\n";
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+if result.Outcome == tacet.Unmeasurable {
+    fmt.Printf("Operation takes ~%.0f ns, need >%.0f ns to measure\n",
+        result.OperationNs, result.ThresholdNs)
+    fmt.Println(result.Recommendation)
+}
+```
+</TabItem>
+</Tabs>
 
 Common solutions:
 - Use `TimerSpec::CyclePrecision` for finer resolution (see [Measurement Precision](/core-concepts/measurement-precision))
@@ -245,6 +438,8 @@ MDE (Minimum Detectable Effect) is the smallest timing difference that could be 
 
 The diagnostics include information about threshold elevation:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 match outcome {
     Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
@@ -257,6 +452,53 @@ match outcome {
     _ => {}
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+if (result.isPass() || result.isFail()) {
+    const diag = result.diagnostics;
+    if (diag.thetaEff > diag.thetaUser * 1.1) {
+        console.log(`Note: Threshold elevated from ${diag.thetaUser.toFixed(1)}ns to ${diag.thetaEff.toFixed(1)}ns`);
+        console.log('See: /core-concepts/measurement-precision');
+    }
+}
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == Pass || result.outcome == Fail) {
+    if (result.diagnostics.theta_eff > result.diagnostics.theta_user * 1.1) {
+        printf("Note: Threshold elevated from %.1f ns to %.1f ns\n",
+               result.diagnostics.theta_user, result.diagnostics.theta_eff);
+        printf("See: /core-concepts/measurement-precision\n");
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (result.outcome == ToOutcome::Pass || result.outcome == ToOutcome::Fail) {
+    if (result.diagnostics.theta_eff > result.diagnostics.theta_user * 1.1) {
+        std::cout << "Note: Threshold elevated from "
+                  << result.diagnostics.theta_user << "ns to "
+                  << result.diagnostics.theta_eff << "ns\n";
+        std::cout << "See: /core-concepts/measurement-precision\n";
+    }
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+if result.Outcome == tacet.Pass || result.Outcome == tacet.Fail {
+    if result.Diagnostics.ThetaEff > result.Diagnostics.ThetaUser*1.1 {
+        fmt.Printf("Note: Threshold elevated from %.1f ns to %.1f ns\n",
+            result.Diagnostics.ThetaUser, result.Diagnostics.ThetaEff)
+        fmt.Println("See: /core-concepts/measurement-precision")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 | Field | Meaning |
 |-------|---------|

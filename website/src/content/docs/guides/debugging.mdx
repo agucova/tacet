@@ -13,6 +13,8 @@ This guide helps diagnose issues when timing tests don't behave as expected.
 
 Before investigating other issues, confirm your test harness is working:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 
@@ -38,6 +40,179 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 assert!(outcome.failed(), "Harness should detect obvious leak");
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+import { TimingOracle, AttackerModel } from 'tacet';
+
+// Test 1: Identical inputs should pass
+let outcome = TimingOracle.forAttacker(AttackerModel.Research)
+    .test({
+        baseline: () => new Uint8Array(32).fill(0),
+        sample: () => new Uint8Array(32).fill(0)  // Same as baseline
+    }, (data) => myFunction(data));
+
+if (!outcome.isPass()) {
+    throw new Error("Sanity check failed: identical inputs should pass");
+}
+
+// Test 2: Obviously leaky code should fail
+function leaky(data) {
+    return data.every(b => b === 0);
+}
+
+outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+    .test({
+        baseline: () => new Uint8Array(64).fill(0),
+        sample: () => new Uint8Array(64).fill(0xFF)
+    }, (data) => leaky(data));
+
+if (!outcome.isFail()) {
+    throw new Error("Harness should detect obvious leak");
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet/tacet.h>
+#include <string.h>
+#include <assert.h>
+
+// Callback for identical inputs
+void identical_inputs(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t data[32] = {0};
+    memset(baseline, 0, n * sizeof(uint64_t));
+    memset(sample, 0, n * sizeof(uint64_t));
+    for (size_t i = 0; i < n; i++) {
+        my_function(data);  // Same operation
+    }
+}
+
+// Test 1: Identical inputs should pass
+TOConfig config = to_config_default(TO_ATTACKER_RESEARCH);
+TOResult result;
+int ret = to_test(&config, identical_inputs, NULL, &result);
+assert(ret == 0 && result.outcome == TO_OUTCOME_PASS);
+
+// Test 2: Obviously leaky code should fail
+bool leaky(const uint8_t *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] != 0) return false;
+    }
+    return true;
+}
+
+void leaky_inputs(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t zero_data[64] = {0};
+    uint8_t ones_data[64];
+    memset(ones_data, 0xFF, 64);
+
+    for (size_t i = 0; i < n; i++) {
+        baseline[i] = 0;
+        leaky(zero_data, 64);
+    }
+    for (size_t i = 0; i < n; i++) {
+        sample[i] = 0;
+        leaky(ones_data, 64);
+    }
+}
+
+config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
+ret = to_test(&config, leaky_inputs, NULL, &result);
+assert(ret == 0 && result.outcome == TO_OUTCOME_FAIL);
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet/tacet.hpp>
+#include <cassert>
+#include <algorithm>
+
+// Test 1: Identical inputs should pass
+auto outcome = tacet::Oracle::forAttacker(tacet::AttackerModel::Research)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> data{};
+        for (auto& t : baseline) {
+            myFunction(data);  // Same operation
+        }
+        for (auto& t : sample) {
+            myFunction(data);  // Same operation
+        }
+    });
+
+assert(outcome.passed() && "Sanity check failed: identical inputs should pass");
+
+// Test 2: Obviously leaky code should fail
+auto leaky = [](const auto& data) {
+    return std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0; });
+};
+
+outcome = tacet::Oracle::forAttacker(tacet::AttackerModel::AdjacentNetwork)
+    .test([&](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 64> zero_data{};
+        std::array<uint8_t, 64> ones_data;
+        ones_data.fill(0xFF);
+
+        for (auto& t : baseline) {
+            leaky(zero_data);
+        }
+        for (auto& t : sample) {
+            leaky(ones_data);
+        }
+    });
+
+assert(outcome.failed() && "Harness should detect obvious leak");
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "bytes"
+    "testing"
+    "github.com/tacet-labs/tacet/tacet"
+)
+
+// Test 1: Identical inputs should pass
+gen := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    sample := make([]byte, 32)
+    return baseline, sample
+}
+
+outcome := tacet.Test(gen, myFunction, 32,
+    tacet.WithAttacker(tacet.AttackerResearch))
+
+if !outcome.Passed() {
+    t.Fatal("Sanity check failed: identical inputs should pass")
+}
+
+// Test 2: Obviously leaky code should fail
+leaky := func(data []byte) bool {
+    return bytes.Equal(data, make([]byte, len(data)))
+}
+
+gen = func() ([]byte, []byte) {
+    baseline := make([]byte, 64)
+    sample := make([]byte, 64)
+    for i := range sample {
+        sample[i] = 0xFF
+    }
+    return baseline, sample
+}
+
+outcome = tacet.Test(gen, func(data []byte) { leaky(data) }, 64,
+    tacet.WithAttacker(tacet.AttackerAdjacentNetwork))
+
+if !outcome.Failed() {
+    t.Fatal("Harness should detect obvious leak")
+}
+```
+</TabItem>
+</Tabs>
 
 If Test 1 fails, there's an environmental issue. If Test 2 fails, check your measurement setup.
 
@@ -93,14 +268,46 @@ echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
 
 ### Enable cycle-accurate timer
 
-Use `TimerSpec::CyclePrecision` for higher precision:
+Use cycle-precision timers for higher precision:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::{TimingOracle, AttackerModel, TimerSpec};
+
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
     .timer_spec(TimerSpec::CyclePrecision)
 ```
 
-This requires elevated privileges on ARM64:
+This requires elevated privileges on ARM64 platforms.
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+<Aside type="note">
+Privileged timers are not available in JavaScript. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+<Aside type="note">
+Privileged timers are not exposed in the C API. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+<Aside type="note">
+Privileged timers are not available in C++. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+<Aside type="note">
+Privileged timers are not exposed in the Go API. Use the default timer.
+</Aside>
+</TabItem>
+</Tabs>
+
+**Running with elevated privileges (Rust only):**
 
 <Tabs>
 <TabItem label="macOS">
@@ -132,7 +339,11 @@ sudo setcap cap_perfmon+ep ./target/debug/deps/my_test-*
 
 Test with identical inputs:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
+
 let inputs = InputPair::new(
     || [0u8; 32],
     || [0u8; 32],  // Identical
@@ -145,6 +356,90 @@ if !outcome.passed() {
     println!("Environment issue detected: {:?}", outcome);
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+import { TimingOracle, AttackerModel } from 'tacet';
+
+let outcome = TimingOracle.forAttacker(AttackerModel.Research)
+    .test({
+        baseline: () => new Uint8Array(32).fill(0),
+        sample: () => new Uint8Array(32).fill(0)
+    }, (data) => myFunction(data));
+
+if (!outcome.isPass()) {
+    console.log("Environment issue detected:", outcome);
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet/tacet.h>
+
+void identical_inputs(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t data[32] = {0};
+    for (size_t i = 0; i < n; i++) {
+        baseline[i] = 0;
+        my_function(data);
+    }
+    for (size_t i = 0; i < n; i++) {
+        sample[i] = 0;
+        my_function(data);
+    }
+}
+
+TOConfig config = to_config_default(TO_ATTACKER_RESEARCH);
+TOResult result;
+int ret = to_test(&config, identical_inputs, NULL, &result);
+
+if (ret != 0 || result.outcome != TO_OUTCOME_PASS) {
+    fprintf(stderr, "Environment issue detected\n");
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet/tacet.hpp>
+
+auto outcome = tacet::Oracle::forAttacker(tacet::AttackerModel::Research)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> data{};
+        for (auto& t : baseline) {
+            myFunction(data);
+        }
+        for (auto& t : sample) {
+            myFunction(data);
+        }
+    });
+
+if (!outcome.passed()) {
+    std::cerr << "Environment issue detected\n";
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+import "github.com/tacet-labs/tacet/tacet"
+
+gen := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    sample := make([]byte, 32)
+    return baseline, sample
+}
+
+outcome := tacet.Test(gen, myFunction, 32,
+    tacet.WithAttacker(tacet.AttackerResearch))
+
+if !outcome.Passed() {
+    fmt.Println("Environment issue detected")
+}
+```
+</TabItem>
+</Tabs>
 
 If this fails, the problem is environmental, not your code.
 
@@ -152,7 +447,11 @@ If this fails, the problem is environmental, not your code.
 
 The library runs preflight checks that may indicate issues:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::Outcome;
+
 match outcome {
     Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
         if !diagnostics.preflight_warnings.is_empty() {
@@ -162,11 +461,57 @@ match outcome {
     _ => {}
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+if (outcome.isPass() || outcome.isFail()) {
+    const diagnostics = outcome.diagnostics;
+    if (diagnostics.preflightWarnings.length > 0) {
+        console.log("Preflight warnings:", diagnostics.preflightWarnings);
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == TO_OUTCOME_PASS || result.outcome == TO_OUTCOME_FAIL) {
+    if (result.diagnostics.preflight_warning_count > 0) {
+        fprintf(stderr, "Preflight warnings detected\n");
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (outcome.passed() || outcome.failed()) {
+    const auto& diagnostics = outcome.diagnostics();
+    if (!diagnostics.preflightWarnings.empty()) {
+        std::cerr << "Preflight warnings detected\n";
+    }
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+if outcome.Passed() || outcome.Failed() {
+    if len(outcome.Diagnostics.PreflightWarnings) > 0 {
+        fmt.Println("Preflight warnings:", outcome.Diagnostics.PreflightWarnings)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### Ensure identical code paths
 
 Both input classes must execute the same code:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // ✗ Wrong: different code paths
 let inputs = InputPair::new(
@@ -182,11 +527,112 @@ let inputs = InputPair::new(
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .test(inputs, |data| encrypt_with_key_a(&data));  // Same key
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// ✗ Wrong: different code paths
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+    .test({
+        baseline: () => encryptWithKeyA(data),  // Uses key A
+        sample: () => encryptWithKeyB(data)     // Uses key B
+    }, (encrypted) => processResult(encrypted));
+
+// ✓ Correct: same operation, different input data
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+    .test({
+        baseline: () => new Uint8Array(32).fill(0),
+        sample: () => crypto.getRandomValues(new Uint8Array(32))
+    }, (data) => encryptWithKeyA(data));  // Same key
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// ✗ Wrong: different code paths in callback
+void wrong_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    for (size_t i = 0; i < n; i++) {
+        encrypt_with_key_a(data);  // Key A
+    }
+    for (size_t i = 0; i < n; i++) {
+        encrypt_with_key_b(data);  // Key B - different operation!
+    }
+}
+
+// ✓ Correct: same operation, different input data
+void correct_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t zero_data[32] = {0};
+    uint8_t random_data[32];
+    fill_random(random_data, 32);
+
+    for (size_t i = 0; i < n; i++) {
+        encrypt_with_key_a(zero_data);  // Same key
+    }
+    for (size_t i = 0; i < n; i++) {
+        encrypt_with_key_a(random_data);  // Same key
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// ✗ Wrong: different code paths
+Oracle::forAttacker(AttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        for (auto& t : baseline) {
+            encryptWithKeyA(data);  // Key A
+        }
+        for (auto& t : sample) {
+            encryptWithKeyB(data);  // Key B - different!
+        }
+    });
+
+// ✓ Correct: same operation, different input data
+Oracle::forAttacker(AttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> zero_data{};
+        std::array<uint8_t, 32> random_data = getRandomBytes<32>();
+
+        for (auto& t : baseline) {
+            encryptWithKeyA(zero_data);  // Same key
+        }
+        for (auto& t : sample) {
+            encryptWithKeyA(random_data);  // Same key
+        }
+    });
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// ✗ Wrong: different code paths
+gen := func() ([]byte, []byte) {
+    baseline := encryptWithKeyA(data)  // Key A
+    sample := encryptWithKeyB(data)    // Key B - different!
+    return baseline, sample
+}
+
+// ✓ Correct: same operation, different input data
+gen = func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    sample := make([]byte, 32)
+    rand.Read(sample)
+    return baseline, sample
+}
+outcome := tacet.Test(gen,
+    func(data []byte) { encryptWithKeyA(data) },  // Same key
+    32, tacet.WithAttacker(tacet.AttackerAdjacentNetwork))
+```
+</TabItem>
+</Tabs>
 
 ### Check for state pollution
 
 Ensure no global state is modified between measurements:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // ✗ Wrong: modifying shared state
 static mut COUNTER: u64 = 0;
@@ -200,6 +646,80 @@ let outcome = oracle.test(inputs, |data| {
     process(data);  // No side effects
 });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// ✗ Wrong: modifying shared state
+let counter = 0;
+TimingOracle.forAttacker(model).test(inputs, (data) => {
+    counter++;  // Side effect!
+    process(data);
+});
+
+// ✓ Correct: isolated state
+TimingOracle.forAttacker(model).test(inputs, (data) => {
+    process(data);  // No side effects
+});
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// ✗ Wrong: modifying shared state
+static uint64_t counter = 0;
+void bad_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    for (size_t i = 0; i < n; i++) {
+        counter++;  // Side effect!
+        process(data);
+    }
+}
+
+// ✓ Correct: isolated state
+void good_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    for (size_t i = 0; i < n; i++) {
+        process(data);  // No side effects
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// ✗ Wrong: modifying shared state
+static uint64_t counter = 0;
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    for (auto& t : baseline) {
+        counter++;  // Side effect!
+        process(data);
+    }
+});
+
+// ✓ Correct: isolated state
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    for (auto& t : baseline) {
+        process(data);  // No side effects
+    }
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// ✗ Wrong: modifying shared state
+var counter int64
+tacet.Test(gen, func(data []byte) {
+    atomic.AddInt64(&counter, 1)  // Side effect!
+    process(data)
+}, size, opts...)
+
+// ✓ Correct: isolated state
+tacet.Test(gen, func(data []byte) {
+    process(data)  // No side effects
+}, size, opts...)
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -216,6 +736,8 @@ let outcome = oracle.test(inputs, |data| {
 
 Manually check timing difference:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use std::time::Instant;
 
@@ -241,11 +763,135 @@ random_times.sort();
 println!("Fixed median: {:?}", fixed_times[500]);
 println!("Random median: {:?}", random_times[500]);
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const fixedInput = new Uint8Array(32).fill(0);
+const randomInput = crypto.getRandomValues(new Uint8Array(32));
+
+const fixedTimes = [];
+const randomTimes = [];
+
+for (let i = 0; i < 1000; i++) {
+    let start = performance.now();
+    myFunction(fixedInput);
+    fixedTimes.push(performance.now() - start);
+
+    start = performance.now();
+    myFunction(randomInput);
+    randomTimes.push(performance.now() - start);
+}
+
+// Compare medians
+fixedTimes.sort((a, b) => a - b);
+randomTimes.sort((a, b) => a - b);
+console.log("Fixed median:", fixedTimes[500], "ms");
+console.log("Random median:", randomTimes[500], "ms");
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+#include <time.h>
+
+uint8_t fixed_input[32] = {0};
+uint8_t random_input[32];
+fill_random(random_input, 32);
+
+uint64_t fixed_times[1000];
+uint64_t random_times[1000];
+
+for (int i = 0; i < 1000; i++) {
+    struct timespec start, end;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    my_function(fixed_input);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    fixed_times[i] = (end.tv_sec - start.tv_sec) * 1000000000 +
+                     (end.tv_nsec - start.tv_nsec);
+
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    my_function(random_input);
+    clock_gettime(CLOCK_MONOTONIC, &end);
+    random_times[i] = (end.tv_sec - start.tv_sec) * 1000000000 +
+                      (end.tv_nsec - start.tv_nsec);
+}
+
+// Compare medians (after sorting)
+qsort(fixed_times, 1000, sizeof(uint64_t), compare_uint64);
+qsort(random_times, 1000, sizeof(uint64_t), compare_uint64);
+printf("Fixed median: %llu ns\n", fixed_times[500]);
+printf("Random median: %llu ns\n", random_times[500]);
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <chrono>
+#include <algorithm>
+
+std::array<uint8_t, 32> fixed_input{};
+auto random_input = getRandomBytes<32>();
+
+std::vector<std::chrono::nanoseconds> fixed_times;
+std::vector<std::chrono::nanoseconds> random_times;
+
+for (int i = 0; i < 1000; i++) {
+    auto start = std::chrono::high_resolution_clock::now();
+    myFunction(fixed_input);
+    auto end = std::chrono::high_resolution_clock::now();
+    fixed_times.push_back(end - start);
+
+    start = std::chrono::high_resolution_clock::now();
+    myFunction(random_input);
+    end = std::chrono::high_resolution_clock::now();
+    random_times.push_back(end - start);
+}
+
+// Compare medians
+std::sort(fixed_times.begin(), fixed_times.end());
+std::sort(random_times.begin(), random_times.end());
+std::cout << "Fixed median: " << fixed_times[500].count() << " ns\n";
+std::cout << "Random median: " << random_times[500].count() << " ns\n";
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+import "time"
+
+fixedInput := make([]byte, 32)
+randomInput := make([]byte, 32)
+rand.Read(randomInput)
+
+fixedTimes := make([]time.Duration, 1000)
+randomTimes := make([]time.Duration, 1000)
+
+for i := 0; i < 1000; i++ {
+    start := time.Now()
+    myFunction(fixedInput)
+    fixedTimes[i] = time.Since(start)
+
+    start = time.Now()
+    myFunction(randomInput)
+    randomTimes[i] = time.Since(start)
+}
+
+// Compare medians
+sort.Slice(fixedTimes, func(i, j int) bool { return fixedTimes[i] < fixedTimes[j] })
+sort.Slice(randomTimes, func(i, j int) bool { return randomTimes[i] < randomTimes[j] })
+fmt.Printf("Fixed median: %v\n", fixedTimes[500])
+fmt.Printf("Random median: %v\n", randomTimes[500])
+```
+</TabItem>
+</Tabs>
 
 ### Prevent compiler optimization
 
-Use `black_box` to prevent the compiler from optimizing away the operation:
+Prevent the compiler from optimizing away the operation:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use std::hint::black_box;
 
@@ -254,22 +900,115 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         black_box(my_function(black_box(data)));
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// JavaScript doesn't have black_box, but ensure the operation result is used
+let sink = 0;
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+    .test(inputs, (data) => {
+        sink ^= myFunction(data);  // Use result to prevent optimization
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// Ensure compiler doesn't optimize away the operation
+// Mark function as having side effects or use volatile
+volatile int sink = 0;
+void callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    for (size_t i = 0; i < n; i++) {
+        sink ^= my_function(data);  // Use result
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// Use [[gnu::noinline]] or ensure result is used
+inline volatile int sink = 0;
+Oracle::forAttacker(AttackerModel::AdjacentNetwork)
+    .test([](auto baseline, auto sample) {
+        for (auto& t : baseline) {
+            sink ^= myFunction(data);  // Use result
+        }
+    });
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// Go doesn't aggressively optimize like C/Rust, but ensure result is used
+var sink int
+tacet.Test(gen, func(data []byte) {
+    sink ^= myFunction(data)  // Use result to prevent optimization
+}, size, opts...)
+```
+</TabItem>
+</Tabs>
 
 ### Prevent inlining
 
-Mark the function under test with `#[inline(never)]`:
+Mark the function under test to prevent inlining:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 #[inline(never)]
 fn my_function(data: &[u8]) -> bool {
     // ...
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// JavaScript doesn't expose inlining control
+// Ensure function is complex enough not to inline
+function myFunction(data) {
+    // Complex logic here
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+__attribute__((noinline))
+bool my_function(const uint8_t *data, size_t len) {
+    // ...
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+[[gnu::noinline]]
+bool myFunction(const std::span<uint8_t> data) {
+    // ...
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// Use //go:noinline directive
+//go:noinline
+func myFunction(data []byte) bool {
+    // ...
+}
+```
+</TabItem>
+</Tabs>
 
 ### Use larger inputs
 
 Larger inputs amplify timing differences:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // Small input: timing difference may be too small
 let inputs = InputPair::new(|| [0u8; 8], || rand::random::<[u8; 8]>());
@@ -277,11 +1016,83 @@ let inputs = InputPair::new(|| [0u8; 8], || rand::random::<[u8; 8]>());
 // Larger input: timing difference is amplified
 let inputs = InputPair::new(|| [0u8; 512], || rand::random::<[u8; 512]>());
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// Small input: timing difference may be too small
+let outcome = oracle.test({
+    baseline: () => new Uint8Array(8).fill(0),
+    sample: () => crypto.getRandomValues(new Uint8Array(8))
+}, operation);
+
+// Larger input: timing difference is amplified
+outcome = oracle.test({
+    baseline: () => new Uint8Array(512).fill(0),
+    sample: () => crypto.getRandomValues(new Uint8Array(512))
+}, operation);
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// Small input: timing difference may be too small
+void callback_small(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t data[8];
+    // ...
+}
+
+// Larger input: timing difference is amplified
+void callback_large(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t data[512];
+    // ...
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// Small input: timing difference may be too small
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    std::array<uint8_t, 8> data;
+    // ...
+});
+
+// Larger input: timing difference is amplified
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    std::array<uint8_t, 512> data;
+    // ...
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// Small input: timing difference may be too small
+gen := func() ([]byte, []byte) {
+    baseline := make([]byte, 8)
+    sample := make([]byte, 8)
+    rand.Read(sample)
+    return baseline, sample
+}
+
+// Larger input: timing difference is amplified
+gen = func() ([]byte, []byte) {
+    baseline := make([]byte, 512)
+    sample := make([]byte, 512)
+    rand.Read(sample)
+    return baseline, sample
+}
+```
+</TabItem>
+</Tabs>
 
 ### Use stricter threshold
 
 A tighter threshold may detect smaller effects:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // AdjacentNetwork (100ns) may miss small leaks
 TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -292,11 +1103,68 @@ TimingOracle::for_attacker(AttackerModel::SharedHardware)
 // Or custom threshold
 TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 10.0 })
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// AdjacentNetwork (100ns) may miss small leaks
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+
+// SharedHardware (0.6ns) catches cycle-level differences
+TimingOracle.forAttacker(AttackerModel.SharedHardware)
+
+// Or custom threshold
+TimingOracle.forAttacker(AttackerModel.custom(10.0))
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// AdjacentNetwork (100ns) may miss small leaks
+TOConfig config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
+
+// SharedHardware (0.6ns) catches cycle-level differences
+config = to_config_default(TO_ATTACKER_SHARED_HARDWARE);
+
+// Or custom threshold
+config = to_config_default(TO_ATTACKER_CUSTOM);
+config.threshold_ns = 10.0;
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// AdjacentNetwork (100ns) may miss small leaks
+Oracle::forAttacker(AttackerModel::AdjacentNetwork)
+
+// SharedHardware (0.6ns) catches cycle-level differences
+Oracle::forAttacker(AttackerModel::SharedHardware)
+
+// Or custom threshold
+Oracle::forAttacker(AttackerModel::custom(10.0))
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// AdjacentNetwork (100ns) may miss small leaks
+tacet.Test(gen, op, size, tacet.WithAttacker(tacet.AttackerAdjacentNetwork))
+
+// SharedHardware (0.6ns) catches cycle-level differences
+tacet.Test(gen, op, size, tacet.WithAttacker(tacet.AttackerSharedHardware))
+
+// Or custom threshold
+tacet.Test(gen, op, size, tacet.WithAttacker(tacet.AttackerCustom(10.0)))
+```
+</TabItem>
+</Tabs>
 
 ### Check input class selection
 
 For comparison functions, baseline must match the secret:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let secret = [0u8; 32];
 
@@ -312,6 +1180,94 @@ let inputs = InputPair::new(
     || rand::random(),       // Mismatches → early exit
 );
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const secret = new Uint8Array(32).fill(0);
+
+// ✗ Wrong: both exit early
+oracle.test({
+    baseline: () => new Uint8Array(32).fill(0xFF),  // Mismatches secret
+    sample: () => crypto.getRandomValues(new Uint8Array(32))  // Also mismatches
+}, operation);
+
+// ✓ Correct: baseline matches, sample mismatches
+oracle.test({
+    baseline: () => new Uint8Array(32).fill(0),  // Matches secret → full comparison
+    sample: () => crypto.getRandomValues(new Uint8Array(32))  // Mismatches → early exit
+}, operation);
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+uint8_t secret[32] = {0};
+
+// ✗ Wrong: both exit early
+void wrong_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t mismatch_data[32];
+    memset(mismatch_data, 0xFF, 32);  // Mismatches secret
+    uint8_t random_data[32];
+    fill_random(random_data, 32);  // Also mismatches
+    // ...
+}
+
+// ✓ Correct: baseline matches, sample mismatches
+void correct_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t zero_data[32] = {0};  // Matches secret → full comparison
+    uint8_t random_data[32];
+    fill_random(random_data, 32);  // Mismatches → early exit
+    // ...
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+std::array<uint8_t, 32> secret{};
+
+// ✗ Wrong: both exit early
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    std::array<uint8_t, 32> mismatch_data;
+    mismatch_data.fill(0xFF);  // Mismatches secret
+    // ...
+});
+
+// ✓ Correct: baseline matches, sample mismatches
+Oracle::forAttacker(model).test([](auto baseline, auto sample) {
+    std::array<uint8_t, 32> zero_data{};  // Matches secret → full comparison
+    auto random_data = getRandomBytes<32>();  // Mismatches → early exit
+    // ...
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+secret := make([]byte, 32)
+
+// ✗ Wrong: both exit early
+gen := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    for i := range baseline {
+        baseline[i] = 0xFF  // Mismatches secret
+    }
+    sample := make([]byte, 32)
+    rand.Read(sample)  // Also mismatches
+    return baseline, sample
+}
+
+// ✓ Correct: baseline matches, sample mismatches
+gen = func() ([]byte, []byte) {
+    baseline := make([]byte, 32)  // Matches secret → full comparison
+    sample := make([]byte, 32)
+    rand.Read(sample)  // Mismatches → early exit
+    return baseline, sample
+}
+```
+</TabItem>
+</Tabs>
 
 See [The Two-Class Pattern](/core-concepts/two-class-pattern) for details.
 
@@ -327,12 +1283,46 @@ See [The Two-Class Pattern](/core-concepts/two-class-pattern) for details.
 
 ### Use cycle-accurate timer
 
-Use `TimerSpec::CyclePrecision` for higher resolution:
+Use cycle-precision timers for higher resolution:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::{TimingOracle, AttackerModel, TimerSpec};
+
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
     .timer_spec(TimerSpec::CyclePrecision)
 ```
+
+This requires elevated privileges on ARM64 platforms.
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+<Aside type="note">
+Privileged timers are not available in JavaScript. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+<Aside type="note">
+Privileged timers are not exposed in the C API. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+<Aside type="note">
+Privileged timers are not available in C++. Use the default timer.
+</Aside>
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+<Aside type="note">
+Privileged timers are not exposed in the Go API. Use the default timer.
+</Aside>
+</TabItem>
+</Tabs>
+
+**Running with elevated privileges (Rust only):**
 
 <Tabs>
 <TabItem label="macOS">
@@ -352,6 +1342,8 @@ sudo cargo test -- --test-threads=1
 
 Test multiple iterations together:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let inputs = InputPair::new(
     || [[0u8; 16]; 100],  // 100 blocks
@@ -365,11 +1357,79 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         }
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+    .test({
+        baseline: () => Array(100).fill(new Uint8Array(16).fill(0)),
+        sample: () => Array(100).fill(null).map(() =>
+            crypto.getRandomValues(new Uint8Array(16)))
+    }, (blocks) => {
+        blocks.forEach(block => cipher.encryptBlock(block));
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+void batched_callback(uint64_t *baseline, uint64_t *sample, size_t n, void *ctx) {
+    uint8_t blocks[100][16];
+    memset(blocks, 0, sizeof(blocks));
+
+    for (size_t i = 0; i < n; i++) {
+        for (int j = 0; j < 100; j++) {
+            cipher_encrypt_block(&blocks[j]);
+        }
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+Oracle::forAttacker(AttackerModel::AdjacentNetwork)
+    .test([](auto baseline, auto sample) {
+        std::array<std::array<uint8_t, 16>, 100> blocks;
+
+        for (auto& t : baseline) {
+            for (auto& block : blocks) {
+                cipher.encryptBlock(block);
+            }
+        }
+    });
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+gen := func() ([][]byte, [][]byte) {
+    baseline := make([][]byte, 100)
+    sample := make([][]byte, 100)
+    for i := 0; i < 100; i++ {
+        baseline[i] = make([]byte, 16)
+        sample[i] = make([]byte, 16)
+        rand.Read(sample[i])
+    }
+    return baseline, sample
+}
+
+tacet.Test(gen, func(blocks [][]byte) {
+    for _, block := range blocks {
+        cipher.EncryptBlock(block)
+    }
+}, 16*100, tacet.WithAttacker(tacet.AttackerAdjacentNetwork))
+```
+</TabItem>
+</Tabs>
 
 ### Accept the limitation
 
 Some operations are genuinely too fast to measure:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 match outcome {
     Outcome::Unmeasurable { operation_ns, .. } => {
@@ -381,6 +1441,49 @@ match outcome {
     _ => {}
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+if (outcome.isUnmeasurable()) {
+    const { operationNs } = outcome;
+    if (operationNs < 1.0) {
+        console.log("Operation inherently unmeasurable");
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == TO_OUTCOME_UNMEASURABLE) {
+    if (result.unmeasurable_info.operation_ns < 1.0) {
+        fprintf(stderr, "Operation inherently unmeasurable\n");
+    }
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (outcome.isUnmeasurable()) {
+    if (outcome.operationNs() < 1.0) {
+        std::cerr << "Operation inherently unmeasurable\n";
+    }
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+if outcome.IsUnmeasurable() {
+    if outcome.OperationNs < 1.0 {
+        fmt.Println("Operation inherently unmeasurable")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -441,7 +1544,11 @@ cargo test -- --nocapture
 
 ### Check diagnostics
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::Outcome;
+
 match outcome {
     Outcome::Pass { diagnostics, quality, .. }
     | Outcome::Fail { diagnostics, quality, .. } => {
@@ -465,6 +1572,98 @@ match outcome {
     }
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+if (outcome.isPass() || outcome.isFail()) {
+    const { diagnostics, quality } = outcome;
+    console.log("Quality:", quality);
+    console.log("Samples used:", diagnostics.samplesUsed);
+    console.log("Theta user:", diagnostics.thetaUser.toFixed(1), "ns");
+    console.log("Theta effective:", diagnostics.thetaEff.toFixed(1), "ns");
+    console.log("Theta floor:", diagnostics.thetaFloor.toFixed(1), "ns");
+    if (diagnostics.preflightWarnings.length > 0) {
+        console.log("Warnings:", diagnostics.preflightWarnings);
+    }
+} else if (outcome.isInconclusive()) {
+    console.log("Inconclusive:", outcome.reason);
+    console.log("Current estimate: P=" + (outcome.leakProbability * 100).toFixed(1) + "%");
+} else if (outcome.isUnmeasurable()) {
+    console.log("Operation:", outcome.operationNs.toFixed(1), "ns");
+    console.log("Threshold:", outcome.thresholdNs.toFixed(1), "ns");
+    console.log("Recommendation:", outcome.recommendation);
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+if (result.outcome == TO_OUTCOME_PASS || result.outcome == TO_OUTCOME_FAIL) {
+    printf("Quality: %d\n", result.quality);
+    printf("Samples used: %zu\n", result.diagnostics.samples_used);
+    printf("Theta user: %.1f ns\n", result.diagnostics.theta_user);
+    printf("Theta effective: %.1f ns\n", result.diagnostics.theta_eff);
+    printf("Theta floor: %.1f ns\n", result.diagnostics.theta_floor);
+    if (result.diagnostics.preflight_warning_count > 0) {
+        fprintf(stderr, "Preflight warnings detected\n");
+    }
+} else if (result.outcome == TO_OUTCOME_INCONCLUSIVE) {
+    printf("Inconclusive: %d\n", result.inconclusive_reason);
+    printf("Current estimate: P=%.1f%%\n", result.leak_probability * 100.0);
+} else if (result.outcome == TO_OUTCOME_UNMEASURABLE) {
+    printf("Operation: %.1f ns\n", result.unmeasurable_info.operation_ns);
+    printf("Threshold: %.1f ns\n", result.unmeasurable_info.threshold_ns);
+    printf("Recommendation: %s\n", result.unmeasurable_info.recommendation);
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+if (outcome.passed() || outcome.failed()) {
+    const auto& diagnostics = outcome.diagnostics();
+    std::cout << "Quality: " << static_cast<int>(outcome.quality()) << "\n";
+    std::cout << "Samples used: " << diagnostics.samplesUsed << "\n";
+    std::cout << "Theta user: " << diagnostics.thetaUser << " ns\n";
+    std::cout << "Theta effective: " << diagnostics.thetaEff << " ns\n";
+    std::cout << "Theta floor: " << diagnostics.thetaFloor << " ns\n";
+    if (!diagnostics.preflightWarnings.empty()) {
+        std::cerr << "Warnings detected\n";
+    }
+} else if (outcome.isInconclusive()) {
+    std::cout << "Inconclusive: " << static_cast<int>(outcome.reason()) << "\n";
+    std::cout << "Current estimate: P=" << (outcome.leakProbability() * 100) << "%\n";
+} else if (outcome.isUnmeasurable()) {
+    std::cout << "Operation: " << outcome.operationNs() << " ns\n";
+    std::cout << "Threshold: " << outcome.thresholdNs() << " ns\n";
+    std::cout << "Recommendation: " << outcome.recommendation() << "\n";
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+if outcome.Passed() || outcome.Failed() {
+    fmt.Printf("Quality: %v\n", outcome.Quality)
+    fmt.Printf("Samples used: %d\n", outcome.Diagnostics.SamplesUsed)
+    fmt.Printf("Theta user: %.1f ns\n", outcome.Diagnostics.ThetaUser)
+    fmt.Printf("Theta effective: %.1f ns\n", outcome.Diagnostics.ThetaEff)
+    fmt.Printf("Theta floor: %.1f ns\n", outcome.Diagnostics.ThetaFloor)
+    if len(outcome.Diagnostics.PreflightWarnings) > 0 {
+        fmt.Println("Warnings:", outcome.Diagnostics.PreflightWarnings)
+    }
+} else if outcome.IsInconclusive() {
+    fmt.Printf("Inconclusive: %v\n", outcome.Reason)
+    fmt.Printf("Current estimate: P=%.1f%%\n", outcome.LeakProbability*100)
+} else if outcome.IsUnmeasurable() {
+    fmt.Printf("Operation: %.1f ns\n", outcome.OperationNs)
+    fmt.Printf("Threshold: %.1f ns\n", outcome.ThresholdNs)
+    fmt.Printf("Recommendation: %s\n", outcome.Recommendation)
+}
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -475,6 +1674,6 @@ match outcome {
 | High noise / TooNoisy | Run with `--test-threads=1` |
 | False positive | Run sanity check (identical inputs) |
 | Can't detect leak | Check input class selection |
-| Unmeasurable | Use `TimerSpec::CyclePrecision` or batch operations |
+| Unmeasurable | Use cycle-precision timer or batch operations |
 | Inconsistent results | Check CPU governor, disable turbo |
 | macOS kperf not working | Use both `sudo` AND `--test-threads=1` |

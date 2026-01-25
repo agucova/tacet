@@ -671,17 +671,23 @@ impl TimingOracle {
         let mut pilot_cycles = Vec::with_capacity(PILOT_SAMPLES * 2);
 
         for i in 0..PILOT_SAMPLES.min(initial_samples) {
-            let cycles = timer.measure_cycles(|| {
+            let result = timer.measure_cycles(|| {
                 operation(&baseline_inputs[i]);
                 std::hint::black_box(());
             });
-            pilot_cycles.push(cycles);
+            // Skip invalid measurements - they corrupt statistical analysis
+            if let Ok(cycles) = result {
+                pilot_cycles.push(cycles);
+            }
 
-            let cycles = timer.measure_cycles(|| {
+            let result = timer.measure_cycles(|| {
                 operation(&sample_inputs[i]);
                 std::hint::black_box(());
             });
-            pilot_cycles.push(cycles);
+            // Skip invalid measurements - they corrupt statistical analysis
+            if let Ok(cycles) = result {
+                pilot_cycles.push(cycles);
+            }
         }
 
         // Check if operation is measurable and select batching
@@ -800,22 +806,28 @@ impl TimingOracle {
         for (class, idx) in cal_schedule {
             match class {
                 Class::Baseline => {
-                    let cycles = timer.measure_cycles(|| {
+                    let result = timer.measure_cycles(|| {
                         for _ in 0..k {
                             operation(&baseline_inputs[idx]);
                             std::hint::black_box(());
                         }
                     });
-                    calibration_baseline_cycles.push(cycles);
+                    // Skip invalid measurements - they corrupt statistical analysis
+                    if let Ok(cycles) = result {
+                        calibration_baseline_cycles.push(cycles);
+                    }
                 }
                 Class::Sample => {
-                    let cycles = timer.measure_cycles(|| {
+                    let result = timer.measure_cycles(|| {
                         for _ in 0..k {
                             operation(&sample_inputs[idx]);
                             std::hint::black_box(());
                         }
                     });
-                    calibration_sample_cycles.push(cycles);
+                    // Skip invalid measurements - they corrupt statistical analysis
+                    if let Ok(cycles) = result {
+                        calibration_sample_cycles.push(cycles);
+                    }
                 }
             }
         }
@@ -1037,24 +1049,30 @@ impl TimingOracle {
             for (class, idx) in batch_schedule {
                 match class {
                     Class::Baseline => {
-                        let cycles = timer.measure_cycles(|| {
+                        let result = timer.measure_cycles(|| {
                             for _ in 0..k {
                                 operation(&baseline_inputs[idx]);
                                 std::hint::black_box(());
                             }
                         });
-                        batch_baseline.push(cycles);
-                        stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+                        // Skip invalid measurements - they corrupt statistical analysis
+                        if let Ok(cycles) = result {
+                            batch_baseline.push(cycles);
+                            stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+                        }
                     }
                     Class::Sample => {
-                        let cycles = timer.measure_cycles(|| {
+                        let result = timer.measure_cycles(|| {
                             for _ in 0..k {
                                 operation(&sample_inputs[idx]);
                                 std::hint::black_box(());
                             }
                         });
-                        batch_sample.push(cycles);
-                        stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+                        // Skip invalid measurements - they corrupt statistical analysis
+                        if let Ok(cycles) = result {
+                            batch_sample.push(cycles);
+                            stationarity_tracker.push(cycles as f64 * ns_per_cycle);
+                        }
                     }
                 }
             }
@@ -1404,22 +1422,28 @@ impl TimingOracle {
             for (class, idx) in batch_schedule {
                 match class {
                     Class::Baseline => {
-                        let cycles = timer.measure_cycles(|| {
+                        let result = timer.measure_cycles(|| {
                             for _ in 0..k {
                                 operation(&baseline_inputs[idx]);
                                 std::hint::black_box(());
                             }
                         });
-                        batch_baseline.push(cycles);
+                        // Skip invalid measurements - they corrupt statistical analysis
+                        if let Ok(cycles) = result {
+                            batch_baseline.push(cycles);
+                        }
                     }
                     Class::Sample => {
-                        let cycles = timer.measure_cycles(|| {
+                        let result = timer.measure_cycles(|| {
                             for _ in 0..k {
                                 operation(&sample_inputs[idx]);
                                 std::hint::black_box(());
                             }
                         });
-                        batch_sample.push(cycles);
+                        // Skip invalid measurements - they corrupt statistical analysis
+                        if let Ok(cycles) = result {
+                            batch_sample.push(cycles);
+                        }
                     }
                 }
             }

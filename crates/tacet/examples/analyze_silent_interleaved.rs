@@ -89,8 +89,7 @@ fn estimate_block_length(data: &[f64]) -> usize {
     }
 
     // Use 2x first negative as block length, with bounds
-    let block_len = (2 * first_negative).max(10).min(n / 10);
-    block_len
+    (2 * first_negative).max(10).min(n / 10)
 }
 
 /// Compute decile differences (baseline - test) for each quantile

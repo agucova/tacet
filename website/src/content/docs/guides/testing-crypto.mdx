@@ -17,6 +17,8 @@ Before trusting results from timing tests, verify the test harness itself works:
 
 **1. Identical inputs should pass:**
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 
@@ -30,9 +32,96 @@ let outcome = TimingOracle::for_attacker(AttackerModel::Research)
 
 assert!(outcome.passed(), "Sanity check failed");
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import { TimingOracle, AttackerModel } from '@tacet/js';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.Research)
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => Buffer.alloc(32, 0),  // Same as baseline
+    },
+    (data) => myFunction(data)
+  );
+
+result.assertNoLeak("Sanity check failed");
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet.h>
+#include <assert.h>
+
+void identical_inputs(uint64_t* baseline, uint64_t* sample,
+                      size_t count, void* ctx) {
+    uint8_t data[32] = {0};
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure(my_function, data);
+        sample[i] = measure(my_function, data);  // Same as baseline
+    }
+}
+
+ToConfig cfg = to_config_default(Research);
+ToResult result;
+to_test(&cfg, identical_inputs, NULL, &result);
+
+assert(result.outcome == Pass && "Sanity check failed");
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet.hpp>
+#include <cassert>
+
+using namespace tacet;
+
+auto result = Oracle::forAttacker(ToAttackerModel::Research)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        uint8_t data[32] = {0};
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure(myFunction, data);
+            sample[i] = measure(myFunction, data);  // Same as baseline
+        }
+    });
+
+assert(result.outcome == ToOutcome::Pass && "Sanity check failed");
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "testing"
+    tacet "github.com/agucova/tacet/crates/tacet-go"
+)
+
+func TestSanityCheck(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(input []byte) {
+            myFunction(input)
+        }),
+        32,
+        tacet.WithAttacker(tacet.Research),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    if result.Outcome != tacet.Pass {
+        t.Fatal("Sanity check failed")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 **2. Known-leaky code should fail:**
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 fn definitely_leaky(data: &[u8]) -> bool {
     data.iter().all(|&b| b == 0)
@@ -50,6 +139,108 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 assert!(outcome.failed(), "Harness should detect obvious leak");
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+function definitelyLeaky(data: Buffer): boolean {
+  return data.every((b) => b === 0);
+}
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => Buffer.alloc(64, 0xFF),
+    },
+    (data) => definitelyLeaky(data)
+  );
+
+if (!result.isFail()) {
+  throw new Error("Harness should detect obvious leak");
+}
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+bool definitely_leaky(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] != 0) return false;
+    }
+    return true;
+}
+
+void leaky_collector(uint64_t* baseline, uint64_t* sample,
+                     size_t count, void* ctx) {
+    uint8_t zeros[64] = {0};
+    uint8_t ones[64];
+    memset(ones, 0xFF, 64);
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure(definitely_leaky, zeros, 64);
+        sample[i] = measure(definitely_leaky, ones, 64);
+    }
+}
+
+ToConfig cfg = to_config_default(AdjacentNetwork);
+ToResult result;
+to_test(&cfg, leaky_collector, NULL, &result);
+
+assert(result.outcome == Fail && "Harness should detect obvious leak");
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+bool definitelyLeaky(const std::span<const uint8_t> data) {
+    return std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0; });
+}
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 64> zeros{0};
+        std::array<uint8_t, 64> ones;
+        ones.fill(0xFF);
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure(definitelyLeaky, zeros);
+            sample[i] = measure(definitelyLeaky, ones);
+        }
+    });
+
+assert(result.outcome == ToOutcome::Fail && "Harness should detect obvious leak");
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func definitelyLeaky(data []byte) bool {
+    for _, b := range data {
+        if b != 0 {
+            return false
+        }
+    }
+    return true
+}
+
+func TestLeakyDetection(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewConstantGenerator(0xFF, 0),
+        tacet.FuncOperation(func(input []byte) {
+            definitelyLeaky(input)
+        }),
+        64,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+
+    if result.Outcome != tacet.Fail {
+        t.Fatal("Harness should detect obvious leak")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 If both checks pass, your harness is working correctly.
 
@@ -59,6 +250,8 @@ If both checks pass, your harness is working correctly.
 
 ### AES
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
 use aes::Aes128;
@@ -78,13 +271,123 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(block);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import crypto from 'crypto';
+
+const key = Buffer.alloc(16, 0x42);
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(16, 0),
+      sample: () => crypto.randomBytes(16),
+    },
+    (plaintext) => {
+      const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
+      cipher.setAutoPadding(false);
+      const encrypted = cipher.update(plaintext);
+      cipher.final();
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/aes.h>
+
+void aes_collector(uint64_t* baseline, uint64_t* sample,
+                   size_t count, void* ctx) {
+    AES_KEY key;
+    uint8_t key_bytes[16];
+    memset(key_bytes, 0x42, 16);
+    AES_set_encrypt_key(key_bytes, 128, &key);
+
+    uint8_t plaintext_zeros[16] = {0};
+    uint8_t plaintext_random[16];
+    uint8_t ciphertext[16];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_aes(&key, plaintext_zeros, ciphertext);
+
+        arc4random_buf(plaintext_random, 16);
+        sample[i] = measure_aes(&key, plaintext_random, ciphertext);
+    }
+}
+
+ToConfig cfg = to_config_default(AdjacentNetwork);
+ToResult result;
+to_test(&cfg, aes_collector, NULL, &result);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/aes.h>
+#include <random>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        AES_KEY key;
+        std::array<uint8_t, 16> key_bytes;
+        key_bytes.fill(0x42);
+        AES_set_encrypt_key(key_bytes.data(), 128, &key);
+
+        std::array<uint8_t, 16> plaintext_zeros{0};
+        std::array<uint8_t, 16> plaintext_random;
+        std::array<uint8_t, 16> ciphertext;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_aes(&key, plaintext_zeros, ciphertext);
+
+            std::generate(plaintext_random.begin(), plaintext_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_aes(&key, plaintext_random, ciphertext);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "crypto/aes"
+    "crypto/cipher"
+)
+
+func TestAES(t *testing.T) {
+    key := make([]byte, 16)
+    for i := range key {
+        key[i] = 0x42
+    }
+    block, _ := aes.NewCipher(key)
+
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(plaintext []byte) {
+            ciphertext := make([]byte, len(plaintext))
+            block.Encrypt(ciphertext, plaintext)
+        }),
+        16,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 <Aside type="tip">
-`black_box` prevents the compiler from optimizing away the encryption. Always use it when the result isn't otherwise consumed.
+`black_box` (Rust), unused returns (JavaScript), and proper result handling prevent the compiler from optimizing away the encryption. Always ensure the operation result is consumed.
 </Aside>
 
 ### AES with multiple blocks
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let inputs = InputPair::new(
     || [[0u8; 16]; 4],
@@ -100,6 +403,101 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         }
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Array(4).fill(Buffer.alloc(16, 0)),
+      sample: () => Array(4).fill(null).map(() => crypto.randomBytes(16)),
+    },
+    (blocks) => {
+      for (const block of blocks) {
+        const cipher = crypto.createCipheriv('aes-128-ecb', key, null);
+        cipher.setAutoPadding(false);
+        cipher.update(block);
+        cipher.final();
+      }
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void aes_multi_collector(uint64_t* baseline, uint64_t* sample,
+                         size_t count, void* ctx) {
+    AES_KEY* key = (AES_KEY*)ctx;
+    uint8_t blocks_zeros[4][16] = {0};
+    uint8_t blocks_random[4][16];
+    uint8_t ciphertext[16];
+
+    for (size_t i = 0; i < count; i++) {
+        uint64_t start = rdtsc();
+        for (int j = 0; j < 4; j++) {
+            AES_encrypt(blocks_zeros[j], ciphertext, key);
+        }
+        baseline[i] = rdtsc() - start;
+
+        for (int j = 0; j < 4; j++) {
+            arc4random_buf(blocks_random[j], 16);
+        }
+        start = rdtsc();
+        for (int j = 0; j < 4; j++) {
+            AES_encrypt(blocks_random[j], ciphertext, key);
+        }
+        sample[i] = rdtsc() - start;
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([&key](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<std::array<uint8_t, 16>, 4> blocks_zeros{0};
+        std::array<std::array<uint8_t, 16>, 4> blocks_random;
+        std::array<uint8_t, 16> ciphertext;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            auto start = rdtsc();
+            for (auto& block : blocks_zeros) {
+                AES_encrypt(block.data(), ciphertext.data(), &key);
+            }
+            baseline[i] = rdtsc() - start;
+
+            for (auto& block : blocks_random) {
+                std::generate(block.begin(), block.end(), [&]() { return rd(); });
+            }
+            start = rdtsc();
+            for (auto& block : blocks_random) {
+                AES_encrypt(block.data(), ciphertext.data(), &key);
+            }
+            sample[i] = rdtsc() - start;
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+result, err := tacet.Test(
+    tacet.NewZeroGenerator(0),
+    tacet.FuncOperation(func(plaintext []byte) {
+        // Treat input as 4 blocks of 16 bytes
+        for i := 0; i < 4; i++ {
+            block := plaintext[i*16 : (i+1)*16]
+            ciphertext := make([]byte, 16)
+            cipher.Encrypt(ciphertext, block)
+        }
+    }),
+    64,  // 4 blocks × 16 bytes
+    tacet.WithAttacker(tacet.AdjacentNetwork),
+)
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -109,6 +507,8 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 AEAD ciphers require unique nonces. Use an atomic counter:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use chacha20poly1305::{ChaCha20Poly1305, KeyInit, AeadInPlace, Nonce};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -134,9 +534,163 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(buffer);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import crypto from 'crypto';
+
+let nonceCounter = 0;
+
+function getNonce(): Buffer {
+  const nonce = Buffer.alloc(12);
+  nonce.writeBigUInt64LE(BigInt(nonceCounter++));
+  return nonce;
+}
+
+const key = crypto.randomBytes(32);
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => crypto.randomBytes(64),
+    },
+    (plaintext) => {
+      const nonce = getNonce();
+      const cipher = crypto.createCipheriv('chacha20-poly1305', key, nonce, {
+        authTagLength: 16,
+      });
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const tag = cipher.getAuthTag();
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/evp.h>
+#include <stdatomic.h>
+
+typedef struct {
+    EVP_CIPHER_CTX* ctx;
+    uint8_t key[32];
+    atomic_uint_fast64_t nonce_counter;
+} ChaChaContext;
+
+void chacha_collector(uint64_t* baseline, uint64_t* sample,
+                      size_t count, void* ctx) {
+    ChaChaContext* chacha = (ChaChaContext*)ctx;
+    uint8_t plaintext_zeros[64] = {0};
+    uint8_t plaintext_random[64];
+    uint8_t ciphertext[80];  // 64 + 16 (auth tag)
+    int len;
+
+    for (size_t i = 0; i < count; i++) {
+        uint8_t nonce[12] = {0};
+        uint64_t n = atomic_fetch_add(&chacha->nonce_counter, 1);
+        memcpy(nonce, &n, 8);
+
+        EVP_EncryptInit_ex(chacha->ctx, EVP_chacha20_poly1305(),
+                          NULL, chacha->key, nonce);
+        baseline[i] = measure_encrypt(chacha->ctx, plaintext_zeros,
+                                      64, ciphertext);
+
+        arc4random_buf(plaintext_random, 64);
+        n = atomic_fetch_add(&chacha->nonce_counter, 1);
+        memcpy(nonce, &n, 8);
+        EVP_EncryptInit_ex(chacha->ctx, EVP_chacha20_poly1305(),
+                          NULL, chacha->key, nonce);
+        sample[i] = measure_encrypt(chacha->ctx, plaintext_random,
+                                    64, ciphertext);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/evp.h>
+#include <atomic>
+
+struct ChaChaContext {
+    EVP_CIPHER_CTX* ctx;
+    std::array<uint8_t, 32> key;
+    std::atomic<uint64_t> nonce_counter{0};
+};
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([&](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        ChaChaContext chacha;
+        chacha.ctx = EVP_CIPHER_CTX_new();
+        RAND_bytes(chacha.key.data(), 32);
+
+        std::array<uint8_t, 64> plaintext_zeros{0};
+        std::array<uint8_t, 64> plaintext_random;
+        std::array<uint8_t, 80> ciphertext;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            std::array<uint8_t, 12> nonce{0};
+            uint64_t n = chacha.nonce_counter.fetch_add(1);
+            std::memcpy(nonce.data(), &n, 8);
+
+            EVP_EncryptInit_ex(chacha.ctx, EVP_chacha20_poly1305(),
+                              NULL, chacha.key.data(), nonce.data());
+            baseline[i] = measure_encrypt(chacha.ctx, plaintext_zeros, ciphertext);
+
+            std::generate(plaintext_random.begin(), plaintext_random.end(),
+                         [&]() { return rd(); });
+            n = chacha.nonce_counter.fetch_add(1);
+            std::memcpy(nonce.data(), &n, 8);
+            EVP_EncryptInit_ex(chacha.ctx, EVP_chacha20_poly1305(),
+                              NULL, chacha.key.data(), nonce.data());
+            sample[i] = measure_encrypt(chacha.ctx, plaintext_random, ciphertext);
+        }
+
+        EVP_CIPHER_CTX_free(chacha.ctx);
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "crypto/cipher"
+    "golang.org/x/crypto/chacha20poly1305"
+    "sync/atomic"
+)
+
+func TestChaCha20Poly1305(t *testing.T) {
+    key := make([]byte, 32)
+    rand.Read(key)
+    aead, _ := chacha20poly1305.New(key)
+
+    var nonceCounter uint64
+
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(plaintext []byte) {
+            nonce := make([]byte, 12)
+            n := atomic.AddUint64(&nonceCounter, 1)
+            binary.LittleEndian.PutUint64(nonce, n)
+
+            ciphertext := aead.Seal(nil, nonce, plaintext, nil)
+            _ = ciphertext
+        }),
+        64,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### AES-GCM
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use aes_gcm::{Aes256Gcm, KeyInit, AeadInPlace, Nonce};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -162,6 +716,149 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(buffer);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import crypto from 'crypto';
+
+let nonceCounter = 0;
+
+function getNonce(): Buffer {
+  const nonce = Buffer.alloc(12);
+  nonce.writeBigUInt64LE(BigInt(nonceCounter++));
+  return nonce;
+}
+
+const key = crypto.randomBytes(32);
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => crypto.randomBytes(64),
+    },
+    (plaintext) => {
+      const nonce = getNonce();
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+      const encrypted = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+      const tag = cipher.getAuthTag();
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/evp.h>
+
+typedef struct {
+    EVP_CIPHER_CTX* ctx;
+    uint8_t key[32];
+    atomic_uint_fast64_t nonce_counter;
+} GcmContext;
+
+void gcm_collector(uint64_t* baseline, uint64_t* sample,
+                   size_t count, void* ctx) {
+    GcmContext* gcm = (GcmContext*)ctx;
+    uint8_t plaintext_zeros[64] = {0};
+    uint8_t plaintext_random[64];
+    uint8_t ciphertext[80];
+
+    for (size_t i = 0; i < count; i++) {
+        uint8_t nonce[12] = {0};
+        uint64_t n = atomic_fetch_add(&gcm->nonce_counter, 1);
+        memcpy(nonce, &n, 8);
+
+        EVP_EncryptInit_ex(gcm->ctx, EVP_aes_256_gcm(),
+                          NULL, gcm->key, nonce);
+        baseline[i] = measure_encrypt(gcm->ctx, plaintext_zeros,
+                                      64, ciphertext);
+
+        arc4random_buf(plaintext_random, 64);
+        n = atomic_fetch_add(&gcm->nonce_counter, 1);
+        memcpy(nonce, &n, 8);
+        EVP_EncryptInit_ex(gcm->ctx, EVP_aes_256_gcm(),
+                          NULL, gcm->key, nonce);
+        sample[i] = measure_encrypt(gcm->ctx, plaintext_random,
+                                    64, ciphertext);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/evp.h>
+#include <atomic>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+        std::array<uint8_t, 32> key;
+        RAND_bytes(key.data(), 32);
+        std::atomic<uint64_t> nonce_counter{0};
+
+        std::array<uint8_t, 64> plaintext_zeros{0};
+        std::array<uint8_t, 64> plaintext_random;
+        std::array<uint8_t, 80> ciphertext;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            std::array<uint8_t, 12> nonce{0};
+            uint64_t n = nonce_counter.fetch_add(1);
+            std::memcpy(nonce.data(), &n, 8);
+
+            EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(),
+                              NULL, key.data(), nonce.data());
+            baseline[i] = measure_encrypt(ctx, plaintext_zeros, ciphertext);
+
+            std::generate(plaintext_random.begin(), plaintext_random.end(),
+                         [&]() { return rd(); });
+            n = nonce_counter.fetch_add(1);
+            std::memcpy(nonce.data(), &n, 8);
+            EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(),
+                              NULL, key.data(), nonce.data());
+            sample[i] = measure_encrypt(ctx, plaintext_random, ciphertext);
+        }
+
+        EVP_CIPHER_CTX_free(ctx);
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "crypto/aes"
+    "crypto/cipher"
+)
+
+func TestAESGCM(t *testing.T) {
+    key := make([]byte, 32)
+    rand.Read(key)
+    block, _ := aes.NewCipher(key)
+    aead, _ := cipher.NewGCM(block)
+
+    var nonceCounter uint64
+
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(plaintext []byte) {
+            nonce := make([]byte, 12)
+            n := atomic.AddUint64(&nonceCounter, 1)
+            binary.LittleEndian.PutUint64(nonce, n)
+
+            ciphertext := aead.Seal(nil, nonce, plaintext, nil)
+            _ = ciphertext
+        }),
+        64,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 <Aside type="caution" title="Nonce handling">
 Never reuse nonces in AEAD encryption; it breaks security. The atomic counter ensures each measurement uses a unique nonce.
@@ -173,6 +870,8 @@ Never reuse nonces in AEAD encryption; it breaks security. The atomic counter en
 
 ### SHA-3
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use sha3::{Sha3_256, Digest};
 
@@ -188,9 +887,97 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(hasher.finalize());
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import crypto from 'crypto';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => crypto.randomBytes(64),
+    },
+    (data) => {
+      const hash = crypto.createHash('sha3-256');
+      hash.update(data);
+      hash.digest();
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/evp.h>
+
+void sha3_collector(uint64_t* baseline, uint64_t* sample,
+                    size_t count, void* ctx) {
+    uint8_t data_zeros[64] = {0};
+    uint8_t data_random[64];
+    uint8_t hash[32];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_hash(EVP_sha3_256(), data_zeros, 64, hash);
+
+        arc4random_buf(data_random, 64);
+        sample[i] = measure_hash(EVP_sha3_256(), data_random, 64, hash);
+    }
+}
+
+ToConfig cfg = to_config_default(AdjacentNetwork);
+ToResult result;
+to_test(&cfg, sha3_collector, NULL, &result);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/evp.h>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 64> data_zeros{0};
+        std::array<uint8_t, 64> data_random;
+        std::array<uint8_t, 32> hash;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_hash(EVP_sha3_256(), data_zeros, hash);
+
+            std::generate(data_random.begin(), data_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_hash(EVP_sha3_256(), data_random, hash);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import "golang.org/x/crypto/sha3"
+
+func TestSHA3(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(data []byte) {
+            hasher := sha3.New256()
+            hasher.Write(data)
+            _ = hasher.Sum(nil)
+        }),
+        64,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### BLAKE2
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use blake2::{Blake2b512, Digest};
 
@@ -206,9 +993,91 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(hasher.finalize());
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import { blake2b } from 'blakejs';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => crypto.randomBytes(64),
+    },
+    (data) => {
+      blake2b(data, undefined, 64);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/evp.h>
+
+void blake2_collector(uint64_t* baseline, uint64_t* sample,
+                      size_t count, void* ctx) {
+    uint8_t data_zeros[64] = {0};
+    uint8_t data_random[64];
+    uint8_t hash[64];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_hash(EVP_blake2b512(), data_zeros, 64, hash);
+
+        arc4random_buf(data_random, 64);
+        sample[i] = measure_hash(EVP_blake2b512(), data_random, 64, hash);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/evp.h>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 64> data_zeros{0};
+        std::array<uint8_t, 64> data_random;
+        std::array<uint8_t, 64> hash;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_hash(EVP_blake2b512(), data_zeros, hash);
+
+            std::generate(data_random.begin(), data_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_hash(EVP_blake2b512(), data_random, hash);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import "golang.org/x/crypto/blake2b"
+
+func TestBLAKE2(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(data []byte) {
+            hasher, _ := blake2b.New512(nil)
+            hasher.Write(data)
+            _ = hasher.Sum(nil)
+        }),
+        64,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### Incremental hashing
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use sha3::{Sha3_256, Digest};
 
@@ -226,6 +1095,114 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(hasher.finalize());
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Array(4).fill(Buffer.alloc(64, 0)),
+      sample: () => Array(4).fill(null).map(() => crypto.randomBytes(64)),
+    },
+    (chunks) => {
+      const hash = crypto.createHash('sha3-256');
+      for (const chunk of chunks) {
+        hash.update(chunk);
+      }
+      hash.digest();
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void incremental_hash_collector(uint64_t* baseline, uint64_t* sample,
+                                size_t count, void* ctx) {
+    uint8_t chunks_zeros[4][64] = {0};
+    uint8_t chunks_random[4][64];
+    uint8_t hash[32];
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+
+    for (size_t i = 0; i < count; i++) {
+        EVP_DigestInit_ex(md_ctx, EVP_sha3_256(), NULL);
+        uint64_t start = rdtsc();
+        for (int j = 0; j < 4; j++) {
+            EVP_DigestUpdate(md_ctx, chunks_zeros[j], 64);
+        }
+        EVP_DigestFinal_ex(md_ctx, hash, NULL);
+        baseline[i] = rdtsc() - start;
+
+        for (int j = 0; j < 4; j++) {
+            arc4random_buf(chunks_random[j], 64);
+        }
+        EVP_DigestInit_ex(md_ctx, EVP_sha3_256(), NULL);
+        start = rdtsc();
+        for (int j = 0; j < 4; j++) {
+            EVP_DigestUpdate(md_ctx, chunks_random[j], 64);
+        }
+        EVP_DigestFinal_ex(md_ctx, hash, NULL);
+        sample[i] = rdtsc() - start;
+    }
+
+    EVP_MD_CTX_free(md_ctx);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<std::array<uint8_t, 64>, 4> chunks_zeros{0};
+        std::array<std::array<uint8_t, 64>, 4> chunks_random;
+        std::array<uint8_t, 32> hash;
+        EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            EVP_DigestInit_ex(md_ctx, EVP_sha3_256(), nullptr);
+            auto start = rdtsc();
+            for (auto& chunk : chunks_zeros) {
+                EVP_DigestUpdate(md_ctx, chunk.data(), 64);
+            }
+            EVP_DigestFinal_ex(md_ctx, hash.data(), nullptr);
+            baseline[i] = rdtsc() - start;
+
+            for (auto& chunk : chunks_random) {
+                std::generate(chunk.begin(), chunk.end(), [&]() { return rd(); });
+            }
+            EVP_DigestInit_ex(md_ctx, EVP_sha3_256(), nullptr);
+            start = rdtsc();
+            for (auto& chunk : chunks_random) {
+                EVP_DigestUpdate(md_ctx, chunk.data(), 64);
+            }
+            EVP_DigestFinal_ex(md_ctx, hash.data(), nullptr);
+            sample[i] = rdtsc() - start;
+        }
+
+        EVP_MD_CTX_free(md_ctx);
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+result, err := tacet.Test(
+    tacet.NewZeroGenerator(0),
+    tacet.FuncOperation(func(data []byte) {
+        hasher := sha3.New256()
+        // Treat input as 4 chunks of 64 bytes
+        for i := 0; i < 4; i++ {
+            chunk := data[i*64 : (i+1)*64]
+            hasher.Write(chunk)
+        }
+        _ = hasher.Sum(nil)
+    }),
+    256,  // 4 chunks × 64 bytes
+    tacet.WithAttacker(tacet.AdjacentNetwork),
+)
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -233,6 +1210,8 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 ### X25519 scalar multiplication
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use x25519_dalek::PublicKey;
 
@@ -248,9 +1227,90 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(public);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import { x25519 } from '@noble/curves/ed25519';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => crypto.randomBytes(32),
+    },
+    (scalarBytes) => {
+      const publicKey = x25519.getPublicKey(scalarBytes);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/evp.h>
+
+void x25519_collector(uint64_t* baseline, uint64_t* sample,
+                      size_t count, void* ctx) {
+    uint8_t scalar_zeros[32] = {0};
+    uint8_t scalar_random[32];
+    uint8_t public_key[32];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_x25519_base(scalar_zeros, public_key);
+
+        arc4random_buf(scalar_random, 32);
+        sample[i] = measure_x25519_base(scalar_random, public_key);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/evp.h>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> scalar_zeros{0};
+        std::array<uint8_t, 32> scalar_random;
+        std::array<uint8_t, 32> public_key;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_x25519_base(scalar_zeros, public_key);
+
+            std::generate(scalar_random.begin(), scalar_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_x25519_base(scalar_random, public_key);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import "golang.org/x/crypto/curve25519"
+
+func TestX25519(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(scalar []byte) {
+            publicKey, _ := curve25519.X25519(scalar, curve25519.Basepoint)
+            _ = publicKey
+        }),
+        32,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### Full ECDH
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use x25519_dalek::{EphemeralSecret, PublicKey};
 
@@ -267,6 +1327,91 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(shared);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import { x25519 } from '@noble/curves/ed25519';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => crypto.randomBytes(32),
+    },
+    (peerPublicBytes) => {
+      const privateKey = crypto.randomBytes(32);
+      const sharedSecret = x25519.getSharedSecret(privateKey, peerPublicBytes);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void ecdh_collector(uint64_t* baseline, uint64_t* sample,
+                    size_t count, void* ctx) {
+    uint8_t peer_public_zeros[32] = {0};
+    uint8_t peer_public_random[32];
+    uint8_t private_key[32];
+    uint8_t shared_secret[32];
+
+    for (size_t i = 0; i < count; i++) {
+        arc4random_buf(private_key, 32);
+        baseline[i] = measure_ecdh(private_key, peer_public_zeros, shared_secret);
+
+        arc4random_buf(private_key, 32);
+        arc4random_buf(peer_public_random, 32);
+        sample[i] = measure_ecdh(private_key, peer_public_random, shared_secret);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> peer_public_zeros{0};
+        std::array<uint8_t, 32> peer_public_random;
+        std::array<uint8_t, 32> private_key;
+        std::array<uint8_t, 32> shared_secret;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            std::generate(private_key.begin(), private_key.end(),
+                         [&]() { return rd(); });
+            baseline[i] = measure_ecdh(private_key, peer_public_zeros, shared_secret);
+
+            std::generate(private_key.begin(), private_key.end(),
+                         [&]() { return rd(); });
+            std::generate(peer_public_random.begin(), peer_public_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_ecdh(private_key, peer_public_random, shared_secret);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func TestECDH(t *testing.T) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(peerPublic []byte) {
+            privateKey := make([]byte, 32)
+            rand.Read(privateKey)
+
+            sharedSecret, _ := curve25519.X25519(privateKey, peerPublic)
+            _ = sharedSecret
+        }),
+        32,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -274,6 +1419,8 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 ### RSA signing
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use rsa::{RsaPrivateKey, pkcs1v15::SigningKey, signature::Signer};
 use sha2::Sha256;
@@ -293,9 +1440,133 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(signature);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+import crypto from 'crypto';
+
+const { privateKey } = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+});
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .timeBudget(60_000)  // RSA is slow
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => crypto.randomBytes(32),
+    },
+    (message) => {
+      const sign = crypto.createSign('SHA256');
+      sign.update(message);
+      sign.sign(privateKey);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <openssl/rsa.h>
+#include <openssl/sha.h>
+
+void rsa_sign_collector(uint64_t* baseline, uint64_t* sample,
+                        size_t count, void* ctx) {
+    RSA* rsa = (RSA*)ctx;
+    uint8_t message_zeros[32] = {0};
+    uint8_t message_random[32];
+    uint8_t signature[256];
+    unsigned int sig_len;
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_rsa_sign(rsa, message_zeros, 32,
+                                       signature, &sig_len);
+
+        arc4random_buf(message_random, 32);
+        sample[i] = measure_rsa_sign(rsa, message_random, 32,
+                                     signature, &sig_len);
+    }
+}
+
+RSA* rsa = RSA_new();
+BIGNUM* e = BN_new();
+BN_set_word(e, RSA_F4);
+RSA_generate_key_ex(rsa, 2048, e, NULL);
+
+ToConfig cfg = to_config_default(AdjacentNetwork);
+cfg.time_budget_secs = 60.0;
+ToResult result;
+to_test(&cfg, rsa_sign_collector, rsa, &result);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <openssl/rsa.h>
+
+using namespace std::chrono_literals;
+
+RSA* rsa = RSA_new();
+BIGNUM* e = BN_new();
+BN_set_word(e, RSA_F4);
+RSA_generate_key_ex(rsa, 2048, e, nullptr);
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .timeBudget(60s)
+    .test([&rsa](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> message_zeros{0};
+        std::array<uint8_t, 32> message_random;
+        std::array<uint8_t, 256> signature;
+        unsigned int sig_len;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_rsa_sign(rsa, message_zeros, signature, &sig_len);
+
+            std::generate(message_random.begin(), message_random.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_rsa_sign(rsa, message_random, signature, &sig_len);
+        }
+    });
+
+RSA_free(rsa);
+BN_free(e);
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "crypto/rand"
+    "crypto/rsa"
+    "crypto/sha256"
+)
+
+func TestRSASign(t *testing.T) {
+    privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(message []byte) {
+            hashed := sha256.Sum256(message)
+            signature, _ := rsa.SignPKCS1v15(rand.Reader, privateKey,
+                                            crypto.SHA256, hashed[:])
+            _ = signature
+        }),
+        32,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(60 * time.Second),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### RSA decryption
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use rsa::{RsaPrivateKey, RsaPublicKey, Pkcs1v15Encrypt};
 
@@ -318,6 +1589,119 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         let _ = private_key.decrypt(Pkcs1v15Encrypt, &ciphertext);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
+  modulusLength: 2048,
+});
+
+function encryptMsg(msg: Buffer): Buffer {
+  return crypto.publicEncrypt(publicKey, msg);
+}
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .timeBudget(60_000)
+  .test(
+    {
+      baseline: () => encryptMsg(Buffer.alloc(32, 0)),
+      sample: () => encryptMsg(crypto.randomBytes(32)),
+    },
+    (ciphertext) => {
+      crypto.privateDecrypt(privateKey, ciphertext);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+typedef struct {
+    RSA* public_key;
+    RSA* private_key;
+} RsaKeyPair;
+
+void rsa_decrypt_collector(uint64_t* baseline, uint64_t* sample,
+                           size_t count, void* ctx) {
+    RsaKeyPair* keys = (RsaKeyPair*)ctx;
+    uint8_t plaintext_zeros[32] = {0};
+    uint8_t plaintext_random[32];
+    uint8_t ciphertext[256];
+    int ct_len;
+
+    for (size_t i = 0; i < count; i++) {
+        ct_len = RSA_public_encrypt(32, plaintext_zeros, ciphertext,
+                                    keys->public_key, RSA_PKCS1_PADDING);
+        baseline[i] = measure_rsa_decrypt(keys->private_key, ciphertext, ct_len);
+
+        arc4random_buf(plaintext_random, 32);
+        ct_len = RSA_public_encrypt(32, plaintext_random, ciphertext,
+                                    keys->public_key, RSA_PKCS1_PADDING);
+        sample[i] = measure_rsa_decrypt(keys->private_key, ciphertext, ct_len);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+struct RsaKeyPair {
+    RSA* public_key;
+    RSA* private_key;
+};
+
+RsaKeyPair keys = generate_rsa_keys(2048);
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .timeBudget(60s)
+    .test([&keys](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> plaintext_zeros{0};
+        std::array<uint8_t, 32> plaintext_random;
+        std::array<uint8_t, 256> ciphertext;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            int ct_len = RSA_public_encrypt(32, plaintext_zeros.data(),
+                                           ciphertext.data(), keys.public_key,
+                                           RSA_PKCS1_PADDING);
+            baseline[i] = measure_rsa_decrypt(keys.private_key, ciphertext, ct_len);
+
+            std::generate(plaintext_random.begin(), plaintext_random.end(),
+                         [&]() { return rd(); });
+            ct_len = RSA_public_encrypt(32, plaintext_random.data(),
+                                       ciphertext.data(), keys.public_key,
+                                       RSA_PKCS1_PADDING);
+            sample[i] = measure_rsa_decrypt(keys.private_key, ciphertext, ct_len);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func TestRSADecrypt(t *testing.T) {
+    privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+    publicKey := &privateKey.PublicKey
+
+    result, err := tacet.Test(
+        tacet.NewGeneratorFunc(func() []byte {
+            plaintext := make([]byte, 32)
+            ciphertext, _ := rsa.EncryptPKCS1v15(rand.Reader, publicKey, plaintext)
+            return ciphertext
+        }),
+        tacet.FuncOperation(func(ciphertext []byte) {
+            plaintext, _ := rsa.DecryptPKCS1v15(rand.Reader, privateKey, ciphertext)
+            _ = plaintext
+        }),
+        256,  // Ciphertext size for 2048-bit RSA
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(60 * time.Second),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -325,6 +1709,8 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 For comparison functions, the baseline must match the secret:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let secret = [0u8; 32];
 
@@ -338,6 +1724,80 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         constant_time_compare(&secret, &data);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+const secret = Buffer.alloc(32, 0);
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),  // Matches secret
+      sample: () => crypto.randomBytes(32),  // Mismatches
+    },
+    (data) => {
+      constantTimeCompare(secret, data);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void comparison_collector(uint64_t* baseline, uint64_t* sample,
+                          size_t count, void* ctx) {
+    uint8_t secret[32] = {0};
+    uint8_t data_match[32] = {0};
+    uint8_t data_mismatch[32];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_compare(secret, data_match, 32);
+
+        arc4random_buf(data_mismatch, 32);
+        sample[i] = measure_compare(secret, data_mismatch, 32);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> secret{0};
+        std::array<uint8_t, 32> data_match{0};
+        std::array<uint8_t, 32> data_mismatch;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_compare(secret, data_match);
+
+            std::generate(data_mismatch.begin(), data_mismatch.end(),
+                         [&]() { return rd(); });
+            sample[i] = measure_compare(secret, data_mismatch);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func TestComparison(t *testing.T) {
+    secret := make([]byte, 32)
+
+    result, err := tacet.Test(
+        tacet.NewConstantGenerator(0, 0),  // Matches secret
+        tacet.FuncOperation(func(data []byte) {
+            constantTimeCompare(secret, data)
+        }),
+        32,
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+    )
+    if err != nil {
+        t.Fatal(err)
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 See [The Two-Class Pattern](/core-concepts/two-class-pattern#the-comparison-function-trap) for why this matters.
 
@@ -347,17 +1807,76 @@ See [The Two-Class Pattern](/core-concepts/two-class-pattern#the-comparison-func
 
 ### Fresh random values (correct)
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let inputs = InputPair::new(
     || [0u8; 32],
     || rand::random::<[u8; 32]>(),  // Fresh each time
 );
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+const inputs = {
+  baseline: () => Buffer.alloc(32, 0),
+  sample: () => crypto.randomBytes(32),  // Fresh each time
+};
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void collector(uint64_t* baseline, uint64_t* sample,
+               size_t count, void* ctx) {
+    uint8_t data_zeros[32] = {0};
+    uint8_t data_random[32];
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure(data_zeros);
+
+        arc4random_buf(data_random, 32);  // Fresh each time
+        sample[i] = measure(data_random);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> data_zeros{0};
+        std::array<uint8_t, 32> data_random;
+        std::random_device rd;
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure(data_zeros);
+
+            std::generate(data_random.begin(), data_random.end(),
+                         [&]() { return rd(); });  // Fresh each time
+            sample[i] = measure(data_random);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+// Go API handles random generation automatically
+result, err := tacet.Test(
+    tacet.NewZeroGenerator(0),  // Baseline: all zeros
+    operation,
+    32,
+    // Sample class uses crypto/rand automatically
+)
+```
+</TabItem>
+</Tabs>
 
 ### Thread-safe counters
 
 For deterministic sequences:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -373,11 +1892,91 @@ let inputs = InputPair::new(
     },
 );
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+let counter = 0;
+
+const inputs = {
+  baseline: () => Buffer.alloc(32, 0),
+  sample: () => {
+    const data = Buffer.alloc(32, 0);
+    data.writeBigUInt64LE(BigInt(counter++));
+    return data;
+  },
+};
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <stdatomic.h>
+
+void counter_collector(uint64_t* baseline, uint64_t* sample,
+                       size_t count, void* ctx) {
+    atomic_uint_fast64_t* counter = (atomic_uint_fast64_t*)ctx;
+    uint8_t data_zeros[32] = {0};
+    uint8_t data_sequential[32] = {0};
+
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure(data_zeros);
+
+        uint64_t n = atomic_fetch_add(counter, 1);
+        memcpy(data_sequential, &n, 8);
+        sample[i] = measure(data_sequential);
+    }
+}
+
+atomic_uint_fast64_t counter = ATOMIC_VAR_INIT(0);
+to_test(&cfg, counter_collector, &counter, &result);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <atomic>
+
+std::atomic<uint64_t> counter{0};
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([&counter](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        std::array<uint8_t, 32> data_zeros{0};
+        std::array<uint8_t, 32> data_sequential{0};
+
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure(data_zeros);
+
+            uint64_t n = counter.fetch_add(1);
+            std::memcpy(data_sequential.data(), &n, 8);
+            sample[i] = measure(data_sequential);
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import "sync/atomic"
+
+var counter uint64
+
+result, err := tacet.Test(
+    tacet.NewGeneratorFunc(func() []byte {
+        data := make([]byte, 32)
+        n := atomic.AddUint64(&counter, 1)
+        binary.LittleEndian.PutUint64(data, n)
+        return data
+    }),
+    operation,
+    32,
+)
+```
+</TabItem>
+</Tabs>
 
 ### Pre-initialized state
 
 Expensive setup should happen outside the measurement:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // Setup once
 let key = expensive_key_derivation();
@@ -392,6 +1991,84 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         cipher.encrypt(&nonce, &plaintext);
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+// Setup once
+const key = expensiveKeyDerivation();
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(64, 0),
+      sample: () => crypto.randomBytes(64),
+    },
+    (plaintext) => {
+      // key is already initialized
+      const cipher = crypto.createCipheriv('aes-256-gcm', key, nonce);
+      cipher.update(plaintext);
+    }
+  );
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+// Setup once
+uint8_t key[32];
+expensive_key_derivation(key);
+EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+
+void collector(uint64_t* baseline, uint64_t* sample,
+               size_t count, void* ctx_ptr) {
+    EVP_CIPHER_CTX* ctx = (EVP_CIPHER_CTX*)ctx_ptr;
+    // ctx is already initialized
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_encrypt(ctx, baseline_data);
+        sample[i] = measure_encrypt(ctx, sample_data);
+    }
+}
+
+to_test(&cfg, collector, ctx, &result);
+EVP_CIPHER_CTX_free(ctx);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// Setup once
+std::array<uint8_t, 32> key = expensiveKeyDerivation();
+EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([&ctx](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        // ctx is already initialized
+        for (size_t i = 0; i < baseline.size(); i++) {
+            baseline[i] = measure_encrypt(ctx, baseline_data);
+            sample[i] = measure_encrypt(ctx, sample_data);
+        }
+    });
+
+EVP_CIPHER_CTX_free(ctx);
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+// Setup once
+key := expensiveKeyDerivation()
+block, _ := aes.NewCipher(key)
+
+result, err := tacet.Test(
+    generator,
+    tacet.FuncOperation(func(plaintext []byte) {
+        // block is already initialized
+        ciphertext := make([]byte, len(plaintext))
+        block.Encrypt(ciphertext, plaintext)
+    }),
+    32,
+)
+```
+</TabItem>
+</Tabs>
 
 ---
 
@@ -399,6 +2076,8 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 For async code, use `block_on`:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tokio::runtime::Runtime;
 
@@ -420,9 +2099,79 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         })
     });
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```typescript
+// JavaScript is natively async, but for sync measurement contexts:
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => crypto.randomBytes(32),
+    },
+    (data) => {
+      // Use sync wrappers or promisify if needed
+      asyncCryptoOperationSync(data);
+    }
+  );
+```
+
+<Aside type="note">
+JavaScript timing tests expect synchronous operation functions. If you need to test async operations, wrap them in a synchronous harness or use a dedicated async testing approach.
+</Aside>
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+// C APIs are typically synchronous
+// For async operations, use platform-specific blocking mechanisms
+
+void async_collector(uint64_t* baseline, uint64_t* sample,
+                     size_t count, void* ctx) {
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure_blocking_async(baseline_data);
+        sample[i] = measure_blocking_async(sample_data);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <future>
+
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        for (size_t i = 0; i < baseline.size(); i++) {
+            // Block on async operation
+            auto future_baseline = std::async(std::launch::async,
+                                             asyncCryptoOperation, baseline_data);
+            baseline[i] = measure([&]() { future_baseline.get(); });
+
+            auto future_sample = std::async(std::launch::async,
+                                           asyncCryptoOperation, sample_data);
+            sample[i] = measure([&]() { future_sample.get(); });
+        }
+    });
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+// Go's goroutines make async operations look synchronous
+result, err := tacet.Test(
+    generator,
+    tacet.FuncOperation(func(data []byte) {
+        // If asyncCryptoOperation uses goroutines internally,
+        // ensure it blocks until completion
+        asyncCryptoOperation(data)
+    }),
+    32,
+)
+```
+</TabItem>
+</Tabs>
 
 <Aside type="tip">
-Use `new_current_thread()` for lower noise. Multi-threaded runtimes add scheduling jitter.
+Use `new_current_thread()` (Rust) or single-threaded contexts for lower noise. Multi-threaded runtimes add scheduling jitter.
 </Aside>
 
 ---

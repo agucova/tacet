@@ -411,20 +411,12 @@ site-search button[data-open-modal] {
     padding: 0.5rem 1rem;
 }
 
-/* On splash page, center and widen the search bar container */
-[data-has-hero] .header > .header > .sl-flex:has(site-search) {
-    flex: 1 1 auto !important;
-    display: flex !important;
-    justify-content: center !important;
-    padding: 0 2rem !important;
-}
-
-/* On splash page, ensure search button is wide and centered */
-[data-has-hero] site-search button[data-open-modal] {
-    width: 100% !important;
-    max-width: 600px !important;
-    min-width: 40vw !important;
-    margin: 0 auto !important;
+/* Widen the search button on all pages */
+site-search button[data-open-modal] {
+    min-width: 50vw;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .search-input {
@@ -676,5 +668,51 @@ pre:has(code:not([class*="language-"])) {
     .expressive-code code {
         white-space: pre-wrap !important;
         word-break: break-word !important;
+    }
+}
+
+/* ============================================
+   VIEW TRANSITIONS
+   ============================================ */
+
+/* Customize page transitions to match oscilloscope aesthetic */
+@view-transition {
+    navigation: auto;
+}
+
+/* Smooth, fast crossfade - no movement to avoid bounce */
+::view-transition-old(root),
+::view-transition-new(root) {
+    animation-duration: 0.15s;
+    animation-timing-function: ease-in-out;
+}
+
+/* Simple fade out */
+::view-transition-old(root) {
+    animation-name: fade-out;
+}
+
+/* Simple fade in - no transform to prevent bounce */
+::view-transition-new(root) {
+    animation-name: fade-in;
+}
+
+@keyframes fade-out {
+    to {
+        opacity: 0;
+    }
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+    }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+        animation-duration: 0.01s;
     }
 }

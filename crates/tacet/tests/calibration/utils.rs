@@ -22,7 +22,7 @@ use tacet::Outcome;
 // Re-export effect injection from the shared module
 // These are used by other calibration test files via `mod calibration_utils;`
 #[allow(unused_imports)]
-pub use tacet::helpers::effect::{busy_wait_ns, set_global_max_delay_ns};
+pub use tacet::helpers::effect::{busy_wait_ns, init_effect_injection, set_global_max_delay_ns};
 
 // =============================================================================
 // CONFIGURATION

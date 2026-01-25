@@ -13,6 +13,8 @@ Timing tests require more care in CI than typical unit tests. This guide covers 
 
 A basic test with formatted output:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use std::time::Duration;
@@ -37,16 +39,174 @@ fn test_crypto_constant_time() {
     assert!(outcome.passed(), "Timing leak detected");
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+import { TimingOracle, AttackerModel } from 'tacet';
+
+test('crypto constant time', async () => {
+    const outcome = await new TimingOracle(AttackerModel.AdjacentNetwork)
+        .timeBudget(30_000) // milliseconds
+        .test({
+            baseline: () => new Uint8Array(32),
+            sample: () => crypto.getRandomValues(new Uint8Array(32)),
+            measure: (data) => myCryptoFunction(data)
+        });
+
+    // Display formatted output
+    console.log(outcome.toString());
+
+    // Assert the test passed
+    expect(outcome.passed()).toBe(true);
+});
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet.h>
+#include <assert.h>
+
+void test_crypto_constant_time(void) {
+    // Create oracle
+    tacet_oracle_t* oracle = tacet_oracle_for_attacker(
+        TACET_ATTACKER_ADJACENT_NETWORK
+    );
+    tacet_oracle_set_time_budget_secs(oracle, 30);
+
+    // Run test
+    tacet_outcome_t outcome = tacet_test(
+        oracle,
+        generate_baseline,  // Returns all zeros
+        generate_sample,    // Returns random data
+        measure_crypto,     // The function to test
+        NULL                // Optional context pointer
+    );
+
+    // Display formatted output
+    tacet_outcome_print(outcome);
+
+    // Assert the test passed
+    assert(tacet_outcome_passed(outcome));
+
+    // Cleanup
+    tacet_outcome_free(outcome);
+    tacet_oracle_free(oracle);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet.hpp>
+#include <catch2/catch_test_macros.hpp>
+
+TEST_CASE("crypto constant time") {
+    auto outcome = tacet::TimingOracle::forAttacker(
+        tacet::AttackerModel::AdjacentNetwork
+    )
+    .timeBudget(std::chrono::seconds(30))
+    .test(
+        []() { return std::array<uint8_t, 32>{}; },        // baseline
+        []() { return randomArray<uint8_t, 32>(); },       // sample
+        [](const auto& data) { myCryptoFunction(data); }   // measure
+    );
+
+    // Display formatted output
+    std::cout << outcome << std::endl;
+
+    // Assert the test passed
+    REQUIRE(outcome.passed());
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+package crypto_test
+
+import (
+    "crypto/rand"
+    "testing"
+    "time"
+    "github.com/yourusername/tacet-go"
+)
+
+func TestCryptoConstantTime(t *testing.T) {
+    outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+        TimeBudget(30 * time.Second).
+        Test(tacet.TestConfig{
+            Baseline: func() []byte {
+                return make([]byte, 32)
+            },
+            Sample: func() []byte {
+                data := make([]byte, 32)
+                rand.Read(data)
+                return data
+            },
+            Measure: func(data []byte) {
+                myCryptoFunction(data)
+            },
+        })
+
+    // Display formatted output
+    t.Log(outcome)
+
+    // Assert the test passed
+    if !outcome.Passed() {
+        t.Fatalf("Timing leak detected")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ## Running tests
 
-### The critical flag: `--test-threads=1`
+### The critical flag: single-threaded execution
 
-Timing tests should run single-threaded:
+Timing tests should run single-threaded to avoid interference:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```bash
 cargo test --test timing_tests -- --test-threads=1 --nocapture
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```bash
+# Bun runs tests single-threaded by default
+bun test
+
+# npm/yarn with Jest: use --runInBand
+npm test -- --runInBand
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```bash
+# CMake with CTest
+ctest --test-dir build --serial
+
+# Or run test binary directly
+./build/timing_tests
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```bash
+# CMake with CTest
+ctest --test-dir build --serial
+
+# Or run test binary directly
+./build/timing_tests
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```bash
+# Go runs tests single-threaded by default
+go test
+
+# Explicitly set parallelism to 1
+go test -p 1 -parallel 1
+```
+</TabItem>
+</Tabs>
 
 **Why single-threaded?**
 
@@ -57,14 +217,14 @@ cargo test --test timing_tests -- --test-threads=1 --nocapture
 3. **Reproducibility**: Single-threaded execution produces more consistent results across runs.
 
 <Aside type="caution">
-Without `--test-threads=1`, tests may pass or fail inconsistently, and cycle-accurate timing won't work on macOS even with sudo.
+Without single-threaded execution, tests may pass or fail inconsistently, and cycle-accurate timing won't work on macOS even with sudo.
 </Aside>
 
 ### Enabling cycle-accurate timers
 
 For higher precision on ARM64, enable cycle-accurate timers. Use `TimerSpec::CyclePrecision` in your test code to explicitly request high precision:
 
-<Tabs>
+<Tabs syncKey="language">
 <TabItem label="macOS">
 ```bash
 # Requires both sudo AND single-threaded
@@ -93,7 +253,12 @@ cargo test --test timing_tests -- --test-threads=1
 | PR checks | 30s | Balance speed and accuracy |
 | Nightly/security audit | 60s+ | Higher confidence |
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
+use tacet::{TimingOracle, AttackerModel};
+use std::time::Duration;
+
 // Development: quick feedback
 TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .time_budget(Duration::from_secs(10))
@@ -107,15 +272,93 @@ TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .time_budget(Duration::from_secs(60))
     .max_samples(100_000)
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+import { TimingOracle, AttackerModel } from 'tacet';
+
+// Development: quick feedback
+new TimingOracle(AttackerModel.AdjacentNetwork)
+    .timeBudget(10_000) // milliseconds
+
+// CI: standard checks
+new TimingOracle(AttackerModel.AdjacentNetwork)
+    .timeBudget(30_000)
+
+// Security audit: thorough
+new TimingOracle(AttackerModel.AdjacentNetwork)
+    .timeBudget(60_000)
+    .maxSamples(100_000)
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet.h>
+
+// Development: quick feedback
+tacet_oracle_t* oracle = tacet_oracle_for_attacker(
+    TACET_ATTACKER_ADJACENT_NETWORK
+);
+tacet_oracle_set_time_budget_secs(oracle, 10);
+
+// CI: standard checks
+tacet_oracle_set_time_budget_secs(oracle, 30);
+
+// Security audit: thorough
+tacet_oracle_set_time_budget_secs(oracle, 60);
+tacet_oracle_set_max_samples(oracle, 100000);
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet.hpp>
+#include <chrono>
+
+using namespace std::chrono_literals;
+
+// Development: quick feedback
+auto oracle = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork
+).timeBudget(10s);
+
+// CI: standard checks
+oracle.timeBudget(30s);
+
+// Security audit: thorough
+oracle.timeBudget(60s).maxSamples(100'000);
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import (
+    "time"
+    "github.com/yourusername/tacet-go"
+)
+
+// Development: quick feedback
+oracle := tacet.ForAttacker(tacet.AdjacentNetwork).
+    TimeBudget(10 * time.Second)
+
+// CI: standard checks
+oracle.TimeBudget(30 * time.Second)
+
+// Security audit: thorough
+oracle.TimeBudget(60 * time.Second).
+    MaxSamples(100_000)
+```
+</TabItem>
+</Tabs>
 
 ## Handling noisy environments
 
-CI runners are often noisier than local development machines. The library provides macros for handling unreliable conditions:
+CI runners are often noisier than local development machines. The library provides utilities for handling unreliable conditions:
 
-### skip_if_unreliable!
+### Skip unreliable tests (fail-open)
 
-Skip tests that can't produce reliable results (fail-open):
+Skip tests that can't produce reliable results:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::skip_if_unreliable;
 
@@ -131,11 +374,104 @@ fn test_crypto() {
     assert!(outcome.passed(), "Timing leak detected");
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+test('crypto timing', async () => {
+    const outcome = await new TimingOracle(AttackerModel.AdjacentNetwork)
+        .test({
+            baseline: () => new Uint8Array(32),
+            sample: () => crypto.getRandomValues(new Uint8Array(32)),
+            measure: (data) => myFunction(data)
+        });
 
-### require_reliable!
+    // Skip if inconclusive or unmeasurable
+    if (!outcome.isConclusive() || !outcome.isMeasurable()) {
+        console.warn('Test skipped: environment too noisy');
+        return;
+    }
 
-Require reliable results, failing on uncertainty (fail-closed):
+    expect(outcome.passed()).toBe(true);
+});
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void test_crypto(void) {
+    tacet_oracle_t* oracle = tacet_oracle_for_attacker(
+        TACET_ATTACKER_ADJACENT_NETWORK
+    );
+    tacet_outcome_t outcome = tacet_test(oracle, gen_baseline, gen_sample,
+                                          measure, NULL);
 
+    // Skip if inconclusive or unmeasurable
+    if (!tacet_outcome_is_conclusive(outcome) ||
+        !tacet_outcome_is_measurable(outcome)) {
+        printf("Test skipped: environment too noisy\n");
+        tacet_outcome_free(outcome);
+        tacet_oracle_free(oracle);
+        return;
+    }
+
+    assert(tacet_outcome_passed(outcome));
+    tacet_outcome_free(outcome);
+    tacet_oracle_free(oracle);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+TEST_CASE("crypto timing") {
+    auto outcome = tacet::TimingOracle::forAttacker(
+        tacet::AttackerModel::AdjacentNetwork
+    ).test(
+        []() { return std::array<uint8_t, 32>{}; },
+        []() { return randomArray<uint8_t, 32>(); },
+        [](const auto& data) { myFunction(data); }
+    );
+
+    // Skip if inconclusive or unmeasurable
+    if (!outcome.isConclusive() || !outcome.isMeasurable()) {
+        SKIP("Environment too noisy");
+    }
+
+    REQUIRE(outcome.passed());
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func TestCryptoTiming(t *testing.T) {
+    outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+        Test(tacet.TestConfig{
+            Baseline: func() []byte { return make([]byte, 32) },
+            Sample: func() []byte {
+                data := make([]byte, 32)
+                rand.Read(data)
+                return data
+            },
+            Measure: func(data []byte) { myFunction(data) },
+        })
+
+    // Skip if inconclusive or unmeasurable
+    if !outcome.IsConclusive() || !outcome.IsMeasurable() {
+        t.Skip("Environment too noisy")
+    }
+
+    if !outcome.Passed() {
+        t.Fatal("Timing leak detected")
+    }
+}
+```
+</TabItem>
+</Tabs>
+
+### Require reliable results (fail-closed)
+
+Require reliable results, failing on uncertainty:
+
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::require_reliable;
 
@@ -151,11 +487,113 @@ fn test_security_critical() {
     assert!(outcome.passed());
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+test('security critical timing', async () => {
+    const outcome = await new TimingOracle(AttackerModel.AdjacentNetwork)
+        .test({
+            baseline: () => new Uint8Array(32),
+            sample: () => crypto.getRandomValues(new Uint8Array(32)),
+            measure: (data) => criticalFunction(data)
+        });
+
+    // Fail if inconclusive or unmeasurable
+    if (!outcome.isConclusive()) {
+        throw new Error('Test inconclusive: environment too noisy');
+    }
+    if (!outcome.isMeasurable()) {
+        throw new Error('Test unmeasurable: operation too fast');
+    }
+
+    expect(outcome.passed()).toBe(true);
+});
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```c
+void test_security_critical(void) {
+    tacet_oracle_t* oracle = tacet_oracle_for_attacker(
+        TACET_ATTACKER_ADJACENT_NETWORK
+    );
+    tacet_outcome_t outcome = tacet_test(oracle, gen_baseline, gen_sample,
+                                          measure_critical, NULL);
+
+    // Fail if inconclusive or unmeasurable
+    if (!tacet_outcome_is_conclusive(outcome)) {
+        fprintf(stderr, "Test inconclusive: environment too noisy\n");
+        exit(1);
+    }
+    if (!tacet_outcome_is_measurable(outcome)) {
+        fprintf(stderr, "Test unmeasurable: operation too fast\n");
+        exit(1);
+    }
+
+    assert(tacet_outcome_passed(outcome));
+    tacet_outcome_free(outcome);
+    tacet_oracle_free(oracle);
+}
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+TEST_CASE("security critical timing") {
+    auto outcome = tacet::TimingOracle::forAttacker(
+        tacet::AttackerModel::AdjacentNetwork
+    ).test(
+        []() { return std::array<uint8_t, 32>{}; },
+        []() { return randomArray<uint8_t, 32>(); },
+        [](const auto& data) { criticalFunction(data); }
+    );
+
+    // Fail if inconclusive or unmeasurable
+    if (!outcome.isConclusive()) {
+        FAIL("Test inconclusive: environment too noisy");
+    }
+    if (!outcome.isMeasurable()) {
+        FAIL("Test unmeasurable: operation too fast");
+    }
+
+    REQUIRE(outcome.passed());
+}
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+func TestSecurityCriticalTiming(t *testing.T) {
+    outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+        Test(tacet.TestConfig{
+            Baseline: func() []byte { return make([]byte, 32) },
+            Sample: func() []byte {
+                data := make([]byte, 32)
+                rand.Read(data)
+                return data
+            },
+            Measure: func(data []byte) { criticalFunction(data) },
+        })
+
+    // Fail if inconclusive or unmeasurable
+    if !outcome.IsConclusive() {
+        t.Fatal("Test inconclusive: environment too noisy")
+    }
+    if !outcome.IsMeasurable() {
+        t.Fatal("Test unmeasurable: operation too fast")
+    }
+
+    if !outcome.Passed() {
+        t.Fatal("Timing leak detected")
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 ### Environment variable override
 
 Force a policy for all tests:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```bash
 # Fail-closed: all tests must produce reliable results
 TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed cargo test
@@ -163,6 +601,35 @@ TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed cargo test
 # Fail-open: skip unreliable tests (default)
 TIMING_ORACLE_UNRELIABLE_POLICY=skip cargo test
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```bash
+# Fail-closed: all tests must produce reliable results
+TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed bun test
+
+# Fail-open: skip unreliable tests (default)
+TIMING_ORACLE_UNRELIABLE_POLICY=skip bun test
+```
+</TabItem>
+<TabItem label="C/C++">
+```bash
+# Fail-closed: all tests must produce reliable results
+TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed ./build/timing_tests
+
+# Fail-open: skip unreliable tests (default)
+TIMING_ORACLE_UNRELIABLE_POLICY=skip ./build/timing_tests
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```bash
+# Fail-closed: all tests must produce reliable results
+TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed go test
+
+# Fail-open: skip unreliable tests (default)
+TIMING_ORACLE_UNRELIABLE_POLICY=skip go test
+```
+</TabItem>
+</Tabs>
 
 ## GitHub Actions example
 
@@ -253,6 +720,8 @@ For self-hosted runners:
 
 Consider separating timing tests from your regular test suite:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```
 tests/
 ├── unit/           # Fast unit tests
@@ -272,11 +741,133 @@ cargo test --test unit --test integration
 # Timing tests (slower, single-threaded)
 cargo test --test timing -- --test-threads=1
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```
+tests/
+├── unit/           # Fast unit tests
+├── integration/    # Integration tests
+└── timing/         # Timing side channel tests
+    ├── aes.test.js
+    ├── ecdh.test.js
+    └── rsa.test.js
+```
 
-## Cargo.toml configuration
+Run them separately:
 
-Set default test threads for timing tests:
+```bash
+# Regular tests (fast, parallel)
+bun test tests/unit tests/integration
 
+# Timing tests (slower, single-threaded)
+bun test tests/timing
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+```
+tests/
+├── unit/           # Fast unit tests
+├── integration/    # Integration tests
+└── timing/         # Timing side channel tests
+    ├── test_aes.c
+    ├── test_ecdh.c
+    └── test_rsa.c
+```
+
+Configure in CMakeLists.txt:
+
+```cmake
+# Regular tests (fast, can run in parallel)
+add_test(NAME unit_tests COMMAND unit_tests)
+add_test(NAME integration_tests COMMAND integration_tests)
+
+# Timing tests (slower, single-threaded)
+add_test(NAME timing_aes COMMAND timing_tests aes)
+add_test(NAME timing_ecdh COMMAND timing_tests ecdh)
+add_test(NAME timing_rsa COMMAND timing_tests rsa)
+
+# Mark timing tests to run serially
+set_tests_properties(timing_aes timing_ecdh timing_rsa
+    PROPERTIES RUN_SERIAL TRUE)
+```
+
+Run them:
+
+```bash
+# Regular tests
+ctest --test-dir build -R "unit|integration"
+
+# Timing tests
+ctest --test-dir build -R "timing" --serial
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+```
+tests/
+├── unit/           # Fast unit tests
+├── integration/    # Integration tests
+└── timing/         # Timing side channel tests
+    ├── test_aes.cpp
+    ├── test_ecdh.cpp
+    └── test_rsa.cpp
+```
+
+Configure in CMakeLists.txt:
+
+```cmake
+# Regular tests (fast, can run in parallel)
+add_test(NAME unit_tests COMMAND unit_tests)
+add_test(NAME integration_tests COMMAND integration_tests)
+
+# Timing tests (slower, single-threaded)
+add_test(NAME timing_aes COMMAND timing_tests [aes])
+add_test(NAME timing_ecdh COMMAND timing_tests [ecdh])
+add_test(NAME timing_rsa COMMAND timing_tests [rsa])
+
+# Mark timing tests to run serially
+set_tests_properties(timing_aes timing_ecdh timing_rsa
+    PROPERTIES RUN_SERIAL TRUE)
+```
+
+Run them:
+
+```bash
+# Regular tests
+ctest --test-dir build -R "unit|integration"
+
+# Timing tests
+ctest --test-dir build -R "timing" --serial
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```
+tests/
+├── unit/           # Fast unit tests
+├── integration/    # Integration tests
+└── timing/         # Timing side channel tests
+    ├── aes_test.go
+    ├── ecdh_test.go
+    └── rsa_test.go
+```
+
+Run them separately:
+
+```bash
+# Regular tests (fast, parallel)
+go test ./tests/unit/... ./tests/integration/...
+
+# Timing tests (slower, single-threaded)
+go test ./tests/timing/... -p 1 -parallel 1
+```
+</TabItem>
+</Tabs>
+
+## Test configuration
+
+Set default single-threaded execution for timing tests:
+
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```toml
 # In .cargo/config.toml
 [env]
@@ -295,12 +886,73 @@ fn main() {
     // This file's tests will respect --test-threads=1
 }
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```json
+// In package.json
+{
+  "scripts": {
+    "test": "bun test",
+    "test:timing": "bun test tests/timing"
+  }
+}
+```
+
+Or with Jest:
+
+```json
+// In jest.config.js
+module.exports = {
+  testMatch: ['**/tests/timing/**/*.test.js'],
+  maxWorkers: 1,  // Single-threaded
+  bail: true
+};
+```
+</TabItem>
+<TabItem label="C/C++">
+```cmake
+# In CMakeLists.txt
+# Mark timing tests to run serially
+set_tests_properties(
+    timing_aes timing_ecdh timing_rsa
+    PROPERTIES RUN_SERIAL TRUE
+)
+
+# Or set a custom property for all timing tests
+set_tests_properties(
+    timing_aes timing_ecdh timing_rsa
+    PROPERTIES LABELS "timing"
+)
+
+# Run timing tests with: ctest -L timing --serial
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```bash
+# Create a timing_test.sh script
+#!/bin/bash
+go test ./tests/timing/... -p 1 -parallel 1 "$@"
+```
+
+Or use a Makefile:
+
+```makefile
+.PHONY: test test-timing
+
+test:
+	go test ./tests/unit/... ./tests/integration/...
+
+test-timing:
+	go test ./tests/timing/... -p 1 -parallel 1 -v
+```
+</TabItem>
+</Tabs>
 
 ## Summary
 
-1. **Always use `--test-threads=1`** for timing tests
+1. **Always run timing tests single-threaded** to avoid measurement interference
 2. **Use 30s time budget** for CI, longer for security audits
-3. **Use `TimerSpec::CyclePrecision`** with sudo/capabilities for higher precision on ARM64
-4. **Handle noisy environments** with `skip_if_unreliable!` or `require_reliable!`
+3. **Use cycle-accurate timers** (with sudo/capabilities) for higher precision on ARM64
+4. **Handle noisy environments** with skip/fail policies based on your requirements
 5. **Separate timing tests** from regular tests in your CI workflow
 6. **Cloud VMs are noisier**: use relaxed thresholds or longer budgets

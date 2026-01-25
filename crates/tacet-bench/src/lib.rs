@@ -68,6 +68,7 @@ pub mod dudect_stats;
 pub mod output;
 pub mod realistic;
 pub mod runner;
+mod semaphore;
 pub mod sweep;
 pub mod synthetic;
 

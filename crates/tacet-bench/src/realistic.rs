@@ -29,6 +29,7 @@
 use rand::prelude::*;
 use std::hint::black_box;
 use std::time::Instant;
+use tacet::measurement::affinity::AffinityGuard;
 use tacet::measurement::{BoxedTimer, TimerSpec};
 use tacet::{busy_wait_ns, BenchmarkEffect, Class};
 
@@ -99,6 +100,20 @@ pub struct RealisticBlockedData {
 /// A `RealisticDataset` with both interleaved (acquisition order) and blocked views.
 pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
     let wall_start = Instant::now();
+
+    // Initialize effect injection calibration before any measurements
+    // This ensures calibration overhead doesn't interfere with timing data
+    tacet::helpers::init_effect_injection();
+
+    // Pin to current CPU to prevent thread migration during measurements
+    // This is critical for perf_event mmap-based PMU access on Linux, which marks
+    // events as unavailable (index=0) when threads migrate to different CPUs.
+    // Without pinning, events get multiplexed out on every migration, causing
+    // RetryExhausted errors due to the 4ms multiplexing interval.
+    let _affinity_guard = match AffinityGuard::try_pin() {
+        tacet::measurement::affinity::AffinityResult::Pinned(guard) => Some(guard),
+        tacet::measurement::affinity::AffinityResult::NotPinned { .. } => None,
+    };
 
     // Initialize timer with automatic fallback - prefers cycle-accurate when available
     // On ARM64 macOS: uses kperf if sudo available, otherwise falls back to cntvct_el0 (~42ns)
@@ -281,7 +296,7 @@ fn measure_operation(
     // Use BoxedTimer::measure_cycles and convert to nanoseconds
     let cycles = timer.measure_cycles(|| {
         busy_wait_ns(base_ns + effect_delay);
-    });
+    }).expect("measurement should not fail during benchmarking");
 
     // Convert cycles to nanoseconds
     timer.cycles_to_ns(cycles).round() as u64
@@ -498,7 +513,6 @@ mod tests {
             seed: 12345,
             warmup_iterations: 5,
             base_operation_ns: 100,
-            ..Default::default()
         };
 
         let dataset1 = collect_realistic_dataset(&config);

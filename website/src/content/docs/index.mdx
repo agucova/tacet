@@ -21,15 +21,15 @@ import { Tabs, TabItem, Code, LinkCard, CardGrid } from '@astrojs/starlight/comp
 
 ## Install
 
-<Tabs>
-<TabItem label="Rust">
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```bash
 cargo add tacet --dev
 cargo add rand --dev  # For random input generation
 ```
 Default features include parallel processing and cycle-accurate timer support (kperf/perf). See [installation](/getting-started/installation) for feature flags.
 </TabItem>
-<TabItem label="JavaScript">
+<TabItem label="JavaScript" icon="seti:javascript">
 ```bash
 # npm
 npm install @tacet/js
@@ -42,7 +42,7 @@ pnpm add @tacet/js
 ```
 Native bindings (NAPI-RS) for Node.js and Bun on Linux, macOS, and Windows. See [installation](/getting-started/installation) for platform details.
 </TabItem>
-<TabItem label="C/C++">
+<TabItem label="C" icon="seti:c">
 **Install script (Linux/macOS):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
@@ -53,9 +53,22 @@ curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bas
 brew install agucova/tacet/tacet-c
 ```
 
-See [installation](/getting-started/installation) for pkg-config setup and CMake integration.
+See [installation](/getting-started/installation#c) for pkg-config setup and CMake integration.
 </TabItem>
-<TabItem label="Go">
+<TabItem label="C++" icon="seti:cpp">
+**Install script (Linux/macOS):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+```
+
+**Homebrew (macOS):**
+```bash
+brew install agucova/tacet/tacet-c
+```
+
+See [installation](/getting-started/installation#c-1) for pkg-config setup and CMake integration (requires C++20).
+</TabItem>
+<TabItem label="Go" icon="seti:go">
 ```bash
 go get github.com/agucova/tacet/crates/tacet-go
 go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest

@@ -76,6 +76,7 @@
 pub mod affinity;
 mod collector;
 mod cycle_timer;
+mod error;
 mod outlier;
 #[cfg(feature = "thread-priority")]
 pub mod priority;
@@ -90,9 +91,13 @@ pub mod kperf;
 #[cfg(all(feature = "perf", target_os = "linux"))]
 pub mod perf;
 
+#[cfg(all(feature = "perf-mmap", target_os = "linux"))]
+pub(crate) mod perf_mmap;
+
 pub use collector::{
     Collector, Sample, MAX_BATCH_SIZE, MIN_TICKS_SINGLE_CALL, TARGET_TICKS_PER_BATCH,
 };
 pub use cycle_timer::{BoxedTimer, TimerError, TimerFallbackReason, TimerSpec};
+pub use error::{MeasurementError, MeasurementResult};
 pub use outlier::{filter_outliers, winsorize_f64, OutlierStats};
 pub use timer::{black_box, cycles_per_ns, rdtsc, Timer};

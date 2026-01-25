@@ -36,7 +36,7 @@ tacet gives you:
 ### Input types
 
 <Tabs>
-<TabItem label="DudeCT (C)">
+<TabItem label="DudeCT (C)" icon="seti:c">
 ```c
 typedef struct {
     uint8_t *data;
@@ -56,7 +56,7 @@ void prepare_inputs(input_t *inputs, uint8_t *classes, int n) {
 }
 ```
 </TabItem>
-<TabItem label="tacet (Rust)">
+<TabItem label="tacet (Rust)" icon="seti:rust">
 ```rust
 use tacet::helpers::InputPair;
 
@@ -66,7 +66,7 @@ let inputs = InputPair::new(
 );
 ```
 </TabItem>
-<TabItem label="tacet (C)">
+<TabItem label="tacet (C)" icon="seti:c">
 ```c
 #include <tacet.h>
 
@@ -82,7 +82,7 @@ tacet_inputs_t inputs = {
 ### The measurement function
 
 <Tabs>
-<TabItem label="DudeCT (C)">
+<TabItem label="DudeCT (C)" icon="seti:c">
 ```c
 uint8_t do_one_computation(uint8_t *data) {
     // Perform the operation to test
@@ -90,7 +90,7 @@ uint8_t do_one_computation(uint8_t *data) {
 }
 ```
 </TabItem>
-<TabItem label="tacet (Rust)">
+<TabItem label="tacet (Rust)" icon="seti:rust">
 ```rust
 let outcome = oracle.test(inputs, |data| {
     // Perform the operation to test
@@ -98,7 +98,7 @@ let outcome = oracle.test(inputs, |data| {
 });
 ```
 </TabItem>
-<TabItem label="tacet (C)">
+<TabItem label="tacet (C)" icon="seti:c">
 ```c
 void measure_fn(const uint8_t* data, size_t len, void* ctx) {
     // Perform the operation to test
@@ -111,7 +111,7 @@ void measure_fn(const uint8_t* data, size_t len, void* ctx) {
 ### Running the test
 
 <Tabs>
-<TabItem label="DudeCT (C)">
+<TabItem label="DudeCT (C)" icon="seti:c">
 ```c
 dudect_ctx_t ctx;
 dudect_init(&ctx, do_one_computation);
@@ -127,7 +127,7 @@ if (ctx.t > 4.5) {
 }
 ```
 </TabItem>
-<TabItem label="tacet (Rust)">
+<TabItem label="tacet (Rust)" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel};
 
@@ -138,7 +138,7 @@ println!("{outcome}");  // Formatted output with colors
 assert!(outcome.passed(), "Timing leak detected");
 ```
 </TabItem>
-<TabItem label="tacet (C)">
+<TabItem label="tacet (C)" icon="seti:c">
 ```c
 tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
 tacet_outcome_t outcome;
@@ -197,7 +197,7 @@ int main() {
 ### Equivalent tacet test
 
 <Tabs>
-<TabItem label="Rust">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
@@ -225,7 +225,7 @@ fn test_aes_constant_time() {
 }
 ```
 </TabItem>
-<TabItem label="C">
+<TabItem label="C" icon="seti:c">
 ```c
 #include <tacet.h>
 #include <aes.h>
@@ -309,7 +309,7 @@ This is a more meaningful question than "is there any statistical difference?"
 If you're using the [dudect-bencher](https://crates.io/crates/dudect-bencher) Rust crate, the migration is similar but with different type names:
 
 <Tabs>
-<TabItem label="dudect-bencher">
+<TabItem label="dudect-bencher" icon="seti:rust">
 ```rust
 use dudect_bencher::{ctbench_main, BenchRng, Class, CtRunner};
 use rand::Rng;
@@ -341,7 +341,7 @@ fn vec_eq(runner: &mut CtRunner, rng: &mut BenchRng) {
 ctbench_main!(vec_eq);
 ```
 </TabItem>
-<TabItem label="tacet">
+<TabItem label="tacet" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 

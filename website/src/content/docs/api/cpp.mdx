@@ -5,6 +5,10 @@ sidebar:
   order: 3
 ---
 
+import ApiLanguageSwitcher from '../../../components/ApiLanguageSwitcher.astro';
+
+<ApiLanguageSwitcher currentLanguage="cpp" />
+
 Header-only C++ wrapper for tacet, providing RAII semantics, modern C++ idioms, and a fluent builder API.
 
 ## Quick Reference
@@ -39,18 +43,36 @@ int main() {
 
 The C++ wrapper is a header-only library that wraps the C bindings.
 
+**Quick Install (Recommended):**
+
+```bash
+# Install script (Linux/macOS) — includes both tacet.h and tacet.hpp
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+
+# Or Homebrew (macOS)
+brew install https://raw.githubusercontent.com/agucova/tacet/main/homebrew/Formula/tacet-c.rb
+
+# Verify
+pkg-config --modversion tacet
+```
+
+**Build from Source:**
+
 ```bash
 git clone https://github.com/agucova/tacet
 cd tacet
 cargo build --release -p tacet-c
 
-# Headers at:
-#   crates/tacet-c/include/tacet.h
-#   bindings/cpp/tacet.hpp
-# Library at: target/release/libtacet_c.{a,so,dylib}
+# Artifacts:
+# - C header: crates/tacet-c/include/tacet.h
+# - C++ wrapper: bindings/cpp/tacet.hpp
+# - Library: target/release/libtacet_c.a
+# - pkg-config: target/release/tacet.pc
 ```
 
-Requires C++20 for `std::span` and `std::chrono_literals`.
+**Requirements:** C++20 for `std::span` and `std::chrono_literals`.
+
+See [Installation Guide](/getting-started/installation) for more details.
 
 ---
 

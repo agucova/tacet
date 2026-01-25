@@ -1,0 +1,21 @@
+---
+// Custom Sidebar component that adds language selector
+// Preserves Starlight's default structure by importing and reusing internal components
+
+import SidebarPersister from '@astrojs/starlight/components/SidebarPersister.astro';
+import SidebarSublist from '@astrojs/starlight/components/SidebarSublist.astro';
+import MobileMenuFooter from 'virtual:starlight/components/MobileMenuFooter';
+import LanguageSelect from './LanguageSelect.astro';
+
+const { sidebar } = Astro.locals.starlightRoute;
+---
+
+<LanguageSelect />
+
+<SidebarPersister>
+	<SidebarSublist sublist={sidebar} />
+</SidebarPersister>
+
+<div class="md:sl-hidden">
+	<MobileMenuFooter />
+</div>

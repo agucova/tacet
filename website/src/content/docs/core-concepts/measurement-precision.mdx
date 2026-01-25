@@ -38,20 +38,65 @@ You requested `SharedHardware` (0.6ns), but:
 
 This isn't a bug; it's honest reporting. The library could pretend to test at 0.6ns and give you a false sense of confidence, but instead it tells you what precision was actually achieved.
 
-## Platform precision
+## Timer matrix
 
-Different platforms have different precision capabilities:
+tacet supports multiple timing sources across platforms and languages. This table shows all available timers, including both standard and cycle-accurate options:
 
-| Platform | Standard Timer | Cycle-Accurate Timer | How to enable |
-|----------|----------------|---------------------|---------------|
-| x86\_64 Linux | ~1ns (rdtsc) | ~1ns | Already high precision |
-| x86\_64 macOS | ~1ns (rdtsc) | ~1ns | Already high precision |
-| Apple Silicon | ~21ns (cntvct) | ~1ns (kperf) | `sudo` + `--test-threads=1` |
-| Linux ARM64 | varies by SoC | ~1ns (perf\_event) | `sudo` or `CAP_PERFMON` |
+| Language | Platform | Timer | Precision | Requirements | Notes |
+|----------|----------|-------|-----------|--------------|-------|
+| **Rust** | x86\_64 | `rdtsc` | ~0.3–1ns | None | CPU timestamp counter (cycle-accurate) |
+| **Rust** | macOS ARM64 | `cntvct_el0` | ~42ns | None | 24 MHz virtual timer (default) |
+| **Rust** | macOS ARM64 | **kperf PMU** | **~0.3–1ns** | **`sudo` + single-threaded** | Cycle-accurate via Apple's kperf framework<br/>Enable: `TimerSpec::CyclePrecision` |
+| **Rust** | Linux ARM64 | `cntvct_el0` | 18–42ns or ~1ns | None | SoC-dependent (ARMv8.6+ is ~1ns) |
+| **Rust** | Linux ARM64 | **perf\_event** | **~0.3–1ns** | **`sudo` or `CAP_PERFMON`** | Cycle-accurate via Linux perf\_event API<br/>Enable: `TimerSpec::CyclePrecision` |
+| **Rust** | Other | `Instant::now()` | ~100ns+ | None | OS-dependent fallback |
+| **C/C++** | x86\_64 | `rdtsc` | ~0.3–1ns | None | Inline assembly (cycle-accurate) |
+| **C/C++** | macOS ARM64 | `cntvct_el0` | ~42ns | None | Inline assembly (24 MHz virtual timer) |
+| **C/C++** | macOS ARM64 | **kperf PMU** | **~0.3–1ns** | **`sudo` + single-threaded** | Cycle-accurate (planned) |
+| **C/C++** | Linux ARM64 | `cntvct_el0` | 18–42ns or ~1ns | None | Inline assembly (SoC-dependent) |
+| **C/C++** | Linux ARM64 | **perf\_event** | **~0.3–1ns** | **`sudo` or `CAP_PERFMON`** | Cycle-accurate (planned) |
+| **Go** | x86\_64 | `rdtsc` | ~0.3–1ns | None | Assembly (cycle-accurate) |
+| **Go** | macOS ARM64 | `cntvct_el0` | ~42ns | None | Assembly (24 MHz virtual timer) |
+| **Go** | macOS ARM64 | **kperf PMU** | **~0.3–1ns** | **`sudo` + single-threaded** | Cycle-accurate (planned) |
+| **Go** | Linux ARM64 | `cntvct_el0` | 18–42ns or ~1ns | None | Assembly (SoC-dependent) |
+| **Go** | Linux ARM64 | **perf\_event** | **~0.3–1ns** | **`sudo` or `CAP_PERFMON`** | Cycle-accurate (planned) |
+| **Go** | Other | `time.Now()` | ~100ns+ | None | OS-dependent fallback |
+| **JavaScript/WASM** | Linux | `clock_gettime(CLOCK_MONOTONIC)` | ~1–10ns | None | Via `Bun.nanoseconds()` or `process.hrtime.bigint()`<br/>vDSO fast path |
+| **JavaScript/WASM** | macOS | `mach_absolute_time()` | ~10–100ns | None | Via `Bun.nanoseconds()` or `process.hrtime.bigint()` |
+| **JavaScript/WASM** | Windows | `QueryPerformanceCounter()` | ~10–100ns | None | Via `Bun.nanoseconds()` or `process.hrtime.bigint()` |
 
-<Aside type="note">
-On x86\_64, the `rdtsc` instruction provides cycle-accurate timing without requiring elevated privileges. ARM64 platforms use a lower-resolution virtual timer counter by default, but can access cycle-accurate timers (kperf on macOS, perf\_event on Linux) with the right permissions.
-</Aside>
+**Key points:**
+
+- **Automatic timer selection**: By default, tacet automatically selects the best available timer for your platform. You don't need to configure anything unless you specifically want cycle-accurate timers on ARM64.
+- **Precision notification**: If the available timer precision isn't sufficient to measure at your requested threshold (e.g., `SharedHardware` at 0.6ns on Apple Silicon with standard timer), tacet will:
+  1. Notify you that the threshold was elevated to match measurement capabilities
+  2. Report the actual threshold tested in the results (`theta_eff` vs `theta_user`)
+  3. Still give you valid results at the achievable precision level
+- **x86\_64**: Cycle-accurate by default via `rdtsc` — no special setup needed across all languages
+- **ARM64 standard timers**: Use `cntvct_el0` virtual timer (42ns on Apple Silicon, varies on other SoCs)
+- **ARM64 cycle-accurate timers** (bold rows): Require elevated privileges but provide ~0.3–1ns precision
+  - **macOS**: kperf PMU requires both `sudo` AND `--test-threads=1` (single-threaded restriction)
+  - **Linux**: perf\_event requires `sudo` OR `CAP_PERFMON` capability
+  - **Rust**: Available now via `TimerSpec::CyclePrecision`
+  - **C/C++/Go**: Planned support
+- **JavaScript/WASM**: Cannot access CPU cycle counters; relies on OS monotonic clocks (still sub-microsecond)
+
+### When do you need cycle-accurate timers?
+
+Most users don't need cycle-accurate timers. Consider your attacker model:
+
+| Attacker Model | Threshold | Achievable With |
+|----------------|-----------|-----------------|
+| `RemoteNetwork` | 50 μs (~50,000ns) | ✓ All standard timers on all platforms |
+| `AdjacentNetwork` | 100ns | ✓ All standard timers on all platforms |
+| `SharedHardware` | 0.6ns (~2 cycles) | ✓ x86\_64 standard timer<br/>✓ ARM64 cycle-accurate timer (kperf/perf\_event) |
+| `Research` | 0ns (any difference) | ✓ x86\_64 standard timer<br/>✓ ARM64 cycle-accurate timer (kperf/perf\_event) |
+
+**Recommendations:**
+- **Most users**: Standard timers are sufficient. `AdjacentNetwork` (100ns) works perfectly with all standard timers, including Apple Silicon's 42ns timer.
+- **Testing SharedHardware on ARM64**: Use cycle-accurate timers (kperf/perf\_event). Currently available in Rust; planned for C/C++/Go.
+- **JavaScript/WASM users**: Standard timers only. Use `AdjacentNetwork` threshold, or test on x86\_64 for better precision.
+- **CI/cloud environments**: Expect higher measurement floors due to virtualization noise; `AdjacentNetwork` is a practical threshold.
 
 ## Improving precision
 
@@ -61,16 +106,109 @@ If your tests are hitting the measurement floor, you have several options:
 
 Use the `CyclePrecision` timer preset to request cycle-accurate measurements:
 
+<Tabs syncKey="lang">
+<TabItem label="Rust">
 ```rust
-use tacet::{TimingOracle, AttackerModel, TimerSpec};
+use tacet::{TimingOracle, AttackerModel, TimerSpec, helpers::InputPair};
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>()
+);
 
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
     .timer_spec(TimerSpec::CyclePrecision)  // Explicitly request cycle-accurate timer
-    .test(inputs, |data| my_function(&data));
+    .test(inputs, |data| my_function(data));
 ```
+</TabItem>
+<TabItem label="JavaScript">
+```javascript
+import { TimingOracle, AttackerModel } from '@tacet/tacet';
+
+// Note: Cycle-accurate timers are not available in JavaScript/WASM
+// The library automatically uses the best available timer
+
+const result = await TimingOracle.forAttacker(AttackerModel.SharedHardware)
+    .test({
+        baseline: () => new Uint8Array(32),
+        sample: () => crypto.getRandomValues(new Uint8Array(32))
+    }, (data) => myFunction(data));
+```
+</TabItem>
+<TabItem label="C">
+```c
+#include <tacet/tacet.h>
+
+// Note: Cycle-accurate timers are not available in the C API
+// The library automatically uses the best available timer (rdtsc on x86_64)
+
+to_config_t config = {
+    .attacker_model = TO_ATTACKER_SHARED_HARDWARE,
+    .time_budget_ms = 30000,
+    .max_samples = 100000
+};
+
+to_result_t result;
+int status = to_test(&config, my_callback, ctx, &result);
+```
+</TabItem>
+<TabItem label="C++">
+```cpp
+#include <tacet/tacet.hpp>
+
+// Note: Cycle-accurate timers are not available in the C++ API
+// The library automatically uses the best available timer (rdtsc on x86_64)
+
+auto result = tacet::Oracle::forAttacker(tacet::AttackerModel::SharedHardware)
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        // Generate baseline: all zeros
+        std::fill(baseline.begin(), baseline.end(), 0);
+
+        // Generate sample: random data
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        std::uniform_int_distribution<uint64_t> dist;
+        for (auto& val : sample) {
+            val = dist(gen);
+        }
+
+        // Measure operation
+        myFunction(baseline.data());
+    });
+```
+</TabItem>
+<TabItem label="Go">
+```go
+package main
+
+import "github.com/tacet-project/tacet-go"
+
+// Note: Cycle-accurate timers are not available in the Go API
+// The library automatically uses the best available timer (rdtsc on x86_64)
+
+func main() {
+    result := tacet.Test(
+        func(class tacet.Class) []byte {
+            if class == tacet.Baseline {
+                return make([]byte, 32) // All zeros
+            }
+            data := make([]byte, 32)
+            rand.Read(data)
+            return data
+        },
+        func(data []byte) {
+            myFunction(data)
+        },
+        32,
+        tacet.WithAttacker(tacet.SharedHardware),
+    )
+}
+```
+</TabItem>
+</Tabs>
 
 <Aside type="tip">
-Using `CyclePrecision` explicitly will error if cycle-accurate timing isn't available, rather than silently falling back to a coarse timer. This is safer for security-critical tests.
+Using `CyclePrecision` explicitly (Rust only) will error if cycle-accurate timing isn't available, rather than silently falling back to a coarse timer. This is safer for security-critical tests. Other language bindings automatically select the best available timer for the platform.
 </Aside>
 
 Cycle-accurate timers require elevated privileges on ARM64:
@@ -107,10 +245,73 @@ If you can't use cycle-accurate timers, consider whether the elevated threshold 
 
 Set a threshold that's above your measurement floor:
 
+<Tabs syncKey="lang">
+<TabItem label="Rust">
 ```rust
+use tacet::{TimingOracle, AttackerModel};
+
 // If your floor is ~21ns, test at 25ns
 TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 25.0 })
+    .test(inputs, |data| my_function(data));
 ```
+</TabItem>
+<TabItem label="JavaScript">
+```javascript
+import { TimingOracle, AttackerModel } from '@tacet/tacet';
+
+// If your floor is ~21ns, test at 25ns
+const result = await TimingOracle.forAttacker({ custom: 25.0 })
+    .test({
+        baseline: () => new Uint8Array(32),
+        sample: () => crypto.getRandomValues(new Uint8Array(32))
+    }, (data) => myFunction(data));
+```
+</TabItem>
+<TabItem label="C">
+```c
+#include <tacet/tacet.h>
+
+// If your floor is ~21ns, test at 25ns
+to_config_t config = {
+    .attacker_model = TO_ATTACKER_CUSTOM,
+    .custom_threshold_ns = 25.0,
+    .time_budget_ms = 30000,
+    .max_samples = 100000
+};
+
+to_result_t result;
+int status = to_test(&config, my_callback, ctx, &result);
+```
+</TabItem>
+<TabItem label="C++">
+```cpp
+#include <tacet/tacet.hpp>
+
+// If your floor is ~21ns, test at 25ns
+auto result = tacet::Oracle::forAttacker(tacet::AttackerModel::custom(25.0))
+    .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+        // ...
+    });
+```
+</TabItem>
+<TabItem label="Go">
+```go
+package main
+
+import "github.com/tacet-project/tacet-go"
+
+func main() {
+    // If your floor is ~21ns, test at 25ns
+    result := tacet.Test(
+        generator,
+        operation,
+        32,
+        tacet.WithCustomThreshold(25.0),
+    )
+}
+```
+</TabItem>
+</Tabs>
 
 This gives you conclusive results at an achievable precision level.
 
@@ -132,7 +333,11 @@ If you need `SharedHardware`-level precision but can't achieve it, consider:
 
 The outcome includes diagnostic information about precision:
 
+<Tabs syncKey="lang">
+<TabItem label="Rust">
 ```rust
+use tacet::Outcome;
+
 match outcome {
     Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
         // What you requested
@@ -151,22 +356,95 @@ match outcome {
     // ...
 }
 ```
+</TabItem>
+<TabItem label="JavaScript">
+```javascript
+import { Outcome } from '@tacet/tacet';
+
+if (result.outcome === Outcome.Pass || result.outcome === Outcome.Fail) {
+    const { diagnostics } = result;
+
+    // What you requested
+    const requested = diagnostics.thetaUser;
+
+    // What was actually tested
+    const effective = diagnostics.thetaEff;
+
+    if (effective > requested) {
+        console.log(
+            `Note: Threshold elevated from ${requested.toFixed(1)}ns to ${effective.toFixed(1)}ns`
+        );
+    }
+}
+```
+</TabItem>
+<TabItem label="C">
+```c
+#include <tacet/tacet.h>
+
+if (result.outcome == TO_OUTCOME_PASS || result.outcome == TO_OUTCOME_FAIL) {
+    // What you requested
+    double requested = result.diagnostics.theta_user;
+
+    // What was actually tested
+    double effective = result.diagnostics.theta_eff;
+
+    if (effective > requested) {
+        printf("Note: Threshold elevated from %.1fns to %.1fns\n",
+               requested, effective);
+    }
+}
+```
+</TabItem>
+<TabItem label="C++">
+```cpp
+#include <tacet/tacet.hpp>
+
+if (result.outcome == tacet::Outcome::Pass ||
+    result.outcome == tacet::Outcome::Fail) {
+    const auto& diagnostics = result.diagnostics;
+
+    // What you requested
+    double requested = diagnostics.theta_user;
+
+    // What was actually tested
+    double effective = diagnostics.theta_eff;
+
+    if (effective > requested) {
+        std::cout << "Note: Threshold elevated from "
+                  << std::fixed << std::setprecision(1)
+                  << requested << "ns to " << effective << "ns\n";
+    }
+}
+```
+</TabItem>
+<TabItem label="Go">
+```go
+package main
+
+import (
+    "fmt"
+    "github.com/tacet-project/tacet-go"
+)
+
+func main() {
+    result := tacet.Test(/* ... */)
+
+    if result.Outcome == tacet.Pass || result.Outcome == tacet.Fail {
+        // What you requested
+        requested := result.Diagnostics.ThetaUser
+
+        // What was actually tested
+        effective := result.Diagnostics.ThetaEff
+
+        if effective > requested {
+            fmt.Printf("Note: Threshold elevated from %.1fns to %.1fns\n",
+                requested, effective)
+        }
+    }
+}
+```
+</TabItem>
+</Tabs>
 
 A `ThresholdElevated` flag in diagnostics indicates when elevation occurred.
-
-## Practical guidance
-
-| Your goal | Recommended approach |
-|-----------|---------------------|
-| Test for LAN/HTTP/2 exploitability | Use `AdjacentNetwork` (100ns); works on all platforms |
-| Test for shared-hardware exploitability | Use `SharedHardware` if achievable; otherwise `Custom { threshold_ns: 10.0 }` |
-| Maximum precision on ARM64 | Use `TimerSpec::CyclePrecision` with sudo + `--test-threads=1` |
-| CI on cloud VMs | Expect higher floors due to VM noise; use `AdjacentNetwork` or longer budgets |
-
-## Summary
-
-- Every measurement setup has a precision floor (θ\_floor)
-- The library elevates your threshold if the requested precision isn't achievable
-- Check `theta_eff` vs `theta_user` in results to see if elevation occurred
-- Use `TimerSpec::CyclePrecision` for cycle-accurate measurements on ARM64
-- x86\_64 provides high precision by default via `rdtsc`

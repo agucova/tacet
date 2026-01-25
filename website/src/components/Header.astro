@@ -1,0 +1,76 @@
+---
+import type { Props } from '@astrojs/starlight/props';
+import Search from '@astrojs/starlight/components/Search.astro';
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+import ThemeSelect from './ThemeSelect.astro';
+import SiteTitle from './SiteTitle.astro';
+
+// Check if this is the splash page
+const isSplash = Astro.props.hasSidebar === false && Astro.props.entry.data.template === 'splash';
+---
+
+<div class="header sl-flex">
+	<div class:list={['title-wrapper', 'sl-flex', { 'splash-layout': isSplash }]}>
+		<SiteTitle {...Astro.props} />
+	</div>
+	<div class:list={['sl-flex', 'search-wrapper', { 'splash-search': isSplash }]}>
+		<Search {...Astro.props} />
+	</div>
+	<div class="sl-hidden md:sl-flex right-group">
+		<div class="sl-flex social-icons">
+			<SocialIcons {...Astro.props} />
+		</div>
+		<ThemeSelect {...Astro.props} />
+	</div>
+</div>
+
+<style>
+	.header {
+		gap: var(--sl-nav-gap);
+		justify-content: space-between;
+		align-items: center;
+		height: 100%;
+	}
+
+	/* On larger screens, use grid layout */
+	@media (min-width: 50rem) {
+		.header {
+			display: grid;
+			align-content: center;
+		}
+
+		/* Default grid for normal pages - keeps sidebar alignment */
+		.header:not(:has(.splash-layout)) {
+			grid-template-columns: minmax(
+					calc(
+						var(--__sidebar-width, 0rem) +
+							max(0rem, var(--__main-column-fr, 0rem) - var(--sl-nav-gap))
+					),
+					auto
+				)
+				1fr auto;
+		}
+
+		/* Simpler grid for splash page - centered search */
+		.header:has(.splash-layout) {
+			grid-template-columns: auto 1fr auto;
+		}
+
+		/* Center search on splash page */
+		.splash-search {
+			display: flex;
+			justify-content: center;
+		}
+	}
+
+	.search-wrapper {
+		flex: 1 1 auto;
+	}
+
+	.title-wrapper {
+		overflow: clip;
+		padding: 0.25rem;
+		margin: -0.25rem;
+		min-width: 0;
+	}
+</style>

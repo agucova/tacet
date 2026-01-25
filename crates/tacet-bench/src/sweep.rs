@@ -31,17 +31,18 @@ use crate::synthetic::{generate_benchmark_dataset, BenchmarkConfig, EffectPatter
 use crate::GeneratedDataset;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+
+use crate::semaphore::Semaphore;
 use std::time::{Duration, Instant};
 use tacet::{AttackerModel, BenchmarkEffect};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
-#[cfg(feature = "parallel")]
-use rayon::ThreadPoolBuilder;
 
-/// Default batch size for dataset processing (~160-320 MB per batch).
+/// Default batch size for dataset processing.
+/// Reduced from 500 to 100 to avoid deadlocks with concurrent timer creation.
 /// Each dataset is ~320 KB (10K samples) to ~640 KB (20K samples).
-const DEFAULT_BATCH_SIZE: usize = 500;
+const DEFAULT_BATCH_SIZE: usize = 100;
 
 /// Minimum batch size to ensure parallelism within batches.
 const MIN_BATCH_SIZE: usize = 50;
@@ -1285,33 +1286,39 @@ impl SweepRunner {
     #[cfg(feature = "parallel")]
     fn generate_batch(&self, sweep_config: &SweepConfig, configs: &[DatasetConfig]) -> DatasetBatch {
         let datasets: Vec<(DatasetConfig, Arc<GeneratedDataset>)> = if sweep_config.use_realistic {
-            // Limited parallelism for realistic mode to avoid PMU contention
-            // macOS kperf: single-threaded only (exclusive PMU access)
-            // Linux perf: multi-threaded OK (per-thread counters)
+            // Semaphore to limit concurrent timer creation in realistic mode
+            // macOS kperf: limit to 1 (exclusive PMU access)
+            // Linux perf_event: limit to 2 to avoid kernel resource exhaustion
             #[cfg(target_os = "macos")]
-            let num_threads = 1;
+            let max_concurrent_timers = 1;
+            // CRITICAL: Limit to 1 concurrent timer to prevent PMU multiplexing
+            // ARM64 PMUs have limited hardware counters (~6 per CPU). Even with
+            // thread pinning and CPU-specific perf_events, multiple concurrent
+            // events compete for counters, causing constant index==0 multiplexing.
+            // Using 1 concurrent timer eliminates this issue while preserving
+            // perf_mmap's ~7x performance advantage (300ns vs 2000ns per measurement).
             #[cfg(not(target_os = "macos"))]
-            let num_threads = 4;
+            let max_concurrent_timers = 1;
 
-            let pool = ThreadPoolBuilder::new()
-                .num_threads(num_threads)
-                .build()
-                .expect("Failed to create thread pool");
-            pool.install(|| {
-                configs
-                    .par_iter()
-                    .map(|cfg| {
-                        let dataset = self.generate_dataset(
-                            sweep_config,
-                            cfg.pattern,
-                            cfg.effect_mult,
-                            cfg.noise,
-                            cfg.instance_id,
-                        );
-                        (*cfg, Arc::new(dataset))
-                    })
-                    .collect()
-            })
+            let timer_semaphore = Semaphore::new(max_concurrent_timers);
+
+            // Use default rayon pool, but limit concurrent timer creation with semaphore
+            configs
+                .par_iter()
+                .map(|cfg| {
+                    // Acquire permit before creating timer (blocks if limit reached)
+                    let _permit = timer_semaphore.acquire();
+                    let dataset = self.generate_dataset(
+                        sweep_config,
+                        cfg.pattern,
+                        cfg.effect_mult,
+                        cfg.noise,
+                        cfg.instance_id,
+                    );
+                    // Permit is released here when _permit is dropped
+                    (*cfg, Arc::new(dataset))
+                })
+                .collect()
         } else {
             // Full parallel dataset generation for synthetic mode
             configs

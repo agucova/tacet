@@ -5,6 +5,10 @@ sidebar:
   order: 2
 ---
 
+import ApiLanguageSwitcher from '../../../components/ApiLanguageSwitcher.astro';
+
+<ApiLanguageSwitcher currentLanguage="c" />
+
 C bindings for tacet, providing low-overhead timing side-channel detection.
 
 ## Quick Reference
@@ -51,16 +55,35 @@ int main(void) {
 
 ---
 
-## Building
+## Installation
+
+**Quick Install (Recommended):**
+
+```bash
+# Install script (Linux/macOS)
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+
+# Or Homebrew (macOS)
+brew install https://raw.githubusercontent.com/agucova/tacet/main/homebrew/Formula/tacet-c.rb
+
+# Verify
+pkg-config --modversion tacet
+```
+
+**Build from Source:**
 
 ```bash
 git clone https://github.com/agucova/tacet
 cd tacet
 cargo build --release -p tacet-c
 
-# Headers at: crates/tacet-c/include/tacet.h
-# Library at: target/release/libtacet_c.{a,so,dylib}
+# Artifacts:
+# - Header: crates/tacet-c/include/tacet.h
+# - Library: target/release/libtacet_c.a
+# - pkg-config: target/release/tacet.pc
 ```
+
+See [Installation Guide](/getting-started/installation) for more details.
 
 ---
 
@@ -425,9 +448,24 @@ int main(void) {
 
 ### Compilation
 
+**With pkg-config (recommended):**
+
 ```bash
-cc -O3 -Wall -std=c11 -o timing_test timing_test.c \
-    -I/path/to/tacet/crates/tacet-c/include \
-    -L/path/to/tacet/target/release \
-    -ltacet_c -lpthread -lm
+cc -O3 -Wall -std=c11 timing_test.c $(pkg-config --cflags --libs tacet) -o timing_test
+```
+
+**Manual linking:**
+
+```bash
+# macOS
+cc -O3 -Wall -std=c11 timing_test.c -o timing_test \
+    -I/usr/local/include/tacet \
+    -L/usr/local/lib -ltacet_c \
+    -framework Security -framework CoreFoundation
+
+# Linux
+cc -O3 -Wall -std=c11 timing_test.c -o timing_test \
+    -I/usr/local/include/tacet \
+    -L/usr/local/lib -ltacet_c \
+    -lpthread -ldl -lm
 ```

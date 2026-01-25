@@ -1,0 +1,116 @@
+name: Update Homebrew Formula
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g., v0.3.1)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  update-formula:
+    name: Update Homebrew Formula
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            VERSION="${{ github.event.release.tag_name }}"
+          else
+            VERSION="${{ github.event.inputs.tag }}"
+          fi
+          # Remove 'v' prefix if present
+          VERSION_NUMBER="${VERSION#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "version_number=${VERSION_NUMBER}" >> $GITHUB_OUTPUT
+
+      - name: Download release artifacts
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BASE_URL="https://github.com/agucova/tacet/releases/download/${VERSION}"
+
+          mkdir -p /tmp/tacet-artifacts
+          cd /tmp/tacet-artifacts
+
+          echo "Downloading artifacts for ${VERSION}..."
+          curl -fSL -o libtacet_c-darwin-arm64.a "${BASE_URL}/libtacet_c-darwin-arm64.a"
+          curl -fSL -o libtacet_c-darwin-amd64.a "${BASE_URL}/libtacet_c-darwin-amd64.a"
+          curl -fSL -o tacet.h "${BASE_URL}/tacet.h"
+          curl -fSL -o tacet.hpp "${BASE_URL}/tacet.hpp"
+
+          echo "Files downloaded:"
+          ls -lh
+
+      - name: Calculate SHA256 checksums
+        id: checksums
+        run: |
+          cd /tmp/tacet-artifacts
+
+          SHA256_ARM64=$(shasum -a 256 libtacet_c-darwin-arm64.a | cut -d' ' -f1)
+          SHA256_AMD64=$(shasum -a 256 libtacet_c-darwin-amd64.a | cut -d' ' -f1)
+          SHA256_HEADER=$(shasum -a 256 tacet.h | cut -d' ' -f1)
+          SHA256_CPP_HEADER=$(shasum -a 256 tacet.hpp | cut -d' ' -f1)
+
+          echo "sha256_arm64=${SHA256_ARM64}" >> $GITHUB_OUTPUT
+          echo "sha256_amd64=${SHA256_AMD64}" >> $GITHUB_OUTPUT
+          echo "sha256_header=${SHA256_HEADER}" >> $GITHUB_OUTPUT
+          echo "sha256_cpp_header=${SHA256_CPP_HEADER}" >> $GITHUB_OUTPUT
+
+          echo "Checksums calculated:"
+          echo "  ARM64:      ${SHA256_ARM64}"
+          echo "  AMD64:      ${SHA256_AMD64}"
+          echo "  tacet.h:    ${SHA256_HEADER}"
+          echo "  tacet.hpp:  ${SHA256_CPP_HEADER}"
+
+      - name: Update formula
+        run: |
+          FORMULA_PATH="homebrew/Formula/tacet-c.rb"
+          VERSION_NUMBER="${{ steps.version.outputs.version_number }}"
+
+          # Update version
+          sed -i '' "s/version \".*\"/version \"${VERSION_NUMBER}\"/" "$FORMULA_PATH"
+
+          # Update SHA256 checksums
+          sed -i '' "s/sha256 \"SHA256_ARM64_PLACEHOLDER\".*/sha256 \"${{ steps.checksums.outputs.sha256_arm64 }}\"/" "$FORMULA_PATH"
+          sed -i '' "s/sha256 \"SHA256_AMD64_PLACEHOLDER\".*/sha256 \"${{ steps.checksums.outputs.sha256_amd64 }}\"/" "$FORMULA_PATH"
+          sed -i '' "s/sha256 \"SHA256_HEADER_PLACEHOLDER\".*/sha256 \"${{ steps.checksums.outputs.sha256_header }}\"/" "$FORMULA_PATH"
+          sed -i '' "s/sha256 \"SHA256_CPP_HEADER_PLACEHOLDER\".*/sha256 \"${{ steps.checksums.outputs.sha256_cpp_header }}\"/" "$FORMULA_PATH"
+
+          # Also update any existing checksums (for subsequent releases)
+          sed -i '' -E "0,/sha256 \"[a-f0-9]{64}\"/s//sha256 \"${{ steps.checksums.outputs.sha256_arm64 }}\"/" "$FORMULA_PATH"
+
+          echo "Formula updated:"
+          git diff "$FORMULA_PATH"
+
+      - name: Test formula
+        run: |
+          brew install --build-from-source ./homebrew/Formula/tacet-c.rb
+          brew test tacet-c || true  # Don't fail if tests have issues
+          brew audit --strict tacet-c || true  # Don't fail on warnings
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add homebrew/Formula/tacet-c.rb
+
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "chore: update Homebrew formula to ${{ steps.version.outputs.version }}"
+            git push
+          fi

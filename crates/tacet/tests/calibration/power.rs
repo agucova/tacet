@@ -7,7 +7,9 @@
 
 use crate::calibration_utils;
 
-use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, TimerBackend, TrialRunner};
+use calibration_utils::{
+    busy_wait_ns, init_effect_injection, CalibrationConfig, Decision, TimerBackend, TrialRunner,
+};
 use tacet::helpers::InputPair;
 use tacet::{AttackerModel, TimingOracle};
 
@@ -254,6 +256,9 @@ fn run_power_test(test_name: &str, effect_sizes: &EffectSizes, effect_index: usi
         return;
     }
 
+    // Initialize effect injection calibration before measurements
+    init_effect_injection();
+
     let config = CalibrationConfig::from_env(test_name);
     let (multiplier, effect_ns) = effect_sizes.effects[effect_index];
 
@@ -325,6 +330,9 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;
     }
+
+    // Initialize effect injection calibration before measurements
+    init_effect_injection();
 
     // Force validation tier for curve tests
     std::env::set_var("CALIBRATION_TIER", "validation");

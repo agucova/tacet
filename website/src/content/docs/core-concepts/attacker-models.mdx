@@ -182,8 +182,8 @@ See [Measurement Precision](/core-concepts/measurement-precision) for details on
 
 Basic usage for each language:
 
-<Tabs>
-<TabItem label="Rust">
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel};
 
@@ -194,7 +194,7 @@ TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 ```
 </TabItem>
-<TabItem label="JavaScript">
+<TabItem label="JavaScript" icon="seti:javascript">
 ```javascript
 import { TimingOracle, AttackerModel } from 'tacet';
 
@@ -202,25 +202,41 @@ import { TimingOracle, AttackerModel } from 'tacet';
 TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
 
 // Custom threshold
-TimingOracle.forAttacker({ Custom: { thresholdNs: 500.0 } })
+TimingOracle.forAttacker({ custom: 500.0 })
 ```
 </TabItem>
-<TabItem label="C">
+<TabItem label="C" icon="seti:c">
 ```c
+#include <tacet/tacet.h>
+
 // Preset
-tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
+TOConfig config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
 
 // Custom threshold
-tacet_t* oracle = tacet_for_attacker_custom(500.0);
+TOConfig config = to_config_default(TO_ATTACKER_CUSTOM);
+config.custom_threshold_ns = 500.0;
 ```
 </TabItem>
-<TabItem label="Go">
-```go
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet/tacet.hpp>
+
 // Preset
-oracle := tacet.ForAttacker(tacet.AdjacentNetwork)
+tacet::Oracle::forAttacker(tacet::AttackerModel::AdjacentNetwork)
 
 // Custom threshold
-oracle := tacet.ForAttackerCustom(500.0)
+tacet::Oracle::forAttacker(tacet::AttackerModel::custom(500.0))
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```go
+import "github.com/tacet-labs/tacet/tacet"
+
+// Preset
+tacet.Test(gen, op, size, tacet.WithAttacker(tacet.AttackerAdjacentNetwork))
+
+// Custom threshold
+tacet.Test(gen, op, size, tacet.WithCustomThreshold(500.0))
 ```
 </TabItem>
 </Tabs>

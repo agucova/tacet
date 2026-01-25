@@ -292,25 +292,35 @@ impl Timer {
     /// Measure the execution time of a function in cycles.
     ///
     /// Uses `black_box` to prevent optimization of the measured function.
+    ///
+    /// # Errors
+    ///
+    /// This implementation always succeeds (register-based timers cannot fail),
+    /// but returns `Result` for API consistency with PMU-based timers.
     #[inline]
-    pub fn measure_cycles<F, T>(&self, f: F) -> u64
+    pub fn measure_cycles<F, T>(&self, f: F) -> super::error::MeasurementResult
     where
         F: FnOnce() -> T,
     {
         let start = rdtsc();
         black_box(f());
         let end = rdtsc();
-        end.saturating_sub(start)
+        Ok(end.saturating_sub(start))
     }
 
     /// Measure the execution time of a function in nanoseconds.
+    ///
+    /// # Errors
+    ///
+    /// This implementation always succeeds (register-based timers cannot fail),
+    /// but returns `Result` for API consistency with PMU-based timers.
     #[inline]
-    pub fn measure_ns<F, T>(&self, f: F) -> f64
+    pub fn measure_ns<F, T>(&self, f: F) -> Result<f64, super::error::MeasurementError>
     where
         F: FnOnce() -> T,
     {
-        let cycles = self.measure_cycles(f);
-        self.cycles_to_ns(cycles)
+        let cycles = self.measure_cycles(f)?;
+        Ok(self.cycles_to_ns(cycles))
     }
 
     /// Convert cycles to nanoseconds using calibrated ratio.
@@ -324,8 +334,13 @@ impl Timer {
     /// Runs the function `iterations` times and returns the average
     /// cycles per iteration. This is useful when timer resolution is
     /// too coarse for single-iteration measurements.
+    ///
+    /// # Errors
+    ///
+    /// This implementation always succeeds (register-based timers cannot fail),
+    /// but returns `Result` for API consistency with PMU-based timers.
     #[inline]
-    pub fn measure_batched_cycles<F, T>(&self, iterations: usize, mut f: F) -> u64
+    pub fn measure_batched_cycles<F, T>(&self, iterations: usize, mut f: F) -> super::error::MeasurementResult
     where
         F: FnMut() -> T,
     {
@@ -340,17 +355,22 @@ impl Timer {
         let end = rdtsc();
 
         let total_cycles = end.saturating_sub(start);
-        total_cycles / iterations as u64
+        Ok(total_cycles / iterations as u64)
     }
 
     /// Measure batched iterations and return per-iteration nanoseconds.
+    ///
+    /// # Errors
+    ///
+    /// This implementation always succeeds (register-based timers cannot fail),
+    /// but returns `Result` for API consistency with PMU-based timers.
     #[inline]
-    pub fn measure_batched_ns<F, T>(&self, iterations: usize, f: F) -> f64
+    pub fn measure_batched_ns<F, T>(&self, iterations: usize, f: F) -> Result<f64, super::error::MeasurementError>
     where
         F: FnMut() -> T,
     {
-        let cycles = self.measure_batched_cycles(iterations, f);
-        self.cycles_to_ns(cycles)
+        let cycles = self.measure_batched_cycles(iterations, f)?;
+        Ok(self.cycles_to_ns(cycles))
     }
 }
 
@@ -392,7 +412,7 @@ mod tests {
                 sum = sum.wrapping_add(black_box(i));
             }
             black_box(sum)
-        });
+        }).expect("measure_cycles should not fail");
         assert!(cycles > 0, "cycles should be positive, got {}", cycles);
     }
 
@@ -434,8 +454,8 @@ mod tests {
         let timer = Timer::new();
 
         // Batched measurement should give reasonable results
-        let single = timer.measure_cycles(|| black_box(42));
-        let batched = timer.measure_batched_cycles(100, || black_box(42));
+        let single = timer.measure_cycles(|| black_box(42)).expect("measure_cycles should not fail");
+        let batched = timer.measure_batched_cycles(100, || black_box(42)).expect("measure_batched_cycles should not fail");
 
         // Batched per-iteration should be similar to or less than single
         // (amortizes measurement overhead)

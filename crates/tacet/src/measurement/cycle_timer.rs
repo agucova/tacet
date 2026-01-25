@@ -141,8 +141,17 @@ pub enum BoxedTimer {
 
 impl BoxedTimer {
     /// Measure execution time in cycles (or equivalent units).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the measurement fails:
+    /// - `RetryExhausted`: PMU counter seqlock retry limit exceeded (perf_event mmap only)
+    /// - `SyscallFailed`: Timer syscall failed (PMU timers only)
+    ///
+    /// When a measurement fails, the caller should skip the entire sample rather than
+    /// using a sentinel value, as invalid measurements corrupt statistical analysis.
     #[inline]
-    pub fn measure_cycles<F, T>(&mut self, f: F) -> u64
+    pub fn measure_cycles<F, T>(&mut self, f: F) -> super::error::MeasurementResult
     where
         F: FnOnce() -> T,
     {

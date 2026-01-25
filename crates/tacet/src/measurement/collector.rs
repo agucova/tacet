@@ -286,20 +286,28 @@ impl Collector {
         if k == 1 {
             // Single-iteration measurement
             for class in schedule {
-                let cycles = match class {
+                let result = match class {
                     Class::Baseline => self.timer.measure_cycles(&mut fixed),
                     Class::Sample => self.timer.measure_cycles(&mut random),
                 };
-                samples.push(Sample::new(class, cycles));
+
+                // Skip invalid measurements - they corrupt statistical analysis
+                if let Ok(cycles) = result {
+                    samples.push(Sample::new(class, cycles));
+                }
             }
         } else {
             // Batched measurement - return batch totals (not divided)
             for class in schedule {
-                let cycles = match class {
+                let result = match class {
                     Class::Baseline => self.measure_batch_total(&mut fixed, k),
                     Class::Sample => self.measure_batch_total(&mut random, k),
                 };
-                samples.push(Sample::new(class, cycles));
+
+                // Skip invalid measurements - they corrupt statistical analysis
+                if let Ok(cycles) = result {
+                    samples.push(Sample::new(class, cycles));
+                }
             }
         }
 
@@ -320,7 +328,7 @@ impl Collector {
 
     /// Measure a batch of K iterations and return the total cycles (not divided).
     #[inline]
-    fn measure_batch_total<F, T>(&self, f: &mut F, k: u32) -> u64
+    fn measure_batch_total<F, T>(&self, f: &mut F, k: u32) -> super::error::MeasurementResult
     where
         F: FnMut() -> T,
     {
@@ -329,7 +337,7 @@ impl Collector {
             black_box(f());
         }
         let end = rdtsc();
-        end.saturating_sub(start)
+        Ok(end.saturating_sub(start))
     }
 
     /// Create a randomized interleaved measurement schedule.

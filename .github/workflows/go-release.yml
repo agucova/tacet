@@ -61,17 +61,24 @@ jobs:
         if: startsWith(matrix.os, 'ubuntu')
         run: strip --strip-debug target/${{ matrix.rust_target }}/release/libtacet_c.a
 
-      - name: Rename artifact
+      - name: Prepare release artifacts
         run: |
           mkdir -p artifacts
+          # Copy static library
           cp target/${{ matrix.rust_target }}/release/libtacet_c.a \
              artifacts/libtacet_c-${{ matrix.target }}.a
+          # Copy headers (same for all platforms)
+          cp crates/tacet-c/include/tacet.h artifacts/
+          cp bindings/cpp/tacet.hpp artifacts/
+          # Copy platform-specific pkg-config file
+          cp target/${{ matrix.rust_target }}/release/tacet.pc \
+             artifacts/tacet-${{ matrix.target }}.pc
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: libtacet_c-${{ matrix.target }}
-          path: artifacts/libtacet_c-${{ matrix.target }}.a
+          name: tacet-${{ matrix.target }}
+          path: artifacts/*
 
   upload-release:
     name: Upload to Release
@@ -93,7 +100,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.tag || github.event.release.tag_name }}
-          files: artifacts/*.a
+          files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -125,7 +132,7 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v6
         with:
-          name: libtacet_c-${{ matrix.target }}
+          name: tacet-${{ matrix.target }}
           path: crates/tacet-go/internal/ffi/lib/${{ matrix.target }}/
 
       - name: Rename library

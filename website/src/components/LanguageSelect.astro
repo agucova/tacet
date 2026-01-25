@@ -1,0 +1,92 @@
+---
+// Language selector dropdown component
+// Uses Starlight CSS variables for automatic theme consistency
+---
+
+<div class="language-select">
+	<label for="language-selector" class="language-select-label">
+		Preferred Language
+	</label>
+	<select id="language-selector" class="language-select-dropdown" aria-label="Select preferred programming language">
+		<option value="rust">Rust</option>
+		<option value="javascript">JavaScript/TypeScript</option>
+		<option value="c">C</option>
+		<option value="cpp">C++</option>
+		<option value="go">Go</option>
+	</select>
+</div>
+
+<script>
+	import {
+		getPreferredLanguage,
+		setPreferredLanguage,
+		type Language,
+	} from '../scripts/language-preference';
+
+	function initializeLanguageSelector() {
+		const select = document.getElementById(
+			'language-selector'
+		) as HTMLSelectElement;
+
+		if (select) {
+			// Set initial value from localStorage
+			select.value = getPreferredLanguage();
+
+			// Update preference when user changes selection
+			select.addEventListener('change', () => {
+				setPreferredLanguage(select.value as Language);
+			});
+		}
+	}
+
+	// Initialize on first load
+	initializeLanguageSelector();
+
+	// Re-initialize after view transitions
+	document.addEventListener('astro:page-load', initializeLanguageSelector);
+</script>
+
+<style>
+	.language-select {
+		padding: 1rem 1rem 0.75rem 1rem;
+		border-bottom: 1px solid var(--sl-color-hairline);
+	}
+
+	.language-select-label {
+		display: block;
+		font-family: var(--__sl-font);
+		font-size: var(--sl-text-sm);
+		font-weight: 500;
+		color: var(--sl-color-text);
+		margin-bottom: 0.5rem;
+	}
+
+	.language-select-dropdown {
+		width: 100%;
+		font-family: var(--__sl-font);
+		font-size: var(--sl-text-sm);
+		background: var(--sl-color-bg-sidebar);
+		border: 1px solid var(--sl-color-hairline);
+		border-radius: 6px;
+		color: var(--sl-color-text);
+		padding: 0.5rem 0.75rem;
+		cursor: pointer;
+		transition: all 0.2s ease;
+	}
+
+	.language-select-dropdown:hover {
+		border-color: var(--sl-color-accent);
+	}
+
+	.language-select-dropdown:focus {
+		outline: 2px solid var(--sl-color-accent);
+		outline-offset: 2px;
+		border-color: var(--sl-color-accent);
+	}
+
+	/* Ensure option elements inherit styling */
+	.language-select-dropdown option {
+		background: var(--sl-color-bg-sidebar);
+		color: var(--sl-color-text);
+	}
+</style>

@@ -15,6 +15,8 @@ This page explains how to choose input classes that will actually reveal timing 
 
 Let's start with an example where the input class choice is straightforward: testing whether a hash function has data-dependent timing.
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use sha3::{Sha3_256, Digest};
@@ -31,6 +33,101 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         std::hint::black_box(hasher.finalize());
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+import { TimingOracle, AttackerModel } from '@tacet/wasm';
+
+const inputs = {
+    baseline: () => new Uint8Array(64), // All zeros
+    sample: () => crypto.getRandomValues(new Uint8Array(64))
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.AdjacentNetwork())
+    .test(inputs, (data) => {
+        const hasher = new Sha3_256();
+        hasher.update(data);
+        hasher.finalize();
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+#include <tacet/tacet.h>
+#include <sha3.h>
+
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 64);     // All zeros
+    random_bytes(sample, 64);    // Random bytes
+}
+
+void measure_hash(const void *input, void *ctx) {
+    sha3_ctx_t hasher;
+    sha3_init(&hasher, 64);
+    sha3_update(&hasher, input, 64);
+    uint8_t hash[32];
+    sha3_final(hash, &hasher);
+}
+
+tacet_attacker_model_t model = tacet_attacker_model_adjacent_network();
+tacet_oracle_t *oracle = tacet_oracle_for_attacker(model);
+
+tacet_outcome_t outcome;
+tacet_test(oracle, generate_inputs, NULL, measure_hash, NULL, &outcome);
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <tacet/tacet.hpp>
+#include <sha3.hpp>
+#include <span>
+
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0); // All zeros
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork()
+).test(inputs, [](std::span<const uint8_t> data) {
+    sha3::Sha3_256 hasher;
+    hasher.update(data);
+    hasher.finalize();
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+package main
+
+import (
+    "crypto/rand"
+    "github.com/tacet-oracle/tacet-go"
+    "golang.org/x/crypto/sha3"
+)
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 64) // All zeros
+    sample := make([]byte, 64)
+    rand.Read(sample)            // Random bytes
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+    Test(inputs, func(data []byte) {
+        hasher := sha3.New256()
+        hasher.Write(data)
+        hasher.Sum(nil)
+    })
+```
+</TabItem>
+</Tabs>
 
 This works because SHA-3 processes all input bytes the same way regardless of their values. The zeros and random bytes go through identical code paths, so any timing difference would indicate a leak.
 
@@ -64,6 +161,8 @@ Some functions have timing that depends on the *relationship* between the input 
 
 Consider testing an early-exit comparison function:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // A leaky comparison (exits on first mismatch)
 fn leaky_compare(a: &[u8], b: &[u8]) -> bool {
@@ -75,9 +174,69 @@ fn leaky_compare(a: &[u8], b: &[u8]) -> bool {
     true
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// A leaky comparison (exits on first mismatch)
+function leakyCompare(a, b) {
+    for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) {
+            return false;  // Early exit!
+        }
+    }
+    return true;
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// A leaky comparison (exits on first mismatch)
+bool leaky_compare(const uint8_t *a, const uint8_t *b, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (a[i] != b[i]) {
+            return false;  // Early exit!
+        }
+    }
+    return true;
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// A leaky comparison (exits on first mismatch)
+bool leakyCompare(std::span<const uint8_t> a, std::span<const uint8_t> b) {
+    for (size_t i = 0; i < a.size(); i++) {
+        if (a[i] != b[i]) {
+            return false;  // Early exit!
+        }
+    }
+    return true;
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// A leaky comparison (exits on first mismatch)
+func leakyCompare(a, b []byte) bool {
+    for i := range a {
+        if a[i] != b[i] {
+            return false  // Early exit!
+        }
+    }
+    return true
+}
+```
+</TabItem>
+</Tabs>
 
 If you test this naively:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let secret = [0x42u8; 32];  // Secret value being compared
 
@@ -91,6 +250,86 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         leaky_compare(&secret, &data);
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const secret = new Uint8Array(32).fill(0x42);  // Secret value
+
+const inputs = {
+    baseline: () => new Uint8Array(32),        // Zeros
+    sample: () => crypto.getRandomValues(new Uint8Array(32))
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.AdjacentNetwork())
+    .test(inputs, (data) => {
+        leakyCompare(secret, data);
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+uint8_t secret[32];
+memset(secret, 0x42, 32);  // Secret value
+
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 32);      // Zeros
+    random_bytes(sample, 32);     // Random
+}
+
+void measure_compare(const void *input, void *ctx) {
+    leaky_compare(secret, input, 32);
+}
+
+tacet_attacker_model_t model = tacet_attacker_model_adjacent_network();
+tacet_oracle_t *oracle = tacet_oracle_for_attacker(model);
+tacet_outcome_t outcome;
+tacet_test(oracle, generate_inputs, NULL, measure_compare, NULL, &outcome);
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+std::array<uint8_t, 32> secret;
+std::fill(secret.begin(), secret.end(), 0x42);  // Secret value
+
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);  // Zeros
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork()
+).test(inputs, [&secret](std::span<const uint8_t> data) {
+    leakyCompare(secret, data);
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+secret := make([]byte, 32)
+for i := range secret {
+    secret[i] = 0x42  // Secret value
+}
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)  // Zeros
+    sample := make([]byte, 32)
+    rand.Read(sample)              // Random
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+    Test(inputs, func(data []byte) {
+        leakyCompare(secret, data)
+    })
+```
+</TabItem>
+</Tabs>
 
 **This test will incorrectly pass.** Here's why:
 
@@ -103,6 +342,8 @@ Both inputs exit on the very first byte! There's no timing difference to detect,
 
 For comparison functions, the baseline must match what's being compared against:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let secret = [0u8; 32];  // Use a secret that baseline will match
 
@@ -116,6 +357,81 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         leaky_compare(&secret, &data);
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const secret = new Uint8Array(32);  // All zeros - baseline will match
+
+const inputs = {
+    baseline: () => new Uint8Array(32),  // Matches secret → checks ALL bytes
+    sample: () => crypto.getRandomValues(new Uint8Array(32))
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.AdjacentNetwork())
+    .test(inputs, (data) => {
+        leakyCompare(secret, data);
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+uint8_t secret[32] = {0};  // All zeros - baseline will match
+
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 32);      // Matches secret → checks ALL bytes
+    random_bytes(sample, 32);     // Random → exits on first mismatch
+}
+
+void measure_compare(const void *input, void *ctx) {
+    leaky_compare(secret, input, 32);
+}
+
+tacet_attacker_model_t model = tacet_attacker_model_adjacent_network();
+tacet_oracle_t *oracle = tacet_oracle_for_attacker(model);
+tacet_outcome_t outcome;
+tacet_test(oracle, generate_inputs, NULL, measure_compare, NULL, &outcome);
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+std::array<uint8_t, 32> secret{};  // All zeros - baseline will match
+
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);  // Matches secret
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork()
+).test(inputs, [&secret](std::span<const uint8_t> data) {
+    leakyCompare(secret, data);
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+secret := make([]byte, 32)  // All zeros - baseline will match
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)  // Matches secret → checks ALL bytes
+    sample := make([]byte, 32)
+    rand.Read(sample)              // Random → exits on first mismatch
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+    Test(inputs, func(data []byte) {
+        leakyCompare(secret, data)
+    })
+```
+</TabItem>
+</Tabs>
 
 Now:
 - Baseline `[0x00, 0x00, ...]` matches secret → compares all 32 bytes (slow)
@@ -149,12 +465,56 @@ The key question to ask: **What makes this operation take different amounts of t
 
 Use the standard zeros vs random pattern:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let inputs = InputPair::new(
     || [0u8; 16],           // Baseline: zeros
     || rand::random(),      // Sample: random
 );
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const inputs = {
+    baseline: () => new Uint8Array(16),
+    sample: () => crypto.getRandomValues(new Uint8Array(16))
+};
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 16);     // Baseline: zeros
+    random_bytes(sample, 16);    // Sample: random
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 16)  // Zeros
+    sample := make([]byte, 16)
+    rand.Read(sample)              // Random
+    return baseline, sample
+}
+```
+</TabItem>
+</Tabs>
 
 These primitives should process all input bytes identically.
 
@@ -162,6 +522,8 @@ These primitives should process all input bytes identically.
 
 Use zeros vs random for the plaintext, but ensure unique nonces:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -181,6 +543,86 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         cipher.encrypt(&nonce, &plaintext);
     });
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+let nonceCounter = 0n;
+
+const inputs = {
+    baseline: () => new Uint8Array(64),
+    sample: () => crypto.getRandomValues(new Uint8Array(64))
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.AdjacentNetwork())
+    .test(inputs, (plaintext) => {
+        const nonce = new Uint8Array(12);
+        const n = nonceCounter++;
+        new DataView(nonce.buffer).setBigUint64(0, n, true);
+
+        cipher.encrypt(nonce, plaintext);
+    });
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+#include <stdatomic.h>
+
+atomic_uint_fast64_t nonce_counter = ATOMIC_VAR_INIT(0);
+
+void measure_aead(const void *input, void *ctx) {
+    uint64_t n = atomic_fetch_add(&nonce_counter, 1);
+    uint8_t nonce[12] = {0};
+    memcpy(nonce, &n, 8);
+
+    aead_encrypt(nonce, input, 64, /* ... */);
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+#include <atomic>
+
+std::atomic<uint64_t> nonce_counter{0};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork()
+).test(inputs, [&](std::span<const uint8_t> plaintext) {
+    uint64_t n = nonce_counter.fetch_add(1);
+    std::array<uint8_t, 12> nonce{};
+    std::memcpy(nonce.data(), &n, 8);
+
+    cipher.encrypt(nonce, plaintext);
+});
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+import "sync/atomic"
+
+var nonceCounter uint64
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 64)
+    sample := make([]byte, 64)
+    rand.Read(sample)
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+    Test(inputs, func(plaintext []byte) {
+        n := atomic.AddUint64(&nonceCounter, 1)
+        nonce := make([]byte, 12)
+        binary.LittleEndian.PutUint64(nonce, n)
+
+        cipher.Encrypt(nonce, plaintext)
+    })
+```
+</TabItem>
+</Tabs>
 
 <Aside type="tip">
 AEAD ciphers require unique nonces. Using the same nonce for every measurement would be cryptographically unsafe and could also introduce spurious timing variations.
@@ -190,6 +632,8 @@ AEAD ciphers require unique nonces. Using the same nonce for every measurement w
 
 Baseline must match the value being compared:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let secret = [0u8; 32];
 
@@ -198,6 +642,56 @@ let inputs = InputPair::new(
     || rand::random(),      // Mismatches
 );
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const secret = new Uint8Array(32);
+
+const inputs = {
+    baseline: () => new Uint8Array(32),  // Matches secret
+    sample: () => crypto.getRandomValues(new Uint8Array(32))
+};
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+uint8_t secret[32] = {0};
+
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 32);      // Matches secret
+    random_bytes(sample, 32);     // Mismatches
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+std::array<uint8_t, 32> secret{};
+
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);  // Matches
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+secret := make([]byte, 32)
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)  // Matches secret
+    sample := make([]byte, 32)
+    rand.Read(sample)              // Mismatches
+    return baseline, sample
+}
+```
+</TabItem>
+</Tabs>
 
 ### Scalar multiplication (X25519, ECDH)
 
@@ -231,6 +725,8 @@ Before trusting results from a timing test, verify that your harness itself is w
 
 If you test with both classes generating the same input, the test should always pass:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 let inputs = InputPair::new(
     || [0u8; 32],
@@ -242,6 +738,75 @@ let outcome = TimingOracle::for_attacker(AttackerModel::Research)
 
 assert!(outcome.passed(), "Sanity check failed: identical inputs should pass");
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+const inputs = {
+    baseline: () => new Uint8Array(32),
+    sample: () => new Uint8Array(32)  // Same as baseline
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.Research())
+    .test(inputs, (data) => myFunction(data));
+
+console.assert(outcome.passed(), "Sanity check failed");
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+void generate_identical(uint64_t *baseline, uint64_t *sample,
+                        size_t n, void *ctx) {
+    memset(baseline, 0, 32);
+    memset(sample, 0, 32);  // Same as baseline
+}
+
+tacet_attacker_model_t model = tacet_attacker_model_research();
+tacet_oracle_t *oracle = tacet_oracle_for_attacker(model);
+tacet_outcome_t outcome;
+tacet_test(oracle, generate_identical, NULL, measure_fn, NULL, &outcome);
+
+assert(tacet_outcome_passed(&outcome));
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);
+    std::fill(sample.begin(), sample.end(), 0);  // Same
+};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::Research()
+).test(inputs, [](std::span<const uint8_t> data) {
+    myFunction(data);
+});
+
+assert(outcome.passed());
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    sample := make([]byte, 32)  // Same as baseline
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.Research).
+    Test(inputs, func(data []byte) {
+        myFunction(data)
+    })
+
+if !outcome.Passed() {
+    panic("Sanity check failed")
+}
+```
+</TabItem>
+</Tabs>
 
 If this fails, there's likely an environmental issue (high system noise, measurement problems) rather than a timing leak in your code.
 
@@ -249,6 +814,8 @@ If this fails, there's likely an environmental issue (high system noise, measure
 
 Test against a function you know is not constant-time:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 fn definitely_leaky(data: &[u8]) -> bool {
     data.iter().all(|&b| b == 0)  // Early exit on non-zero
@@ -266,6 +833,111 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
 assert!(outcome.failed(), "Should detect the obvious leak");
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+function definitelyLeaky(data) {
+    return data.every(b => b === 0);  // Early exit on non-zero
+}
+
+const inputs = {
+    baseline: () => new Uint8Array(64),      // All zeros
+    sample: () => new Uint8Array(64).fill(0xFF)  // All 0xFF
+};
+
+const outcome = await TimingOracle.forAttacker(AttackerModel.AdjacentNetwork())
+    .test(inputs, (data) => {
+        definitelyLeaky(data);
+    });
+
+console.assert(outcome.failed(), "Should detect leak");
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+bool definitely_leaky(const uint8_t *data, size_t len) {
+    for (size_t i = 0; i < len; i++) {
+        if (data[i] != 0) return false;  // Early exit
+    }
+    return true;
+}
+
+void generate_leaky_inputs(uint64_t *baseline, uint64_t *sample,
+                           size_t n, void *ctx) {
+    memset(baseline, 0, 64);      // All zeros
+    memset(sample, 0xFF, 64);     // All 0xFF
+}
+
+void measure_leaky(const void *input, void *ctx) {
+    definitely_leaky(input, 64);
+}
+
+tacet_attacker_model_t model = tacet_attacker_model_adjacent_network();
+tacet_oracle_t *oracle = tacet_oracle_for_attacker(model);
+tacet_outcome_t outcome;
+tacet_test(oracle, generate_leaky_inputs, NULL, measure_leaky, NULL, &outcome);
+
+assert(tacet_outcome_failed(&outcome));
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+bool definitelyLeaky(std::span<const uint8_t> data) {
+    for (auto b : data) {
+        if (b != 0) return false;  // Early exit
+    }
+    return true;
+}
+
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);
+    std::fill(sample.begin(), sample.end(), 0xFF);
+};
+
+auto outcome = tacet::TimingOracle::forAttacker(
+    tacet::AttackerModel::AdjacentNetwork()
+).test(inputs, [](std::span<const uint8_t> data) {
+    definitelyLeaky(data);
+});
+
+assert(outcome.failed());
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+func definitelyLeaky(data []byte) bool {
+    for _, b := range data {
+        if b != 0 {
+            return false  // Early exit
+        }
+    }
+    return true
+}
+
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 64)           // All zeros
+    sample := make([]byte, 64)
+    for i := range sample {
+        sample[i] = 0xFF                   // All 0xFF
+    }
+    return baseline, sample
+}
+
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
+    Test(inputs, func(data []byte) {
+        definitelyLeaky(data)
+    })
+
+if !outcome.Failed() {
+    panic("Should detect the leak")
+}
+```
+</TabItem>
+</Tabs>
 
 If your harness can't detect this obvious leak, something is wrong with your measurement setup.
 
@@ -273,6 +945,8 @@ If your harness can't detect this obvious leak, something is wrong with your mea
 
 The `InputPair::new()` function takes closures that generate fresh inputs for each measurement:
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```rust
 // ✓ Correct: fresh random value each time
 let inputs = InputPair::new(
@@ -287,6 +961,87 @@ let inputs = InputPair::new(
     || random_value,  // Always returns the same value!
 );
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+```javascript
+// ✓ Correct: fresh random value each time
+const inputs = {
+    baseline: () => new Uint8Array(32),
+    sample: () => crypto.getRandomValues(new Uint8Array(32))
+};
+
+// ✗ Wrong: same captured value for all measurements
+const randomValue = crypto.getRandomValues(new Uint8Array(32));
+const badInputs = {
+    baseline: () => new Uint8Array(32),
+    sample: () => randomValue  // Always returns the same value!
+};
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+```c
+// ✓ Correct: generate fresh values in the callback
+void generate_inputs(uint64_t *baseline, uint64_t *sample,
+                     size_t n, void *ctx) {
+    memset(baseline, 0, 32);
+    random_bytes(sample, 32);  // Fresh random each call
+}
+
+// ✗ Wrong: reusing the same buffer
+uint8_t random_value[32];
+random_bytes(random_value, 32);  // Only called once!
+
+void generate_inputs_wrong(uint64_t *baseline, uint64_t *sample,
+                           size_t n, void *ctx) {
+    memset(baseline, 0, 32);
+    memcpy(sample, random_value, 32);  // Same value every time!
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+```cpp
+// ✓ Correct: fresh random value each time
+auto inputs = [](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);
+    std::generate(sample.begin(), sample.end(),
+                  []() { return random_byte(); });
+};
+
+// ✗ Wrong: same captured value for all measurements
+std::array<uint8_t, 32> randomValue = generateRandom();
+auto badInputs = [randomValue](std::span<uint64_t> baseline,
+                                std::span<uint64_t> sample) {
+    std::fill(baseline.begin(), baseline.end(), 0);
+    std::copy(randomValue.begin(), randomValue.end(),
+              reinterpret_cast<uint8_t*>(sample.data()));
+};
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+```go
+// ✓ Correct: fresh random value each time
+inputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    sample := make([]byte, 32)
+    rand.Read(sample)  // Fresh random each call
+    return baseline, sample
+}
+
+// ✗ Wrong: same captured value for all calls
+randomValue := make([]byte, 32)
+rand.Read(randomValue)  // Only called once!
+
+badInputs := func() ([]byte, []byte) {
+    baseline := make([]byte, 32)
+    return baseline, randomValue  // Same value every time!
+}
+```
+</TabItem>
+</Tabs>
 
 Generating fresh random values ensures that sample-class measurements exercise varied code paths across the test run.
 

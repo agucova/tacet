@@ -1,0 +1,17 @@
+---
+// Custom Head component that loads language preference scripts
+// Extends Starlight's default Head component
+
+import StarlightHead from '@astrojs/starlight/components/Head.astro';
+import { ViewTransitions } from 'astro:transitions';
+---
+
+<StarlightHead {...Astro.props} />
+<ViewTransitions />
+
+<script>
+	// Load language preference management
+	import '../scripts/language-preference';
+	// Load auto-selection logic for tabs
+	import '../scripts/auto-select-tabs';
+</script>

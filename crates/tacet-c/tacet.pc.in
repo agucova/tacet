@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: tacet
+Description: Statistical timing side-channel detection library
+Version: @VERSION@
+URL: https://github.com/agucova/tacet
+Libs: -L${libdir} -ltacet_c @PLATFORM_LIBS@
+Cflags: -I${includedir}

@@ -43,8 +43,11 @@ export default defineConfig({
       },
       lastUpdated: true,
       components: {
+        Header: "./src/components/Header.astro",
         SiteTitle: "./src/components/SiteTitle.astro",
         ThemeSelect: "./src/components/ThemeSelect.astro",
+        Sidebar: "./src/components/Sidebar.astro",
+        Head: "./src/components/CustomHead.astro",
       },
       customCss: [
         // Fonts

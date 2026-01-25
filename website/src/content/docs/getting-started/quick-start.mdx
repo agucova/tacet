@@ -11,14 +11,92 @@ This guide walks through writing and running your first timing test. You've seen
 
 ## Add the dependencies
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 ```bash
 cargo add tacet --dev
 cargo add rand --dev  # For random input generation
 cargo add subtle --dev  # For the constant-time comparison example
 ```
+</TabItem>
+<TabItem label="JavaScript" icon="seti:javascript">
+```bash
+bun add @tacet/js --dev
+# Or with npm
+npm install --save-dev @tacet/js
+```
+</TabItem>
+<TabItem label="C" icon="seti:c">
+**With pkg-config (recommended):**
+```cmake
+# CMakeLists.txt
+cmake_minimum_required(VERSION 3.14)
+project(my_project)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TACET REQUIRED tacet)
+
+add_executable(my_test test.c)
+target_include_directories(my_test PRIVATE ${TACET_INCLUDE_DIRS})
+target_link_libraries(my_test PRIVATE ${TACET_LIBRARIES})
+```
+
+**Direct compilation:**
+```bash
+cc test.c $(pkg-config --cflags --libs tacet) -o test
+```
+
+**Manual linking (without pkg-config):**
+```cmake
+# macOS
+target_link_libraries(my_test PRIVATE
+    /usr/local/lib/libtacet_c.a
+    "-framework Security"
+    "-framework CoreFoundation"
+)
+
+# Linux
+target_link_libraries(my_test PRIVATE
+    /usr/local/lib/libtacet_c.a
+    pthread dl m
+)
+```
+</TabItem>
+<TabItem label="C++" icon="seti:cpp">
+**With pkg-config (recommended):**
+```cmake
+# CMakeLists.txt
+cmake_minimum_required(VERSION 3.14)
+project(my_project)
+
+# C++20 required for std::span
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TACET REQUIRED tacet)
+
+add_executable(my_test test.cpp)
+target_include_directories(my_test PRIVATE ${TACET_INCLUDE_DIRS})
+target_link_libraries(my_test PRIVATE ${TACET_LIBRARIES})
+```
+
+**Direct compilation:**
+```bash
+c++ -std=c++20 test.cpp $(pkg-config --cflags --libs tacet) -o test
+```
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+```bash
+go get github.com/tacet-labs/tacet
+```
+</TabItem>
+</Tabs>
 
 ## Write a test
 
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 Create a test file (e.g., `tests/timing.rs`):
 
 ```rust
@@ -55,15 +133,252 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     subtle::ConstantTimeEq::ct_eq(a, b).into()
 }
 ```
+</TabItem>
+
+<TabItem label="JavaScript" icon="seti:javascript">
+Create a test file (e.g., `test/timing.test.ts`):
+
+```typescript
+import { TimingOracle, AttackerModel } from '@tacet/js';
+import { expect, test } from 'bun:test';
+
+test('constant-time comparison', async () => {
+    const secret = new Uint8Array(32).fill(0);
+
+    const outcome = await TimingOracle
+        .forAttacker(AttackerModel.AdjacentNetwork)
+        .timeBudget(30_000) // milliseconds
+        .test({
+            // Baseline matches secret (slow path if leaky)
+            baseline: () => new Uint8Array(32).fill(0),
+            // Sample is random (fast path if leaky)
+            sample: () => crypto.getRandomValues(new Uint8Array(32)),
+        }, (input) => {
+            // Test your comparison function
+            constantTimeEq(secret, input);
+        });
+
+    // Display prints formatted output
+    console.log(outcome.toString());
+
+    // Assert the test passed
+    expect(outcome.passed()).toBe(true);
+});
+
+function constantTimeEq(a: Uint8Array, b: Uint8Array): boolean {
+    // Your constant-time comparison implementation
+    let result = 0;
+    for (let i = 0; i < a.length; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result === 0;
+}
+```
+</TabItem>
+
+<TabItem label="C" icon="seti:c">
+Create a test file (e.g., `test_timing.c`):
+
+```c
+#include <tacet/tacet.h>
+#include <string.h>
+#include <stdlib.h>
+#include <assert.h>
+
+static uint8_t secret[32] = {0};
+
+// Generator callback: creates test inputs
+void generate_inputs(to_class_t cls, void *buf, size_t size, void *ctx) {
+    uint8_t *data = (uint8_t *)buf;
+    if (cls == TO_CLASS_BASELINE) {
+        // Baseline matches secret (slow path if leaky)
+        memset(data, 0, size);
+    } else {
+        // Sample is random (fast path if leaky)
+        for (size_t i = 0; i < size; i++) {
+            data[i] = rand() & 0xFF;
+        }
+    }
+}
+
+// Operation to test
+void test_operation(const void *input, size_t size, void *ctx) {
+    constant_time_eq(secret, (const uint8_t *)input, size);
+}
+
+int constant_time_eq(const uint8_t *a, const uint8_t *b, size_t len) {
+    // Your constant-time comparison implementation
+    uint8_t result = 0;
+    for (size_t i = 0; i < len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}
+
+int main(void) {
+    to_config_t config = {
+        .attacker_model = TO_ATTACKER_ADJACENT_NETWORK,
+        .time_budget_ms = 30000,
+    };
+
+    to_result_t result;
+    to_test(&config, generate_inputs, test_operation, NULL, 32, &result);
+
+    // Print formatted output
+    to_result_print(&result);
+
+    // Check result
+    assert(to_result_passed(&result) && "Timing leak detected");
+
+    to_result_free(&result);
+    return 0;
+}
+```
+</TabItem>
+
+<TabItem label="C++" icon="seti:cpp">
+Create a test file (e.g., `test_timing.cpp`):
+
+```cpp
+#include <tacet/tacet.hpp>
+#include <cstring>
+#include <random>
+#include <cassert>
+
+static uint8_t secret[32] = {0};
+
+bool constant_time_eq(const uint8_t* a, const uint8_t* b, size_t len) {
+    // Your constant-time comparison implementation
+    uint8_t result = 0;
+    for (size_t i = 0; i < len; i++) {
+        result |= a[i] ^ b[i];
+    }
+    return result == 0;
+}
+
+int main() {
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<> dis(0, 255);
+
+    auto outcome = tacet::Oracle::forAttacker(tacet::AttackerModel::AdjacentNetwork)
+        .timeBudget(std::chrono::seconds(30))
+        .test<std::array<uint8_t, 32>>(
+            // Generator lambda
+            [&](tacet::Class cls) {
+                std::array<uint8_t, 32> data;
+                if (cls == tacet::Class::Baseline) {
+                    // Baseline matches secret (slow path if leaky)
+                    data.fill(0);
+                } else {
+                    // Sample is random (fast path if leaky)
+                    for (auto& byte : data) {
+                        byte = dis(gen);
+                    }
+                }
+                return data;
+            },
+            // Operation lambda
+            [](const std::array<uint8_t, 32>& input) {
+                constant_time_eq(secret, input.data(), 32);
+            }
+        );
+
+    // Print formatted output
+    std::cout << outcome << std::endl;
+
+    // Check result
+    assert(outcome.passed() && "Timing leak detected");
+    return 0;
+}
+```
+</TabItem>
+
+<TabItem label="Go" icon="seti:go">
+Create a test file (e.g., `timing_test.go`):
+
+```go
+package mypackage
+
+import (
+    "crypto/rand"
+    "testing"
+    "time"
+
+    "github.com/tacet-labs/tacet"
+)
+
+var secret = make([]byte, 32)
+
+func TestConstantTimeCompare(t *testing.T) {
+    // Generator function: creates test inputs
+    generator := func(cls tacet.Class) []byte {
+        data := make([]byte, 32)
+        if cls == tacet.Baseline {
+            // Baseline matches secret (slow path if leaky)
+            // data is already zeros
+        } else {
+            // Sample is random (fast path if leaky)
+            rand.Read(data)
+        }
+        return data
+    }
+
+    // Operation to test
+    operation := func(input []byte) {
+        constantTimeEq(secret, input)
+    }
+
+    outcome := tacet.Test(
+        generator,
+        operation,
+        32, // input size
+        tacet.WithAttackerModel(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(30*time.Second),
+    )
+
+    // Print formatted output
+    t.Log(outcome.String())
+
+    // Assert the test passed
+    if !outcome.Passed() {
+        t.Fatal("Timing leak detected")
+    }
+}
+
+func constantTimeEq(a, b []byte) bool {
+    // Your constant-time comparison implementation
+    var result byte
+    for i := range a {
+        result |= a[i] ^ b[i]
+    }
+    return result == 0
+}
+```
+</TabItem>
+</Tabs>
 
 ## Run the test
 
 ```bash
+# Rust
 cargo test --test timing -- --test-threads=1 --nocapture
+
+# JavaScript
+bun test --concurrent=1 test/timing.test.ts
+
+# C (compile and run)
+gcc test_timing.c -ltacet -o test_timing && ./test_timing
+
+# C++ (compile and run)
+g++ test_timing.cpp -ltacet -std=c++17 -o test_timing && ./test_timing
+
+# Go
+go test -v -p 1 ./...
 ```
 
 <Aside type="tip">
-`--test-threads=1` is important: parallel tests interfere with timing measurements. See [CI Integration](/guides/ci-integration) for details.
+Running tests sequentially is important: parallel tests interfere with timing measurements. Each language has its own flag (`--test-threads=1` for Rust, `--concurrent=1` for Bun, `-p 1` for Go). See [CI Integration](/guides/ci-integration) for details.
 </Aside>
 
 You should see output like:

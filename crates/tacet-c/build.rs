@@ -3,6 +3,7 @@
 //! Generates C header file using cbindgen.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
@@ -67,4 +68,53 @@ fn main() {
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/types.rs");
     println!("cargo:rustc-env=GENERATED_HEADER={}", output_file.display());
+
+    // Generate pkg-config file
+    generate_pkgconfig(&crate_dir);
+}
+
+/// Get platform-specific library flags for pkg-config
+fn get_platform_libs() -> &'static str {
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    match target_os.as_str() {
+        "macos" => "-framework Security -framework CoreFoundation",
+        "linux" => "-lpthread -ldl -lm",
+        _ => "",
+    }
+}
+
+/// Substitute template variables in the pkg-config template
+fn substitute_template(template: &str, version: &str, platform_libs: &str) -> String {
+    template
+        .replace("@PREFIX@", "/usr/local")
+        .replace("@LIBDIR@", "/usr/local/lib")
+        .replace("@INCLUDEDIR@", "/usr/local/include/tacet")
+        .replace("@VERSION@", version)
+        .replace("@PLATFORM_LIBS@", platform_libs)
+}
+
+/// Generate pkg-config file from template
+fn generate_pkgconfig(crate_dir: &str) {
+    let template_path = PathBuf::from(crate_dir).join("tacet.pc.in");
+    let template = fs::read_to_string(&template_path)
+        .expect("Failed to read tacet.pc.in template");
+
+    let version = env::var("CARGO_PKG_VERSION").unwrap();
+    let platform_libs = get_platform_libs();
+    let pc_content = substitute_template(&template, &version, platform_libs);
+
+    // Write to target directory (profile-specific: debug or release)
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    let target_dir = PathBuf::from(crate_dir)
+        .join("../../target")
+        .join(&profile);
+
+    // Create target directory if it doesn't exist
+    fs::create_dir_all(&target_dir).ok();
+
+    let pc_file = target_dir.join("tacet.pc");
+    fs::write(&pc_file, pc_content)
+        .expect("Failed to write tacet.pc file");
+
+    println!("cargo:rerun-if-changed=tacet.pc.in");
 }

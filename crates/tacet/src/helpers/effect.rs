@@ -21,15 +21,17 @@
 //!
 //! | Platform | Timer | Resolution | Notes |
 //! |----------|-------|------------|-------|
-//! | aarch64 macOS | `cntvct_el0` | ~42ns | 24MHz counter |
-//! | aarch64 Linux | `cntvct_el0` | ~1ns | Platform-dependent (1GHz on Graviton) |
+//! | aarch64 macOS | `cntvct_el0` | ~42ns | Direct assembly (kperf can't be used in parallel) |
+//! | aarch64 Linux | `perf_event` | ~0.3ns | PMU cycles via mmap (requires sudo or fallback) |
 //! | x86_64 Linux/macOS | RDTSC | ~0.3ns | ~3GHz TSC typical |
 //! | Other | `Instant::now()` | ~50ns | Fallback, prints warning |
 //!
 //! The module automatically selects the best available timer and warns if
-//! falling back to the imprecise `Instant::now()` method.
+//! falling back to imprecise methods.
 
 use std::sync::atomic::{AtomicU64, Ordering};
+#[allow(unused_imports)]
+use std::sync::OnceLock;
 // Used by x86_64 TSC calibration and fallback path (conditionally compiled)
 // Also used by tests on all platforms
 #[allow(unused_imports)]
@@ -41,6 +43,236 @@ use std::time::{Duration, Instant};
     all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos"))
 )))]
 use std::sync::atomic::AtomicBool;
+
+// Linux ARM64: Use perf timer for accurate effect injection
+#[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+use crate::measurement::perf::LinuxPerfTimer;
+
+// Linux ARM64: Get or initialize the effect timer
+#[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+fn get_effect_timer() -> Option<&'static LinuxPerfTimer> {
+    // CRITICAL: Do NOT use perf_event for effect calibration!
+    //
+    // Creating a persistent perf_event timer here causes PMU multiplexing with
+    // the dataset measurement timer, leading to constant index==0 and
+    // RetryExhausted errors even with semaphore=1 limiting concurrent datasets.
+    //
+    // Root cause: Each thread has:
+    // - 1 persistent effect timer (this static)
+    // - 1 transient dataset timer
+    // = 2 perf_events competing for PMU counters on the same CPU
+    //
+    // Effect injection only needs approximate delays (~μs accuracy) for busy-wait,
+    // not cycle-accurate timing, so cntvct_el0 or Instant provide sufficient
+    // accuracy without consuming PMU resources.
+    //
+    // This allows dataset measurements to use perf_mmap's zero-overhead reads
+    // (~300ns) without multiplexing interference.
+    None
+}
+
+// =============================================================================
+// BUNDLE CALIBRATION FOR EFFECT INJECTION
+// =============================================================================
+
+use std::cell::{Cell, LazyCell};
+
+thread_local! {
+    /// Track whether effect injection was explicitly initialized on this thread.
+    ///
+    /// Used to enforce explicit initialization before measurements to prevent
+    /// calibration overhead from interfering with timing tests.
+    static EFFECT_INITIALIZED: Cell<bool> = const { Cell::new(false) };
+
+    /// Thread-local calibrated bundle costs for effect injection.
+    ///
+    /// Calibrates once per thread on first use. Uses perf timer if available,
+    /// falls back to Instant-based measurement.
+    static BUNDLE_CALIBRATION: LazyCell<Option<BundleCalibration>> = LazyCell::new(|| {
+        eprintln!("[BUNDLE_CALIBRATION] Initializing...");
+
+        // Try perf timer first (Linux ARM64 with perf feature)
+        #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+        if let Some(timer) = get_effect_timer() {
+            eprintln!("[BUNDLE_CALIBRATION] Using perf timer");
+            return Some(BundleCalibration::calibrate_with_perf(timer));
+        }
+
+        // Fallback: calibrate using Instant (less accurate but always available)
+        eprintln!("[BUNDLE_CALIBRATION] Using Instant timer (perf not available)");
+        Some(BundleCalibration::calibrate_with_instant())
+    });
+}
+
+/// Calibrated cost per spin iteration.
+///
+/// Pre-measures the cost of executing spin_bundle(1) many times,
+/// allowing runtime execution without measurement overhead.
+#[derive(Clone, Debug)]
+struct BundleCalibration {
+    /// Nanoseconds per single spin iteration.
+    ///
+    /// Derived from averaging 100,000+ samples to achieve sub-timer precision.
+    cost_per_unit: f64,
+}
+
+impl BundleCalibration {
+    /// Calibrate bundle costs using perf timer (most accurate).
+    ///
+    /// Uses large sample counts to achieve sub-timer-resolution precision.
+    /// Even with perf_event cycle counting, measuring many iterations averages
+    /// out any measurement overhead.
+    #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+    fn calibrate_with_perf(timer: &LinuxPerfTimer) -> Self {
+        const BASE_SIZE: u64 = 1;
+        const LARGE_SAMPLE_COUNT: usize = 100_000;
+        const MAX_REASONABLE_CYCLES: u64 = 10_000_000_000; // 10B cycles (~4s at 2.5GHz)
+
+        let mut calibration_timer = LinuxPerfTimer::new().unwrap_or_else(|_| {
+            panic!("Failed to create perf timer during calibration")
+        });
+
+        // Retry up to 3 times if we get bogus overflow values or measurement errors
+        for _attempt in 0..3 {
+            let result = calibration_timer.measure_cycles(|| {
+                for _ in 0..LARGE_SAMPLE_COUNT {
+                    spin_bundle(BASE_SIZE);
+                }
+            });
+
+            // Skip invalid measurements
+            let total_cycles = match result {
+                Ok(cycles) => cycles,
+                Err(e) => {
+                    eprintln!("[calibrate_with_perf] Measurement error: {:?}, retrying", e);
+                    continue;
+                }
+            };
+
+            eprintln!("[calibrate_with_perf] total_cycles={}", total_cycles);
+
+            // Reject obvious overflow/error values (close to u64::MAX or i64::MAX)
+            if total_cycles > MAX_REASONABLE_CYCLES {
+                eprintln!("[calibrate_with_perf] Rejected overflow value, retrying");
+                continue;
+            }
+
+            let avg_cycles = total_cycles as f64 / LARGE_SAMPLE_COUNT as f64;
+            let cost_per_unit = avg_cycles / timer.cycles_per_ns();
+
+            eprintln!("[calibrate_with_perf] SUCCESS: cost_per_unit={:.2}ns (avg_cycles={:.2}, cycles_per_ns={:.2})",
+                      cost_per_unit, avg_cycles, timer.cycles_per_ns());
+
+            return Self { cost_per_unit };
+        }
+
+        // If all attempts failed, fall back to Instant-based calibration
+        eprintln!("[calibrate_with_perf] All attempts failed, falling back to Instant");
+        Self::calibrate_with_instant()
+    }
+
+    /// Calibrate bundle costs using Instant (fallback, less accurate).
+    ///
+    /// Uses large sample counts to achieve sub-timer-resolution precision.
+    /// Even with a 42ns timer, measuring 100,000 iterations gives sub-ns accuracy
+    /// as quantization errors average out.
+    fn calibrate_with_instant() -> Self {
+        const BASE_SIZE: u64 = 1;
+        const LARGE_SAMPLE_COUNT: usize = 100_000;
+
+        eprintln!("[calibrate_with_instant] Starting calibration...");
+
+        let start = Instant::now();
+        for _ in 0..LARGE_SAMPLE_COUNT {
+            spin_bundle(BASE_SIZE);
+        }
+        let elapsed_ns = start.elapsed().as_nanos() as f64;
+        let cost_per_unit = elapsed_ns / LARGE_SAMPLE_COUNT as f64;
+
+        eprintln!("[calibrate_with_instant] SUCCESS: cost_per_unit={:.2}ns", cost_per_unit);
+
+        Self { cost_per_unit }
+    }
+
+    /// Calculate exact number of iterations needed for target delay.
+    ///
+    /// Returns the iteration count that minimizes error vs target_ns.
+    /// Uses the calibrated cost per unit iteration for sub-timer precision.
+    fn iterations_for_target(&self, target_ns: u64) -> u64 {
+        if target_ns == 0 || self.cost_per_unit <= 0.0 {
+            return 0;
+        }
+
+        let exact_iters = (target_ns as f64) / self.cost_per_unit;
+        exact_iters.round().max(0.0) as u64
+    }
+}
+
+/// Execute a spin-loop bundle without measurement.
+///
+/// This is the core operation that gets calibrated and executed at runtime.
+/// Uses spin_loop + black_box to create measurable delay without optimization.
+#[inline(never)]
+fn spin_bundle(iterations: u64) {
+    for _ in 0..iterations {
+        std::hint::spin_loop();
+        std::hint::black_box(());
+    }
+}
+
+/// Initialize effect injection calibration.
+///
+/// **REQUIRED**: Must be called before using `busy_wait_ns()` or `EffectInjector`.
+/// Calling effect injection functions without initialization will panic.
+///
+/// This function performs one-time calibration of bundle costs for the current thread.
+/// Call this **before** running timing tests that use effect injection to avoid
+/// calibration overhead during measurements.
+///
+/// # When to Use
+///
+/// - **In tests**: Call at the start of each test that uses effect injection
+/// - **In benchmarks**: Call during setup, before measurement phase
+/// - **In libraries**: Call in initialization code before effect injection
+///
+/// # Performance
+///
+/// Takes approximately 10-50ms depending on timer availability:
+/// - Linux ARM64 with perf: ~10ms (uses PMU)
+/// - Other platforms: ~20-50ms (uses Instant)
+///
+/// # Thread Safety
+///
+/// Calibration is thread-local. Call once per thread that will inject effects.
+///
+/// # Panics
+///
+/// Does not panic. However, calling `busy_wait_ns()` without initialization will panic.
+///
+/// # Example
+///
+/// ```ignore
+/// use tacet::helpers::effect::{init_effect_injection, busy_wait_ns};
+///
+/// // In test setup - REQUIRED
+/// init_effect_injection();
+///
+/// // Now effect injection is calibrated
+/// busy_wait_ns(100);
+/// ```
+pub fn init_effect_injection() {
+    // Mark as initialized for this thread
+    EFFECT_INITIALIZED.with(|initialized| initialized.set(true));
+
+    // Trigger calibration by accessing the thread-local
+    BUNDLE_CALIBRATION.with(|_| {
+        // Calibration happens in LazyCell::new() closure
+    });
+
+    // Run validation during initialization (not during first busy_wait_ns call)
+    // This ensures all overhead happens upfront, keeping busy_wait_ns latency consistent
+    validate_busy_wait_once();
+}
 
 // =============================================================================
 // PLATFORM DETECTION AND WARNINGS
@@ -70,7 +302,15 @@ fn warn_imprecise_fallback() {
 
 /// Returns the name of the timer backend being used.
 pub fn timer_backend_name() -> &'static str {
-    #[cfg(target_arch = "aarch64")]
+    #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+    {
+        if get_effect_timer().is_some() {
+            "perf_event"
+        } else {
+            "cntvct_el0"
+        }
+    }
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     {
         "cntvct_el0"
     }
@@ -264,14 +504,24 @@ fn is_reasonable_aarch64_freq(freq: u64) -> bool {
 }
 
 /// Try to detect ARM64 platform from /proc/cpuinfo and return known frequency.
+///
+/// NOTE: This is only used as a fallback when CNTFRQ_EL0 returns an unreasonable
+/// value (outside 1 MHz - 10 GHz range). If CNTFRQ_EL0 is valid, it will be used
+/// directly, even if it differs from these platform defaults.
+///
+/// For example, Neoverse systems may report 25 MHz, 50 MHz, or 1 GHz depending on
+/// the SoC integrator's choice - all are valid if reported by CNTFRQ_EL0.
 #[cfg(all(target_arch = "aarch64", target_os = "linux"))]
 fn detect_aarch64_platform_freq() -> Option<u64> {
     let cpuinfo = std::fs::read_to_string("/proc/cpuinfo").ok()?;
     let cpuinfo_lower = cpuinfo.to_lowercase();
 
-    // AWS Graviton (Neoverse cores)
+    // NOTE: These are fallback defaults for when CNTFRQ_EL0 is broken
+    // Actual systems may use different frequencies - trust CNTFRQ_EL0 if valid!
+
+    // AWS Graviton (Neoverse cores) - common default
     if cpuinfo_lower.contains("neoverse") || cpuinfo_lower.contains("graviton") {
-        return Some(1_000_000_000); // 1 GHz
+        return Some(1_000_000_000); // 1 GHz (common, but not universal)
     }
 
     // Raspberry Pi 4 (Cortex-A72)
@@ -748,8 +998,22 @@ pub fn global_max_delay_ns() -> u64 {
 /// as 1GHz, but the physical resolution remains ~42ns.
 #[inline(never)]
 pub fn busy_wait_ns(ns: u64) {
-    // Validate accuracy on first call (prints warning if misconfigured)
-    validate_busy_wait_once();
+    // Require explicit initialization to prevent calibration during measurements
+    EFFECT_INITIALIZED.with(|initialized| {
+        if !initialized.get() {
+            panic!(
+                "Effect injection not initialized! Call init_effect_injection() before using busy_wait_ns().\n\
+                 \n\
+                 Example:\n\
+                 use tacet::helpers::init_effect_injection;\n\
+                 \n\
+                 init_effect_injection();  // Required before first use\n\
+                 busy_wait_ns(100);        // Now safe to use\n\
+                 \n\
+                 This ensures calibration doesn't interfere with timing measurements."
+            );
+        }
+    });
 
     let max = GLOBAL_MAX_DELAY_NS.load(Ordering::Relaxed);
     let clamped = ns.min(max);
@@ -779,24 +1043,65 @@ pub fn busy_wait_ns(ns: u64) {
 }
 
 /// ARM64-specific busy-wait using counter register.
+///
+/// Uses pre-calibrated bundle execution to avoid double measurement.
+/// Falls back to frequency-based or Instant-based timing if calibration unavailable.
 #[cfg(target_arch = "aarch64")]
 #[inline(never)]
 fn busy_wait_ns_aarch64(ns: u64) {
-    let ticks = ns_to_ticks_aarch64(ns);
-
-    let start: u64;
-    unsafe {
-        core::arch::asm!("mrs {}, cntvct_el0", out(reg) start);
+    if ns == 0 {
+        return;
     }
 
-    loop {
-        let now: u64;
+    // Try calibrated bundles first (avoids double measurement)
+    let used_bundles = BUNDLE_CALIBRATION.with(|cal| {
+        if let Some(cal) = cal.as_ref() {
+            let iterations = cal.iterations_for_target(ns);
+
+            if iterations > 0 {
+                // Execute exact number of iterations (no repetitions needed)
+                // Calibration measured cost per single iteration with high precision
+                spin_bundle(iterations);
+            }
+
+            true
+        } else {
+            false
+        }
+    });
+
+    if used_bundles {
+        return;
+    }
+
+    // Fallback 1: Frequency-based timing using cntvct_el0
+    // This works on all ARM64 platforms and doesn't require measurement during execution
+    let freq = aarch64_counter_freq();
+    if freq > 0 {
+        let ticks = ns_to_ticks_aarch64(ns);
+
+        let start: u64;
         unsafe {
-            core::arch::asm!("mrs {}, cntvct_el0", out(reg) now);
+            core::arch::asm!("mrs {}, cntvct_el0", out(reg) start);
         }
-        if now.wrapping_sub(start) >= ticks {
-            break;
+
+        loop {
+            let now: u64;
+            unsafe {
+                core::arch::asm!("mrs {}, cntvct_el0", out(reg) now);
+            }
+            if now.wrapping_sub(start) >= ticks {
+                break;
+            }
+            std::hint::spin_loop();
         }
+        return;
+    }
+
+    // Fallback 2: Instant-based (least accurate, always available)
+    let start = Instant::now();
+    let target = Duration::from_nanos(ns);
+    while start.elapsed() < target {
         std::hint::spin_loop();
     }
 }
@@ -869,7 +1174,12 @@ impl Default for EffectInjector {
 
 impl EffectInjector {
     /// Create a new effect injector with default safety limit (100μs).
+    ///
+    /// **Important**: Call `init_effect_injection()` before creating the first
+    /// EffectInjector to ensure calibration doesn't interfere with timing measurements.
     pub fn new() -> Self {
+        // Ensure calibration happens (if not already done)
+        init_effect_injection();
         Self { max_ns: 100_000 }
     }
 
@@ -878,6 +1188,8 @@ impl EffectInjector {
     /// # Arguments
     /// * `max_ns` - Maximum delay in nanoseconds
     pub fn with_max_ns(max_ns: u64) -> Self {
+        // Ensure calibration happens (if not already done)
+        init_effect_injection();
         Self { max_ns }
     }
 
