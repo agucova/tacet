@@ -113,9 +113,9 @@ impl SweepConfig {
             preset: BenchmarkPreset::Quick,
             samples_per_class: 5_000,
             datasets_per_point: 20,
-            // SILENT-like scale: [0, 0.1σ] = [0, 10μs]
-            // Plus 5ns (0.00005σ) for SharedHardware threshold testing
-            effect_multipliers: vec![0.0, 0.00005, 0.02, 0.05, 0.1],
+            // Range focused on sub-microsecond crypto vulnerabilities
+            // With σ = 100μs: [0, 5ns, 100ns, 500ns, 2μs, 10μs]
+            effect_multipliers: vec![0.0, 0.00005, 0.001, 0.005, 0.02, 0.1],
             effect_patterns: vec![EffectPattern::Null, EffectPattern::Shift],
             noise_models: vec![
                 NoiseModel::IID,
@@ -142,9 +142,19 @@ impl SweepConfig {
             preset: BenchmarkPreset::Medium,
             samples_per_class: 10_000,
             datasets_per_point: 50,
-            // SILENT-like scale with finer granularity
-            // [0, 0.1σ] = [0, 10μs] with ~2μs steps
-            effect_multipliers: vec![0.0, 0.01, 0.02, 0.04, 0.06, 0.08, 0.1],
+            // Extended range covering sub-microsecond effects common in crypto vulns
+            // With σ = 100μs: [0, 10ns, 50ns, 100ns, 200ns, 500ns, 1μs, 5μs, 10μs]
+            effect_multipliers: vec![
+                0.0,      // null
+                0.0001,   // 10ns
+                0.0005,   // 50ns
+                0.001,    // 100ns
+                0.002,    // 200ns
+                0.005,    // 500ns
+                0.01,     // 1μs
+                0.05,     // 5μs
+                0.1,      // 10μs
+            ],
             effect_patterns: vec![
                 EffectPattern::Null,
                 EffectPattern::Shift,
@@ -1212,7 +1222,7 @@ mod tests {
         let config = SweepConfig::quick();
         assert_eq!(config.samples_per_class, 5_000);
         assert_eq!(config.datasets_per_point, 20);
-        assert_eq!(config.effect_multipliers.len(), 5); // [0, 0.00005, 0.02, 0.05, 0.1]
+        assert_eq!(config.effect_multipliers.len(), 6); // [0, 5ns, 100ns, 500ns, 2μs, 10μs]
         assert_eq!(config.effect_patterns.len(), 2);
         assert_eq!(config.noise_models.len(), 3); // [IID, AR(0.5), AR(-0.5)]
     }
@@ -1220,10 +1230,10 @@ mod tests {
     #[test]
     fn test_sweep_config_total_points() {
         let config = SweepConfig::quick();
-        // 5 multipliers * 2 patterns * 3 noise = 30 points
-        assert_eq!(config.total_points(), 30);
-        // 30 points * 20 datasets = 600 total
-        assert_eq!(config.total_datasets(), 600);
+        // 6 multipliers * 2 patterns * 3 noise = 36 points
+        assert_eq!(config.total_points(), 36);
+        // 36 points * 20 datasets = 720 total
+        assert_eq!(config.total_datasets(), 720);
     }
 
     #[test]

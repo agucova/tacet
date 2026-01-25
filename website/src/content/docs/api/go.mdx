@@ -17,7 +17,7 @@ import (
     "log"
     "time"
 
-    "github.com/agucova/timing-oracle/crates/timing-oracle-go"
+    timingoracle "github.com/agucova/timing-oracle/crates/timing-oracle-go"
 )
 
 func main() {
@@ -53,6 +53,66 @@ func main() {
 
 ```bash
 go get github.com/agucova/timing-oracle/crates/timing-oracle-go
+go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
+```
+
+The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
+
+**Requirements:** Go 1.21+ with CGo enabled.
+
+### Platform Support
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| macOS | ARM64 (Apple Silicon) | ✅ Supported |
+| macOS | AMD64 (Intel) | ✅ Supported |
+| Linux | ARM64 | ✅ Supported |
+| Linux | AMD64 | ✅ Supported |
+
+The library is statically linked, so binaries are self-contained with no runtime dependencies.
+
+---
+
+## Building from Source
+
+If you prefer to build the native library yourself instead of downloading pre-built binaries:
+
+### Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (stable)
+- Go 1.21+ with CGo enabled
+- C compiler (clang or gcc)
+
+### Build Steps
+
+```bash
+# Clone the repository
+git clone https://github.com/agucova/timing-oracle
+cd timing-oracle
+
+# Build the C library
+cargo build -p timing-oracle-c --release
+
+# Strip debug symbols (reduces size from ~26MB to ~12MB)
+strip -S target/release/libtiming_oracle_c.a  # macOS
+# or: strip --strip-debug target/release/libtiming_oracle_c.a  # Linux
+
+# Copy to the appropriate platform directory
+mkdir -p crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)
+cp target/release/libtiming_oracle_c.a \
+   crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)/
+
+# Verify it works
+cd crates/timing-oracle-go
+go test -v -short -run TestTimerWorks
+```
+
+### Specifying a Version
+
+To download a specific version of the library:
+
+```bash
+TIMING_ORACLE_VERSION=v0.1.0 go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
 ```
 
 ---

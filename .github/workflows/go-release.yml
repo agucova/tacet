@@ -1,0 +1,151 @@
+name: Go Bindings Release
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach binaries to (e.g., v0.1.0)'
+        required: false
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-static-libs:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+            rust_target: aarch64-apple-darwin
+          - os: macos-15-intel
+            target: darwin-amd64
+            rust_target: x86_64-apple-darwin
+          - os: ubuntu-latest
+            target: linux-amd64
+            rust_target: x86_64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            rust_target: aarch64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build static library
+        run: cargo build -p timing-oracle-c --release --target ${{ matrix.rust_target }}
+
+      - name: Strip debug symbols (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: strip -S target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a
+
+      - name: Strip debug symbols (Linux)
+        if: startsWith(matrix.os, 'ubuntu')
+        run: strip --strip-debug target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a
+
+      - name: Rename artifact
+        run: |
+          mkdir -p artifacts
+          cp target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a \
+             artifacts/libtiming_oracle_c-${{ matrix.target }}.a
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: libtiming_oracle_c-${{ matrix.target }}
+          path: artifacts/libtiming_oracle_c-${{ matrix.target }}.a
+
+  upload-release:
+    name: Upload to Release
+    needs: build-static-libs
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' || github.event.inputs.tag != ''
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.event.release.tag_name }}
+          files: artifacts/*.a
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Verify Go bindings work with the built libraries
+  verify-go:
+    name: Verify Go (${{ matrix.target }})
+    needs: build-static-libs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-amd64
+          - os: ubuntu-latest
+            target: linux-amd64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.21'
+
+      - name: Download artifact
+        uses: actions/download-artifact@v6
+        with:
+          name: libtiming_oracle_c-${{ matrix.target }}
+          path: crates/timing-oracle-go/internal/ffi/lib/${{ matrix.target }}/
+
+      - name: Rename library
+        run: |
+          cd crates/timing-oracle-go/internal/ffi/lib/${{ matrix.target }}
+          mv libtiming_oracle_c-${{ matrix.target }}.a libtiming_oracle_c.a
+
+      - name: Fix lib directory structure
+        run: |
+          cd crates/timing-oracle-go/internal/ffi/lib
+          # Convert darwin-arm64 to darwin_arm64 format expected by CGo
+          for dir in */; do
+            newname="${dir//-/_}"
+            if [ "$dir" != "$newname" ]; then
+              mv "$dir" "$newname"
+            fi
+          done
+          ls -la
+
+      - name: Build Go bindings
+        working-directory: crates/timing-oracle-go
+        run: go build -v ./...
+
+      - name: Test Go bindings
+        working-directory: crates/timing-oracle-go
+        run: go test -v -short -run TestTimerWorks .

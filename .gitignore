@@ -39,6 +39,9 @@ bindings/cpp/test_cpp_wrapper
 # Go Bindings
 # =============================================================================
 
+# Downloaded static libraries (via go generate)
+crates/timing-oracle-go/internal/ffi/lib/
+
 # Go test binaries
 crates/timing-oracle-go/*.test
 crates/timing-oracle-go/examples/simple/simple

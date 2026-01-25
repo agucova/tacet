@@ -6,15 +6,23 @@ Go bindings for [timing-oracle](https://github.com/agucova/timing-oracle), a lib
 
 ```bash
 go get github.com/agucova/timing-oracle/crates/timing-oracle-go
+go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
 ```
 
-Pre-built static libraries are included for:
-- macOS ARM64 (Apple Silicon)
-- macOS AMD64 (Intel)
-- Linux ARM64
-- Linux AMD64
+The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
 
-No Rust toolchain required.
+**Requirements:** Go 1.21+ with CGo enabled.
+
+### Platform Support
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| macOS | ARM64 (Apple Silicon) | ✅ Supported |
+| macOS | AMD64 (Intel) | ✅ Supported |
+| Linux | ARM64 | ✅ Supported |
+| Linux | AMD64 | ✅ Supported |
+
+The library is statically linked, so binaries are self-contained with no runtime dependencies.
 
 ## Quick Start
 
@@ -68,23 +76,93 @@ Choose based on your threat scenario:
 
 ## Documentation
 
-See the full [Go API documentation](https://github.com/agucova/timing-oracle/blob/main/docs/api-go.md).
+See the full [API documentation](https://timing-oracle.dev/api/go/) or the [user guide](https://timing-oracle.dev/guides/user-guide/).
 
 ## Building from Source
 
-If you need to build the native library yourself:
+If you prefer to build the native library yourself instead of downloading pre-built binaries:
+
+### Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (stable)
+- Go 1.21+ with CGo enabled
+- C compiler (clang or gcc)
+
+### Build Steps
 
 ```bash
-# Requires Rust toolchain
+# Clone the repository
+git clone https://github.com/agucova/timing-oracle
+cd timing-oracle
+
+# Build the C library
 cargo build -p timing-oracle-c --release
 
-# Strip debug symbols
-strip -S target/release/libtiming_oracle_c.a
+# Strip debug symbols (reduces size from ~26MB to ~12MB)
+strip -S target/release/libtiming_oracle_c.a  # macOS
+# or: strip --strip-debug target/release/libtiming_oracle_c.a  # Linux
 
 # Copy to the appropriate platform directory
+mkdir -p crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)
 cp target/release/libtiming_oracle_c.a \
    crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)/
+
+# Verify it works
+cd crates/timing-oracle-go
+go test -v -short -run TestTimerWorks
 ```
+
+### Specifying a Version
+
+To download a specific version of the library:
+
+```bash
+TIMING_ORACLE_VERSION=v0.1.0 go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
+```
+
+### Verifying Your Build
+
+After building or downloading, verify the library works:
+
+```bash
+cd crates/timing-oracle-go
+
+# Run a quick test
+go test -v -short -run TestTimerWorks
+
+# Run the example
+go run ./examples/simple
+```
+
+Expected output:
+```
+Timer: cntvct_el0 (41.67 ns resolution)  # ARM64
+# or
+Timer: rdtsc (0.29 ns resolution)        # x86_64
+```
+
+## Architecture
+
+The Go bindings use CGo to call a statically-linked Rust library:
+
+```
+┌─────────────────────────────────────────────┐
+│  Your Go Code                               │
+├─────────────────────────────────────────────┤
+│  timingoracle (Go)                          │
+│  - Pure Go measurement loop                 │
+│  - Platform-specific timers (asm)           │
+├─────────────────────────────────────────────┤
+│  internal/ffi (CGo)                         │
+│  - Calls Rust via C ABI                     │
+├─────────────────────────────────────────────┤
+│  libtiming_oracle_c.a (Rust, static)        │
+│  - Bayesian statistical analysis            │
+│  - Calibration and adaptive sampling        │
+└─────────────────────────────────────────────┘
+```
+
+The timing-critical measurement loop runs in pure Go with platform-specific assembly timers (`rdtsc` on x86_64, `cntvct_el0` on ARM64). The Rust library is only called for statistical analysis between batches, minimizing FFI overhead.
 
 ## License
 

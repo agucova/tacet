@@ -123,32 +123,32 @@ Outcome =
 
 **Semantics:**
 
-The field `leak_probability` MUST be computed as P(m(δ) > θ_eff | Δ), where θ_eff is the effective threshold used for inference at decision time.
+The field `leak_probability` MUST be computed as $P(m(\delta) > \theta_{\text{eff}} \mid \Delta)$, where $\theta_{\text{eff}}$ is the effective threshold used for inference at decision time.
 
-When θ_eff > θ_user, the oracle cannot support a **Pass claim at θ_user**, because effects in the range (θ_user, θ_eff] are not distinguishable from noise under the measured conditions.
+When $\theta_{\text{eff}}$ > $\theta_{\text{user}}$, the oracle cannot support a **Pass claim at $\theta_{\text{user}}$**, because effects in the range ($\theta_{\text{user}}$, $\theta_{\text{eff}}$] are not distinguishable from noise under the measured conditions.
 
-Implementations MUST NOT substitute θ_user into `leak_probability` when θ_eff > θ_user.
+Implementations MUST NOT substitute $\theta_{\text{user}}$ into `leak_probability` when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$.
 
 - **Pass**: MUST be returned when ALL of the following hold:
   1. `leak_probability < pass_threshold` (default 0.05)
-  2. `theta_eff ≤ theta_user + ε_θ` where ε_θ = max(θ_tick, 10⁻⁶ · θ_user)
+  2. $\theta_{\text{eff}} \le \theta_{\text{user}} + \varepsilon_{\theta}$ where $\varepsilon_{\theta} = \max(\theta_{\text{tick}}, 10^{-6} \cdot \theta_{\text{user}})$
   3. All verdict-blocking quality gates pass
-  4. θ_user > 0 (non-research mode)
+  4. $\theta_{\text{user}}$ > 0 (non-research mode)
 
 - **Fail**: MUST be returned when ALL of the following hold:
   1. `leak_probability > fail_threshold` (default 0.95)
   2. All verdict-blocking quality gates pass
 
-  Note: Fail MAY be returned when θ_eff > θ_user. Detecting m(δ) > θ_eff implies m(δ) > θ_user (since θ_eff ≥ θ_user by construction).
+  Note: Fail MAY be returned when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$. Detecting $m(\delta)$ > $\theta_{\text{eff}}$ implies $m(\delta)$ > $\theta_{\text{user}}$ (since $\theta_{\text{eff}}$ ≥ $\theta_{\text{user}}$ by construction).
 
 - **Inconclusive**: MUST be returned when ANY of the following hold:
   1. A verdict-blocking quality gate fails
   2. Resource budgets exhausted without reaching a decision threshold
-  3. `leak_probability < pass_threshold` but `theta_eff > theta_user + ε_θ` (threshold elevated)
+  3. `leak_probability < pass_threshold` but $\theta_{\text{eff}} > \theta_{\text{user}} + \varepsilon_{\theta}$ (threshold elevated)
 
 - **Unmeasurable**: MUST be returned when the operation is too fast to measure reliably (see §4.5)
 
-- **Research**: MUST be returned only when θ_user = 0. In research mode, Pass/Fail semantics do not apply; the oracle reports effect estimates at the measurement floor.
+- **Research**: MUST be returned only when $\theta_{\text{user}}$ = 0. In research mode, Pass/Fail semantics do not apply; the oracle reports effect estimates at the measurement floor.
 
 ### 2.2 AttackerModel
 
@@ -169,7 +169,7 @@ AttackerModel =
 | SharedHardware | 0.6 ns | SGX enclaves, cross-VM, containers, hyperthreading |
 | PostQuantumSentinel | 3.3 ns | Post-quantum crypto (ML-KEM, ML-DSA) |
 | AdjacentNetwork | 100 ns | LAN services, HTTP/2 APIs |
-| RemoteNetwork | 50 μs | Internet-exposed services |
+| RemoteNetwork | 50 $\mu\text{s}$ | Internet-exposed services |
 | Research | 0 | Profiling, debugging (not for CI) |
 
 **There is no single correct threshold.** The choice of attacker model is a statement about your threat model.
@@ -219,8 +219,8 @@ Exploitability =
 |-------|-------------|---------------|
 | SharedHardwareOnly | < 10 ns | ~1k queries on same physical core |
 | Http2Multiplexing | 10–100 ns | ~100k concurrent HTTP/2 requests |
-| StandardRemote | 100 ns – 10 μs | ~1k-10k queries with standard timing |
-| ObviousLeak | > 10 μs | &lt;100 queries, trivially observable |
+| StandardRemote | 100 ns – 10 $\mu\text{s}$ | ~1k-10k queries with standard timing |
+| ObviousLeak | > 10 $\mu\text{s}$ | &lt;100 queries, trivially observable |
 
 ### 2.5 MeasurementQuality
 
@@ -255,11 +255,11 @@ InconclusiveReason =
   | ConditionsChanged { drift: ConditionDrift }
 ```
 
-The `meets_pass_criterion_at_eff` field indicates whether P(m(δ) > θ_eff | Δ) < pass_threshold. This allows CI systems to implement policies like "treat pass-criterion-met-at-floor as acceptable" without changing inference semantics.
+The `meets_pass_criterion_at_eff` field indicates whether $P(m(\delta) > \theta_{\text{eff}} \mid \Delta)$ < pass_threshold. This allows CI systems to implement policies like "treat pass-criterion-met-at-floor as acceptable" without changing inference semantics.
 
 The `achievable_at_max` field distinguishes:
-- `true`: θ_floor > θ_user now, but θ_floor(n_max) ≤ θ_user (more sampling may help)
-- `false`: θ_floor(n_max) > θ_user (cannot reach θ_user on this platform/configuration)
+- `true`: $\theta_{\text{floor}}$ > $\theta_{\text{user}}$ now, but $\theta_{\text{floor}}(n_{\max}) \le \theta_{\text{user}}$ (more sampling may help)
+- `false`: $\theta_{\text{floor}}(n_{\max}) > \theta_{\text{user}}$ (cannot reach $\theta_{\text{user}}$ on this platform/configuration)
 
 ### 2.7 ResearchStatus
 
@@ -343,7 +343,7 @@ We collect timing samples from two classes:
 - **Fixed class (F)**: A specific input (e.g., all zeros)
 - **Random class (R)**: Randomly sampled inputs
 
-Rather than comparing means, we compare the distributions via their deciles. For each class, compute the 10th, 20th, ..., 90th percentiles, yielding two vectors in ℝ⁹. The test statistic is their difference:
+Rather than comparing means, we compare the distributions via their deciles. For each class, compute the 10th, 20th, ..., 90th percentiles, yielding two vectors in $\mathbb{R}^9$. The test statistic is their difference:
 
 $$
 \Delta = \hat{q}(\text{Fixed}) - \hat{q}(\text{Random}) \in \mathbb{R}^9
@@ -410,18 +410,18 @@ The system operates in two phases:
 **Phase 1: Calibration** (runs once)
 - Collect initial samples to characterize measurement noise
 - Estimate covariance structure via stream-based block bootstrap
-- Compute "covariance rate" Σ_rate that scales as Σ = Σ_rate / n
-- Compute initial measurement floor θ_floor and floor-rate constant c_floor
+- Compute "covariance rate" $\Sigma_{\text{rate}}$ that scales as $\Sigma = \Sigma_{\text{rate}} / n$
+- Compute initial measurement floor $\theta_{\text{floor}}$ and floor-rate constant c_floor
 - Compute projection mismatch threshold Q_proj,thresh from bootstrap distribution
-- Compute effective threshold θ_eff and calibrate prior scale σ
+- Compute effective threshold $\theta_{\text{eff}}$ and calibrate prior scale $\sigma$
 - Run pre-flight checks (timer sanity, harness sanity, stationarity)
 
 **Phase 2: Adaptive Loop** (iterates until decision)
 - Collect batches of samples
 - Update quantile estimates from all data collected so far
-- Scale covariance: Σ_n = Σ_rate / n
-- Update θ_floor(n) using floor-rate constant
-- Run Gibbs sampler to approximate posterior and compute P(effect > θ_eff)
+- Scale covariance: $\Sigma_n = \Sigma_{\text{rate}}/n$
+- Update $\theta_{\text{floor}}(n)$ using floor-rate constant
+- Run Gibbs sampler to approximate posterior and compute $P(\text{effect} > \theta_{\text{eff}})$
 - Check quality gates (posterior ≈ prior → Inconclusive)
 - Check decision boundaries (P > 95% → Fail, P < 5% → Pass)
 - Check time/sample budgets
@@ -494,7 +494,7 @@ $$
 |\hat{\rho}^{(\max)}_k| = \max(|\hat{\rho}^{(F)}_k|, |\hat{\rho}^{(R)}_k|)
 $$
 
-This measures within-class dependence at acquisition-stream lags—the quantity that actually drives Var(Δ)—without being masked by class alternation.
+This measures within-class dependence at acquisition-stream lags—the quantity that actually drives $\mathrm{Var}(\Delta)$—without being masked by class alternation.
 
 **Why class-conditional ACF?** The variance of quantile estimators $\hat{q}(F)$ and $\hat{q}(R)$ depends on within-class autocorrelation. When computing ACF on the pooled interleaved stream, adjacent samples often belong to different classes, artificially reducing apparent autocorrelation. Class-conditional ACF preserves acquisition-stream timing (lag $k$ means $k$ acquisition steps apart) while measuring the relevant dependence structure.
 
@@ -550,7 +550,7 @@ For each of $B$ bootstrap iterations (default: 2,000):
 
 4. **Compute quantile differences**: $\Delta^* = \hat{q}(F^*) - \hat{q}(R^*)$
 
-Compute sample covariance of the Δ* vectors using Welford's online algorithm³ (numerically stable).
+Compute sample covariance of the $\Delta^*$ vectors using Welford's online algorithm³ (numerically stable).
 
 ³ Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420.
 
@@ -595,7 +595,7 @@ This allows cheap posterior updates without re-bootstrapping, while correctly ac
 
 **Numerical stability:**
 
-With discrete timers or few unique values, some quantiles may have near-zero variance, making Σ ill-conditioned. Implementations MUST regularize by ensuring a minimum diagonal value:
+With discrete timers or few unique values, some quantiles may have near-zero variance, making $\Sigma$ ill-conditioned. Implementations MUST regularize by ensuring a minimum diagonal value:
 
 $$
 \sigma^2_i \leftarrow \max(\sigma^2_i, 0.01 \cdot \bar{\sigma}^2) + \varepsilon
@@ -607,11 +607,11 @@ where $\bar{\sigma}^2 = \text{tr}(\Sigma)/9$ and $\varepsilon = 10^{-10} + \bar{
 
 During bootstrap, calibrate the threshold for the projection mismatch diagnostic (see §3.5.3). This determines when the 2D shift+tail summary is a faithful description of the inferred 9D quantile profile.
 
-For each bootstrap replicate Δ*:
-1. Compute 9D posterior mean: δ*_post under the Bayesian update
-2. Compute GLS projection: β*_proj = A δ*_post
-3. Compute projection residual: r*_proj = δ*_post − Xβ*_proj
-4. Compute mismatch statistic: Q*_proj = (r*_proj)ᵀ Σ_n⁻¹ (r*_proj)
+For each bootstrap replicate $\Delta^*$:
+1. Compute 9D posterior mean: $\delta^*_{\text{post}}$ under the Bayesian update
+2. Compute GLS projection: $\beta^*_{\text{proj}} = A \delta^*_{\text{post}}$
+3. Compute projection residual: $r^*_{\text{proj}} = \delta^*_{\text{post}} - X\beta^*_{\text{proj}}$
+4. Compute mismatch statistic: $Q^*_{\text{proj}} = (r^*_{\text{proj}})^\top \Sigma_n^{-1} (r^*_{\text{proj}})$
 
 The projection mismatch threshold is the 99th percentile of the bootstrap distribution:
 
@@ -623,13 +623,13 @@ $$
 
 #### 3.3.4 Measurement Floor and Effective Threshold
 
-A critical design element is distinguishing between what the user *wants* to detect (θ_user) and what the measurement *can* detect (θ_floor).
+A critical design element is distinguishing between what the user *wants* to detect ($\theta_{\text{user}}$) and what the measurement *can* detect ($\theta_{\text{floor}}$).
 
 **Floor-rate constant:**
 
-Under the model's scaling assumption Σ_n = Σ_rate/n_eff, the measurement floor scales as 1/√n_eff. Implementations MUST compute a floor-rate constant once at calibration based on the 9D decision functional m(δ) = max_k |δ_k|.
+Under the model's scaling assumption $\Sigma_n = \Sigma_{\text{rate}}/n_{\text{eff}}$, the measurement floor scales as $1/\sqrt{n_{\text{eff}}}$. Implementations MUST compute a floor-rate constant once at calibration based on the 9D decision functional $m(\delta) = \max_k |\delta_k|$.
 
-Draw Z₀ ~ N(0, Σ_rate) via Monte Carlo (SHOULD use 50,000 samples) and compute:
+Draw $Z_0 \sim \mathcal{N}(0, \Sigma_{\text{rate}})$ via Monte Carlo (SHOULD use 50,000 samples) and compute:
 
 $$
 c_{\text{floor}} := q_{0.95}\left( \max_k |Z_{0,k}| \right)
@@ -661,7 +661,7 @@ $$
 \theta_{\text{floor}}(n) = \max\bigl(\theta_{\text{floor,stat}}(n), \, \theta_{\text{tick}}\bigr)
 $$
 
-**Effective threshold (θ_eff):**
+**Effective threshold ($\theta_{\text{eff}}$):**
 
 The threshold actually used for inference:
 
@@ -674,45 +674,45 @@ $$
 
 **Threshold Elevation Decision Rule:**
 
-When the measurement floor exceeds the user's requested threshold, claims at θ_user are fundamentally limited. This section defines the normative decision rule.
+When the measurement floor exceeds the user's requested threshold, claims at $\theta_{\text{user}}$ are fundamentally limited. This section defines the normative decision rule.
 
 *Definitions:*
 
-- θ_user: User-requested threshold (from AttackerModel or custom)
-- θ_floor(n): Measurement floor at sample count n (see formula above)
-- θ_eff: Effective threshold used for inference = max(θ_user, θ_floor)
-- ε_θ: Tolerance for threshold comparison = max(θ_tick, 10⁻⁶ · θ_user)
+- $\theta_{\text{user}}$: User-requested threshold (from AttackerModel or custom)
+- $\theta_{\text{floor}}(n)$: Measurement floor at sample count n (see formula above)
+- $\theta_{\text{eff}}$: Effective threshold used for inference = $\max(\theta_{\text{user}}, \theta_{\text{floor}})$
+- $\varepsilon_{\theta}$: Tolerance for threshold comparison = $\max(\theta_{\text{tick}}, 10^{-6} \cdot \theta_{\text{user}})$
 
 *Core principle:*
 
-When θ_eff > θ_user, the oracle cannot support a Pass claim at θ_user, because effects in the range (θ_user, θ_eff] are not distinguishable from noise under the measured conditions.
+When $\theta_{\text{eff}}$ > $\theta_{\text{user}}$, the oracle cannot support a Pass claim at $\theta_{\text{user}}$, because effects in the range ($\theta_{\text{user}}$, $\theta_{\text{eff}}$] are not distinguishable from noise under the measured conditions.
 
-1. **Fail propagates**: Detecting m(δ) > θ_eff implies m(δ) > θ_user (since θ_eff ≥ θ_user). Implementations MAY return Fail when θ_eff > θ_user.
+1. **Fail propagates**: Detecting $m(\delta)$ > $\theta_{\text{eff}}$ implies $m(\delta)$ > $\theta_{\text{user}}$ (since $\theta_{\text{eff}}$ ≥ $\theta_{\text{user}}$). Implementations MAY return Fail when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$.
 
-2. **Pass does not propagate**: "No detectable effect above θ_eff" is compatible with effects in (θ_user, θ_eff]. Implementations MUST NOT return Pass when θ_eff > θ_user + ε_θ.
+2. **Pass does not propagate**: "No detectable effect above $\theta_{\text{eff}}$" is compatible with effects in ($\theta_{\text{user}}$, $\theta_{\text{eff}}$]. Implementations MUST NOT return Pass when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$ + $\varepsilon_{\theta}$.
 
 *Decision rule (normative):*
 
-At decision time, let P = P(m(δ) > θ_eff | Δ):
+At decision time, let $P = P(m(\delta) > \theta_{\text{eff}} \mid \Delta)$:
 
-| Condition | P value | θ_eff vs θ_user | Outcome |
+| Condition | P value | $\theta_{\text{eff}}$ vs $\theta_{\text{user}}$ | Outcome |
 |-----------|---------|-----------------|---------|
 | Leak detected | P > fail_threshold | any | **Fail** |
-| No leak, threshold met | P < pass_threshold | θ_eff ≤ θ_user + ε_θ | **Pass** |
-| No leak, threshold elevated | P < pass_threshold | θ_eff > θ_user + ε_θ | **Inconclusive**(ThresholdElevated) |
+| No leak, threshold met | P < pass_threshold | $\theta_{\text{eff}}$ ≤ $\theta_{\text{user}}$ + $\varepsilon_{\theta}$ | **Pass** |
+| No leak, threshold elevated | P < pass_threshold | $\theta_{\text{eff}}$ > $\theta_{\text{user}}$ + $\varepsilon_{\theta}$ | **Inconclusive**(ThresholdElevated) |
 | Uncertain | else | any | Continue sampling or **Inconclusive** |
 
 **Dynamic floor updates:**
 
-During the adaptive loop, θ_floor(n) decreases as n grows. Implementations MUST:
+During the adaptive loop, $\theta_{\text{floor}}(n)$ decreases as n grows. Implementations MUST:
 
-1. Recompute θ_eff = max(θ_user, θ_floor(n)) after each batch
-2. If θ_floor(n) drops to θ_user or below, Pass becomes possible (subject to posterior)
-3. Report the θ_eff used for the **final** decision, not the maximum observed during the run
+1. Recompute $\theta_{\text{eff}} = \max(\theta_{\text{user}}, \theta_{\text{floor}}(n))$ after each batch
+2. If $\theta_{\text{floor}}(n)$ drops to $\theta_{\text{user}}$ or below, Pass becomes possible (subject to posterior)
+3. Report the $\theta_{\text{eff}}$ used for the **final** decision, not the maximum observed during the run
 
 **Early termination heuristic (SHOULD):**
 
-At calibration, compute θ_floor,max = max(c_floor/√n_max, θ_tick). If θ_floor,max > θ_user + ε_θ:
+At calibration, compute $\theta_{\text{floor,max}} = \max(c_{\text{floor}}/\sqrt{n_{\max}}, \theta_{\text{tick}})$. If $\theta_{\text{floor,max}}$ > $\theta_{\text{user}}$ + $\varepsilon_{\theta}$:
 
 - Set `achievable_at_max = false`
 - If P < pass_threshold and the posterior is stable, implementations SHOULD terminate early with Inconclusive(ThresholdElevated) rather than exhausting the budget
@@ -721,17 +721,17 @@ This is a budget-control optimization, not a verdict-blocking gate.
 
 #### 3.3.5 Prior Scale Calibration (Student's *t*)
 
-The prior on the 9D effect profile δ MUST be a **correlation-shaped multivariate Student's *t*** distribution:
+The prior on the 9D effect profile $\delta$ MUST be a **correlation-shaped multivariate Student's *t*** distribution:
 
 $$
 \delta \sim t_\nu(0, \sigma^2 R)
 $$
 
-where R is the correlation matrix derived from Σ_rate, ν is a fixed degrees-of-freedom parameter, and σ is a global scale calibrated to an exceedance target.
+where R is the correlation matrix derived from $\Sigma_{\text{rate}}$, $\nu$ is a fixed degrees-of-freedom parameter, and $\sigma$ is a global scale calibrated to an exceedance target.
 
 **Prior correlation matrix (R):**
 
-Let D = diag(Σ_rate), computed **after** any diagonal-floor regularization (§3.3.2). Define:
+Let D = diag($\Sigma_{\text{rate}}$), computed **after** any diagonal-floor regularization (§3.3.2). Define:
 
 $$
 R := \text{Corr}(\Sigma_{\text{rate}}) = D^{-1/2} \Sigma_{\text{rate}} D^{-1/2}
@@ -743,9 +743,9 @@ $$
 R \leftarrow R + \varepsilon I, \quad \varepsilon \in [10^{-10}, 10^{-6}]
 $$
 
-chosen adaptively (start at 10⁻¹⁰, increase on Cholesky failure).
+chosen adaptively (start at $10^{-10}$, increase on Cholesky failure).
 
-**Robustness fallback (fragile regimes) — normative:** In fragile regimes (§3.3) or when cond(R) > 10⁴, implementations MUST apply shrinkage:
+**Robustness fallback (fragile regimes) — normative:** In fragile regimes (§3.3) or when $\mathrm{cond}(R) > 10^4$, implementations MUST apply shrinkage:
 
 $$
 R \leftarrow (1-\lambda_{\text{shrink}})R + \lambda_{\text{shrink}} I, \quad \lambda_{\text{shrink}} \in [0.01, 0.2]
@@ -753,7 +753,7 @@ $$
 
 chosen deterministically from conditioning diagnostics (e.g., stepwise based on condition number buckets).
 
-**Precomputation requirement:** Implementations MUST precompute and cache a factorization sufficient to apply R⁻¹ efficiently (e.g., a Cholesky factor L_R such that L_R L_Rᵀ = R). Implementations MUST NOT form explicit matrix inverses in floating point unless demonstrably stable. The quadratic form is computed as:
+**Precomputation requirement:** Implementations MUST precompute and cache a factorization sufficient to apply $R^{-1}$ efficiently (e.g., a Cholesky factor $L_R$ such that $L_R L_R^\top = R$). Implementations MUST NOT form explicit matrix inverses in floating point unless demonstrably stable. The quadratic form is computed as:
 
 $$
 \delta^\top R^{-1} \delta = \|L_R^{-1} \delta\|_2^2
@@ -761,7 +761,7 @@ $$
 
 via a triangular solve.
 
-**Degrees of freedom (ν) — normative:**
+**Degrees of freedom ($\nu$) — normative:**
 
 Implementations MUST use:
 
@@ -769,10 +769,10 @@ $$
 \nu := 4
 $$
 
-**Rationale:** ν = 4 provides:
-- Heavy tails (polynomial decay ∝ |x|⁻⁵) that don't crush large effects
-- Finite variance (required for Gate 1): Var(δ) exists for ν > 2
-- Stable Gibbs mixing: not so heavy that λ becomes degenerate
+**Rationale:** $\nu = 4$ provides:
+- Heavy tails (polynomial decay ∝ $|x|^{-5}$) that don't crush large effects
+- Finite variance (required for Gate 1): $\mathrm{Var}(\delta)$ exists for $\nu > 2$
+- Stable Gibbs mixing: not so heavy that $\lambda$ becomes degenerate
 
 **Scale-mixture representation — normative:**
 
@@ -786,11 +786,11 @@ $$
 \delta \mid \lambda \sim \mathcal{N}\left(0, \frac{\sigma^2}{\lambda} R\right)
 $$
 
-**Gamma parameterization:** This specification uses **shape–rate** parameterization throughout. Under this parameterization, E[λ] = 1 and Var(λ) = 2/ν.
+**Gamma parameterization:** This specification uses **shape–rate** parameterization throughout. Under this parameterization, $E[\lambda] = 1$ and $\mathrm{Var}(\lambda) = 2/\nu$.
 
-**Calibrating σ via exceedance target — normative:**
+**Calibrating $\sigma$ via exceedance target — normative:**
 
-The scale σ MUST be chosen so that the prior exceedance probability equals a fixed target π₀ (default 0.62):
+The scale $\sigma$ MUST be chosen so that the prior exceedance probability equals a fixed target $\pi_0$ (default 0.62):
 
 $$
 P\left(\max_k |\delta_k| > \theta_{\text{eff}} \;\middle|\; \delta \sim t_\nu(0, \sigma^2 R)\right) = \pi_0
@@ -802,12 +802,12 @@ This MUST be solved by deterministic 1D root-finding (e.g., bisection or Brent's
 
 For each of M draws (SHOULD use M = 50,000):
 
-1. Draw λ ~ Gamma(shape = ν/2, rate = ν/2)
-2. Draw z ~ N(0, I₉)
-3. Compute δ = (σ/√λ) · L_R z, where L_R is the Cholesky factor of R (i.e., L_R L_Rᵀ = R)
-4. Record whether max_k |δ_k| > θ_eff
+1. Draw $\lambda \sim \text{Gamma}(\text{shape} = \nu/2, \text{rate} = \nu/2)$
+2. Draw $z \sim \mathcal{N}(0, I_9)$
+3. Compute $\delta = (\sigma/\sqrt{\lambda}) \cdot L_R z$, where $L_R$ is the Cholesky factor of $R$ (i.e., $L_R L_R^\top = R$)
+4. Record whether $\max_k |\delta_k| > \theta_{\text{eff}}$
 
-The exceedance probability is the fraction of draws exceeding θ_eff.
+The exceedance probability is the fraction of draws exceeding $\theta_{\text{eff}}$.
 
 **Search bounds — normative:**
 
@@ -820,10 +820,10 @@ $$
 and SE_med be the median of {SE_k}_{k=1}^9.
 
 Binary search bounds MUST be:
-- σ_lo = 0.05 · θ_eff
-- σ_hi = max(50 · θ_eff, 10 · SE_med)
+- $\sigma_{\text{lo}} = 0.05 \cdot \theta_{\text{eff}}$
+- $\sigma_{\text{hi}} = \max(50 \cdot \theta_{\text{eff}}, 10 \cdot \text{SE}_{\text{med}})$
 
-**Calibration timing:** The calibration MUST be performed once per run, during the calibration phase. The resulting σ MUST remain fixed for the entire run, even if θ_eff changes due to floor updates.
+**Calibration timing:** The calibration MUST be performed once per run, during the calibration phase. The resulting $\sigma$ MUST remain fixed for the entire run, even if $\theta_{\text{eff}}$ changes due to floor updates.
 
 #### 3.3.6 Deterministic Seeding Policy
 
@@ -873,7 +873,7 @@ This is unconstrained—the model can represent any quantile-difference pattern,
 
 #### 3.4.2 Likelihood (Robust t-likelihood via scale mixture)
 
-Timing summary statistics Δ may deviate from the Gaussian approximation when Σₙ is underestimated (e.g., high dependence, interference bursts, discrete timers). To prevent pathological posterior certainty under covariance misestimation, implementations MUST use a robust likelihood with a single scalar precision factor κ.
+Timing summary statistics $\Delta$ may deviate from the Gaussian approximation when $\Sigma_n$ is underestimated (e.g., high dependence, interference bursts, discrete timers). To prevent pathological posterior certainty under covariance misestimation, implementations MUST use a robust likelihood with a single scalar precision factor $\kappa$.
 
 $$
 \Delta \mid \delta, \kappa \sim \mathcal{N}\!\left(\delta, \frac{\Sigma_n}{\kappa}\right)
@@ -889,19 +889,19 @@ $$
 \Delta \mid \delta \sim t_{\nu_\ell}(\delta, \Sigma_n)
 $$
 
-where Σ_n = Σ_rate / n_eff is the scaled covariance (see §3.3.2 for n_eff definition).
+where $\Sigma_n = \Sigma_{\text{rate}} / n_{\text{eff}}$ is the scaled covariance (see §3.3.2 for $n_{\text{eff}}$ definition).
 
-**Gamma parameterization:** shape–rate. E[κ] = 1.
+**Gamma parameterization:** shape–rate. $E[\kappa] = 1$.
 
-**Degrees of freedom for likelihood (ν_ℓ) — normative default:**
+**Degrees of freedom for likelihood ($\nu_{\ell}$) — normative default:**
 
-Implementations MUST use ν_ℓ := 8 unless overridden by a calibration-driven conservatism escalation policy (§3.8).
+Implementations MUST use $\nu_{\ell}$ := 8 unless overridden by a calibration-driven conservatism escalation policy (§3.8).
 
-**Rationale:** When Σₙ is underestimated (common when dependence is worse than calibration captured), κ is pulled downward and inflates uncertainty automatically, preventing pathological certainty (P(leak) → 0 or 1) from artifacts.
+**Rationale:** When $\Sigma_n$ is underestimated (common when dependence is worse than calibration captured), $\kappa$ is pulled downward and inflates uncertainty automatically, preventing pathological certainty (P(leak) → 0 or 1) from artifacts.
 
 #### 3.4.3 Prior (Student's *t* via scale mixture)
 
-The prior on δ ∈ ℝ⁹ is:
+The prior on $\delta \in \mathbb{R}^9$ is:
 
 $$
 \delta \sim t_\nu(0, \sigma^2 R), \quad \nu = 4
@@ -921,13 +921,13 @@ where Gamma uses **shape–rate** parameterization.
 
 **Marginal prior covariance:**
 
-For ν > 2, the marginal covariance of δ is:
+For $\nu$ > 2, the marginal covariance of $\delta$ is:
 
 $$
 \text{Cov}(\delta) = \frac{\nu}{\nu - 2} \sigma^2 R
 $$
 
-For ν = 4:
+For $\nu$ = 4:
 
 $$
 \Lambda_0^{\text{marginal}} := \text{Cov}(\delta) = 2\sigma^2 R
@@ -937,29 +937,29 @@ This matrix is used as the prior covariance reference in Gate 1 (§3.5.2).
 
 **Why Student's *t* instead of Gaussian?**
 
-A Gaussian prior with scale calibrated to the exceedance target can cause catastrophic shrinkage when measurement noise is high relative to θ_eff. The Student's *t* prior's heavy tails (polynomial decay rather than exponential) naturally accommodate large effects without requiring explicit mixture components.
+A Gaussian prior with scale calibrated to the exceedance target can cause catastrophic shrinkage when measurement noise is high relative to $\theta_{\text{eff}}$. The Student's *t* prior's heavy tails (polynomial decay rather than exponential) naturally accommodate large effects without requiring explicit mixture components.
 
 **Why Student's *t* instead of Gaussian mixture?**
 
 A 2-component Gaussian mixture (as in v5.2) suffers from discrete scale selection. Under correlated likelihoods, the Bayes factor computation for mixture weights is dominated by Occam penalties (log-det terms), causing the posterior to stick to the narrow component even when data clearly favors larger effects — but not as large as the slab.
 
-The Student's *t* prior makes the effective scale λ continuous. The posterior on λ can settle at whatever scale the data supports, rather than being forced to choose between two fixed options.
+The Student's *t* prior makes the effective scale $\lambda$ continuous. The posterior on $\lambda$ can settle at whatever scale the data supports, rather than being forced to choose between two fixed options.
 
 #### 3.4.4 Posterior Inference (Deterministic Gibbs Sampling)
 
-Because the prior is Student's *t* and the likelihood uses a robust t-distribution (§3.4.2), the marginal posterior p(δ | Δ) is not available in closed form. Implementations MUST approximate the posterior using a **deterministic Gibbs sampler** over (δ, λ, κ).
+Because the prior is Student's *t* and the likelihood uses a robust t-distribution (§3.4.2), the marginal posterior $p(\delta \mid \Delta)$ is not available in closed form. Implementations MUST approximate the posterior using a **deterministic Gibbs sampler** over $(\delta, \lambda, \kappa)$.
 
 **Gibbs conditionals:**
 
-**Conditional 1: δ | λ, κ, Δ (Gaussian)**
+**Conditional 1: $\delta$ | $\lambda$, $\kappa$, $\Delta$ (Gaussian)**
 
-Given λ (prior precision multiplier) and κ (likelihood precision multiplier), the prior covariance is:
+Given $\lambda$ (prior precision multiplier) and $\kappa$ (likelihood precision multiplier), the prior covariance is:
 
 $$
 \Lambda_0(\lambda) = \frac{\sigma^2}{\lambda} R
 $$
 
-The effective likelihood covariance is Σₙ/κ. The posterior is conjugate Gaussian:
+The effective likelihood covariance is $\Sigma_n/\kappa$. The posterior is conjugate Gaussian:
 
 $$
 \delta \mid \lambda, \kappa, \Delta \sim \mathcal{N}(\mu(\lambda, \kappa), \Lambda(\lambda, \kappa))
@@ -977,7 +977,7 @@ $$
 
 **Sampling without explicit inverses — normative:**
 
-Let Q(λ, κ) := κΣₙ⁻¹ + (λ/σ²)R⁻¹. Note that Σₙ⁻¹ and R⁻¹ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
+Let $Q(\lambda, \kappa) := \kappa \Sigma_n^{-1} + (\lambda/\sigma^2) R^{-1}$. Note that $\Sigma_n^{-1}$ and $R^{-1}$ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
 
 $$
 L L^\top = Q(\lambda, \kappa)
@@ -991,15 +991,15 @@ $$
 
 via forward-backward substitution (two triangular solves).
 
-To sample δ:
+To sample $\delta$:
 
 $$
 \delta = \mu(\lambda, \kappa) + L^{-\top} z, \quad z \sim \mathcal{N}(0, I_9)
 $$
 
-where L⁻ᵀz MUST be computed via a single triangular solve (backward substitution), not by forming L⁻¹.
+where $L^{-\top} z$ MUST be computed via a single triangular solve (backward substitution), not by forming $L^{-1}$.
 
-**Conditional 2: λ | δ (Gamma)**
+**Conditional 2: $\lambda$ | $\delta$ (Gamma)**
 
 Let d = 9 (dimension) and define:
 
@@ -1013,11 +1013,11 @@ $$
 \lambda \mid \delta \sim \text{Gamma}\left(\text{shape} = \frac{\nu + d}{2}, \; \text{rate} = \frac{\nu + \sigma^{-2} q}{2}\right)
 $$
 
-**Derivation:** Combining the Gamma(ν/2, ν/2) prior on λ with the Gaussian likelihood contribution exp(−(λ/2σ²)δᵀR⁻¹δ) yields a Gamma posterior with shape increased by d/2 and rate increased by q/(2σ²).
+**Derivation:** Combining the Gamma($\nu/2, \nu/2$) prior on $\lambda$ with the Gaussian likelihood contribution $\exp\left(-(\lambda/2\sigma^2)\delta^\top R^{-1}\delta\right)$ yields a Gamma posterior with shape increased by $d/2$ and rate increased by $q/(2\sigma^2)$.
 
-**Conditional 3: κ | δ, Δ (Gamma) — normative**
+**Conditional 3: $\kappa$ | $\delta$, $\Delta$ (Gamma) — normative**
 
-The likelihood precision multiplier κ is sampled conditional on δ and Δ. Let d = 9 and define the Mahalanobis residual:
+The likelihood precision multiplier $\kappa$ is sampled conditional on $\delta$ and $\Delta$. Let d = 9 and define the Mahalanobis residual:
 
 $$
 s := (\Delta - \delta)^\top \Sigma_n^{-1} (\Delta - \delta)
@@ -1029,11 +1029,11 @@ $$
 \kappa \mid \delta, \Delta \sim \text{Gamma}\left(\text{shape} = \frac{\nu_\ell + d}{2}, \; \text{rate} = \frac{\nu_\ell + s}{2}\right)
 $$
 
-where ν_ℓ = 8 is the likelihood degrees of freedom (see §3.4.2).
+where $\nu_{\ell}$ = 8 is the likelihood degrees of freedom (see §3.4.2).
 
-**Derivation:** Combining the Gamma(ν_ℓ/2, ν_ℓ/2) prior on κ with the Gaussian likelihood contribution exp(−(κ/2)(Δ−δ)ᵀΣₙ⁻¹(Δ−δ)) yields a Gamma posterior with shape increased by d/2 and rate increased by s/2.
+**Derivation:** Combining the Gamma($\nu_{\ell}/2, \nu_{\ell}/2$) prior on $\kappa$ with the Gaussian likelihood contribution $\exp\left(-(\kappa/2)(\Delta-\delta)^\top \Sigma_n^{-1} (\Delta-\delta)\right)$ yields a Gamma posterior with shape increased by $d/2$ and rate increased by $s/2$.
 
-**Interpretation:** When the observed residual s is large relative to expectations under Σₙ (indicating potential covariance misestimation), κ is pulled below 1, effectively inflating the likelihood covariance and preventing false certainty.
+**Interpretation:** When the observed residual s is large relative to expectations under $\Sigma_n$ (indicating potential covariance misestimation), $\kappa$ is pulled below 1, effectively inflating the likelihood covariance and preventing false certainty.
 
 **Gibbs schedule — normative:**
 
@@ -1053,36 +1053,36 @@ $$
 \lambda^{(0)} = 1, \quad \kappa^{(0)} = 1
 $$
 
-**Rationale:** Under the Gamma priors, E[λ] = E[κ] = 1. Starting at the prior means provides a neutral initialization.
+**Rationale:** Under the Gamma priors, $E[\lambda] = E[\kappa] = 1$. Starting at the prior means provides a neutral initialization.
 
 **Iteration order:**
 
 For t = 1, ..., N_gibbs:
-1. Sample δ^(t) ~ p(δ | λ^(t-1), κ^(t-1), Δ)
-2. Sample λ^(t) ~ p(λ | δ^(t))
-3. Sample κ^(t) ~ p(κ | δ^(t), Δ)
+1. Sample $\delta^{(t)} \sim p(\delta \mid \lambda^{(t-1)}, \kappa^{(t-1)}, \Delta)$
+2. Sample $\lambda^{(t)} \sim p(\lambda \mid \delta^{(t)})$
+3. Sample $\kappa^{(t)} \sim p(\kappa \mid \delta^{(t)}, \Delta)$
 
-Retain {(δ^(t), λ^(t), κ^(t))}_{t=N_burn+1}^{N_gibbs}.
+Retain $\{(\delta^{(t)}, \lambda^{(t)}, \kappa^{(t)})\}_{t=N_{\text{burn}}+1}^{N_{\text{gibbs}}}$.
 
 **RNG seeding:**
 
-The RNG seed MUST be deterministic per §3.3.6. Given identical inputs (Δ, Σₙ, configuration), the Gibbs sampler MUST produce identical output.
+The RNG seed MUST be deterministic per §3.3.6. Given identical inputs ($\Delta$, $\Sigma_n$, configuration), the Gibbs sampler MUST produce identical output.
 
 **Precomputation requirements:**
 
 To minimize per-iteration cost, implementations MUST precompute during calibration:
 
 1. **L_R** (Cholesky factor of R, i.e., L_R L_Rᵀ = R)
-2. **L_Σ** (Cholesky factor of Σₙ, updated when n changes)
-3. **Σₙ⁻¹ Δ** (the "data precision-weighted observation", computed via Cholesky solve)
+2. **$L_{\Sigma}$** (Cholesky factor of $\Sigma_n$, updated when n changes)
+3. **$\Sigma_n^{-1} \Delta$** (the "data precision-weighted observation", computed via Cholesky solve)
 
-Per iteration, the dominant cost is the Cholesky factorization of Q(λ), which is O(9³) ≈ 729 flops — negligible.
+Per iteration, the dominant cost is the Cholesky factorization of $Q(\lambda)$, which is $O(9^3) \approx 729$ flops — negligible.
 
-**λ mixing diagnostics — normative:**
+**$\lambda$ mixing diagnostics — normative:**
 
-Implementations SHOULD compute λ mixing diagnostics and SHOULD set `lambda_mixing_ok = false` when either:
+Implementations SHOULD compute $\lambda$ mixing diagnostics and SHOULD set `lambda_mixing_ok = false` when either:
 
-1. **Low coefficient of variation:** lambda_cv < 0.1, indicating λ barely moved from initialization
+1. **Low coefficient of variation:** lambda_cv < 0.1, indicating $\lambda$ barely moved from initialization
 2. **Low effective sample size:** lambda_ess < 20, indicating high autocorrelation
 
 **Effective sample size computation:**
@@ -1091,20 +1091,20 @@ $$
 \text{ESS} = \frac{N_{\text{keep}}}{1 + 2\sum_{k=1}^{K} \hat{\rho}_k}
 $$
 
-where ρ̂_k is the lag-k autocorrelation of the λ chain, summed until ρ̂_k < 0.05 or k > 50.
+where $\hat{\rho}_k$ is the lag-k autocorrelation of the $\lambda$ chain, summed until $\hat{\rho}_k < 0.05$ or $k > 50$.
 
 **Warning emission:**
 
 When `lambda_mixing_ok = false`, implementations SHOULD emit a quality issue with code `LambdaMixingPoor` and guidance suggesting the user increase Gibbs iterations (if configurable) or noting that the posterior may be unreliable.
 
-**κ mixing diagnostics — normative:**
+**$\kappa$ mixing diagnostics — normative:**
 
-Implementations SHOULD compute κ mixing diagnostics and SHOULD set `kappa_mixing_ok = false` when either:
+Implementations SHOULD compute $\kappa$ mixing diagnostics and SHOULD set `kappa_mixing_ok = false` when either:
 
-1. **Low coefficient of variation:** kappa_cv < 0.1, indicating κ barely moved from initialization
+1. **Low coefficient of variation:** kappa_cv < 0.1, indicating $\kappa$ barely moved from initialization
 2. **Low effective sample size:** kappa_ess < 20, indicating high autocorrelation
 
-ESS computation follows the same formula as for λ.
+ESS computation follows the same formula as for $\lambda$.
 
 **Likelihood inflation warning:**
 
@@ -1112,13 +1112,13 @@ Implementations SHOULD emit `QualityIssue::LikelihoodInflated` (non-blocking) wh
 
 - `kappa_mean < 0.3`
 
-This indicates that the run appears inconsistent with the estimated Σₙ and that uncertainty was inflated for robustness. The guidance SHOULD note that the likelihood covariance was effectively scaled up by ~1/κ_mean to maintain calibration.
+This indicates that the run appears inconsistent with the estimated $\Sigma_n$ and that uncertainty was inflated for robustness. The guidance SHOULD note that the likelihood covariance was effectively scaled up by $\sim 1/\kappa_{\text{mean}}$ to maintain calibration.
 
 When `kappa_mixing_ok = false`, implementations SHOULD emit a quality issue with code `KappaMixingPoor`.
 
 **Verdict-blocking status:**
 
-These diagnostics MUST NOT be verdict-blocking. Poor λ or κ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
+These diagnostics MUST NOT be verdict-blocking. Poor $\lambda$ or $\kappa$ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
 
 #### 3.4.5 Decision Functional and Leak Probability
 
@@ -1146,13 +1146,13 @@ $$
 
 Implementations MUST compute:
 
-- **Posterior mean:** δ_post := (1/N_keep) Σ_s δ^(s)
-- **Max-effect credible interval:** 95% CI for m(δ) from empirical quantiles of {m(δ^(s))}
+- **Posterior mean:** $\delta_{\text{post}} := \frac{1}{N_{\text{keep}}} \sum_s \delta^{(s)}$
+- **Max-effect credible interval:** 95% CI for $m(\delta)$ from empirical quantiles of $\{m(\delta^{(s)})\}$
 
 Implementations SHOULD compute:
 
-- **Posterior standard deviation:** element-wise SD of {δ^(s)}
-- **λ posterior mean:** λ̄ := (1/N_keep) Σ_s λ^(s)
+- **Posterior standard deviation:** element-wise SD of $\{\delta^{(s)}\}$
+- **$\lambda$ posterior mean:** $\bar{\lambda} := \frac{1}{N_{\text{keep}}} \sum_s \lambda^{(s)}$
 
 **Thinning:**
 
@@ -1170,11 +1170,11 @@ This is acceptable for decision thresholds at 0.05 and 0.95.
 
 **Interpreting the probability:**
 
-This is a **posterior probability**, not a p-value. When we report "72% probability of a leak," we mean: given the data and our model, 72% of the posterior mass corresponds to effects exceeding θ_eff.
+This is a **posterior probability**, not a p-value. When we report "72% probability of a leak," we mean: given the data and our model, 72% of the posterior mass corresponds to effects exceeding $\theta_{\text{eff}}$.
 
-**Note on θ_eff:**
+**Note on $\theta_{\text{eff}}$:**
 
-All inference uses θ_eff, not θ_user. When these differ, the output MUST clearly report both values so the user understands what was actually tested.
+All inference uses $\theta_{\text{eff}}$, not $\theta_{\text{user}}$. When these differ, the output MUST clearly report both values so the user understands what was actually tested.
 
 #### 3.4.6 2D Projection for Reporting
 
@@ -1196,25 +1196,25 @@ $$
 A := (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1}
 $$
 
-**Conditioning stability for Σ_n — normative:** In fragile regimes (§3.3), Σ_n may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to Σ_n before use in the Gibbs sampler and GLS projection:
+**Conditioning stability for $\Sigma_n$ — normative:** In fragile regimes (§3.3), $\Sigma_n$ may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to $\Sigma_n$ before use in the Gibbs sampler and GLS projection:
 
-- If cond(Σ_n) > 10⁴ but ≤ 10⁶: Apply shrinkage Σ_n ← (1−λ)Σ_n + λ·diag(Σ_n) with λ ∈ [0.1, 0.95] based on condition severity
-- If cond(Σ_n) > 10⁶ or Cholesky fails: Fall back to diagonal matrix diag(Σ_n) (weighted OLS, preserves per-quantile variances)
+- If $\mathrm{cond}(\Sigma_n) > 10^4$ but $\le 10^6$: Apply shrinkage $\Sigma_n \leftarrow (1-\lambda)\Sigma_n + \lambda \cdot \mathrm{diag}(\Sigma_n)$ with $\lambda \in [0.1, 0.95]$ based on condition severity
+- If $\mathrm{cond}(\Sigma_n) > 10^6$ or Cholesky fails: Fall back to diagonal matrix $\mathrm{diag}(\Sigma_n)$ (weighted OLS, preserves per-quantile variances)
 
 **Posterior for projection summary — normative:**
 
-Implementations MUST compute β projection statistics empirically from Gibbs draws rather than analytically. This ensures robustness when Σ_n is regularized.
+Implementations MUST compute $\beta$ projection statistics empirically from Gibbs draws rather than analytically. This ensures robustness when $\Sigma_n$ is regularized.
 
-For each retained δ^(s) draw from the Gibbs sampler, compute β^(s) = A·δ^(s). Then:
+For each retained $\delta^{(s)}$ draw from the Gibbs sampler, compute $\beta^{(s)} = A \delta^{(s)}$. Then:
 
-- **Mean**: β_proj = (1/S) Σ_s β^(s)  (empirical mean of projected draws)
-- **Covariance**: Cov(β_proj) = sample_cov(β^(s))  (empirical covariance of projected draws)
+- **Mean**: $\beta_{\text{proj}} = \frac{1}{S} \sum_s \beta^{(s)}$ (empirical mean of projected draws)
+- **Covariance**: $\mathrm{Cov}(\beta_{\text{proj}})$ = sample_cov($\beta^{(s)}$) (empirical covariance of projected draws)
 
-Retain all β^(s) draws for pattern classification (see below).
+Retain all $\beta^{(s)}$ draws for pattern classification (see below).
 
 The projection gives interpretable components:
-- **Shift (μ)**: Uniform timing difference affecting all quantiles equally
-- **Tail (τ)**: Upper quantiles affected more than lower (or vice versa)
+- **Shift ($\mu$)**: Uniform timing difference affecting all quantiles equally
+- **Tail ($\tau$)**: Upper quantiles affected more than lower (or vice versa)
 
 **Important:** The 2D projection is for reporting only. Decisions MUST be based on the 9D posterior. When the projection doesn't fit well (see §3.5.3), implementations MUST add an interpretation caveat and provide alternative explanations.
 
@@ -1222,12 +1222,12 @@ The projection gives interpretable components:
 
 Pattern classification MUST use dominance probabilities computed from retained Gibbs draws, not point estimates or significance tests. This approach is robust to covariance regularization and discrete mode quantization.
 
-For each retained δ draw, compute β = A·δ to get a projected (μ, τ) sample. The classification uses the following probabilities computed over all draws:
+For each retained $\delta$ draw, compute $\beta = A \delta$ to get a projected $(\mu, \tau)$ sample. The classification uses the following probabilities computed over all draws:
 
-- **P_shift_dominates**: Fraction of draws where |μ| ≥ 5|τ| (shift dominates tail)
-- **P_tail_dominates**: Fraction of draws where |τ| ≥ 5|μ| (tail dominates shift)
-- **P_shift_significant**: Fraction of draws where |μ| > 10ns (absolute threshold)
-- **P_tail_significant**: Fraction of draws where |τ| > 10ns (absolute threshold)
+- **P_shift_dominates**: Fraction of draws where $|\mu| \ge 5|\tau|$ (shift dominates tail)
+- **P_tail_dominates**: Fraction of draws where $|\tau| \ge 5|\mu|$ (tail dominates shift)
+- **P_shift_significant**: Fraction of draws where $|\mu| > 10\,\text{ns}$ (absolute threshold)
+- **P_tail_significant**: Fraction of draws where $|\tau| > 10\,\text{ns}$ (absolute threshold)
 
 Classification rules (applied in order):
 1. **UniformShift**: P_shift_dominates ≥ 0.80
@@ -1273,17 +1273,17 @@ Gate 1 MUST trigger Inconclusive when the data provides insufficient information
 
 **Prior surrogate (Gaussian):**
 
-Under the Student's *t* prior with ν = 4, the marginal prior covariance is:
+Under the Student's *t* prior with $\nu = 4$, the marginal prior covariance is:
 
 $$
 \Lambda_0^{\text{marginal}} := \text{Cov}(\delta) = 2\sigma^2 R
 $$
 
-The prior surrogate is N(0, Λ₀^marginal).
+The prior surrogate is N(0, $\Lambda_0^{\text{marginal}}$).
 
 **Posterior surrogate (Gaussian):**
 
-Estimate μ_post and Λ_post from the Gibbs samples:
+Estimate $\mu_{\text{post}}$ and $\Lambda_{\text{post}}$ from the Gibbs samples:
 
 $$
 \mu_{\text{post}} = \delta_{\text{post}} = \frac{1}{N_{\text{keep}}} \sum_s \delta^{(s)}
@@ -1293,7 +1293,7 @@ $$
 \Lambda_{\text{post}} \approx \frac{1}{N_{\text{keep}}-1} \sum_s (\delta^{(s)} - \delta_{\text{post}})(\delta^{(s)} - \delta_{\text{post}})^\top
 $$
 
-The posterior surrogate is N(μ_post, Λ_post).
+The posterior surrogate is $\mathcal{N}(\mu_{\text{post}}, \Lambda_{\text{post}})$.
 
 **KL divergence computation — normative:**
 
@@ -1309,7 +1309,7 @@ $$
 
 where d = 9.
 
-Implementations MUST compute KL deterministically using Cholesky solves (no explicit inverses). If Λ_post is not SPD, implementations MUST apply a deterministic diagonal jitter ladder (starting at 10⁻¹⁰, increasing by factors of 10) until Cholesky succeeds; if still failing after jitter reaches 10⁻⁴, implementations MUST fall back to a diagonal approximation (conservative).
+Implementations MUST compute KL deterministically using Cholesky solves (no explicit inverses). If $\Lambda_{\text{post}}$ is not SPD, implementations MUST apply a deterministic diagonal jitter ladder (starting at $10^{-10}$, increasing by factors of 10) until Cholesky succeeds; if still failing after jitter reaches $10^{-4}$, implementations MUST fall back to a diagonal approximation (conservative).
 
 **Trigger condition (normative default):**
 
@@ -1317,7 +1317,7 @@ Trigger gate when KL < KL_min where KL_min := 0.7 nats.
 
 When triggered, return Inconclusive with reason `DataTooNoisy`.
 
-**Rationale:** KL correctly accounts for both mean shift (information learned about the location of δ) and covariance contraction (information learned about uncertainty). Unlike a pure log-det ratio, KL captures cases where the posterior mean moved significantly even if covariance contracted only modestly.
+**Rationale:** KL correctly accounts for both mean shift (information learned about the location of $\delta$) and covariance contraction (information learned about uncertainty). Unlike a pure log-det ratio, KL captures cases where the posterior mean moved significantly even if covariance contracted only modestly.
 
 Implementations SHOULD validate KL_min via the null calibration tests (§3.8) and MAY apply deterministic escalation if FPR_gated exceeds targets.
 
@@ -1347,17 +1347,17 @@ If total samples per class exceeds configured maximum, trigger Inconclusive with
 
 **Gate 6: Condition Drift Detected**
 
-The covariance estimate Σ_rate is computed during calibration. If measurement conditions change during the adaptive loop, this estimate becomes invalid.
+The covariance estimate $\Sigma_{\text{rate}}$ is computed during calibration. If measurement conditions change during the adaptive loop, this estimate becomes invalid.
 
 Detect condition drift by comparing measurement statistics from calibration against the full test run:
 
-- Variance ratio: σ²_post / σ²_cal
-- Autocorrelation change: |ρ_post(1) − ρ_cal(1)|
-- Mean drift: |μ_post − μ_cal| / σ_cal
+- Variance ratio: $\sigma_{\text{post}}^2 / \sigma_{\text{cal}}^2$
+- Autocorrelation change: $|\rho_{\text{post}}(1) - \rho_{\text{cal}}(1)|$
+- Mean drift: $|\mu_{\text{post}} - \mu_{\text{cal}}| / \sigma_{\text{cal}}$
 
 If variance ratio is outside [0.5, 2.0], or autocorrelation change exceeds 0.3, or mean drift exceeds 3.0, trigger Inconclusive with reason `ConditionsChanged`.
 
-**Note on threshold elevation:** The case where θ_floor > θ_user is handled by the threshold elevation decision rule (§3.3.4), not by a quality gate. This allows Fail to be returned when large leaks are detected, even if the user's exact threshold cannot be achieved. See §3.3.4 for the early termination heuristic when `achievable_at_max = false`.
+**Note on threshold elevation:** The case where $\theta_{\text{floor}}$ > $\theta_{\text{user}}$ is handled by the threshold elevation decision rule (§3.3.4), not by a quality gate. This allows Fail to be returned when large leaks are detected, even if the user's exact threshold cannot be achieved. See §3.3.4 for the early termination heuristic when `achievable_at_max = false`.
 
 #### 3.5.3 Non-Blocking Diagnostics
 
@@ -1367,7 +1367,7 @@ Under the 9D model, there is no risk of "mean model cannot represent the observe
 
 **Projection mismatch statistic:**
 
-Using the posterior mean δ_post:
+Using the posterior mean $\delta_{\text{post}}$:
 
 $$
 r_{\text{proj}} := \delta_{\text{post}} - X\beta_{\text{proj,post}}
@@ -1380,7 +1380,7 @@ $$
 **Semantics (normative):**
 
 - Projection mismatch MUST NOT be verdict-blocking
-- If Q_proj > Q_proj,thresh, implementations MUST:
+- If $Q_{\text{proj}} > Q_{\text{proj,thresh}}$, implementations MUST:
   - Set `effect.interpretation_caveat`
   - Report a "top quantiles" shape hint (see below)
   - Mark `Diagnostics.projection_mismatch_ok = false`
@@ -1393,7 +1393,7 @@ $$
 p_k := P(|\delta_k| > \theta_{\text{eff}} \mid \Delta)
 $$
 
-Compute this from the Gibbs samples as the fraction where |δ_k^(s)| > θ_eff.
+Compute this from the Gibbs samples as the fraction where $|\delta_k^{(s)}| > \theta_{\text{eff}}$.
 
 **Selection rule:** Select top 2–3 indices by p_k (descending). Optional stability filter: include only those with p_k ≥ 0.10; if fewer than 2 remain, relax to include the top 2.
 
@@ -1413,7 +1413,7 @@ These users want the posterior distribution, not a binary Pass/Fail decision.
 #### 3.6.2 Design Principle
 
 Research mode uses the same Bayesian machinery as normal mode, but:
-1. Sets θ_user = 0, so θ_eff = θ_floor
+1. Sets $\theta_{\text{user}}$ = 0, so $\theta_{\text{eff}}$ = $\theta_{\text{floor}}$
 2. Reports posterior credible intervals instead of exceedance probabilities
 3. Returns a `Research` outcome instead of Pass/Fail
 
@@ -1427,9 +1427,9 @@ $$
 
 | Condition | Criterion | Status |
 |-----------|-----------|--------|
-| Effect detected | CI lower bound > 1.1 × θ_floor | `EffectDetected` |
-| No effect detected | CI upper bound < 0.9 × θ_floor | `NoEffectDetected` |
-| Resolution limit | θ_floor ≈ θ_tick | `ResolutionLimitReached` |
+| Effect detected | CI lower bound > 1.1 × $\theta_{\text{floor}}$ | `EffectDetected` |
+| No effect detected | CI upper bound < 0.9 × $\theta_{\text{floor}}$ | `NoEffectDetected` |
+| Resolution limit | $\theta_{\text{floor}}$ ≈ $\theta_{\text{tick}}$ | `ResolutionLimitReached` |
 | Quality issue | Any quality gate triggers | `QualityIssue` |
 | Budget exhausted | Time or samples exceeded | `BudgetExhausted` |
 
@@ -1456,7 +1456,7 @@ where p(x) is the probability mass at x.
 **Work in ticks internally:**
 
 In discrete mode, implementations SHOULD perform computations in **ticks** (timer's native unit):
-- Δ, θ, effect sizes all in ticks
+- $\Delta$, $\theta$, effect sizes all in ticks
 - Convert to nanoseconds only for display
 
 **Covariance estimation:**
@@ -1523,28 +1523,28 @@ Re-run calibration after each escalation step. This remediation can run:
 
 **Expected calibration results:**
 
-| True Effect | Expected P(leak > θ) | Acceptable Range |
+| True Effect | Expected $P(\text{leak} > \theta)$ | Acceptable Range |
 |-------------|---------------------|------------------|
 | 0 | ~2-5% | 0-10% |
-| θ/2 | ~5-15% | 0-25% |
-| θ | ~50% | 35-65% |
-| 2θ | ~95% | 85-100% |
-| 3θ | ~99% | 95-100% |
+| $\theta/2$ | ~5-15% | 0-25% |
+| $\theta$ | ~50% | 35-65% |
+| $2\theta$ | ~95% | 85-100% |
+| $3\theta$ | ~99% | 95-100% |
 
-This is an end-to-end check that c_floor, Σ scaling, block length selection, prior calibration, and posterior computation are not systematically anti-conservative.
+This is an end-to-end check that $c_{\text{floor}}$, $\Sigma$ scaling, block length selection, prior calibration, and posterior computation are not systematically anti-conservative.
 
 **Large-effect detection tests (normative requirement):**
 
 Implementations MUST include validation tests for the "large effect + noisy likelihood" regime. These tests validate the inference layer directly (the probability P(leak), not the verdict), ensuring the Student's *t* prior correctly detects obvious leaks even when measurement noise is high.
 
-**Test case 1: Diagonal Σₙ (independent coordinates)**
+**Test case 1: Diagonal $\Sigma_n$ (independent coordinates)**
 
 Using synthetic data with diagonal covariance:
-- θ_eff = 100 ns
-- True effect: Δ with entries ~10,000–15,000 ns (≈100× threshold)
+- $\theta_{\text{eff}}$ = 100 ns
+- True effect: $\Delta$ with entries ~10,000–15,000 ns (≈100× threshold)
 - Data SEs: ~2,500–8,000 ns (≈25–80× threshold)
-- Σₙ = diag(SE₁², ..., SE₉²)
-- R = I₉
+- $\Sigma_n = \mathrm{diag}(SE_1^2, \ldots, SE_9^2)$
+- $R = I_9$
 
 Reference values (SILENT web app dataset):
 ```
@@ -1554,7 +1554,7 @@ SE = [2731, 2796, 2612, 2555, 2734, 3125, 3953, 5662, 8105] ns
 
 Assert: P(leak) > 0.99
 
-**Test case 2: Correlated Σₙ (AR(1) structure)**
+**Test case 2: Correlated $\Sigma_n$ (AR(1) structure)**
 
 Using synthetic data with AR(1) correlation structure. Let C denote the AR(1) correlation matrix (distinct from the prior correlation R):
 
@@ -1563,22 +1563,22 @@ C_{ij} = \rho^{|i-j|}, \quad \rho = 0.7
 $$
 
 Construct the test covariance as:
-- Same Δ and diagonal SEs as Test case 1
-- Σₙ = D^(1/2) C D^(1/2) where D = diag(SE²)
+- Same $\Delta$ and diagonal SEs as Test case 1
+- $\Sigma_n = D^{1/2} C D^{1/2}$ where $D = \mathrm{diag}(SE^2)$
 
 Assert: P(leak) > 0.99
 
-**Test case 3: Correlated Σₙ (bootstrap-estimated)**
+**Test case 3: Correlated $\Sigma_n$ (bootstrap-estimated)**
 
-Using a real or realistic bootstrap-estimated Σₙ with non-trivial off-diagonal structure:
-- Same Δ magnitudes as Test case 1
-- Σₙ from an actual calibration run or a reference covariance matrix
+Using a real or realistic bootstrap-estimated $\Sigma_n$ with non-trivial off-diagonal structure:
+- Same $\Delta$ magnitudes as Test case 1
+- $\Sigma_n$ from an actual calibration run or a reference covariance matrix
 
 Assert: P(leak) > 0.99
 
 **Test implementation requirements:**
 
-- Tests MUST use fixed Σₙ, R, and Δ values for determinism
+- Tests MUST use fixed $\Sigma_n$, R, and $\Delta$ values for determinism
 - Tests MUST run at the inference layer (Gibbs sampler + leak probability), not the full pipeline
 - Tests MUST use deterministic seeds per §3.3.6
 - Tests MUST NOT invoke verdict-blocking quality gates
@@ -1689,7 +1689,7 @@ The leak probability MUST be prominently displayed in results and human-readable
 
 **Threshold transparency:**
 
-When θ_eff > θ_user, implementations MUST clearly indicate this to the user.
+When $\theta_{\text{eff}}$ > $\theta_{\text{user}}$, implementations MUST clearly indicate this to the user.
 
 **Exploitability context:**
 
@@ -1744,37 +1744,37 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | {(c_t, y_t)} | Acquisition stream: class labels and timing measurements |
 | T | Acquisition stream length (≈ 2n) |
 | F, R | Per-class sample sets (filtered from stream) |
-| Δ | 9-vector of observed quantile differences |
-| δ | 9-vector of true (latent) quantile differences |
+| $\Delta$ | 9-vector of observed quantile differences |
+| $\delta$ | 9-vector of true (latent) quantile differences |
 | q̂_F(k), q̂_R(k) | Empirical quantiles for Fixed and Random classes |
 | X | 9 × 2 projection basis [**1** ∣ **b**_tail] |
-| β_proj | 2D projection: (μ, τ)ᵀ |
-| Σ_n | Covariance matrix at sample size n: Σ_n = Σ_rate / n_eff |
-| Σ_rate | Covariance rate |
+| $\beta_{\text{proj}}$ | 2D projection: ($\mu$, $\tau$)ᵀ |
+| $\Sigma_n$ | Covariance matrix at sample size n: $\Sigma_n = \Sigma_{\text{rate}}/n_{\text{eff}}$ |
+| $\Sigma_{\text{rate}}$ | Covariance rate |
 | n_eff | Effective sample size: n_eff = floor(n / b̂) |
-| R | Prior correlation matrix: Corr(Σ_rate) |
-| ν | Student's *t* degrees of freedom (fixed at 4) |
-| σ | Student's *t* prior scale (calibrated via exceedance target) |
-| λ | Latent prior precision multiplier in scale-mixture representation |
-| κ | Latent likelihood precision multiplier (robust t-likelihood) |
-| ν_ℓ | Likelihood degrees of freedom (fixed at 8) |
-| t_ν(0, Σ) | Multivariate Student's *t* with ν df, location 0, scale matrix Σ |
-| Λ₀^marginal | Marginal prior covariance: (ν/(ν−2))σ²R = 2σ²R for ν=4 |
-| Λ_post | Posterior covariance of δ (estimated from Gibbs samples) |
-| Q(λ, κ) | Precision matrix in Gibbs: κΣₙ⁻¹ + (λ/σ²)R⁻¹ |
-| s | Mahalanobis residual for κ conditional: (Δ−δ)ᵀΣₙ⁻¹(Δ−δ) |
-| δ_post | Posterior mean of δ (from Gibbs samples) |
+| R | Prior correlation matrix: $\mathrm{Corr}(\Sigma_{\text{rate}})$ |
+| $\nu$ | Student's *t* degrees of freedom (fixed at 4) |
+| $\sigma$ | Student's *t* prior scale (calibrated via exceedance target) |
+| $\lambda$ | Latent prior precision multiplier in scale-mixture representation |
+| $\kappa$ | Latent likelihood precision multiplier (robust t-likelihood) |
+| $\nu_{\ell}$ | Likelihood degrees of freedom (fixed at 8) |
+| $t_{\nu}(0, \Sigma)$ | Multivariate Student's *t* with $\nu$ df, location 0, scale matrix $\Sigma$ |
+| $\Lambda_0^{\text{marginal}}$ | Marginal prior covariance: $(\nu/(\nu-2))\sigma^2 R = 2\sigma^2 R$ for $\nu = 4$ |
+| $\Lambda_{\text{post}}$ | Posterior covariance of $\delta$ (estimated from Gibbs samples) |
+| $Q(\lambda, \kappa)$ | Precision matrix in Gibbs: $\kappa \Sigma_n^{-1} + (\lambda/\sigma^2) R^{-1}$ |
+| s | Mahalanobis residual for $\kappa$ conditional: $(\Delta-\delta)^\top \Sigma_n^{-1} (\Delta-\delta)$ |
+| $\delta_{\text{post}}$ | Posterior mean of $\delta$ (from Gibbs samples) |
 | L_R | Cholesky factor of R (L_R L_Rᵀ = R) |
 | N_gibbs | Total Gibbs iterations |
 | N_burn | Burn-in iterations (discarded) |
 | N_keep | Retained Gibbs samples |
-| C | AR(1) correlation matrix in test cases (C_ij = ρ^{\|i−j\|}) |
-| θ_user | User-requested threshold |
-| θ_floor | Measurement floor (smallest resolvable effect) |
-| c_floor | Floor-rate constant: θ_floor,stat = c_floor / √n_eff |
-| θ_tick | Timer resolution component of floor |
-| θ_eff | Effective threshold used for inference |
-| m(δ) | Decision functional: max_k \|δ_k\| |
+| C | AR(1) correlation matrix in test cases ($C_{ij} = \rho^{|i-j|}$) |
+| $\theta_{\text{user}}$ | User-requested threshold |
+| $\theta_{\text{floor}}$ | Measurement floor (smallest resolvable effect) |
+| $c_{\text{floor}}$ | Floor-rate constant: $\theta_{\text{floor,stat}} = c_{\text{floor}}/\sqrt{n_{\text{eff}}}$ |
+| $\theta_{\text{tick}}$ | Timer resolution component of floor |
+| $\theta_{\text{eff}}$ | Effective threshold used for inference |
+| $m(\delta)$ | Decision functional: $\max_k \|\delta_k\|$ |
 | Q_proj | Projection mismatch statistic |
 | Q_proj,thresh | Projection mismatch threshold (99th percentile) |
 | b̂ | Block length (Politis-White, on acquisition stream) |
@@ -1784,7 +1784,7 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | ESS | Effective sample size (Gibbs chain) |
 | SE_k | Standard error of k-th quantile difference |
 | SE_med | Median of SE_k over k ∈ {1,...,9} |
-| λ_shrink | Shrinkage parameter for correlation matrix regularization |
+| $\lambda_{\text{shrink}}$ | Shrinkage parameter for correlation matrix regularization |
 | KL | KL divergence: KL(posterior ∥ prior) for Gate 1 |
 | KL_min | Minimum KL threshold for conclusive verdict (default 0.7 nats) |
 
@@ -1798,17 +1798,17 @@ These constants define conformant implementations. Implementations MAY use diffe
 |----------|---------|-----------|-----------|
 | Deciles | {0.1, ..., 0.9} | MUST | Nine quantile positions |
 | Prior family | Student's *t* | MUST | Continuous scale adaptation |
-| Degrees of freedom (ν) | 4 | MUST | Heavy tails + finite variance |
+| Degrees of freedom ($\nu$) | 4 | MUST | Heavy tails + finite variance |
 | Gamma parameterization | shape–rate | MUST | Avoid library ambiguity |
 | Gibbs iterations (N_gibbs) | 256 | MUST | Sufficient mixing for 10D |
 | Gibbs burn-in (N_burn) | 64 | MUST | Conservative |
 | Gibbs retained (N_keep) | 192 | MUST | MC variance control |
-| Gibbs initialization (λ⁽⁰⁾, κ⁽⁰⁾) | 1 | MUST | Prior means |
-| Likelihood df (ν_ℓ) | 8 | MUST | Robustness to Σₙ misestimation |
-| Prior exceedance target (π₀) | 0.62 | SHOULD | Genuine uncertainty |
-| Prior calibration MC draws | 50,000 | SHOULD | Stable σ calibration |
-| σ search lower bound | 0.05 · θ_eff | MUST | Prevent degenerate narrow prior |
-| σ search upper bound | max(50·θ_eff, 10·SE_med) | MUST | Cover high-noise regimes |
+| Gibbs initialization ($\lambda^{(0)}$, $\kappa^{(0)}$) | 1 | MUST | Prior means |
+| Likelihood df ($\nu_{\ell}$) | 8 | MUST | Robustness to $\Sigma_n$ misestimation |
+| Prior exceedance target ($\pi_0$) | 0.62 | SHOULD | Genuine uncertainty |
+| Prior calibration MC draws | 50,000 | SHOULD | Stable $\sigma$ calibration |
+| $\sigma$ search lower bound | 0.05 · $\theta_{\text{eff}}$ | MUST | Prevent degenerate narrow prior |
+| $\sigma$ search upper bound | max(50·$\theta_{\text{eff}}$, 10·SE_med) | MUST | Cover high-noise regimes |
 | Bootstrap iterations | 2,000 | SHOULD | Covariance estimation accuracy |
 | Monte Carlo samples (c_floor) | 50,000 | SHOULD | Floor-rate constant estimation |
 | Batch size | 1,000 | SHOULD | Adaptive iteration granularity |
@@ -1820,21 +1820,21 @@ These constants define conformant implementations. Implementations MAY use diffe
 | Block length cap | min(3√T, T/3) | SHOULD | Prevent degenerate blocks |
 | Discrete threshold | 10% unique | SHOULD | Trigger discrete mode |
 | Min ticks per call | 5 | SHOULD | Measurability floor |
-| Max batch size | 20 | SHOULD | Limit μarch artifacts |
+| Max batch size | 20 | SHOULD | Limit microarch artifacts |
 | Default time budget | 60 s | MAY | Maximum runtime |
 | Default sample budget | 1,000,000 | MAY | Maximum samples |
 | CI hysteresis (Research) | 10% | SHOULD | Margin for detection decisions |
 | Default RNG seed | 0x74696D696E67 | SHOULD | "timing" in ASCII |
-| R jitter (ε) | 10⁻¹⁰–10⁻⁶ | MUST | Ensure SPD |
-| R shrinkage (λ_shrink) | 0.01–0.2 | MUST | Robustness under fragile regimes |
-| Condition number threshold (R) | 10⁴ | MUST | Trigger R shrinkage |
-| Condition number threshold (Σ_n) | 10⁴ | MUST | Trigger Σ_n shrinkage |
-| Σ_n OLS fallback threshold | 10⁶ | MUST | Fall back to diagonal matrix |
-| λ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
-| λ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
-| κ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
-| κ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
-| Likelihood inflation threshold | 0.3 | SHOULD | κ_mean triggering LikelihoodInflated |
+| R jitter ($\varepsilon$) | $10^{-10}$–$10^{-6}$ | MUST | Ensure SPD |
+| R shrinkage ($\lambda_{\text{shrink}}$) | 0.01–0.2 | MUST | Robustness under fragile regimes |
+| Condition number threshold (R) | $10^4$ | MUST | Trigger R shrinkage |
+| Condition number threshold ($\Sigma_n$) | $10^4$ | MUST | Trigger $\Sigma_n$ shrinkage |
+| $\Sigma_n$ OLS fallback threshold | $10^6$ | MUST | Fall back to diagonal matrix |
+| $\lambda$ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
+| $\lambda$ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
+| $\kappa$ mixing CV threshold | 0.1 | SHOULD | Detect stuck sampler |
+| $\kappa$ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
+| Likelihood inflation threshold | 0.3 | SHOULD | $\kappa_{\text{mean}}$ triggering LikelihoodInflated |
 
 ---
 
@@ -1879,20 +1879,20 @@ These constants define conformant implementations. Implementations MAY use diffe
 
 ### v5.6 (from v5.5)
 
-**Robust t-likelihood with κ (§3.4.2, §3.4.4):**
+**Robust t-likelihood with $\kappa$ (§3.4.2, §3.4.4):**
 
-- **Added:** Robust t-likelihood via scale mixture: Δ | δ, κ ~ N(δ, Σₙ/κ) with κ ~ Gamma(ν_ℓ/2, ν_ℓ/2)
-- **Added:** Likelihood degrees of freedom ν_ℓ = 8 (normative default)
-- **Added:** κ conditional in Gibbs sampler (Conditional 3)
-- **Added:** Gibbs now samples over (δ, λ, κ) instead of (δ, λ)
-- **Changed:** Q(λ) → Q(λ, κ) = κΣₙ⁻¹ + (λ/σ²)R⁻¹
-- **Rationale:** When Σₙ is underestimated (common under high dependence, interference, discrete timers), κ is pulled below 1, automatically inflating uncertainty and preventing pathological posterior certainty.
+- **Added:** Robust t-likelihood via scale mixture: $\Delta \mid \delta, \kappa \sim \mathcal{N}(\delta, \Sigma_n/\kappa)$ with $\kappa \sim \text{Gamma}(\nu_{\ell}/2, \nu_{\ell}/2)$
+- **Added:** Likelihood degrees of freedom $\nu_{\ell}$ = 8 (normative default)
+- **Added:** $\kappa$ conditional in Gibbs sampler (Conditional 3)
+- **Added:** Gibbs now samples over ($\delta$, $\lambda$, $\kappa$) instead of ($\delta$, $\lambda$)
+- **Changed:** Q($\lambda$) → $Q(\lambda, \kappa) = \kappa \Sigma_n^{-1} + (\lambda/\sigma^2) R^{-1}$
+- **Rationale:** When $\Sigma_n$ is underestimated (common under high dependence, interference, discrete timers), $\kappa$ is pulled below 1, automatically inflating uncertainty and preventing pathological posterior certainty.
 
-**Effective sample size (n_eff) for Σ scaling (§3.3.2, §3.3.4):**
+**Effective sample size ($n_{\text{eff}}$) for $\Sigma$ scaling (§3.3.2, §3.3.4):**
 
-- **Added:** n_eff := max(1, floor(n / b̂)) where b̂ is the block length
-- **Changed:** Σₙ = Σ_rate / n_eff (was Σ_rate / n)
-- **Changed:** θ_floor,stat = c_floor / √n_eff (was c_floor / √n)
+- **Added:** $n_{\text{eff}} := \max(1, \lfloor n/\hat{b} \rfloor)$ where $\hat{b}$ is the block length
+- **Changed:** $\Sigma_n = \Sigma_{\text{rate}}/n_{\text{eff}}$ (was $\Sigma_{\text{rate}}/n$)
+- **Changed:** $\theta_{\text{floor,stat}} = c_{\text{floor}}/\sqrt{n_{\text{eff}}}$ (was $c_{\text{floor}}/\sqrt{n}$)
 - **Rationale:** Under strong dependence, n samples do not provide n independent observations. Using n_eff honestly reflects achievable precision and prevents anti-conservative variance scaling.
 
 **KL-based Gate 1 (§3.5.2):**
@@ -1900,35 +1900,35 @@ These constants define conformant implementations. Implementations MAY use diffe
 - **Changed:** Gate 1 now uses KL divergence between Gaussian surrogates instead of log-det ratio
 - **Removed:** "Exception for decisive probabilities" bypass (was allowing verdicts when P > 0.995 or P < 0.005)
 - **Added:** KL_min = 0.7 nats as normative threshold for minimum information gain
-- **Rationale:** KL correctly accounts for both mean shift and covariance contraction. With κ in the likelihood, "decisive but suspicious" cases should no longer occur, eliminating the need for the bypass.
+- **Rationale:** KL correctly accounts for both mean shift and covariance contraction. With $\kappa$ in the likelihood, "decisive but suspicious" cases should no longer occur, eliminating the need for the bypass.
 
-**κ diagnostics (§2.8, §3.4.4):**
+**$\kappa$ diagnostics (§2.8, §3.4.4):**
 
 - **Added:** kappa_mean, kappa_sd, kappa_cv, kappa_ess, kappa_mixing_ok to Diagnostics
 - **Added:** KappaMixingPoor, LikelihoodInflated issue codes
 - **Added:** LikelihoodInflated warning when kappa_mean < 0.3
-- **Rationale:** Users should see why P(leak) isn't decisive when κ inflates uncertainty.
+- **Rationale:** Users should see why P(leak) isn't decisive when $\kappa$ inflates uncertainty.
 
 **Notation updates (Appendix A, B):**
 
-- **Added:** κ, ν_ℓ, n_eff, s, KL, KL_min to notation table
-- **Changed:** Q(λ) → Q(λ, κ) in notation
-- **Added:** κ-related constants to Appendix B
+- **Added:** $\kappa$, $\nu_{\ell}$, n_eff, s, KL, KL_min to notation table
+- **Changed:** Q($\lambda$) → $Q(\lambda, \kappa)$ in notation
+- **Added:** $\kappa$-related constants to Appendix B
 - **Replaced:** Variance ratio gate (0.5) with KL_min (0.7 nats)
 
 ### v5.5 (from v5.4)
 
 **Threshold elevation decision rule (§2.1, §2.6, §3.3.4, §3.5.2):**
 
-- **Changed:** Pass now requires θ_eff ≤ θ_user + ε_θ (cannot Pass when threshold is elevated)
-- **Changed:** When θ_floor > θ_user and P < pass_threshold, outcome is Inconclusive(ThresholdElevated), not Pass
-- **Added:** Fail MAY be returned when θ_eff > θ_user (large leaks are still detectable)
+- **Changed:** Pass now requires $\theta_{\text{eff}}$ ≤ $\theta_{\text{user}}$ + $\varepsilon_{\theta}$ (cannot Pass when threshold is elevated)
+- **Changed:** When $\theta_{\text{floor}}$ > $\theta_{\text{user}}$ and P < pass_threshold, outcome is Inconclusive(ThresholdElevated), not Pass
+- **Added:** Fail MAY be returned when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$ (large leaks are still detectable)
 - **Added:** `decision_threshold_ns` field to Pass/Fail outcomes
 - **Removed:** Gate 4 (ThresholdUnachievable) as verdict-blocking gate; subsumed by decision rule
 - **Renamed:** `ThresholdUnachievable` → `ThresholdElevated` with additional fields
 - **Added:** `meets_pass_criterion_at_eff` and `achievable_at_max` fields to ThresholdElevated
-- **Added:** ε_θ tolerance = max(θ_tick, 10⁻⁶ · θ_user) for threshold comparison
-- **Rationale:** A Pass at θ_eff does not certify absence of leaks at θ_user when θ_eff > θ_user. Effects in the range (θ_user, θ_eff] are not distinguishable from noise. Fail can propagate because detecting m(δ) > θ_eff implies m(δ) > θ_user.
+- **Added:** $\varepsilon_{\theta}$ tolerance = $\max(\theta_{\text{tick}}, 10^{-6} \cdot \theta_{\text{user}})$ for threshold comparison
+- **Rationale:** A Pass at $\theta_{\text{eff}}$ does not certify absence of leaks at $\theta_{\text{user}}$ when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$. Effects in the range ($\theta_{\text{user}}$, $\theta_{\text{eff}}$] are not distinguishable from noise. Fail can propagate because detecting $m(\delta)$ > $\theta_{\text{eff}}$ implies $m(\delta)$ > $\theta_{\text{user}}$.
 
 **Gate renumbering (§3.5.2):**
 
@@ -1939,32 +1939,32 @@ These constants define conformant implementations. Implementations MAY use diffe
 
 **leak_probability semantics (§2.1):**
 
-- **Clarified:** `leak_probability` MUST always be P(m(δ) > θ_eff | Δ), never P(m(δ) > θ_user | Δ)
-- **Added:** Implementations MUST NOT substitute θ_user into leak_probability when θ_eff > θ_user
+- **Clarified:** `leak_probability` MUST always be $P(m(\delta) > \theta_{\text{eff}} \mid \Delta)$, never $P(m(\delta) > \theta_{\text{user}} \mid \Delta)$
+- **Added:** Implementations MUST NOT substitute $\theta_{\text{user}}$ into leak_probability when $\theta_{\text{eff}}$ > $\theta_{\text{user}}$
 - **Rationale:** Probabilities computed at sub-floor thresholds are not calibrated.
 
 ### v5.4 (from v5.2)
 
 **Student's *t* prior (§3.3.5, §3.4.3):**
 
-- **Changed:** Prior is now multivariate Student's *t* with ν=4: δ ~ t₄(0, σ²R)
-- **Removed:** 2-component Gaussian mixture (w, σ₁, σ₂, Λ₀,₁, Λ₀,₂)
-- **Rationale:** The discrete mixture suffered from Occam penalty pathology under correlated likelihoods — the slab's log-det penalty dominated even when data favored moderate (not extreme) scale increases. Student's *t* provides continuous scale adaptation via the latent λ.
+- **Changed:** Prior is now multivariate Student's *t* with $\nu = 4$: $\delta \sim t_4(0, \sigma^2 R)$
+- **Removed:** 2-component Gaussian mixture ($w$, $\sigma_1$, $\sigma_2$, $\Lambda_{0,1}$, $\Lambda_{0,2}$)
+- **Rationale:** The discrete mixture suffered from Occam penalty pathology under correlated likelihoods — the slab's log-det penalty dominated even when data favored moderate (not extreme) scale increases. Student's *t* provides continuous scale adaptation via the latent $\lambda$.
 
 **Gibbs sampling inference (§3.4.4, §3.4.5):**
 
 - **Changed:** Posterior computed via deterministic Gibbs sampling (256 iter, 64 burn-in)
-- **Added:** Explicit initialization (λ⁽⁰⁾ = 1) and precomputation requirements
+- **Added:** Explicit initialization ($\lambda^{(0)} = 1$) and precomputation requirements
 - **Added:** Explicit guidance against forming matrix inverses; use Cholesky solves throughout
 - **Rationale:** Student's *t* posterior has no closed form; Gibbs exploits conjugacy in the scale-mixture representation.
 
 **Gate 1 prior covariance (§3.5.2):**
 
-- **Changed:** Uses marginal prior covariance 2σ²R (for ν=4) instead of per-component covariance
+- **Changed:** Uses marginal prior covariance $2\sigma^2 R$ (for $\nu = 4$) instead of per-component covariance
 - **Added:** Deterministic fallback pathway for log-det computation (Cholesky success → log-det; failure → trace ratio)
 - **Rationale:** Single prior family, no mixture components; ensures consistent behavior across platforms.
 
-**λ mixing diagnostics (§2.8, §3.4.4):**
+**$\lambda$ mixing diagnostics (§2.8, §3.4.4):**
 
 - **Added:** gibbs_* fields, lambda_mean, lambda_sd, lambda_cv, lambda_ess, lambda_mixing_ok
 - **Added:** LambdaMixingPoor quality issue code
@@ -1985,15 +1985,15 @@ These constants define conformant implementations. Implementations MAY use diffe
 
 **Mixture prior (§3.3.5, §3.4.3, §3.4.4, §3.4.5):**
 
-- **Changed:** Prior is now a 2-component Gaussian scale mixture: w·N(0,σ₁²R) + (1−w)·N(0,σ₂²R)
-- **Added:** Slab component with deterministic scale σ₂ = max(50θ_eff, 10×SE_med)
-- **Added:** Narrow component σ₁ calibrated so mixture satisfies 62% exceedance
+- **Changed:** Prior is now a 2-component Gaussian scale mixture: $w \cdot \mathcal{N}(0, \sigma_1^2 R) + (1-w) \cdot \mathcal{N}(0, \sigma_2^2 R)$
+- **Added:** Slab component with deterministic scale $\sigma_2 = \max(50\theta_{\text{eff}}, 10\,\text{SE}_{\text{med}})$
+- **Added:** Narrow component $\sigma_1$ calibrated so mixture satisfies 62% exceedance
 - **Added:** Posterior is 2-component mixture with weights updated via marginal likelihood
-- **Rationale:** A single θ-calibrated Gaussian causes catastrophic shrinkage when SE ≫ θ.
+- **Rationale:** A single $\theta$-calibrated Gaussian causes catastrophic shrinkage when SE ≫ $\theta$.
 
 ### v5.1 (from v5.0)
 
 **Prior shape matrix change (§3.3.5, §3.4.3):**
 
-- **Changed:** Prior covariance now uses the correlation matrix R = Corr(Σ_rate) instead of the trace-normalized shape matrix S = Σ_rate / tr(Σ_rate)
+- **Changed:** Prior covariance now uses the correlation matrix $R = \mathrm{Corr}(\Sigma_{\text{rate}})$ instead of the trace-normalized shape matrix $S = \Sigma_{\text{rate}}/\mathrm{tr}(\Sigma_{\text{rate}})$
 - **Rationale:** The trace-normalized shape matrix caused heteroskedastic marginal prior variances across coordinates.

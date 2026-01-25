@@ -1,0 +1,207 @@
+name: Bindings CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'crates/timing-oracle-c/**'
+      - 'crates/timing-oracle-napi/**'
+      - 'crates/timing-oracle-go/**'
+      - 'crates/timing-oracle-core/**'
+      - 'bindings/**'
+      - '.github/workflows/bindings.yml'
+  pull_request:
+    paths:
+      - 'crates/timing-oracle-c/**'
+      - 'crates/timing-oracle-napi/**'
+      - 'crates/timing-oracle-go/**'
+      - 'crates/timing-oracle-core/**'
+      - 'bindings/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ============================================================
+  # Build Rust C library (shared by C, C++, Go)
+  # ============================================================
+  build-rust-lib:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: linux-x86_64
+          - os: macos-latest
+            artifact_name: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "c-lib-${{ matrix.os }}"
+
+      - name: Build timing-oracle-c
+        run: cargo build --release -p timing-oracle-c
+
+      - name: Upload C library artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          path: |
+            target/release/libtiming_oracle_c.a
+            target/release/libtiming_oracle_c.dylib
+            target/release/libtiming_oracle_c.so
+          if-no-files-found: ignore
+          retention-days: 1
+
+  # ============================================================
+  # C and C++ binding tests
+  # ============================================================
+  test-c-cpp:
+    needs: build-rust-lib
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: linux-x86_64
+          - os: macos-latest
+            artifact_name: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download C library
+        uses: actions/download-artifact@v6
+        with:
+          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          path: target/release
+
+      - name: Install CMocka (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libcmocka-dev
+
+      - name: Install CMocka (macOS)
+        if: runner.os == 'macOS'
+        run: brew install cmocka
+
+      - name: Build C tests
+        working-directory: crates/timing-oracle-c/tests
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_BUILD_TYPE=Release ..
+          make
+
+      - name: Run C tests
+        working-directory: crates/timing-oracle-c/tests/build
+        run: ./timing_oracle_tests
+        env:
+          LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+          DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
+
+      - name: Build and run C++ tests
+        run: |
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            CXX_FLAGS="-stdlib=libc++"
+          else
+            CXX_FLAGS=""
+          fi
+
+          clang++ -std=c++20 $CXX_FLAGS \
+            -I crates/timing-oracle-c/include \
+            -I bindings/cpp \
+            bindings/cpp/test_cpp_wrapper.cpp \
+            -L target/release \
+            -ltiming_oracle_c \
+            -o /tmp/test_cpp_wrapper
+
+          DYLD_LIBRARY_PATH=${{ github.workspace }}/target/release \
+          LD_LIBRARY_PATH=${{ github.workspace }}/target/release \
+          /tmp/test_cpp_wrapper
+        shell: bash
+
+  # ============================================================
+  # Node.js/Bun (NAPI) binding tests
+  # ============================================================
+  test-napi-js:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: crates/timing-oracle-napi
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "crates/timing-oracle-napi"
+          shared-key: "napi-${{ matrix.os }}"
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build native addon
+        run: bun run build:native
+
+      - name: Build TypeScript
+        run: bun run build:ts
+
+      - name: Run tests
+        run: bun test
+        timeout-minutes: 5
+
+  # ============================================================
+  # Go binding tests
+  # ============================================================
+  test-go:
+    needs: build-rust-lib
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artifact_name: linux-x86_64
+            lib_dir: linux_amd64
+          - os: macos-latest
+            artifact_name: darwin-arm64
+            lib_dir: darwin_arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download C library
+        uses: actions/download-artifact@v6
+        with:
+          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          path: target/release
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.21'
+          cache: true
+          cache-dependency-path: crates/timing-oracle-go/go.mod
+
+      - name: Setup library for CGo
+        run: |
+          mkdir -p crates/timing-oracle-go/internal/ffi/lib/${{ matrix.lib_dir }}
+          cp target/release/libtiming_oracle_c.a \
+             crates/timing-oracle-go/internal/ffi/lib/${{ matrix.lib_dir }}/
+
+      - name: Run Go tests
+        working-directory: crates/timing-oracle-go
+        run: go test -v -timeout 5m ./...

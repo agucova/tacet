@@ -1,10 +1,15 @@
 // Package ffi provides CGo bindings to the timing-oracle C library.
+//
+// Before building, run: go generate ./...
+// This downloads the pre-built static library for your platform.
 package ffi
+
+//go:generate sh -c "cd ../.. && ./scripts/download-lib.sh"
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../timing-oracle-c/include
 
-// Platform-specific static libraries (pre-built)
+// Platform-specific static libraries (downloaded via go generate)
 #cgo darwin,arm64 LDFLAGS: ${SRCDIR}/lib/darwin_arm64/libtiming_oracle_c.a -framework CoreFoundation -framework Security
 #cgo darwin,amd64 LDFLAGS: ${SRCDIR}/lib/darwin_amd64/libtiming_oracle_c.a -framework CoreFoundation -framework Security
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/lib/linux_arm64/libtiming_oracle_c.a -lm -lpthread
