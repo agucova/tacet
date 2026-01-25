@@ -656,19 +656,19 @@ impl TimerSpec {
         // x86_64 rdtsc is always cycle-accurate
         #[cfg(target_arch = "x86_64")]
         {
-            true
+            return true;
         }
 
         // ARM64 macOS: check if kperf can be initialized
         #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
         {
-            PmuTimer::new().is_ok()
+            return PmuTimer::new().is_ok();
         }
 
         // Linux with perf feature: check if perf_event can be initialized
         #[cfg(all(target_os = "linux", feature = "perf"))]
         {
-            LinuxPerfTimer::new().is_ok()
+            return LinuxPerfTimer::new().is_ok();
         }
 
         // ARM64 without kperf feature (Linux without perf, or other platforms)
@@ -678,13 +678,13 @@ impl TimerSpec {
             not(all(target_os = "linux", feature = "perf"))
         ))]
         {
-            false
+            return false;
         }
 
         // Other platforms (no cycle-accurate timing available)
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
-            false
+            return false;
         }
     }
 }
