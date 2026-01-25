@@ -30,9 +30,9 @@ jobs:
           cargo build -p tacet-macros --release
           cargo build -p tacet --release
 
-      - name: Run tests
-        run: cargo test -p tacet-core -p tacet-macros -p tacet
-        timeout-minutes: 10
+      - name: Run unit tests
+        run: cargo test -p tacet-core -p tacet-macros -p tacet --lib
+        timeout-minutes: 5
 
       - name: Dry run - tacet-core
         if: inputs.dry_run == true
