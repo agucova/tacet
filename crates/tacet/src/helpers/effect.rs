@@ -383,10 +383,17 @@ fn get_x86_64_tsc_freq_hz() -> u64 {
     calibrate_tsc_frequency()
 }
 
-/// Linux: Try to get TSC frequency from sysfs or cpuinfo.
+/// Linux: Try to get TSC frequency from sysfs.
+///
+/// Note: We intentionally do NOT use /proc/cpuinfo "cpu MHz" because:
+/// - It reports the *current* CPU frequency (can be boosted by turbo)
+/// - TSC on modern Intel CPUs runs at a constant rate (base frequency)
+/// - Using boosted frequency leads to ~25-30% overestimation
+///
+/// If sysfs is not available, we fall back to calibration which is accurate.
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn get_tsc_freq_linux() -> Option<u64> {
-    // Method 1: sysfs tsc_freq_khz (most reliable, kernel 4.12+)
+    // sysfs tsc_freq_khz (most reliable, kernel 4.12+)
     if let Ok(content) = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/tsc_freq_khz") {
         if let Ok(khz) = content.trim().parse::<u64>() {
             let freq = khz * 1000;
@@ -396,25 +403,7 @@ fn get_tsc_freq_linux() -> Option<u64> {
         }
     }
 
-    // Method 2: cpuinfo (less reliable - shows current frequency, not TSC)
-    // Only use as hint if sysfs not available
-    if let Ok(content) = std::fs::read_to_string("/proc/cpuinfo") {
-        for line in content.lines() {
-            if line.starts_with("cpu MHz") {
-                if let Some(mhz_str) = line.split(':').nth(1) {
-                    if let Ok(mhz) = mhz_str.trim().parse::<f64>() {
-                        let freq = (mhz * 1_000_000.0) as u64;
-                        if is_reasonable_tsc_freq(freq) {
-                            // cpuinfo MHz may not match TSC, so only use if reasonable
-                            return Some(freq);
-                        }
-                    }
-                }
-                break;
-            }
-        }
-    }
-
+    // Fall back to calibration (don't use /proc/cpuinfo - it's unreliable for TSC)
     None
 }
 
@@ -1783,7 +1772,6 @@ mod tests {
     /// - TSC frequency detection returns wrong value
     /// - Platform detection guesses wrong frequency
     #[test]
-    #[ignore] // Unreliable on virtualized CI environments due to CPU frequency scaling
     fn test_frequency_accuracy_validation() {
         let backend = timer_backend_name();
         if backend == "instant_fallback" {
