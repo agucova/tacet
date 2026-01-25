@@ -47,9 +47,9 @@ jobs:
         if: inputs.dry_run == true
         run: cargo publish -p tacet-macros --dry-run
 
-      - name: Dry run - tacet
-        if: inputs.dry_run == true
-        run: cargo publish -p tacet --dry-run
+      # Note: tacet depends on tacet-core via path, so dry-run won't work
+      # (cargo publish --dry-run downloads deps from crates.io, not local paths)
+      # The build verification above already checks tacet compiles correctly
 
       - name: Publish tacet-core
         if: inputs.dry_run != true
