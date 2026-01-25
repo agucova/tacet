@@ -5,6 +5,10 @@ sidebar:
   order: 4
 ---
 
+import ApiLanguageSwitcher from '../../../components/ApiLanguageSwitcher.astro';
+
+<ApiLanguageSwitcher currentLanguage="go" />
+
 Go bindings for tacet.
 
 ## Quick Reference
@@ -58,7 +62,7 @@ go generate github.com/agucova/tacet/crates/tacet-go/...
 
 The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
 
-**Requirements:** Go 1.21+ with CGo enabled.
+**Requirements:** Go 1.22+ with CGo enabled.
 
 ### Platform Support
 
@@ -80,7 +84,7 @@ If you prefer to build the native library yourself instead of downloading pre-bu
 ### Prerequisites
 
 - [Rust toolchain](https://rustup.rs/) (stable)
-- Go 1.21+ with CGo enabled
+- Go 1.22+ with CGo enabled
 - C compiler (clang or gcc)
 
 ### Build Steps
