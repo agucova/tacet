@@ -1,0 +1,73 @@
+---
+title: timing-oracle
+description: Detect timing side channels in cryptographic code with statistically rigorous methods
+---
+
+import { Tabs, TabItem, Code } from '@astrojs/starlight/components';
+
+**timing-oracle** is a Rust library for detecting timing side channels in cryptographic code. It uses advanced statistical methodology to compare timing distributions between baseline and sample inputs, outputting leak probability, effect sizes, and exploitability assessments.
+
+```
+$ cargo test --test aes_timing -- --nocapture
+
+[aes128_block_encrypt_constant_time]
+timing-oracle
+──────────────────────────────────────────────────────────────
+
+  Samples: 6000 per class
+  Quality: Good
+
+  ✓ No timing leak detected
+
+    Probability of leak: 0.0%
+    95% CI: 0.0–12.5 ns
+
+──────────────────────────────────────────────────────────────
+```
+
+## What It Catches
+
+```rust
+// ✗ This looks constant-time but isn't (early-exit on mismatch)
+fn naive_compare(a: &[u8], b: &[u8]) -> bool {
+    a == b  // ← timing-oracle detects this in ~1 second
+}
+
+// ✓ This is actually constant-time
+fn ct_compare(a: &[u8], b: &[u8]) -> bool {
+    subtle::ConstantTimeEq::ct_eq(a, b).into()
+}
+```
+
+## Why Another Tool?
+
+Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
+
+**timing-oracle** gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
+
+| | DudeCT | timing-oracle |
+|---|--------|---------------|
+| **Output** | t-statistic + p-value | Probability of leak (0–100%) |
+| **False positives** | Unbounded (more samples → more FPs) | Converges to correct answer |
+| **Effect size** | Not provided | Estimated in nanoseconds |
+| **Exploitability** | Manual interpretation | Automatic classification |
+| **CI-friendly** | Flaky without tuning | Works out of the box |
+
+## Real-World Validation
+
+While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate — a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](/case-studies/rsa-timing-anomaly).
+
+## Key Features
+
+- **Bayesian statistical analysis** - Get actual probabilities, not just p-values
+- **Adaptive sampling** - Automatically collects more samples when needed
+- **Effect decomposition** - Separates uniform shifts from tail effects
+- **Exploitability assessment** - Classifies leaks by attack difficulty
+- **Quality gates** - Early stopping when data is too noisy or not learning
+- **Multiple language bindings** - Rust, JavaScript/TypeScript (NAPI), C/C++, Go
+
+## Next Steps
+
+- [Installation](/getting-started/installation) - Add timing-oracle to your project
+- [Quick Start](/getting-started/quick-start) - Write your first timing test
+- [Attacker Models](/getting-started/attacker-models) - Choose the right threat model

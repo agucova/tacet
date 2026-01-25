@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// - `Unmeasurable`: Operation too fast to measure on this platform
 ///
 /// See spec Section 4.1 (Result Types).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[allow(clippy::large_enum_variant)]
 pub enum Outcome {
     /// No timing leak detected.
@@ -800,6 +800,16 @@ pub struct Diagnostics {
     /// Platform description (e.g., "macos-aarch64").
     pub platform: String,
 
+    /// Reason the timer fell back from high-precision PMU (if applicable).
+    ///
+    /// Used to generate context-aware recommendations in output.
+    /// - "concurrent access": kperf locked by another process
+    /// - "no sudo": not running with elevated privileges
+    /// - "unavailable": PMU init failed despite privileges
+    /// - None: using high-precision timer or x86_64 (rdtsc is already ~0.3ns)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timer_fallback_reason: Option<String>,
+
     // =========================================================================
     // v5.4 Gibbs sampler diagnostics
     // =========================================================================
@@ -880,6 +890,7 @@ impl Diagnostics {
             threshold_ns: 0.0,
             timer_name: String::new(),
             platform: String::new(),
+            timer_fallback_reason: None,
             // v5.4 Gibbs sampler diagnostics
             gibbs_iters_total: 256,
             gibbs_burnin: 64,
@@ -1517,87 +1528,7 @@ impl Outcome {
 
 impl fmt::Display for Outcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Outcome::Pass {
-                leak_probability,
-                effect,
-                samples_used,
-                ..
-            } => {
-                write!(
-                    f,
-                    "PASS: P(leak)={:.1}%, effect={:.1}ns shift/{:.1}ns tail, {} samples",
-                    leak_probability * 100.0,
-                    effect.shift_ns,
-                    effect.tail_ns,
-                    samples_used
-                )
-            }
-            Outcome::Fail {
-                leak_probability,
-                effect,
-                exploitability,
-                samples_used,
-                ..
-            } => {
-                write!(
-                    f,
-                    "FAIL: P(leak)={:.1}%, effect={:.1}ns shift/{:.1}ns tail, {:?}, {} samples",
-                    leak_probability * 100.0,
-                    effect.shift_ns,
-                    effect.tail_ns,
-                    exploitability,
-                    samples_used
-                )
-            }
-            Outcome::Inconclusive {
-                reason,
-                leak_probability,
-                samples_used,
-                ..
-            } => {
-                let reason_str = match reason {
-                    InconclusiveReason::DataTooNoisy { .. } => "data too noisy",
-                    InconclusiveReason::NotLearning { .. } => "not learning",
-                    InconclusiveReason::WouldTakeTooLong { .. } => "would take too long",
-                    InconclusiveReason::TimeBudgetExceeded { .. } => "time budget exceeded",
-                    InconclusiveReason::SampleBudgetExceeded { .. } => "budget exceeded",
-                    InconclusiveReason::ConditionsChanged { .. } => "conditions changed",
-                    InconclusiveReason::ThresholdElevated { .. } => "threshold elevated",
-                };
-                write!(
-                    f,
-                    "INCONCLUSIVE ({}): P(leak)={:.1}%, {} samples",
-                    reason_str,
-                    leak_probability * 100.0,
-                    samples_used
-                )
-            }
-            Outcome::Unmeasurable {
-                operation_ns,
-                threshold_ns,
-                platform,
-                ..
-            } => {
-                write!(
-                    f,
-                    "UNMEASURABLE: {:.1}ns operation < {:.1}ns threshold ({})",
-                    operation_ns, threshold_ns, platform
-                )
-            }
-            Outcome::Research(research) => {
-                write!(
-                    f,
-                    "RESEARCH: {:?}, max_effect={:.1}ns, CI=[{:.1}, {:.1}]ns, floor={:.1}ns, {} samples",
-                    research.status,
-                    research.max_effect_ns,
-                    research.max_effect_ci.0,
-                    research.max_effect_ci.1,
-                    research.theta_floor,
-                    research.samples_used
-                )
-            }
-        }
+        write!(f, "{}", crate::formatting::format_outcome_plain(self))
     }
 }
 
@@ -1687,5 +1618,15 @@ impl fmt::Display for InconclusiveReason {
                 )
             }
         }
+    }
+}
+
+// ============================================================================
+// Debug implementation for Outcome
+// ============================================================================
+
+impl fmt::Debug for Outcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", crate::formatting::format_debug_summary_plain(self))
     }
 }

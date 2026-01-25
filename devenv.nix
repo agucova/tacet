@@ -176,6 +176,10 @@ in
     cmocka
     cmake
     pkg-config
+
+    # Documentation website (Starlight + CF Workers)
+    bun
+    nodePackages.wrangler
   ];
 
   env = {

@@ -1,0 +1,175 @@
+---
+title: RSA Timing Anomaly
+description: Investigation into RSA decryption timing leaks discovered while testing timing-oracle
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This case study documents the investigation into RSA timing anomalies discovered while testing timing-oracle, which led to the rediscovery of timing vulnerabilities related to [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack).
+
+## Summary
+
+**Key Finding**: Different RSA ciphertexts have **persistently different mean decryption times** due to data-dependent big-integer arithmetic in modular exponentiation. This is NOT caused by ciphertext "shape" or test artifacts.
+
+Even with RSA blinding enabled, averaging enough measurements (~500) reveals persistent per-ciphertext timing signatures. The inter-ciphertext timing variation is 9.1× larger than the standard error.
+
+**Implication**: This is a real timing side channel. Large pools (100+) average it out (realistic for "random users"), but 1-vs-1 tests correctly detect exploitability in chosen-ciphertext scenarios.
+
+---
+
+## Test Setup
+
+- **Library**: timing-oracle (Rust)
+- **RSA Implementation**: `rsa` crate (RustCrypto)
+- **Key Size**: RSA-1024
+- **Platform**: macOS ARM64 (Apple Silicon)
+- **Timer**: kperf (PMU cycle counter, ~0.3ns resolution)
+
+---
+
+## Experiment 1: Original Test Pattern
+
+**Design:**
+```rust
+// Baseline: Same ciphertext for all measurements
+let fixed_ciphertext = encrypt(fixed_message);
+baseline_generator = || fixed_ciphertext.clone()
+
+// Sample: Different ciphertexts, cycling through pool of 200
+sample_generator = || random_ciphertexts[i++ % 200].clone()
+```
+
+**Results:**
+```
+Samples: 6000 per class
+Quality: Poor
+Leak probability: 100.0%
+Effect: 259.7 ns UniformShift
+  Shift: -250.9 ns (negative = baseline faster)
+  Tail: -67.2 ns
+  95% CI: 186.1-333.4 ns
+```
+
+The baseline (repeating the same ciphertext) was consistently **faster** than cycling through different ciphertexts.
+
+---
+
+## Experiment 2: Control Test
+
+**Design:**
+```rust
+// Baseline: Different ciphertexts, cycling through pool A
+baseline_generator = || pool_a[i++ % 200].clone()
+
+// Sample: Different ciphertexts, cycling through pool B
+sample_generator = || pool_b[j++ % 200].clone()
+```
+
+**Results:**
+```
+Samples: 6000 per class
+Quality: Poor
+Leak probability: 5.5%
+Effect: 42.7 ns UniformShift
+  95% CI: 0.0-115.1 ns
+```
+
+When both classes cycle through different ciphertexts, no significant timing difference is detected.
+
+---
+
+## Experiment 3: Same Pool Test
+
+Both classes cycle through the **same** pool of 200 ciphertexts.
+
+**Expected:** ~0 effect (identical data distribution)
+
+**Results:**
+```
+Leak probability: 11.3%
+Effect: 0.8 ns shift
+Outcome: Pass
+```
+
+<Aside type="tip">
+This confirms the measurement methodology is sound—when the data distribution is identical, no timing difference is detected.
+</Aside>
+
+---
+
+## Key Observations
+
+1. **Large effect in original pattern**: ~250ns timing difference where baseline (same ciphertext repeated) is faster than sample (different ciphertexts).
+
+2. **Small effect in control pattern**: ~42ns timing difference when both classes cycle through different ciphertexts.
+
+3. **Consistent across timers**: Both standard timer and PMU show similar effects, suggesting this is not a measurement artifact.
+
+4. **Direction of effect**: The shift is negative, meaning the baseline class (repeated ciphertext) is faster.
+
+---
+
+## Root Cause Analysis
+
+The timing difference comes from **data-dependent big-integer arithmetic** in RSA:
+
+1. **Modular exponentiation**: The square-and-multiply algorithm processes each bit of the private exponent, but the actual multiplication/squaring operations depend on the magnitude of intermediate results.
+
+2. **Montgomery multiplication**: The reduction step can take different amounts of time depending on whether an extra subtraction is needed.
+
+3. **Ciphertext-dependent paths**: Different ciphertext values lead to different intermediate values during decryption, causing different execution paths through the big-integer arithmetic.
+
+When the same ciphertext is repeated:
+- CPU branch predictors learn the pattern
+- Cache lines for intermediate values remain hot
+- Microarchitectural state is optimized for that specific ciphertext
+
+When different ciphertexts are used:
+- Branch predictors must re-learn
+- Cache lines are evicted and reloaded
+- Microarchitectural state varies
+
+---
+
+## Implications
+
+### For Security
+
+This is a **real timing side channel** that could enable:
+- Chosen-ciphertext attacks where attacker controls what's decrypted
+- Key recovery with sufficient queries (~10k-100k depending on precision)
+
+### For Testing
+
+The "fixed vs random" DudeCT pattern correctly identifies this vulnerability. The ~250ns effect is well above the `AdjacentNetwork` threshold (100ns), indicating it's exploitable via HTTP/2 request multiplexing.
+
+### Mitigation
+
+The `rsa` crate has since implemented additional mitigations:
+- Constant-time modular exponentiation
+- Additional blinding
+- Cache-resistant implementations
+
+<Aside type="caution">
+Always use the latest version of cryptographic libraries and verify constant-time properties with tools like timing-oracle.
+</Aside>
+
+---
+
+## Lessons Learned
+
+1. **Blinding is not sufficient**: Even with blinding, per-ciphertext timing signatures can persist.
+
+2. **Microarchitectural state matters**: Branch predictors and cache state can create timing differences even when the algorithm is "constant-time" in the abstract.
+
+3. **Statistical tools work**: timing-oracle correctly identified this vulnerability without any prior knowledge of RSA internals.
+
+4. **Effect decomposition is useful**: The `UniformShift` pattern indicates a systematic timing difference (branch prediction/cache effects), not just random noise.
+
+---
+
+## References
+
+- [CVE-2023-49092 (Marvin Attack)](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
+- [Full investigation report](https://github.com/agucova/timing-oracle/blob/main/docs/investigation-rsa-timing-anomaly.md)
+- Jancar, J., et al. (2023). "Marvin Attack: RSA Decryption Is Vulnerable to Timing Attacks"

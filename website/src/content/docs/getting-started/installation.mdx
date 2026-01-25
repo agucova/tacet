@@ -1,0 +1,108 @@
+---
+title: Installation
+description: How to add timing-oracle to your project
+sidebar:
+  order: 2
+---
+
+import { PackageManagers } from 'starlight-package-managers';
+
+## Rust
+
+Add timing-oracle as a dev dependency:
+
+```bash
+cargo add timing-oracle --dev
+```
+
+Or add to your `Cargo.toml`:
+
+```toml
+[dev-dependencies]
+timing-oracle = "0.1"
+```
+
+### Feature Flags
+
+**Default features** (recommended for most users):
+
+- `parallel` - Rayon-based parallel bootstrap (4-8x speedup)
+- `kperf` (macOS ARM64 only) - PMU-based cycle counting (opt-in via `PmuTimer`, requires `sudo`)
+- `perf` (Linux only) - perf_event-based cycle counting (opt-in via `LinuxPerfTimer`, requires `sudo`)
+
+**Optional features:**
+
+- `macros` - Proc macros (`timing_test!`, `timing_test_checked!`) for ergonomic test syntax
+
+**Minimal build** (no parallelism):
+
+```toml
+[dev-dependencies]
+timing-oracle = { version = "0.1", default-features = false }
+```
+
+## JavaScript
+
+<PackageManagers pkg="@timing-oracle/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+
+The package includes native bindings via NAPI-RS, supporting Node.js and Bun on:
+- Linux (x86_64, aarch64)
+- macOS (x86_64, aarch64)
+- Windows (x86_64)
+
+## C/C++
+
+Build the C bindings from source:
+
+```bash
+git clone https://github.com/agucova/timing-oracle
+cd timing-oracle
+cargo build --release -p timing-oracle-c
+
+# Headers at: crates/timing-oracle-c/include/timing_oracle.h
+# Library at: target/release/libtiming_oracle_c.{a,so,dylib}
+```
+
+Link against `libtiming_oracle_c` and include `timing_oracle.h`.
+
+## Go
+
+```bash
+go get github.com/agucova/timing-oracle/bindings/go
+```
+
+The Go bindings use cgo to link against the C library.
+
+## Platform Support
+
+| Platform | Timer | Resolution | Notes |
+|----------|-------|------------|-------|
+| Linux x86_64 | `rdtsc` | ~0.3 ns | Best precision |
+| Linux aarch64 | `cntvct_el0` | ~1-10 ns | Good precision |
+| macOS x86_64 | `rdtsc` | ~0.3 ns | Best precision |
+| macOS ARM64 | `cntvct_el0` | ~42 ns | Uses adaptive batching |
+| Windows x86_64 | `rdtsc` | ~0.3 ns | Best precision |
+
+On platforms with coarse timer resolution (macOS ARM64), the library automatically uses adaptive batching to compensate.
+
+## Privileged Timers
+
+For cycle-accurate measurements, you can opt into privileged timers:
+
+**macOS ARM64 (`PmuTimer`):**
+```bash
+# Requires sudo
+sudo cargo test --test my_test
+```
+
+**Linux (`LinuxPerfTimer`):**
+```bash
+# Option 1: sudo
+sudo cargo test --test my_test
+
+# Option 2: CAP_PERFMON capability
+sudo setcap cap_perfmon+ep target/debug/deps/my_test-*
+cargo test --test my_test
+```
+
+These are opt-in; the default timer works without elevated privileges.

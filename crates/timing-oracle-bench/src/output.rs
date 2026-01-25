@@ -10,27 +10,37 @@ use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
+/// Escape a field for CSV output (quote if contains comma, quote, or newline).
+pub fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
+}
+
 /// Write benchmark results to CSV.
 pub fn write_csv(results: &SweepResults, path: &Path) -> io::Result<()> {
     let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
 
-    // Header
+    // Header (matches checkpoint::CSV_HEADER)
     writeln!(
         writer,
-        "tool,preset,effect_pattern,effect_sigma_mult,noise_model,dataset_id,samples_per_class,detected,statistic,p_value,time_ms,samples_used"
+        "tool,preset,effect_pattern,effect_sigma_mult,noise_model,attacker_threshold_ns,dataset_id,samples_per_class,detected,statistic,p_value,time_ms,samples_used,status,outcome"
     )?;
 
     // Data rows
     for r in &results.results {
         writeln!(
             writer,
-            "{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             r.tool,
             r.preset,
             r.effect_pattern,
             r.effect_sigma_mult,
             r.noise_model,
+            r.attacker_threshold_ns.map(|t| format!("{}", t)).unwrap_or_default(),
             r.dataset_id,
             r.samples_per_class,
             r.detected,
@@ -38,6 +48,8 @@ pub fn write_csv(results: &SweepResults, path: &Path) -> io::Result<()> {
             r.p_value.map(|p| format!("{:.6}", p)).unwrap_or_default(),
             r.time_ms,
             r.samples_used.map(|s| s.to_string()).unwrap_or_default(),
+            csv_escape(&r.status),
+            r.outcome.as_str(),
         )?;
     }
 
@@ -52,18 +64,19 @@ pub fn write_summary_csv(results: &SweepResults, path: &Path) -> io::Result<()> 
     // Header
     writeln!(
         writer,
-        "tool,effect_pattern,effect_sigma_mult,noise_model,n_datasets,detection_rate,ci_low,ci_high,median_time_ms,median_samples"
+        "tool,effect_pattern,effect_sigma_mult,noise_model,attacker_threshold_ns,n_datasets,detection_rate,ci_low,ci_high,median_time_ms,median_samples"
     )?;
 
     // Data rows
     for s in results.summarize() {
         writeln!(
             writer,
-            "{},{},{},{},{},{:.4},{:.4},{:.4},{},{}",
+            "{},{},{},{},{},{},{:.4},{:.4},{:.4},{},{}",
             s.tool,
             s.effect_pattern,
             s.effect_sigma_mult,
             s.noise_model,
+            s.attacker_threshold_ns.map(|t| format!("{}", t)).unwrap_or_default(),
             s.n_datasets,
             s.detection_rate,
             s.ci_low,
@@ -311,6 +324,7 @@ mod tests {
             effect_pattern: "null".to_string(),
             effect_sigma_mult: 0.0,
             noise_model: "iid".to_string(),
+            attacker_threshold_ns: None,
             dataset_id: 0,
             samples_per_class: 5000,
             detected: false,
@@ -318,6 +332,8 @@ mod tests {
             p_value: Some(0.15),
             time_ms: 100,
             samples_used: Some(5000),
+            status: "Pass".to_string(),
+            outcome: crate::adapters::OutcomeCategory::Pass,
         });
 
         results.push(BenchmarkResult {
@@ -326,6 +342,7 @@ mod tests {
             effect_pattern: "shift".to_string(),
             effect_sigma_mult: 1.0,
             noise_model: "iid".to_string(),
+            attacker_threshold_ns: None,
             dataset_id: 0,
             samples_per_class: 5000,
             detected: true,
@@ -333,6 +350,8 @@ mod tests {
             p_value: Some(0.001),
             time_ms: 120,
             samples_used: Some(5000),
+            status: "Fail".to_string(),
+            outcome: crate::adapters::OutcomeCategory::Fail,
         });
 
         results

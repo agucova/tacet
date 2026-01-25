@@ -159,6 +159,7 @@ pub fn compute_diagnostics(
         threshold_ns: 0.0,
         timer_name: String::new(),
         platform: String::new(),
+        timer_fallback_reason: None, // Filled in by caller
         // v5.4 Gibbs sampler diagnostics
         gibbs_iters_total: 256,
         gibbs_burnin: 64,

@@ -103,19 +103,19 @@ impl ResolutionWarning {
     }
 
     /// Get guidance for addressing this warning.
+    ///
+    /// Note: This provides generic guidance. For context-aware recommendations
+    /// (e.g., based on timer fallback reason), see the output formatting layer.
     pub fn guidance(&self) -> Option<String> {
         match self {
             ResolutionWarning::InsufficientResolution { .. } => Some(
                 "Consider: (1) measuring multiple iterations per sample, \
                  (2) using a more complex operation, or \
-                 (3) running with `sudo` to enable kperf (macOS) or perf_event (Linux) \
-                 for ~1ns resolution."
+                 (3) enabling cycle-accurate timing for ~0.3ns resolution."
                     .into(),
             ),
             ResolutionWarning::HighQuantization { .. } => Some(
-                "Consider running with `sudo` to enable PMU-based timing \
-                 for better resolution."
-                    .into(),
+                "Timer resolution may be limiting measurement quality.".into(),
             ),
         }
     }

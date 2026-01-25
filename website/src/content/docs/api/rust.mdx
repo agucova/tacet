@@ -1,0 +1,266 @@
+---
+title: Rust API
+description: Complete API documentation for the Rust implementation
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Complete API documentation for the Rust implementation of timing-oracle.
+
+## Quick Reference
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+
+// Create inputs using closures
+let inputs = InputPair::new(
+    || [0u8; 32],          // baseline: returns constant value
+    || rand::random(),     // sample: generates varied values
+);
+
+// Run test with attacker model
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_function(data));
+
+// Handle all four possible outcomes
+match outcome {
+    Outcome::Pass { leak_probability, .. } => {
+        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Fail { leak_probability, exploitability, .. } => {
+        panic!("Timing leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
+    }
+    Outcome::Inconclusive { reason, .. } => {
+        println!("Inconclusive: {:?}", reason);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Skipped: {}", recommendation);
+    }
+}
+```
+
+---
+
+## TimingOracle Builder
+
+### Attacker Model Presets
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+// Shared hardware: SGX, cross-VM, containers (~0.6ns / ~2 cycles)
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+
+// Post-quantum sentinel: Catch KyberSlash-class leaks (~3.3ns / ~10 cycles)
+TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
+
+// Adjacent network: LAN or HTTP/2 endpoints (100ns) - DEFAULT
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+
+// Remote network: Public APIs, general internet (50us)
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+
+// Research: Detect any difference (not for CI)
+TimingOracle::for_attacker(AttackerModel::Research)
+
+// Custom threshold in nanoseconds
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
+```
+
+| Preset | Threshold | Use case |
+|--------|-----------|----------|
+| `SharedHardware` | ~0.6 ns | SGX, cross-VM, containers |
+| `PostQuantumSentinel` | ~3.3 ns | Post-quantum crypto |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 |
+| `RemoteNetwork` | 50 us | Public APIs |
+| `Research` | 0 | Academic analysis |
+
+### Configuration Methods
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+use std::time::Duration;
+
+let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    // Decision thresholds
+    .pass_threshold(0.05)                    // Below this = Pass (default: 0.05)
+    .fail_threshold(0.95)                    // Above this = Fail (default: 0.95)
+
+    // Resource limits
+    .time_budget(Duration::from_secs(30))    // Max time (default: 60s)
+    .max_samples(100_000)                    // Hard cap (default: 1M)
+
+    // Advanced tuning
+    .batch_size(1_000)                       // Samples per batch
+    .calibration_samples(5_000)              // Calibration samples
+    .prior_no_leak(0.75)                     // Prior P(no leak)
+    .warmup(1_000)                           // Warmup iterations
+
+    // Timer configuration
+    .timer_spec(TimerSpec::Auto)             // Auto-detect (default)
+    .standard_timer()                        // Force standard timer
+    .prefer_pmu()                            // Prefer PMU with fallback
+
+    // Reproducibility
+    .seed(42);                               // Deterministic seed
+```
+
+---
+
+## Outcome Enum
+
+```rust
+pub enum Outcome {
+    Pass { leak_probability, effect, samples_used, quality, diagnostics },
+    Fail { leak_probability, effect, exploitability, samples_used, quality, diagnostics },
+    Inconclusive { reason, leak_probability, effect, samples_used, quality, diagnostics },
+    Unmeasurable { operation_ns, threshold_ns, platform, recommendation },
+}
+```
+
+### Outcome Methods
+
+```rust
+impl Outcome {
+    /// Check if test passed
+    fn passed(&self) -> bool;
+
+    /// Check if test failed
+    fn failed(&self) -> bool;
+
+    /// Check if result is conclusive (Pass or Fail)
+    fn is_conclusive(&self) -> bool;
+
+    /// Check if operation was measurable
+    fn is_measurable(&self) -> bool;
+
+    /// Check if measurement is reliable
+    fn is_reliable(&self) -> bool;
+
+    /// Get leak probability if available
+    fn leak_probability(&self) -> Option<f64>;
+
+    /// Get effect estimate if available
+    fn effect(&self) -> Option<&EffectEstimate>;
+}
+```
+
+---
+
+## Supporting Types
+
+### EffectEstimate
+
+```rust
+pub struct EffectEstimate {
+    pub shift_ns: f64,              // Uniform shift component
+    pub tail_ns: f64,               // Tail effect component
+    pub credible_interval_ns: (f64, f64), // 95% CI
+    pub pattern: EffectPattern,     // UniformShift, TailEffect, Mixed, etc.
+}
+```
+
+### Exploitability
+
+```rust
+pub enum Exploitability {
+    SharedHardwareOnly,  // < 10 ns
+    Http2Multiplexing,   // 10-100 ns
+    StandardRemote,      // 100 ns - 10 us
+    ObviousLeak,         // > 10 us
+}
+```
+
+### MeasurementQuality
+
+```rust
+pub enum MeasurementQuality {
+    Excellent,  // MDE < 5 ns
+    Good,       // MDE 5-20 ns
+    Poor,       // MDE 20-100 ns
+    TooNoisy,   // MDE > 100 ns
+}
+```
+
+### InconclusiveReason
+
+```rust
+pub enum InconclusiveReason {
+    DataTooNoisy,
+    NotLearning,
+    WouldTakeTooLong,
+    TimeBudgetExceeded,
+    SampleBudgetExceeded,
+    ConditionsChanged,
+}
+```
+
+---
+
+## Helper Types
+
+### InputPair
+
+```rust
+use timing_oracle::helpers::InputPair;
+
+// Create input pair with closures
+let inputs = InputPair::new(
+    || [0u8; 32],          // baseline generator
+    || rand::random(),     // sample generator
+);
+
+// Or from iterators
+let inputs = InputPair::from_iters(
+    std::iter::repeat([0u8; 32]),
+    (0..).map(|i| [i as u8; 32]),
+);
+```
+
+<Aside type="caution">
+Always use closures that generate fresh values, not captured values!
+```rust
+// ❌ Wrong
+let value = rand::random();
+let inputs = InputPair::new(|| value, || value);
+
+// ✓ Correct
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+```
+</Aside>
+
+---
+
+## Macro API
+
+With the `macros` feature:
+
+```rust
+use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel};
+
+let outcome = timing_test_checked! {
+    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30)),
+    baseline: || [0u8; 32],
+    sample: || rand::random::<[u8; 32]>(),
+    measure: |input| my_function(&input),
+};
+```
+
+---
+
+## Configuration Defaults
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `pass_threshold` | 0.05 | P(leak) below this → Pass |
+| `fail_threshold` | 0.95 | P(leak) above this → Fail |
+| `time_budget` | 60 s | Maximum analysis time |
+| `max_samples` | 1,000,000 | Maximum samples per class |
+| `batch_size` | 1,000 | Samples per adaptive batch |
+| `calibration_samples` | 5,000 | Samples for calibration |
+| `prior_no_leak` | 0.75 | Prior probability of no leak |
+| `warmup` | 1,000 | Warmup iterations |
+| `outlier_percentile` | 0.9999 | Winsorization threshold |

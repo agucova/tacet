@@ -2172,6 +2172,7 @@ dependencies = [
 name = "timing-oracle-core"
 version = "0.1.5"
 dependencies = [
+ "colored",
  "hashbrown",
  "libm",
  "nalgebra 0.34.1",

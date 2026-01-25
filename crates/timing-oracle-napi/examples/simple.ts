@@ -4,7 +4,7 @@
  * Run with: bun examples/simple.ts
  */
 
-import { TimingOracle, AttackerModel, Outcome, calibrateTimer } from "../dist/index.js";
+import { TimingOracle, AttackerModel, calibrateTimer } from "../dist/index.js";
 import crypto from "node:crypto";
 
 // Show timer info
@@ -19,6 +19,7 @@ console.log("Test 1: SHA-256 hashing (should PASS)...\n");
 const result1 = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
   .timeBudget(15_000) // 15 seconds
   .maxSamples(50_000)
+  .showProgress()
   .test(
     {
       baseline: () => Buffer.alloc(64, 0), // All zeros
@@ -30,19 +31,20 @@ const result1 = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
     }
   );
 
-const outcomeNames = ["Pass", "Fail", "Inconclusive", "Unmeasurable"];
-console.log("Result:", outcomeNames[result1.outcome]);
-console.log("Leak probability:", (result1.leakProbability * 100).toFixed(2) + "%");
+console.log("\nResult:", result1.outcomeString());
+console.log("Leak probability:", result1.leakProbabilityPercent());
 console.log("Batching:", result1.batchingInfo.rationale);
-console.log("Effect: shift=" + result1.effect.shiftNs.toFixed(2) + "ns, tail=" + result1.effect.tailNs.toFixed(2) + "ns");
+console.log(`Effect: shift=${result1.effect.shiftNs.toFixed(2)}ns, tail=${result1.effect.tailNs.toFixed(2)}ns`);
 
-if (result1.outcome === Outcome.Pass) {
+if (result1.isPass()) {
   console.log("PASS: No timing leak detected\n");
-} else if (result1.outcome === Outcome.Fail) {
+} else if (result1.isFail()) {
   console.log("FAIL: Timing leak detected!");
-  console.log("Exploitability:", result1.exploitability);
+  console.log("Exploitability:", result1.exploitabilityString());
+} else if (result1.isInconclusive()) {
+  console.log("INCONCLUSIVE:", result1.inconclusiveReasonString(), "\n");
 } else {
-  console.log("INCONCLUSIVE:", result1.inconclusiveReason, "\n");
+  console.log("UNMEASURABLE:", result1.recommendation, "\n");
 }
 
 // Test 2: Early-exit comparison (should FAIL - timing leak)
@@ -53,6 +55,7 @@ const secret = Buffer.from("supersecretkey!!");
 const result2 = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
   .timeBudget(15_000)
   .maxSamples(50_000)
+  .showProgress()
   .test(
     {
       baseline: () => Buffer.from(secret), // Matches secret (fast path)
@@ -68,16 +71,28 @@ const result2 = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
     }
   );
 
-console.log("Result:", outcomeNames[result2.outcome]);
-console.log("Leak probability:", (result2.leakProbability * 100).toFixed(2) + "%");
+console.log("\nResult:", result2.outcomeString());
+console.log("Leak probability:", result2.leakProbabilityPercent());
 console.log("Batching:", result2.batchingInfo.rationale);
-console.log("Effect: shift=" + result2.effect.shiftNs.toFixed(2) + "ns, tail=" + result2.effect.tailNs.toFixed(2) + "ns");
+console.log(`Effect: shift=${result2.effect.shiftNs.toFixed(2)}ns, tail=${result2.effect.tailNs.toFixed(2)}ns`);
 
-if (result2.outcome === Outcome.Pass) {
+if (result2.isPass()) {
   console.log("PASS: No timing leak detected (unexpected!)\n");
-} else if (result2.outcome === Outcome.Fail) {
+} else if (result2.isFail()) {
   console.log("FAIL: Timing leak detected! (expected)");
-  console.log("Exploitability:", result2.exploitability);
+  console.log("Exploitability:", result2.exploitabilityString());
+} else if (result2.isInconclusive()) {
+  console.log("INCONCLUSIVE:", result2.inconclusiveReasonString(), "\n");
 } else {
-  console.log("INCONCLUSIVE:", result2.inconclusiveReason, "\n");
+  console.log("UNMEASURABLE:", result2.recommendation, "\n");
+}
+
+// Demonstrate assertion style
+console.log("\n---\nTest 3: Assertion style (assertNoLeak)...\n");
+
+try {
+  result2.assertNoLeak();
+  console.log("No leak detected");
+} catch (e) {
+  console.log("Caught TimingLeakError:", (e as Error).message);
 }

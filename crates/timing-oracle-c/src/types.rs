@@ -1,6 +1,10 @@
 //! C-compatible type definitions for timing-oracle.
 
 use timing_oracle_core::adaptive::{AdaptiveState, Calibration};
+use timing_oracle_core::constants::{
+    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD, DEFAULT_TIME_BUDGET_SECS,
+};
+use timing_oracle_core::result::{Exploitability, MeasurementQuality};
 use timing_oracle_core::types::AttackerModel;
 
 // ============================================================================
@@ -68,10 +72,10 @@ impl Default for ToConfig {
         Self {
             attacker_model: ToAttackerModel::AdjacentNetwork,
             custom_threshold_ns: 0.0,
-            max_samples: 100_000,
-            time_budget_secs: 30.0,
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            max_samples: DEFAULT_MAX_SAMPLES as u64,
+            time_budget_secs: DEFAULT_TIME_BUDGET_SECS as f64,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
             seed: 0,
             timer_frequency_hz: 0,
         }
@@ -136,6 +140,17 @@ pub enum ToExploitability {
     ObviousLeak = 3,
 }
 
+impl From<Exploitability> for ToExploitability {
+    fn from(e: Exploitability) -> Self {
+        match e {
+            Exploitability::SharedHardwareOnly => ToExploitability::SharedHardwareOnly,
+            Exploitability::Http2Multiplexing => ToExploitability::Http2Multiplexing,
+            Exploitability::StandardRemote => ToExploitability::StandardRemote,
+            Exploitability::ObviousLeak => ToExploitability::ObviousLeak,
+        }
+    }
+}
+
 /// Measurement quality assessment.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -148,6 +163,17 @@ pub enum ToMeasurementQuality {
     Poor = 2,
     /// MDE > 100 ns - Too noisy for reliable detection.
     TooNoisy = 3,
+}
+
+impl From<MeasurementQuality> for ToMeasurementQuality {
+    fn from(q: MeasurementQuality) -> Self {
+        match q {
+            MeasurementQuality::Excellent => ToMeasurementQuality::Excellent,
+            MeasurementQuality::Good => ToMeasurementQuality::Good,
+            MeasurementQuality::Poor => ToMeasurementQuality::Poor,
+            MeasurementQuality::TooNoisy => ToMeasurementQuality::TooNoisy,
+        }
+    }
 }
 
 /// Effect pattern.

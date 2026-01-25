@@ -1,0 +1,262 @@
+---
+title: Go API
+description: API documentation for the Go bindings
+sidebar:
+  order: 4
+---
+
+Go bindings for timing-oracle.
+
+## Quick Reference
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/agucova/timing-oracle/crates/timing-oracle-go"
+)
+
+func main() {
+    result, err := timingoracle.Test(
+        timingoracle.NewZeroGenerator(0),  // Baseline: all zeros
+        timingoracle.FuncOperation(func(input []byte) {
+            myCryptoFunction(input)
+        }),
+        32,  // Input size in bytes
+        timingoracle.WithAttacker(timingoracle.AdjacentNetwork),
+        timingoracle.WithTimeBudget(30 * time.Second),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    switch result.Outcome {
+    case timingoracle.Pass:
+        fmt.Printf("No leak: P(leak)=%.1f%%\n", result.LeakProbability*100)
+    case timingoracle.Fail:
+        fmt.Printf("Leak: %.1f ns, %s\n", result.Effect.TotalNs(), result.Exploitability)
+    case timingoracle.Inconclusive:
+        fmt.Printf("Inconclusive: %s\n", result.InconclusiveReason)
+    case timingoracle.Unmeasurable:
+        fmt.Printf("Too fast: %s\n", result.Recommendation)
+    }
+}
+```
+
+---
+
+## Installation
+
+```bash
+go get github.com/agucova/timing-oracle/crates/timing-oracle-go
+```
+
+---
+
+## Test Function
+
+```go
+func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, error)
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `gen` | `Generator` | Input generator |
+| `op` | `Operation` | Operation to test |
+| `inputSize` | `int` | Input buffer size |
+| `opts` | `...Option` | Configuration options |
+
+---
+
+## Configuration Options
+
+### Attacker Models
+
+```go
+func WithAttacker(model AttackerModel) Option
+```
+
+| Model | Threshold | Use Case |
+|-------|-----------|----------|
+| `SharedHardware` | 0.6 ns | SGX, containers |
+| `PostQuantum` | 3.3 ns | Post-quantum crypto |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 |
+| `RemoteNetwork` | 50 μs | Internet |
+| `Research` | 0 | Detect any difference |
+
+### Budget Options
+
+```go
+func WithTimeBudget(d time.Duration) Option
+func WithMaxSamples(n int) Option
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithTimeBudget` | 30s | Maximum test time |
+| `WithMaxSamples` | 100,000 | Max samples per class |
+
+### Threshold Options
+
+```go
+func WithPassThreshold(p float64) Option   // Default: 0.05
+func WithFailThreshold(p float64) Option   // Default: 0.95
+func WithCustomThreshold(ns float64) Option
+```
+
+---
+
+## Generators and Operations
+
+### Generator Interface
+
+```go
+type Generator interface {
+    Generate(isBaseline bool, output []byte)
+}
+```
+
+### Built-in Generators
+
+```go
+// Fixed zero bytes for baseline, random for sample
+timingoracle.NewZeroGenerator(seed)
+
+// Fixed value for baseline, random for sample
+timingoracle.NewFixedGenerator(fixedValue, seed)
+
+// Custom generator from function
+timingoracle.FuncGenerator(func(isBaseline bool, output []byte) {
+    // ...
+})
+```
+
+### Operation Interface
+
+```go
+type Operation interface {
+    Execute(input []byte)
+}
+```
+
+```go
+// From function
+timingoracle.FuncOperation(func(input []byte) {
+    myCryptoFunction(input)
+})
+```
+
+---
+
+## Result Types
+
+### Outcome
+
+```go
+type Outcome int
+
+const (
+    Pass Outcome = iota
+    Fail
+    Inconclusive
+    Unmeasurable
+)
+```
+
+### Result
+
+```go
+type Result struct {
+    Outcome            Outcome
+    LeakProbability    float64
+    Effect             Effect
+    Quality            Quality
+    Exploitability     Exploitability
+    InconclusiveReason InconclusiveReason
+    SamplesUsed        int
+    Recommendation     string
+}
+```
+
+### Effect
+
+```go
+type Effect struct {
+    ShiftNs          float64
+    TailNs           float64
+    CredibleInterval [2]float64
+    Pattern          EffectPattern
+}
+
+func (e Effect) TotalNs() float64  // L2 norm of shift and tail
+```
+
+### Quality
+
+```go
+type Quality int
+
+const (
+    Excellent Quality = iota  // MDE < 5 ns
+    Good                      // MDE 5-20 ns
+    Poor                      // MDE 20-100 ns
+    TooNoisy                  // MDE > 100 ns
+)
+```
+
+### Exploitability
+
+```go
+type Exploitability int
+
+const (
+    SharedHardwareOnly Exploitability = iota  // < 10 ns
+    Http2Multiplexing                         // 10-100 ns
+    StandardRemote                            // 100 ns - 10 us
+    ObviousLeak                               // > 10 us
+)
+```
+
+---
+
+## Complete Example
+
+```go
+package main
+
+import (
+    "crypto/subtle"
+    "fmt"
+    "time"
+
+    "github.com/agucova/timing-oracle/crates/timing-oracle-go"
+)
+
+func main() {
+    secret := make([]byte, 32)
+    copy(secret, []byte("my-secret-key-here-32-bytes-long"))
+
+    result, _ := timingoracle.Test(
+        timingoracle.NewFixedGenerator(secret, 42),
+        timingoracle.FuncOperation(func(input []byte) {
+            subtle.ConstantTimeCompare(secret, input)
+        }),
+        32,
+        timingoracle.WithAttacker(timingoracle.AdjacentNetwork),
+        timingoracle.WithTimeBudget(30*time.Second),
+    )
+
+    switch result.Outcome {
+    case timingoracle.Pass:
+        fmt.Println("Constant-time comparison verified")
+    case timingoracle.Fail:
+        fmt.Printf("Timing leak detected! Effect: %.1f ns\n", result.Effect.TotalNs())
+    default:
+        fmt.Printf("Test incomplete: %v\n", result.Outcome)
+    }
+}
+```

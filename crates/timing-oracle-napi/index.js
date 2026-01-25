@@ -37,7 +37,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.android-arm64.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-android-arm64')
+            nativeBinding = require('@timing-oracle/js-android-arm64')
           }
         } catch (e) {
           loadError = e
@@ -49,7 +49,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.android-arm-eabi.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-android-arm-eabi')
+            nativeBinding = require('@timing-oracle/js-android-arm-eabi')
           }
         } catch (e) {
           loadError = e
@@ -69,7 +69,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.win32-x64-msvc.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-win32-x64-msvc')
+            nativeBinding = require('@timing-oracle/js-win32-x64-msvc')
           }
         } catch (e) {
           loadError = e
@@ -83,7 +83,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.win32-ia32-msvc.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-win32-ia32-msvc')
+            nativeBinding = require('@timing-oracle/js-win32-ia32-msvc')
           }
         } catch (e) {
           loadError = e
@@ -97,7 +97,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.win32-arm64-msvc.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-win32-arm64-msvc')
+            nativeBinding = require('@timing-oracle/js-win32-arm64-msvc')
           }
         } catch (e) {
           loadError = e
@@ -113,7 +113,7 @@ switch (platform) {
       if (localFileExisted) {
         nativeBinding = require('./timing-oracle.darwin-universal.node')
       } else {
-        nativeBinding = require('@timing-oracle/node-darwin-universal')
+        nativeBinding = require('@timing-oracle/js-darwin-universal')
       }
       break
     } catch {}
@@ -124,7 +124,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.darwin-x64.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-darwin-x64')
+            nativeBinding = require('@timing-oracle/js-darwin-x64')
           }
         } catch (e) {
           loadError = e
@@ -138,7 +138,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.darwin-arm64.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-darwin-arm64')
+            nativeBinding = require('@timing-oracle/js-darwin-arm64')
           }
         } catch (e) {
           loadError = e
@@ -157,7 +157,7 @@ switch (platform) {
       if (localFileExisted) {
         nativeBinding = require('./timing-oracle.freebsd-x64.node')
       } else {
-        nativeBinding = require('@timing-oracle/node-freebsd-x64')
+        nativeBinding = require('@timing-oracle/js-freebsd-x64')
       }
     } catch (e) {
       loadError = e
@@ -174,7 +174,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-x64-musl.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-x64-musl')
+              nativeBinding = require('@timing-oracle/js-linux-x64-musl')
             }
           } catch (e) {
             loadError = e
@@ -187,7 +187,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-x64-gnu.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-x64-gnu')
+              nativeBinding = require('@timing-oracle/js-linux-x64-gnu')
             }
           } catch (e) {
             loadError = e
@@ -203,7 +203,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-arm64-musl.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-arm64-musl')
+              nativeBinding = require('@timing-oracle/js-linux-arm64-musl')
             }
           } catch (e) {
             loadError = e
@@ -216,7 +216,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-arm64-gnu.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-arm64-gnu')
+              nativeBinding = require('@timing-oracle/js-linux-arm64-gnu')
             }
           } catch (e) {
             loadError = e
@@ -232,7 +232,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-arm-musleabihf.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-arm-musleabihf')
+              nativeBinding = require('@timing-oracle/js-linux-arm-musleabihf')
             }
           } catch (e) {
             loadError = e
@@ -245,7 +245,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-arm-gnueabihf.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-arm-gnueabihf')
+              nativeBinding = require('@timing-oracle/js-linux-arm-gnueabihf')
             }
           } catch (e) {
             loadError = e
@@ -261,7 +261,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-riscv64-musl.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-riscv64-musl')
+              nativeBinding = require('@timing-oracle/js-linux-riscv64-musl')
             }
           } catch (e) {
             loadError = e
@@ -274,7 +274,7 @@ switch (platform) {
             if (localFileExisted) {
               nativeBinding = require('./timing-oracle.linux-riscv64-gnu.node')
             } else {
-              nativeBinding = require('@timing-oracle/node-linux-riscv64-gnu')
+              nativeBinding = require('@timing-oracle/js-linux-riscv64-gnu')
             }
           } catch (e) {
             loadError = e
@@ -289,7 +289,7 @@ switch (platform) {
           if (localFileExisted) {
             nativeBinding = require('./timing-oracle.linux-s390x-gnu.node')
           } else {
-            nativeBinding = require('@timing-oracle/node-linux-s390x-gnu')
+            nativeBinding = require('@timing-oracle/js-linux-s390x-gnu')
           }
         } catch (e) {
           loadError = e

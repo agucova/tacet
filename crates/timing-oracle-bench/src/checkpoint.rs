@@ -20,6 +20,7 @@
 //! }
 //! ```
 
+use crate::output::csv_escape;
 use crate::sweep::BenchmarkResult;
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
@@ -28,7 +29,7 @@ use std::path::Path;
 use std::sync::Mutex;
 
 /// CSV header for benchmark results.
-pub const CSV_HEADER: &str = "tool,preset,effect_pattern,effect_sigma_mult,noise_model,dataset_id,samples_per_class,detected,statistic,p_value,time_ms,samples_used";
+pub const CSV_HEADER: &str = "tool,preset,effect_pattern,effect_sigma_mult,noise_model,attacker_threshold_ns,dataset_id,samples_per_class,detected,statistic,p_value,time_ms,samples_used,status,outcome";
 
 /// Unique identifier for a benchmark work item.
 ///
@@ -41,6 +42,8 @@ pub struct WorkItemKey {
     /// String representation of effect_sigma_mult (e.g., "0.050000")
     pub effect_sigma_mult_str: String,
     pub noise_model: String,
+    /// String representation of attacker_threshold_ns (e.g., "100.000000" or "" for None)
+    pub attacker_threshold_ns_str: String,
     pub dataset_id: usize,
 }
 
@@ -52,11 +55,15 @@ impl WorkItemKey {
             effect_pattern: r.effect_pattern.clone(),
             effect_sigma_mult_str: format!("{:.6}", r.effect_sigma_mult),
             noise_model: r.noise_model.clone(),
+            attacker_threshold_ns_str: r
+                .attacker_threshold_ns
+                .map(|t| format!("{:.6}", t))
+                .unwrap_or_default(),
             dataset_id: r.dataset_id,
         }
     }
 
-    /// Create a key from individual components.
+    /// Create a key from individual components (legacy, without attacker model).
     pub fn new(
         tool: &str,
         effect_pattern: &str,
@@ -69,6 +76,28 @@ impl WorkItemKey {
             effect_pattern: effect_pattern.to_string(),
             effect_sigma_mult_str: format!("{:.6}", effect_sigma_mult),
             noise_model: noise_model.to_string(),
+            attacker_threshold_ns_str: String::new(),
+            dataset_id,
+        }
+    }
+
+    /// Create a key from individual components with attacker model.
+    pub fn new_with_attacker(
+        tool: &str,
+        effect_pattern: &str,
+        effect_sigma_mult: f64,
+        noise_model: &str,
+        dataset_id: usize,
+        attacker_threshold_ns: Option<f64>,
+    ) -> Self {
+        Self {
+            tool: tool.to_string(),
+            effect_pattern: effect_pattern.to_string(),
+            effect_sigma_mult_str: format!("{:.6}", effect_sigma_mult),
+            noise_model: noise_model.to_string(),
+            attacker_threshold_ns_str: attacker_threshold_ns
+                .map(|t| format!("{:.6}", t))
+                .unwrap_or_default(),
             dataset_id,
         }
     }
@@ -154,12 +183,16 @@ impl IncrementalCsvWriter {
             let mut file = self.file.lock().unwrap();
             writeln!(
                 file,
-                "{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 result.tool,
                 result.preset,
                 result.effect_pattern,
                 result.effect_sigma_mult,
                 result.noise_model,
+                result
+                    .attacker_threshold_ns
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_default(),
                 result.dataset_id,
                 result.samples_per_class,
                 result.detected,
@@ -176,6 +209,8 @@ impl IncrementalCsvWriter {
                     .samples_used
                     .map(|s| s.to_string())
                     .unwrap_or_default(),
+                csv_escape(&result.status),
+                result.outcome.as_str(),
             )?;
             file.flush()?;
         }
@@ -235,16 +270,41 @@ impl IncrementalCsvWriter {
     /// Parse a CSV row into a WorkItemKey.
     ///
     /// Returns None if the row cannot be parsed (malformed or incomplete).
+    /// Handles both old format (without attacker_threshold_ns) and new format.
     fn parse_csv_row(line: &str) -> Option<WorkItemKey> {
         let parts: Vec<&str> = line.split(',').collect();
-        if parts.len() >= 6 {
-            // Normalize effect_sigma_mult to consistent format
+        if parts.len() >= 7 {
+            // New format with attacker_threshold_ns
+            // CSV: tool,preset,effect_pattern,effect_sigma_mult,noise_model,attacker_threshold_ns,dataset_id,...
+            let effect_mult: f64 = parts[3].parse().ok()?;
+            let attacker_threshold_ns_str = if parts[5].is_empty() {
+                String::new()
+            } else {
+                // Normalize to consistent format
+                parts[5]
+                    .parse::<f64>()
+                    .ok()
+                    .map(|t| format!("{:.6}", t))
+                    .unwrap_or_default()
+            };
+            Some(WorkItemKey {
+                tool: parts[0].to_string(),
+                effect_pattern: parts[2].to_string(),
+                effect_sigma_mult_str: format!("{:.6}", effect_mult),
+                noise_model: parts[4].to_string(),
+                attacker_threshold_ns_str,
+                dataset_id: parts[6].parse().ok()?,
+            })
+        } else if parts.len() >= 6 {
+            // Legacy format without attacker_threshold_ns
+            // CSV: tool,preset,effect_pattern,effect_sigma_mult,noise_model,dataset_id,...
             let effect_mult: f64 = parts[3].parse().ok()?;
             Some(WorkItemKey {
                 tool: parts[0].to_string(),
                 effect_pattern: parts[2].to_string(),
                 effect_sigma_mult_str: format!("{:.6}", effect_mult),
                 noise_model: parts[4].to_string(),
+                attacker_threshold_ns_str: String::new(),
                 dataset_id: parts[5].parse().ok()?,
             })
         } else {
@@ -265,6 +325,7 @@ mod tests {
             effect_pattern: "shift".to_string(),
             effect_sigma_mult: effect_mult,
             noise_model: "iid".to_string(),
+            attacker_threshold_ns: None,
             dataset_id,
             samples_per_class: 5000,
             detected: false,
@@ -272,6 +333,8 @@ mod tests {
             p_value: Some(0.15),
             time_ms: 100,
             samples_used: Some(5000),
+            status: "Pass".to_string(),
+            outcome: crate::adapters::OutcomeCategory::Pass,
         }
     }
 

@@ -27,7 +27,7 @@ use crate::analysis::compute_max_effect_ci;
 use crate::config::Config;
 use crate::constants::DEFAULT_SEED;
 use crate::helpers::InputPair;
-use crate::measurement::{BoxedTimer, TimerSpec};
+use crate::measurement::{BoxedTimer, TimerFallbackReason, TimerSpec};
 use crate::result::{
     BatchingInfo, Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, IssueCode,
     MeasurementQuality, Outcome, QualityIssue, ResearchOutcome, ResearchStatus,
@@ -142,18 +142,18 @@ impl TimingOracle {
     /// Set the timer specification.
     ///
     /// Controls which timer implementation is used:
-    /// - `TimerSpec::Auto` (default): Try PMU first, fall back to standard
-    /// - `TimerSpec::Standard`: Always use standard timer (rdtsc/cntvct_el0)
-    /// - `TimerSpec::PreferPmu`: Prefer PMU, fall back if unavailable
+    /// - `TimerSpec::Auto` (default): Try cycle-accurate timer first, fall back to system timer
+    /// - `TimerSpec::SystemTimer`: Always use system timer (rdtsc on x86_64, cntvct_el0 on ARM64)
+    /// - `TimerSpec::RequireCycleAccurate`: Require cycle-accurate timing or panic
     ///
     /// # Example
     ///
     /// ```ignore
     /// use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
     ///
-    /// // Force standard timer (no PMU attempt)
+    /// // Force system timer (no cycle-accurate timing)
     /// let result = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-    ///     .timer_spec(TimerSpec::Standard)
+    ///     .timer_spec(TimerSpec::SystemTimer)
     ///     .test(...);
     /// ```
     pub fn timer_spec(mut self, spec: TimerSpec) -> Self {
@@ -161,18 +161,19 @@ impl TimingOracle {
         self
     }
 
-    /// Use the standard timer only (no PMU attempt).
+    /// Use the system timer only (no cycle-accurate timing).
     ///
-    /// Shorthand for `.timer_spec(TimerSpec::Standard)`.
-    pub fn standard_timer(self) -> Self {
-        self.timer_spec(TimerSpec::Standard)
+    /// Shorthand for `.timer_spec(TimerSpec::SystemTimer)`.
+    pub fn system_timer(self) -> Self {
+        self.timer_spec(TimerSpec::SystemTimer)
     }
 
-    /// Prefer PMU timer with fallback to standard.
+    /// Require cycle-accurate timing.
     ///
-    /// Shorthand for `.timer_spec(TimerSpec::PreferPmu)`.
-    pub fn prefer_pmu(self) -> Self {
-        self.timer_spec(TimerSpec::PreferPmu)
+    /// Shorthand for `.timer_spec(TimerSpec::RequireCycleAccurate)`.
+    /// Panics if cycle-accurate timing is unavailable.
+    pub fn require_cycle_accurate(self) -> Self {
+        self.timer_spec(TimerSpec::RequireCycleAccurate)
     }
 
     /// Set the time budget for the adaptive sampling loop.
@@ -618,7 +619,7 @@ impl TimingOracle {
         };
 
         // Step 1: Create timer based on spec (auto-detects PMU if available)
-        let mut timer = self.timer_spec.create_timer();
+        let (mut timer, fallback_reason) = self.timer_spec.create_timer();
 
         // Resolve the theta threshold based on attacker model and timer
         let raw_theta_ns = self
@@ -742,20 +743,13 @@ impl TimingOracle {
                             timer.resolution_ns()
                         );
 
-                        #[cfg(target_os = "macos")]
-                        let suggestion = "Run with sudo to enable kperf cycle counting (~0.3ns resolution), or increase operation complexity";
-                        #[cfg(target_os = "linux")]
-                        let suggestion = "Run with sudo to enable perf_event cycle counting (~0.3ns resolution), or increase operation complexity";
-                        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-                        let suggestion = "Increase operation complexity (current operation is too fast to measure reliably)";
-
                         return Outcome::Unmeasurable {
                             operation_ns: median_ns,
                             threshold_ns: resolution_ns
                                 * crate::measurement::TARGET_TICKS_PER_BATCH
                                 / k as f64,
                             platform,
-                            recommendation: suggestion.to_string(),
+                            recommendation: generate_unmeasurable_recommendation(fallback_reason),
                         };
                     }
 
@@ -880,6 +874,7 @@ impl TimingOracle {
                 n_cal,
                 k,
                 &mut timer,
+                fallback_reason,
                 &mut operation,
                 &mut rng,
                 initial_samples,
@@ -947,6 +942,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     &timer,
+                    fallback_reason,
                     start_time,
                     theta_ns,
                     stationarity,
@@ -967,6 +963,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     &timer,
+                    fallback_reason,
                     start_time,
                     theta_ns,
                     stationarity,
@@ -991,6 +988,7 @@ impl TimingOracle {
                         &adaptive_state,
                         &calibration,
                         &timer,
+                        fallback_reason,
                         start_time,
                         theta_ns,
                         stationarity,
@@ -1072,6 +1070,7 @@ impl TimingOracle {
                         samples_per_class,
                         &calibration,
                         &timer,
+                        fallback_reason,
                         start_time,
                         theta_ns,
                         stationarity,
@@ -1088,6 +1087,7 @@ impl TimingOracle {
                         samples_per_class,
                         &calibration,
                         &timer,
+                        fallback_reason,
                         start_time,
                         theta_ns,
                         stationarity,
@@ -1109,6 +1109,7 @@ impl TimingOracle {
                 } => {
                     // v5.5: Threshold elevated and P < pass_threshold at θ_eff
                     let stationarity = stationarity_tracker.compute();
+                    let guidance = generate_threshold_elevated_guidance(fallback_reason);
                     let reason = InconclusiveReason::ThresholdElevated {
                         theta_user,
                         theta_eff,
@@ -1119,14 +1120,14 @@ impl TimingOracle {
                             "Threshold elevated from {:.0}ns to {:.1}ns; P={:.1}% at elevated threshold",
                             theta_user, theta_eff, posterior.leak_probability * 100.0
                         ),
-                        guidance: "Use a cycle counter (PmuTimer on macOS, LinuxPerfTimer on Linux) \
-                            or increase max_samples to achieve the requested threshold.".to_string(),
+                        guidance,
                     };
                     return self.build_inconclusive_outcome(
                         reason,
                         &adaptive_state,
                         &calibration,
                         &timer,
+                        fallback_reason,
                         start_time,
                         theta_ns,
                         stationarity,
@@ -1141,6 +1142,7 @@ impl TimingOracle {
                         &adaptive_state,
                         &calibration,
                         &timer,
+                        fallback_reason,
                         start_time,
                         theta_ns,
                         stationarity,
@@ -1161,6 +1163,7 @@ impl TimingOracle {
         samples_used: usize,
         calibration: &Calibration,
         timer: &BoxedTimer,
+        fallback_reason: TimerFallbackReason,
         start_time: Instant,
         theta_ns: f64,
         stationarity: Option<crate::analysis::StationarityResult>,
@@ -1170,6 +1173,7 @@ impl TimingOracle {
         let diagnostics = build_diagnostics(
             calibration,
             timer,
+            fallback_reason,
             start_time,
             &self.config,
             theta_ns,
@@ -1197,6 +1201,7 @@ impl TimingOracle {
         samples_used: usize,
         calibration: &Calibration,
         timer: &BoxedTimer,
+        fallback_reason: TimerFallbackReason,
         start_time: Instant,
         theta_ns: f64,
         stationarity: Option<crate::analysis::StationarityResult>,
@@ -1207,6 +1212,7 @@ impl TimingOracle {
         let diagnostics = build_diagnostics(
             calibration,
             timer,
+            fallback_reason,
             start_time,
             &self.config,
             theta_ns,
@@ -1235,6 +1241,7 @@ impl TimingOracle {
         state: &AdaptiveState,
         calibration: &Calibration,
         timer: &BoxedTimer,
+        fallback_reason: TimerFallbackReason,
         start_time: Instant,
         theta_ns: f64,
         stationarity: Option<crate::analysis::StationarityResult>,
@@ -1249,6 +1256,7 @@ impl TimingOracle {
         let diagnostics = build_diagnostics(
             calibration,
             timer,
+            fallback_reason,
             start_time,
             &self.config,
             theta_ns,
@@ -1293,6 +1301,7 @@ impl TimingOracle {
         n_cal: usize,
         k: u32,
         timer: &mut BoxedTimer,
+        fallback_reason: TimerFallbackReason,
         operation: &mut F,
         rng: &mut R,
         total_samples_needed: usize,
@@ -1338,6 +1347,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1349,6 +1359,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1361,6 +1372,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1430,6 +1442,7 @@ impl TimingOracle {
                         &adaptive_state,
                         &calibration,
                         timer,
+                        fallback_reason,
                         start_time,
                     );
                 }
@@ -1446,6 +1459,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1465,6 +1479,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1476,6 +1491,7 @@ impl TimingOracle {
                     &adaptive_state,
                     &calibration,
                     timer,
+                    fallback_reason,
                     start_time,
                 );
             }
@@ -1492,6 +1508,7 @@ impl TimingOracle {
         state: &AdaptiveState,
         calibration: &Calibration,
         timer: &BoxedTimer,
+        fallback_reason: TimerFallbackReason,
         start_time: Instant,
     ) -> Outcome {
         let posterior = state.current_posterior();
@@ -1530,6 +1547,7 @@ impl TimingOracle {
         let diagnostics = build_diagnostics(
             calibration,
             timer,
+            fallback_reason,
             start_time,
             &self.config,
             theta_ns,
@@ -1677,6 +1695,7 @@ fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64, batch_k: u32) ->
 fn build_diagnostics(
     calibration: &Calibration,
     timer: &BoxedTimer,
+    fallback_reason: TimerFallbackReason,
     start_time: Instant,
     config: &Config,
     theta_ns: f64,
@@ -1709,15 +1728,14 @@ fn build_diagnostics(
     // Check for ThresholdElevated: user requested threshold lower than measurement floor
     let mut quality_issues = Vec::new();
     if calibration.theta_ns > 0.0 && calibration.theta_eff > calibration.theta_ns {
+        let guidance = generate_threshold_elevated_guidance(fallback_reason);
         quality_issues.push(QualityIssue {
             code: IssueCode::ThresholdElevated,
             message: format!(
                 "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
                 calibration.theta_ns, calibration.theta_eff
             ),
-            guidance: "For better resolution, use a cycle counter (PmuTimer on macOS, \
-                       LinuxPerfTimer on Linux) or increase sample count."
-                .to_string(),
+            guidance,
         });
     }
 
@@ -1748,6 +1766,7 @@ fn build_diagnostics(
         threshold_ns: theta_ns,
         timer_name: timer.name().to_string(),
         platform,
+        timer_fallback_reason: fallback_reason.as_str().map(String::from),
         // v5.4 Gibbs sampler diagnostics
         gibbs_iters_total: 256,
         gibbs_burnin: 64,
@@ -1828,6 +1847,124 @@ fn convert_adaptive_reason(reason: &AdaptiveInconclusiveReason) -> InconclusiveR
             message: message.clone(),
             guidance: guidance.clone(),
         },
+    }
+}
+
+/// Generate context-aware guidance for ThresholdElevated based on fallback reason.
+///
+/// Platform-specific messaging since x86_64 already has good resolution with rdtsc.
+fn generate_threshold_elevated_guidance(fallback_reason: TimerFallbackReason) -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // x86_64 with rdtsc is already ~0.3ns - no PMU recommendations needed
+        let _ = fallback_reason;
+        "Increase max_samples to improve measurement floor, or test at a higher abstraction level.".to_string()
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        match fallback_reason {
+            TimerFallbackReason::ConcurrentAccess => {
+                "High-precision timing is locked. If using cargo test, run with --test-threads=1.".to_string()
+            }
+            TimerFallbackReason::NoPrivileges => {
+                "Run with sudo to enable high-precision timing, or increase max_samples.".to_string()
+            }
+            TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
+                "High-precision timing unavailable. Increase max_samples or test at a higher abstraction level.".to_string()
+            }
+            TimerFallbackReason::None => {
+                "Increase max_samples or test at a higher abstraction level.".to_string()
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        match fallback_reason {
+            TimerFallbackReason::NoPrivileges => {
+                "Run with sudo, set kernel.perf_event_paranoid=1, or grant CAP_PERFMON for high-precision timing. Or increase max_samples.".to_string()
+            }
+            TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
+                "High-precision timing unavailable. Increase max_samples or test at a higher abstraction level.".to_string()
+            }
+            TimerFallbackReason::ConcurrentAccess | TimerFallbackReason::None => {
+                "Increase max_samples or test at a higher abstraction level.".to_string()
+            }
+        }
+    }
+
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "aarch64")
+    )))]
+    {
+        let _ = fallback_reason;
+        "Increase max_samples or test at a higher abstraction level.".to_string()
+    }
+}
+
+/// Generate context-aware recommendation for Unmeasurable based on fallback reason.
+///
+/// Platform-specific messaging since x86_64 already has good resolution with rdtsc.
+fn generate_unmeasurable_recommendation(fallback_reason: TimerFallbackReason) -> String {
+    #[cfg(target_arch = "x86_64")]
+    {
+        // x86_64 with rdtsc is already ~0.3ns - no PMU recommendations needed
+        let _ = fallback_reason;
+        "This operation is too fast to measure reliably, even with cycle-accurate timing (~0.3ns). \
+         Consider testing at a higher abstraction level (e.g., full API calls rather than individual primitives).".to_string()
+    }
+
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    {
+        match fallback_reason {
+            TimerFallbackReason::ConcurrentAccess => {
+                "High-precision timing is locked by another process. \
+                 If using cargo test, run with --test-threads=1.".to_string()
+            }
+            TimerFallbackReason::NoPrivileges => {
+                "Run with sudo to enable high-precision timing (~0.3ns resolution).".to_string()
+            }
+            TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
+                "High-precision timing unavailable. Consider testing at a higher abstraction level \
+                 (e.g., full API calls rather than individual primitives).".to_string()
+            }
+            TimerFallbackReason::None => {
+                "Consider testing at a higher abstraction level \
+                 (e.g., full API calls rather than individual primitives).".to_string()
+            }
+        }
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        match fallback_reason {
+            TimerFallbackReason::NoPrivileges => {
+                "Run with sudo to enable high-precision timing (~0.3ns resolution). \
+                 Alternatively, set kernel.perf_event_paranoid=1 or grant CAP_PERFMON.".to_string()
+            }
+            TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
+                "High-precision timing unavailable. Check kernel perf_event support, \
+                 or test at a higher abstraction level.".to_string()
+            }
+            TimerFallbackReason::ConcurrentAccess | TimerFallbackReason::None => {
+                "Consider testing at a higher abstraction level \
+                 (e.g., full API calls rather than individual primitives).".to_string()
+            }
+        }
+    }
+
+    #[cfg(not(any(
+        target_arch = "x86_64",
+        all(target_os = "macos", target_arch = "aarch64"),
+        all(target_os = "linux", target_arch = "aarch64")
+    )))]
+    {
+        let _ = fallback_reason;
+        "Consider testing at a higher abstraction level \
+         (e.g., full API calls rather than individual primitives).".to_string()
     }
 }
 

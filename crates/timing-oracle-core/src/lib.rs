@@ -8,6 +8,7 @@
 //!
 //! - `std` (default): Enable standard library support for convenience
 //! - `parallel`: Enable parallel bootstrap using rayon (requires `std`)
+//! - `ansi`: Enable ANSI colors in Display/Debug output (no_std compatible)
 //!
 //! # Usage
 //!
@@ -29,7 +30,10 @@ extern crate alloc;
 
 pub mod adaptive;
 pub mod analysis;
+pub mod colors;
 pub mod constants;
+pub mod ffi_summary;
+pub mod formatting;
 pub mod math;
 pub mod orchestration;
 pub mod preflight;
@@ -38,6 +42,10 @@ pub mod statistics;
 pub mod types;
 
 // Re-export commonly used items at crate root
+pub use ffi_summary::{
+    CalibrationSummary, DiagnosticsSummary, EffectSummary, InconclusiveReasonKind, OutcomeSummary,
+    OutcomeType, PosteriorSummary,
+};
 pub use result::{
     EffectEstimate, EffectPattern, Exploitability, MeasurementQuality, MinDetectableEffect,
     Outcome, ResearchOutcome, ResearchStatus, UnreliablePolicy,

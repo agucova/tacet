@@ -29,6 +29,9 @@ use timing_oracle_core::adaptive::{
     is_threshold_elevated,
 };
 use timing_oracle_core::analysis::{classify_pattern, compute_bayes_gibbs, estimate_mde};
+use timing_oracle_core::constants::{
+    DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_FAIL_THRESHOLD, DEFAULT_PASS_THRESHOLD,
+};
 use timing_oracle_core::result::{
     Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
     MeasurementQuality, Outcome, IssueCode, QualityIssue,
@@ -71,9 +74,9 @@ impl Default for SinglePassConfig {
     fn default() -> Self {
         Self {
             theta_ns: 100.0, // AdjacentNetwork default
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
-            bootstrap_iterations: 2000,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
+            bootstrap_iterations: DEFAULT_BOOTSTRAP_ITERATIONS,
             timer_resolution_ns: 1.0, // Assume 1ns resolution for pre-collected data
             seed: 0xDEADBEEF,
             max_variance_ratio: 0.95,
@@ -84,16 +87,8 @@ impl Default for SinglePassConfig {
 impl SinglePassConfig {
     /// Create config from an attacker model.
     pub fn for_attacker(model: AttackerModel) -> Self {
-        let theta_ns = match model {
-            AttackerModel::SharedHardware => 0.6,
-            AttackerModel::AdjacentNetwork => 100.0,
-            AttackerModel::RemoteNetwork => 50_000.0,
-            AttackerModel::Research => 0.001, // Near-zero but not exactly zero
-            AttackerModel::Custom { threshold_ns } => threshold_ns,
-            AttackerModel::PostQuantumSentinel => 10.0, // 10ns for PQ
-        };
         Self {
-            theta_ns,
+            theta_ns: model.to_threshold_ns(),
             ..Default::default()
         }
     }
@@ -445,6 +440,7 @@ pub fn analyze_single_pass(
         threshold_ns: config.theta_ns,
         timer_name: "external".to_string(),
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        timer_fallback_reason: None, // N/A for pre-collected data
         // Gibbs sampler diagnostics
         gibbs_iters_total: 256,
         gibbs_burnin: 64,
@@ -613,6 +609,7 @@ fn make_default_diagnostics(timer_resolution_ns: f64) -> Diagnostics {
         threshold_ns: 0.0,
         timer_name: "external".to_string(),
         platform: format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH),
+        timer_fallback_reason: None,
         gibbs_iters_total: 0,
         gibbs_burnin: 0,
         gibbs_retained: 0,

@@ -26,7 +26,9 @@
 use alloc::string::String;
 
 use crate::analysis::bayes::compute_bayes_gibbs;
-use crate::constants::DEFAULT_SEED;
+use crate::constants::{
+    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD, DEFAULT_SEED,
+};
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 
 use super::{
@@ -65,10 +67,10 @@ pub struct AdaptiveStepConfig {
 impl Default for AdaptiveStepConfig {
     fn default() -> Self {
         Self {
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
             time_budget_secs: 30.0,
-            max_samples: 1_000_000,
+            max_samples: DEFAULT_MAX_SAMPLES,
             theta_ns: 100.0,
             seed: DEFAULT_SEED,
             quality_gates: QualityGateConfig::default(),
@@ -239,6 +241,269 @@ impl AdaptiveOutcome {
             AdaptiveOutcome::NoLeakDetected { elapsed_secs, .. } => *elapsed_secs,
             AdaptiveOutcome::ThresholdElevated { elapsed_secs, .. } => *elapsed_secs,
             AdaptiveOutcome::Inconclusive { elapsed_secs, .. } => *elapsed_secs,
+        }
+    }
+
+    /// Convert to an FFI-friendly summary containing only scalar fields.
+    ///
+    /// This centralizes the conversion logic that was previously duplicated
+    /// across NAPI and C bindings, using canonical effect pattern classification.
+    pub fn to_summary(
+        &self,
+        calibration: &super::Calibration,
+    ) -> crate::ffi_summary::OutcomeSummary {
+        use crate::ffi_summary::{EffectSummary, InconclusiveReasonKind, OutcomeSummary, OutcomeType};
+        use crate::result::{Exploitability, MeasurementQuality};
+
+        let cal_summary = calibration.to_summary();
+
+        match self {
+            AdaptiveOutcome::LeakDetected {
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => {
+                let post_summary = posterior.to_summary();
+                let effect = build_effect_summary(&post_summary);
+                let diagnostics = build_diagnostics(&post_summary, &cal_summary);
+
+                OutcomeSummary {
+                    outcome_type: OutcomeType::Fail,
+                    leak_probability: post_summary.leak_probability,
+                    samples_per_class: *samples_per_class,
+                    elapsed_secs: *elapsed_secs,
+                    effect,
+                    quality: post_summary.measurement_quality(),
+                    exploitability: post_summary.exploitability(),
+                    inconclusive_reason: InconclusiveReasonKind::None,
+                    recommendation: String::new(),
+                    theta_user: cal_summary.theta_ns,
+                    theta_eff: cal_summary.theta_eff,
+                    theta_floor: cal_summary.theta_floor_initial,
+                    theta_tick: cal_summary.theta_tick,
+                    achievable_at_max: true,
+                    diagnostics,
+                    mde_shift_ns: cal_summary.mde_shift_ns,
+                    mde_tail_ns: cal_summary.mde_tail_ns,
+                }
+            }
+
+            AdaptiveOutcome::NoLeakDetected {
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => {
+                let post_summary = posterior.to_summary();
+                let effect = build_effect_summary(&post_summary);
+                let diagnostics = build_diagnostics(&post_summary, &cal_summary);
+
+                OutcomeSummary {
+                    outcome_type: OutcomeType::Pass,
+                    leak_probability: post_summary.leak_probability,
+                    samples_per_class: *samples_per_class,
+                    elapsed_secs: *elapsed_secs,
+                    effect,
+                    quality: post_summary.measurement_quality(),
+                    exploitability: Exploitability::SharedHardwareOnly,
+                    inconclusive_reason: InconclusiveReasonKind::None,
+                    recommendation: String::new(),
+                    theta_user: cal_summary.theta_ns,
+                    theta_eff: cal_summary.theta_eff,
+                    theta_floor: cal_summary.theta_floor_initial,
+                    theta_tick: cal_summary.theta_tick,
+                    achievable_at_max: true,
+                    diagnostics,
+                    mde_shift_ns: cal_summary.mde_shift_ns,
+                    mde_tail_ns: cal_summary.mde_tail_ns,
+                }
+            }
+
+            AdaptiveOutcome::ThresholdElevated {
+                posterior,
+                theta_user,
+                theta_eff,
+                theta_tick,
+                achievable_at_max,
+                samples_per_class,
+                elapsed_secs,
+            } => {
+                let post_summary = posterior.to_summary();
+                let effect = build_effect_summary(&post_summary);
+                let diagnostics = build_diagnostics(&post_summary, &cal_summary);
+
+                let recommendation = if *achievable_at_max {
+                    alloc::format!(
+                        "Threshold elevated from {:.0}ns to {:.1}ns. More samples could achieve the requested threshold.",
+                        theta_user, theta_eff
+                    )
+                } else {
+                    alloc::format!(
+                        "Threshold elevated from {:.0}ns to {:.1}ns. Use a cycle counter for better resolution.",
+                        theta_user, theta_eff
+                    )
+                };
+
+                OutcomeSummary {
+                    outcome_type: OutcomeType::ThresholdElevated,
+                    leak_probability: post_summary.leak_probability,
+                    samples_per_class: *samples_per_class,
+                    elapsed_secs: *elapsed_secs,
+                    effect,
+                    quality: post_summary.measurement_quality(),
+                    exploitability: Exploitability::SharedHardwareOnly,
+                    inconclusive_reason: InconclusiveReasonKind::ThresholdElevated,
+                    recommendation,
+                    theta_user: *theta_user,
+                    theta_eff: *theta_eff,
+                    theta_floor: cal_summary.theta_floor_initial,
+                    theta_tick: *theta_tick,
+                    achievable_at_max: *achievable_at_max,
+                    diagnostics,
+                    mde_shift_ns: cal_summary.mde_shift_ns,
+                    mde_tail_ns: cal_summary.mde_tail_ns,
+                }
+            }
+
+            AdaptiveOutcome::Inconclusive {
+                reason,
+                posterior,
+                samples_per_class,
+                elapsed_secs,
+            } => {
+                let (post_summary, effect, quality, diagnostics) = match posterior {
+                    Some(p) => {
+                        let ps = p.to_summary();
+                        let eff = build_effect_summary(&ps);
+                        let qual = ps.measurement_quality();
+                        let diag = build_diagnostics(&ps, &cal_summary);
+                        (Some(ps), eff, qual, diag)
+                    }
+                    None => (
+                        None,
+                        EffectSummary::default(),
+                        MeasurementQuality::TooNoisy,
+                        build_diagnostics_from_calibration(&cal_summary),
+                    ),
+                };
+
+                let (inconclusive_reason, recommendation) = convert_inconclusive_reason(reason);
+
+                OutcomeSummary {
+                    outcome_type: OutcomeType::Inconclusive,
+                    leak_probability: post_summary
+                        .as_ref()
+                        .map(|p| p.leak_probability)
+                        .unwrap_or(0.5),
+                    samples_per_class: *samples_per_class,
+                    elapsed_secs: *elapsed_secs,
+                    effect,
+                    quality,
+                    exploitability: Exploitability::SharedHardwareOnly,
+                    inconclusive_reason,
+                    recommendation,
+                    theta_user: cal_summary.theta_ns,
+                    theta_eff: cal_summary.theta_eff,
+                    theta_floor: cal_summary.theta_floor_initial,
+                    theta_tick: cal_summary.theta_tick,
+                    achievable_at_max: false,
+                    diagnostics,
+                    mde_shift_ns: cal_summary.mde_shift_ns,
+                    mde_tail_ns: cal_summary.mde_tail_ns,
+                }
+            }
+        }
+    }
+}
+
+/// Build an EffectSummary from a PosteriorSummary.
+fn build_effect_summary(
+    post: &crate::ffi_summary::PosteriorSummary,
+) -> crate::ffi_summary::EffectSummary {
+    crate::ffi_summary::EffectSummary {
+        shift_ns: post.shift_ns,
+        tail_ns: post.tail_ns,
+        ci_low_ns: post.ci_low_ns,
+        ci_high_ns: post.ci_high_ns,
+        pattern: post.pattern,
+        interpretation_caveat: None,
+    }
+}
+
+/// Build DiagnosticsSummary from posterior and calibration summaries.
+fn build_diagnostics(
+    post: &crate::ffi_summary::PosteriorSummary,
+    cal: &crate::ffi_summary::CalibrationSummary,
+) -> crate::ffi_summary::DiagnosticsSummary {
+    crate::ffi_summary::DiagnosticsSummary {
+        dependence_length: cal.block_length,
+        effective_sample_size: post.n,
+        stationarity_ratio: 1.0,
+        stationarity_ok: true,
+        projection_mismatch_q: post.projection_mismatch_q,
+        projection_mismatch_ok: post.projection_mismatch_q <= cal.projection_mismatch_thresh,
+        discrete_mode: cal.discrete_mode,
+        timer_resolution_ns: cal.timer_resolution_ns,
+        lambda_mean: post.lambda_mean,
+        lambda_mixing_ok: post.lambda_mixing_ok,
+        kappa_mean: post.kappa_mean,
+        kappa_cv: post.kappa_cv,
+        kappa_ess: post.kappa_ess,
+        kappa_mixing_ok: post.kappa_mixing_ok,
+    }
+}
+
+/// Build DiagnosticsSummary from calibration only (when no posterior available).
+fn build_diagnostics_from_calibration(
+    cal: &crate::ffi_summary::CalibrationSummary,
+) -> crate::ffi_summary::DiagnosticsSummary {
+    crate::ffi_summary::DiagnosticsSummary {
+        dependence_length: cal.block_length,
+        effective_sample_size: 0,
+        stationarity_ratio: 1.0,
+        stationarity_ok: true,
+        projection_mismatch_q: 0.0,
+        projection_mismatch_ok: true,
+        discrete_mode: cal.discrete_mode,
+        timer_resolution_ns: cal.timer_resolution_ns,
+        lambda_mean: 1.0,
+        lambda_mixing_ok: true,
+        kappa_mean: 1.0,
+        kappa_cv: 0.0,
+        kappa_ess: 0.0,
+        kappa_mixing_ok: true,
+    }
+}
+
+/// Convert InconclusiveReason to FFI kind and recommendation string.
+fn convert_inconclusive_reason(
+    reason: &super::InconclusiveReason,
+) -> (crate::ffi_summary::InconclusiveReasonKind, String) {
+    use crate::ffi_summary::InconclusiveReasonKind;
+    use super::InconclusiveReason;
+
+    match reason {
+        InconclusiveReason::DataTooNoisy { guidance, .. } => {
+            (InconclusiveReasonKind::DataTooNoisy, guidance.clone())
+        }
+        InconclusiveReason::NotLearning { guidance, .. } => {
+            (InconclusiveReasonKind::NotLearning, guidance.clone())
+        }
+        InconclusiveReason::WouldTakeTooLong { guidance, .. } => {
+            (InconclusiveReasonKind::WouldTakeTooLong, guidance.clone())
+        }
+        InconclusiveReason::TimeBudgetExceeded { .. } => (
+            InconclusiveReasonKind::TimeBudgetExceeded,
+            String::from("Increase time budget or reduce threshold"),
+        ),
+        InconclusiveReason::SampleBudgetExceeded { .. } => (
+            InconclusiveReasonKind::SampleBudgetExceeded,
+            String::from("Increase sample budget or reduce threshold"),
+        ),
+        InconclusiveReason::ConditionsChanged { guidance, .. } => {
+            (InconclusiveReasonKind::ConditionsChanged, guidance.clone())
+        }
+        InconclusiveReason::ThresholdElevated { guidance, .. } => {
+            (InconclusiveReasonKind::ThresholdElevated, guidance.clone())
         }
     }
 }

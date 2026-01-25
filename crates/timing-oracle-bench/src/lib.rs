@@ -74,8 +74,8 @@ pub mod synthetic;
 pub use adapters::{
     load_blocked_csv, load_interleaved_csv, split_interleaved, AndersonDarlingAdapter,
     DudectAdapter, KsTestAdapter, MonaAdapter, RtlfAdapter, RtlfDockerAdapter, RtlfNativeAdapter,
-    SilentAdapter, SilentNativeAdapter, StubAdapter, TimingOracleAdapter, TimingTvlaAdapter,
-    TlsfuzzerAdapter, ToolAdapter, ToolResult,
+    SilentAdapter, SilentNativeAdapter, StubAdapter, TimingOracleAdapter,
+    TimingTvlaAdapter, TlsfuzzerAdapter, ToolAdapter, ToolResult,
 };
 pub use runner::{BenchmarkReport, BenchmarkRunner, FprResults, PowerResults};
 pub use synthetic::{

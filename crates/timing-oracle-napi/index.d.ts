@@ -29,7 +29,7 @@ export declare function adaptiveStepBatch(calibration: Calibration, state: Adapt
 /** Run complete analysis on pre-collected timing data. */
 export declare function analyze(baseline: BigInt64Array, sample: BigInt64Array, config: Config, timerFrequencyHz: number): AnalysisResult
 /** Attacker model determines the minimum effect threshold (theta) for leak detection. */
-export const enum AttackerModel {
+export enum AttackerModel {
   /** theta = 0.6 ns (~2 cycles @ 3GHz) - SGX, cross-VM, containers */
   SharedHardware = 0,
   /** theta = 3.3 ns (~10 cycles) - Post-quantum crypto */
@@ -42,7 +42,7 @@ export const enum AttackerModel {
   Research = 4
 }
 /** Test outcome. */
-export const enum Outcome {
+export enum Outcome {
   /** No timing leak detected within threshold theta. */
   Pass = 0,
   /** Timing leak detected exceeding threshold theta. */
@@ -53,7 +53,7 @@ export const enum Outcome {
   Unmeasurable = 3
 }
 /** Reason for inconclusive result. */
-export const enum InconclusiveReason {
+export enum InconclusiveReason {
   /** Not applicable (outcome is not Inconclusive). */
   None = 0,
   /** Posterior approximately equals prior after calibration. */
@@ -72,7 +72,7 @@ export const enum InconclusiveReason {
   ThresholdElevated = 7
 }
 /** Pattern of timing effect. */
-export const enum EffectPattern {
+export enum EffectPattern {
   /** Uniform shift across all quantiles. */
   UniformShift = 0,
   /** Effect concentrated in tails (upper quantiles). */
@@ -83,7 +83,7 @@ export const enum EffectPattern {
   Indeterminate = 3
 }
 /** Exploitability assessment. */
-export const enum Exploitability {
+export enum Exploitability {
   /** < 10 ns - Requires shared hardware to exploit. */
   SharedHardwareOnly = 0,
   /** 10-100 ns - Exploitable via HTTP/2 request multiplexing. */
@@ -94,7 +94,7 @@ export const enum Exploitability {
   ObviousLeak = 3
 }
 /** Measurement quality assessment. */
-export const enum MeasurementQuality {
+export enum MeasurementQuality {
   /** MDE < 5 ns - Excellent measurement precision. */
   Excellent = 0,
   /** MDE 5-20 ns - Good precision. */

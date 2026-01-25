@@ -245,11 +245,11 @@ pub enum TimerBackend {
 }
 
 impl TimerBackend {
-    /// Check if PMU timer is available on this platform.
+    /// Check if cycle-accurate timing is available on this platform.
     ///
     /// Returns true if kperf (macOS) or perf (Linux) is available and usable.
-    pub fn pmu_available() -> bool {
-        // Try to detect PMU availability
+    pub fn cycle_accurate_available() -> bool {
+        // Try to detect cycle-accurate timer availability
         #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
         {
             // kperf requires elevated privileges on macOS
@@ -1643,7 +1643,7 @@ static PMU_WARNING_PRINTED: AtomicBool = AtomicBool::new(false);
 /// This ensures tests use maximum precision when available, but still run on
 /// systems without PMU access.
 pub fn select_attacker_model(test_name: &str) -> AttackerModel {
-    if TimerBackend::pmu_available() {
+    if TimerBackend::cycle_accurate_available() {
         // Only print once per process
         if !PMU_WARNING_PRINTED.swap(true, AtomicOrdering::Relaxed) {
             eprintln!("[{}] Using Research mode (PMU timer available)", test_name);
@@ -1667,7 +1667,7 @@ pub fn select_attacker_model(test_name: &str) -> AttackerModel {
 /// For power tests at specific θ multiples, we need to use the matching attacker model.
 /// This function selects the model but warns if we're using coarse timer with Research.
 pub fn select_attacker_model_for_threshold(test_name: &str, model: AttackerModel) -> AttackerModel {
-    let pmu_available = TimerBackend::pmu_available();
+    let pmu_available = TimerBackend::cycle_accurate_available();
 
     // If requesting Research mode but PMU not available, warn and use AdjacentNetwork
     if matches!(model, AttackerModel::Research) && !pmu_available {

@@ -16,6 +16,7 @@ use alloc::string::String;
 
 use super::drift::{CalibrationSnapshot, ConditionDrift, DriftThresholds};
 use super::Posterior;
+use crate::constants::{DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD};
 use crate::types::Matrix9;
 
 /// Result of quality gate checks.
@@ -161,9 +162,9 @@ impl Default for QualityGateConfig {
             min_kl_sum: 0.001,
             max_time_multiplier: 10.0,
             time_budget_secs: 30.0,
-            max_samples: 1_000_000,
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            max_samples: DEFAULT_MAX_SAMPLES,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
             enable_drift_detection: true,
             drift_thresholds: DriftThresholds::default(),
         }

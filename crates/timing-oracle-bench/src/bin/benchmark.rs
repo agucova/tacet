@@ -44,7 +44,8 @@ use timing_oracle_bench::{
 #[command(about = "Run comprehensive benchmarks comparing timing analysis tools")]
 #[command(version)]
 struct Args {
-    /// Preset configuration: quick (~5min), medium (~30min), thorough (~3h), fine-threshold (~2-4h)
+    /// Preset configuration: quick (~5min), medium (~30min), thorough (~3h),
+    /// fine-threshold (~2-4h), threshold-relative (~1-2h)
     #[arg(short, long, default_value = "quick")]
     preset: String,
 
@@ -54,6 +55,7 @@ struct Args {
 
     /// Specific tools to benchmark (comma-separated)
     /// Available: timing-oracle, dudect, timing-tvla, ks-test, ad-test, mona
+    /// Special: "all" (all tools), "native" (Rust-only), "threshold-relative" (multi-model)
     #[arg(short, long)]
     tools: Option<String>,
 
@@ -132,9 +134,15 @@ fn main() {
         "medium" => SweepConfig::medium(),
         "thorough" => SweepConfig::thorough(),
         "fine-threshold" | "fine_threshold" | "finethreshold" => SweepConfig::fine_threshold(),
+        "threshold-relative" | "threshold_relative" | "thresholdrelative" => {
+            SweepConfig::threshold_relative()
+        }
+        "shared-hardware-stress" | "shared_hardware_stress" | "sharedhardwarestress" => {
+            SweepConfig::shared_hardware_stress()
+        }
         _ => {
             eprintln!(
-                "Unknown preset '{}'. Available: quick, medium, thorough, fine-threshold",
+                "Unknown preset '{}'. Available: quick, medium, thorough, fine-threshold, threshold-relative, shared-hardware-stress",
                 args.preset
             );
             std::process::exit(1);

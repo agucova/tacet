@@ -73,6 +73,8 @@ use timing_oracle_core::adaptive::{
     CalibrationSnapshot, StepResult,
 };
 use timing_oracle_core::analysis::compute_bayes_gibbs;
+use timing_oracle_core::constants::DEFAULT_BOOTSTRAP_ITERATIONS;
+use timing_oracle_core::result::{Exploitability, MeasurementQuality};
 use timing_oracle_core::statistics::{
     bootstrap_difference_covariance_discrete, compute_deciles_inplace, optimal_block_length,
     StatsSnapshot,
@@ -252,8 +254,12 @@ pub unsafe extern "C" fn to_calibrate(
 
     // Bootstrap covariance estimation using discrete mode function (works for both)
     let seed = if cfg.seed == 0 { 42 } else { cfg.seed };
-    let cov_estimate =
-        bootstrap_difference_covariance_discrete(&baseline_ns, &sample_ns, 2000, seed);
+    let cov_estimate = bootstrap_difference_covariance_discrete(
+        &baseline_ns,
+        &sample_ns,
+        DEFAULT_BOOTSTRAP_ITERATIONS,
+        seed,
+    );
     let sigma_rate = cov_estimate.matrix * count as f64; // Convert to rate: sigma_rate = sigma_cal * n_cal
 
     // Compute c_floor for theta_floor estimation
@@ -463,152 +469,86 @@ pub unsafe extern "C" fn to_step(
     ToError::Ok
 }
 
-/// Convert an AdaptiveOutcome to a ToResult.
+/// Convert an AdaptiveOutcome to a ToResult using FFI summary types.
+/// This uses the canonical effect pattern classification from core (spec §3.4.6).
 fn convert_adaptive_outcome(
     outcome: &timing_oracle_core::adaptive::AdaptiveOutcome,
     cal: &Calibration,
-    cfg: &ToConfig,
+    _cfg: &ToConfig,
 ) -> ToResult {
-    use timing_oracle_core::adaptive::AdaptiveOutcome;
+    use timing_oracle_core::ffi_summary::{InconclusiveReasonKind, OutcomeType};
+    use timing_oracle_core::result::EffectPattern;
 
-    let (to_outcome, leak_probability, inconclusive_reason, posterior_ref) = match outcome {
-        AdaptiveOutcome::LeakDetected { posterior, .. } => (
-            ToOutcome::Fail,
-            posterior.leak_probability,
-            ToInconclusiveReason::None,
-            Some(posterior),
-        ),
-        AdaptiveOutcome::NoLeakDetected { posterior, .. } => (
-            ToOutcome::Pass,
-            posterior.leak_probability,
-            ToInconclusiveReason::None,
-            Some(posterior),
-        ),
-        AdaptiveOutcome::ThresholdElevated { posterior, .. } => (
-            ToOutcome::Inconclusive,
-            posterior.leak_probability,
-            ToInconclusiveReason::ThresholdElevated,
-            Some(posterior),
-        ),
-        AdaptiveOutcome::Inconclusive {
-            reason, posterior, ..
-        } => {
-            let to_reason = convert_inconclusive_reason(reason);
-            let prob = posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5);
-            (ToOutcome::Inconclusive, prob, to_reason, posterior.as_ref())
-        }
+    let summary = outcome.to_summary(cal);
+
+    // Map OutcomeType to C ToOutcome
+    let to_outcome = match summary.outcome_type {
+        OutcomeType::Pass => ToOutcome::Pass,
+        OutcomeType::Fail => ToOutcome::Fail,
+        OutcomeType::Inconclusive | OutcomeType::ThresholdElevated => ToOutcome::Inconclusive,
     };
 
-    // Get effect estimate from posterior if available
-    let effect = match outcome {
-        AdaptiveOutcome::LeakDetected { posterior, .. }
-        | AdaptiveOutcome::NoLeakDetected { posterior, .. }
-        | AdaptiveOutcome::ThresholdElevated { posterior, .. } => ToEffect {
-            shift_ns: posterior.beta_proj[0],
-            tail_ns: posterior.beta_proj[1],
-            ci_low_ns: 0.0, // Would need proper CI computation
-            ci_high_ns: 0.0,
-            pattern: ToEffectPattern::Indeterminate,
-        },
-        AdaptiveOutcome::Inconclusive { posterior, .. } => {
-            if let Some(p) = posterior {
-                ToEffect {
-                    shift_ns: p.beta_proj[0],
-                    tail_ns: p.beta_proj[1],
-                    ci_low_ns: 0.0,
-                    ci_high_ns: 0.0,
-                    pattern: ToEffectPattern::Indeterminate,
-                }
-            } else {
-                ToEffect::default()
-            }
-        }
+    // Map InconclusiveReasonKind to C ToInconclusiveReason
+    let inconclusive_reason = match summary.inconclusive_reason {
+        InconclusiveReasonKind::None => ToInconclusiveReason::None,
+        InconclusiveReasonKind::DataTooNoisy => ToInconclusiveReason::DataTooNoisy,
+        InconclusiveReasonKind::NotLearning => ToInconclusiveReason::NotLearning,
+        InconclusiveReasonKind::WouldTakeTooLong => ToInconclusiveReason::WouldTakeTooLong,
+        InconclusiveReasonKind::TimeBudgetExceeded => ToInconclusiveReason::TimeBudgetExceeded,
+        InconclusiveReasonKind::SampleBudgetExceeded => ToInconclusiveReason::SampleBudgetExceeded,
+        InconclusiveReasonKind::ConditionsChanged => ToInconclusiveReason::ConditionsChanged,
+        InconclusiveReasonKind::ThresholdElevated => ToInconclusiveReason::ThresholdElevated,
     };
 
-    // Compute exploitability
-    let total_effect = (effect.shift_ns.powi(2) + effect.tail_ns.powi(2)).sqrt();
-    let exploitability = if total_effect < 10.0 {
-        ToExploitability::SharedHardwareOnly
-    } else if total_effect < 100.0 {
-        ToExploitability::Http2Multiplexing
-    } else if total_effect < 10_000.0 {
-        ToExploitability::StandardRemote
-    } else {
-        ToExploitability::ObviousLeak
+    // Map EffectPattern to C ToEffectPattern
+    let pattern = match summary.effect.pattern {
+        EffectPattern::UniformShift => ToEffectPattern::UniformShift,
+        EffectPattern::TailEffect => ToEffectPattern::TailEffect,
+        EffectPattern::Mixed => ToEffectPattern::Mixed,
+        EffectPattern::Indeterminate => ToEffectPattern::Indeterminate,
     };
-
-    // Build diagnostics
-    let diagnostics = build_diagnostics(posterior_ref, cal);
 
     ToResult {
         outcome: to_outcome,
-        leak_probability,
-        effect,
-        quality: ToMeasurementQuality::Good, // Would need proper quality computation
-        samples_used: outcome.samples_per_class() as u64,
-        elapsed_secs: outcome.elapsed_secs(),
-        exploitability,
+        leak_probability: summary.leak_probability,
+        effect: ToEffect {
+            shift_ns: summary.effect.shift_ns,
+            tail_ns: summary.effect.tail_ns,
+            ci_low_ns: summary.effect.ci_low_ns,
+            ci_high_ns: summary.effect.ci_high_ns,
+            pattern,
+        },
+        quality: summary.quality.into(),
+        samples_used: summary.samples_per_class as u64,
+        elapsed_secs: summary.elapsed_secs,
+        exploitability: summary.exploitability.into(),
         inconclusive_reason,
-        mde_shift_ns: cal.mde_shift_ns,
-        mde_tail_ns: cal.mde_tail_ns,
-        theta_user_ns: cfg.threshold_ns(),
-        theta_eff_ns: cal.theta_eff,
-        theta_floor_ns: cal.theta_floor_initial,
-        timer_resolution_ns: cal.timer_resolution_ns,
-        decision_threshold_ns: cal.theta_eff,
-        diagnostics,
+        mde_shift_ns: summary.mde_shift_ns,
+        mde_tail_ns: summary.mde_tail_ns,
+        theta_user_ns: summary.theta_user,
+        theta_eff_ns: summary.theta_eff,
+        theta_floor_ns: summary.theta_floor,
+        timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
+        decision_threshold_ns: summary.theta_eff,
+        diagnostics: ToDiagnostics {
+            dependence_length: summary.diagnostics.dependence_length as u64,
+            effective_sample_size: summary.diagnostics.effective_sample_size as u64,
+            stationarity_ratio: summary.diagnostics.stationarity_ratio,
+            stationarity_ok: summary.diagnostics.stationarity_ok,
+            projection_mismatch_q: summary.diagnostics.projection_mismatch_q,
+            projection_mismatch_ok: summary.diagnostics.projection_mismatch_ok,
+            discrete_mode: summary.diagnostics.discrete_mode,
+            timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
+            lambda_mean: summary.diagnostics.lambda_mean,
+            lambda_sd: 0.0, // Not in DiagnosticsSummary yet
+            lambda_ess: 0.0, // Not in DiagnosticsSummary yet
+            lambda_mixing_ok: summary.diagnostics.lambda_mixing_ok,
+            kappa_mean: summary.diagnostics.kappa_mean,
+            kappa_cv: summary.diagnostics.kappa_cv,
+            kappa_ess: summary.diagnostics.kappa_ess,
+            kappa_mixing_ok: summary.diagnostics.kappa_mixing_ok,
+        },
     }
-}
-
-/// Convert InconclusiveReason to C enum.
-fn convert_inconclusive_reason(
-    reason: &timing_oracle_core::adaptive::InconclusiveReason,
-) -> ToInconclusiveReason {
-    use timing_oracle_core::adaptive::InconclusiveReason;
-
-    match reason {
-        InconclusiveReason::DataTooNoisy { .. } => ToInconclusiveReason::DataTooNoisy,
-        InconclusiveReason::NotLearning { .. } => ToInconclusiveReason::NotLearning,
-        InconclusiveReason::WouldTakeTooLong { .. } => ToInconclusiveReason::WouldTakeTooLong,
-        InconclusiveReason::TimeBudgetExceeded { .. } => ToInconclusiveReason::TimeBudgetExceeded,
-        InconclusiveReason::SampleBudgetExceeded { .. } => {
-            ToInconclusiveReason::SampleBudgetExceeded
-        }
-        InconclusiveReason::ConditionsChanged { .. } => ToInconclusiveReason::ConditionsChanged,
-        InconclusiveReason::ThresholdElevated { .. } => ToInconclusiveReason::ThresholdElevated,
-    }
-}
-
-/// Build diagnostics from posterior and calibration data.
-fn build_diagnostics(
-    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
-    cal: &Calibration,
-) -> ToDiagnostics {
-    let mut diag = ToDiagnostics::default();
-
-    // From calibration
-    diag.dependence_length = cal.block_length as u64;
-    diag.discrete_mode = cal.discrete_mode;
-    diag.timer_resolution_ns = cal.timer_resolution_ns;
-
-    // From posterior
-    if let Some(p) = posterior {
-        diag.effective_sample_size = p.n as u64;
-        diag.projection_mismatch_q = p.projection_mismatch_q;
-        diag.projection_mismatch_ok = p.projection_mismatch_q <= cal.projection_mismatch_thresh;
-
-        // Gibbs sampler lambda diagnostics
-        diag.lambda_mean = p.lambda_mean.unwrap_or(1.0);
-        diag.lambda_mixing_ok = p.lambda_mixing_ok.unwrap_or(true);
-
-        // Gibbs sampler kappa diagnostics
-        diag.kappa_mean = p.kappa_mean.unwrap_or(1.0);
-        diag.kappa_cv = p.kappa_cv.unwrap_or(0.0);
-        diag.kappa_ess = p.kappa_ess.unwrap_or(0.0);
-        diag.kappa_mixing_ok = p.kappa_mixing_ok.unwrap_or(true);
-    }
-
-    diag
 }
 
 // ============================================================================
@@ -680,8 +620,12 @@ pub unsafe extern "C" fn to_analyze(
 
     // Bootstrap covariance
     let seed = if cfg.seed == 0 { 42 } else { cfg.seed };
-    let cov_estimate =
-        bootstrap_difference_covariance_discrete(&baseline_ns, &sample_ns, 2000, seed);
+    let cov_estimate = bootstrap_difference_covariance_discrete(
+        &baseline_ns,
+        &sample_ns,
+        DEFAULT_BOOTSTRAP_ITERATIONS,
+        seed,
+    );
     let sigma_rate = cov_estimate.matrix * count as f64;
 
     // Compute theta_eff
@@ -725,15 +669,18 @@ pub unsafe extern "C" fn to_analyze(
     let ci_low = (total_effect - 1.96 * total_sd).max(0.0);
     let ci_high = total_effect + 1.96 * total_sd;
 
-    // Classify pattern
-    let pattern = if shift_ns.abs() > 2.0 * tail_ns.abs() {
-        ToEffectPattern::UniformShift
-    } else if tail_ns.abs() > 2.0 * shift_ns.abs() {
-        ToEffectPattern::TailEffect
-    } else if shift_ns.abs() > 0.1 * theta_eff || tail_ns.abs() > 0.1 * theta_eff {
-        ToEffectPattern::Mixed
-    } else {
-        ToEffectPattern::Indeterminate
+    // Classify pattern using canonical classification from core
+    // For one-shot analysis without posterior draws, we use a simplified heuristic
+    // based on effect magnitudes relative to their standard errors (2×SE threshold)
+    let pattern = {
+        let shift_significant = shift_ns.abs() > 2.0 * shift_sd;
+        let tail_significant = tail_ns.abs() > 2.0 * tail_sd;
+        match (shift_significant, tail_significant) {
+            (true, false) => ToEffectPattern::UniformShift,
+            (false, true) => ToEffectPattern::TailEffect,
+            (true, true) => ToEffectPattern::Mixed,
+            (false, false) => ToEffectPattern::Indeterminate,
+        }
     };
 
     // Determine outcome
@@ -746,28 +693,12 @@ pub unsafe extern "C" fn to_analyze(
         (ToOutcome::Inconclusive, ToInconclusiveReason::None)
     };
 
-    // Compute exploitability
-    let exploitability = if total_effect < 10.0 {
-        ToExploitability::SharedHardwareOnly
-    } else if total_effect < 100.0 {
-        ToExploitability::Http2Multiplexing
-    } else if total_effect < 10_000.0 {
-        ToExploitability::StandardRemote
-    } else {
-        ToExploitability::ObviousLeak
-    };
+    // Compute exploitability (delegate to core)
+    let exploitability: ToExploitability = Exploitability::from_effect_ns(total_effect).into();
 
-    // Determine quality
+    // Determine quality (delegate to core)
     let mde_ns = theta_floor;
-    let quality = if mde_ns < 5.0 {
-        ToMeasurementQuality::Excellent
-    } else if mde_ns < 20.0 {
-        ToMeasurementQuality::Good
-    } else if mde_ns < 100.0 {
-        ToMeasurementQuality::Poor
-    } else {
-        ToMeasurementQuality::TooNoisy
-    };
+    let quality: ToMeasurementQuality = MeasurementQuality::from_mde_ns(mde_ns).into();
 
     // Build diagnostics from bayes_result
     let diagnostics = ToDiagnostics {

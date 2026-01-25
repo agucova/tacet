@@ -323,6 +323,33 @@ impl Posterior {
         let effect_se = self.shift_se();
         MeasurementQuality::from_mde_ns(effect_se * 2.0)
     }
+
+    /// Convert to an FFI-friendly summary containing only scalar fields.
+    ///
+    /// This uses the canonical effect pattern classification from draws (spec §3.4.6)
+    /// rather than the simpler heuristics that were previously duplicated in bindings.
+    pub fn to_summary(&self) -> crate::ffi_summary::PosteriorSummary {
+        let effect = self.to_effect_estimate();
+
+        crate::ffi_summary::PosteriorSummary {
+            shift_ns: self.shift_ns(),
+            tail_ns: self.tail_ns(),
+            shift_se: self.shift_se(),
+            tail_se: self.tail_se(),
+            ci_low_ns: effect.credible_interval_ns.0,
+            ci_high_ns: effect.credible_interval_ns.1,
+            pattern: effect.pattern,
+            leak_probability: self.leak_probability,
+            projection_mismatch_q: self.projection_mismatch_q,
+            n: self.n,
+            lambda_mean: self.lambda_mean.unwrap_or(1.0),
+            lambda_mixing_ok: self.lambda_mixing_ok.unwrap_or(true),
+            kappa_mean: self.kappa_mean.unwrap_or(1.0),
+            kappa_cv: self.kappa_cv.unwrap_or(0.0),
+            kappa_ess: self.kappa_ess.unwrap_or(0.0),
+            kappa_mixing_ok: self.kappa_mixing_ok.unwrap_or(true),
+        }
+    }
 }
 
 #[cfg(test)]

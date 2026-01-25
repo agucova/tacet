@@ -1,11 +1,11 @@
 /**
- * @timing-oracle/node - Timing side-channel detection for Node.js/Bun
+ * @timing-oracle/js - Timing side-channel detection for Node.js/Bun
  *
  * Detect timing leaks in cryptographic code using statistical analysis.
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModel, Outcome } from '@timing-oracle/node';
+ * import { TimingOracle, AttackerModel, Outcome } from '@timing-oracle/js';
  * import crypto from 'crypto';
  *
  * const result = TimingOracle
@@ -40,8 +40,14 @@
 export {
   // High-level API
   TimingOracle,
+  TimingTestResult,
   type InputPair,
   type TestResult,
+  // Errors
+  TimingOracleError,
+  TimingLeakError,
+  CalibrationError,
+  InsufficientSamplesError,
   // Measurement loop
   collectSamples,
   collectBatches,

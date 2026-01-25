@@ -19,7 +19,7 @@ c_include_dir := c_crate_dir + "/include"
 c_examples_dir := c_crate_dir + "/examples"
 
 # Go bindings path (CGo-based)
-go_dir := justfile_directory() + "/go/timingoracle"
+go_dir := justfile_directory() + "/crates/timing-oracle-go"
 
 # Library paths
 c_lib := justfile_directory() + "/target/release/libtiming_oracle_c.a"

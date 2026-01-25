@@ -32,7 +32,7 @@ use crate::GeneratedDataset;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use timing_oracle::BenchmarkEffect;
+use timing_oracle::{AttackerModel, BenchmarkEffect};
 
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
@@ -49,6 +49,12 @@ pub enum BenchmarkPreset {
     /// Fine threshold: Focused on graduation around timing-oracle's 100ns threshold
     /// Inspired by SILENT paper (arXiv:2504.19821) heatmap methodology
     FineThreshold,
+    /// Threshold-relative: Tests effects scaled to each attacker model's threshold θ
+    /// Covers SharedHardware (0.6ns), AdjacentNetwork (100ns), RemoteNetwork (50μs)
+    ThresholdRelative,
+    /// SharedHardware stress test: Wide effect range with fixed SharedHardware model
+    /// Tests detection from below threshold (0.3ns) to far above (100μs)
+    SharedHardwareStress,
 }
 
 impl BenchmarkPreset {
@@ -59,6 +65,8 @@ impl BenchmarkPreset {
             BenchmarkPreset::Medium => "medium",
             BenchmarkPreset::Thorough => "thorough",
             BenchmarkPreset::FineThreshold => "fine-threshold",
+            BenchmarkPreset::ThresholdRelative => "threshold-relative",
+            BenchmarkPreset::SharedHardwareStress => "shared-hardware-stress",
         }
     }
 }
@@ -80,6 +88,9 @@ pub struct SweepConfig {
     pub effect_patterns: Vec<EffectPattern>,
     /// Noise models to test
     pub noise_models: Vec<NoiseModel>,
+    /// Attacker models to test (timing-oracle only, others ignore).
+    /// `None` means use the tool's default (AdjacentNetwork for timing-oracle).
+    pub attacker_models: Vec<Option<AttackerModel>>,
     /// Use realistic timing (actual measurements) instead of synthetic generation
     pub use_realistic: bool,
     /// Base operation time in nanoseconds (for realistic mode)
@@ -91,8 +102,9 @@ impl SweepConfig {
     ///
     /// Scaled similar to SILENT paper (μ ∈ [0, 1.0] with σ=10 → [0, 0.1σ] in our terms).
     /// With σ = 100μs: 0.02σ = 2μs, 0.05σ = 5μs, 0.1σ = 10μs
+    /// Also includes 5ns for SharedHardware threshold testing.
     ///
-    /// - Effect sizes: 0, 2μs, 5μs, 10μs (0-0.1σ range)
+    /// - Effect sizes: 0, 5ns, 2μs, 5μs, 10μs
     /// - 2 patterns: Null, Shift
     /// - 3 noise models: IID, AR(0.5), AR(-0.5)
     /// - 20 datasets per point
@@ -102,14 +114,15 @@ impl SweepConfig {
             samples_per_class: 5_000,
             datasets_per_point: 20,
             // SILENT-like scale: [0, 0.1σ] = [0, 10μs]
-            // 0.02σ = 2μs, 0.05σ = 5μs, 0.1σ = 10μs
-            effect_multipliers: vec![0.0, 0.02, 0.05, 0.1],
+            // Plus 5ns (0.00005σ) for SharedHardware threshold testing
+            effect_multipliers: vec![0.0, 0.00005, 0.02, 0.05, 0.1],
             effect_patterns: vec![EffectPattern::Null, EffectPattern::Shift],
             noise_models: vec![
                 NoiseModel::IID,
                 NoiseModel::AR1 { phi: 0.5 },
                 NoiseModel::AR1 { phi: -0.5 },
             ],
+            attacker_models: vec![Some(AttackerModel::SharedHardware)],
             use_realistic: false,
             realistic_base_ns: 1000, // 1μs default
         }
@@ -145,6 +158,7 @@ impl SweepConfig {
                 NoiseModel::AR1 { phi: 0.3 },
                 NoiseModel::AR1 { phi: 0.6 },
             ],
+            attacker_models: vec![Some(AttackerModel::SharedHardware)],
             use_realistic: false,
             realistic_base_ns: 1000,
         }
@@ -152,11 +166,17 @@ impl SweepConfig {
 
     /// Thorough preset: comprehensive coverage for publication (~3 hours)
     ///
-    /// Scaled similar to SILENT paper with full granularity.
-    /// SILENT uses μ ∈ [0, 1.0] with deciles and Φ ∈ [-0.9, 0.9].
-    /// With our σ = 100μs: [0, 0.1σ] = [0, 10μs] with decile granularity
+    /// Scaled similar to SILENT paper with full granularity, extended to cover
+    /// sub-microsecond effects common in real crypto vulnerabilities.
     ///
-    /// - Effect sizes: 11 points in [0, 0.1σ] = [0, 10μs] (deciles)
+    /// Effect sizes cover two ranges:
+    /// - Sub-microsecond (10ns–500ns): cache timing, branch misprediction, table lookups
+    /// - Microsecond (1μs–10μs): larger timing differences
+    ///
+    /// Uses SharedHardware attacker model (θ=0.6ns) for fair comparison with
+    /// other tools that don't have configurable thresholds.
+    ///
+    /// - Effect sizes: 16 points from 0 to 10μs
     /// - 6 patterns: Null, Shift, Tail, Variance, Bimodal, Quantized
     /// - 9 noise models: IID, AR(±0.2), AR(±0.4), AR(±0.6), AR(±0.8)
     /// - 100 datasets per point
@@ -165,20 +185,26 @@ impl SweepConfig {
             preset: BenchmarkPreset::Thorough,
             samples_per_class: 20_000,
             datasets_per_point: 100,
-            // SILENT-like scale: [0, 0.1σ] with deciles (11 points)
-            // 0.01σ = 1μs increments up to 0.1σ = 10μs
+            // Sub-microsecond effects (real crypto vulns) + microsecond range
             effect_multipliers: vec![
-                0.0,    // 0μs
-                0.01,   // 1μs
-                0.02,   // 2μs
-                0.03,   // 3μs
-                0.04,   // 4μs
-                0.05,   // 5μs (Δ in SILENT = 0.5)
-                0.06,   // 6μs
-                0.07,   // 7μs
-                0.08,   // 8μs
-                0.09,   // 9μs
-                0.1,    // 10μs (μ=1.0 in SILENT)
+                0.0,      // 0ns (FPR test)
+                // Sub-microsecond: cache timing, branches, table lookups
+                0.0001,   // 10ns
+                0.0005,   // 50ns
+                0.001,    // 100ns
+                0.002,    // 200ns
+                0.005,    // 500ns
+                // Microsecond range (SILENT-like)
+                0.01,     // 1μs
+                0.02,     // 2μs
+                0.03,     // 3μs
+                0.04,     // 4μs
+                0.05,     // 5μs
+                0.06,     // 6μs
+                0.07,     // 7μs
+                0.08,     // 8μs
+                0.09,     // 9μs
+                0.1,      // 10μs
             ],
             effect_patterns: vec![
                 EffectPattern::Null,
@@ -200,6 +226,8 @@ impl SweepConfig {
                 NoiseModel::AR1 { phi: 0.6 },
                 NoiseModel::AR1 { phi: 0.8 },
             ],
+            // SharedHardware for fair comparison with threshold-less tools
+            attacker_models: vec![Some(AttackerModel::SharedHardware)],
             use_realistic: false,
             realistic_base_ns: 1000,
         }
@@ -257,14 +285,164 @@ impl SweepConfig {
                 NoiseModel::AR1 { phi: 0.6 },
                 NoiseModel::AR1 { phi: 0.8 },
             ],
+            // Test all three attacker models to see threshold graduation
+            attacker_models: vec![
+                Some(AttackerModel::SharedHardware),
+                Some(AttackerModel::AdjacentNetwork),
+                Some(AttackerModel::RemoteNetwork),
+            ],
             use_realistic: false,
             realistic_base_ns: 1000,
         }
     }
 
-    /// Calculate total number of configuration points
+    /// Threshold-relative preset: Tests effects scaled to each attacker model's threshold θ
+    ///
+    /// This preset is designed to generate power curves that are comparable across
+    /// different attacker models by testing at multiples of each model's threshold:
+    ///
+    /// | Attacker Model   | θ       | Test effects (multiples of θ)           |
+    /// |------------------|---------|----------------------------------------|
+    /// | SharedHardware   | 0.6ns   | 0.3, 0.6, 1.2, 3, 6 ns                 |
+    /// | AdjacentNetwork  | 100ns   | 50, 100, 200, 500 ns                   |
+    /// | RemoteNetwork    | 50μs    | 25μs, 50μs, 100μs, 250μs               |
+    ///
+    /// With σ = 100,000ns (100μs), the effect multipliers map to:
+    /// - SharedHardware range: 0.000003σ to 0.00006σ (0.3-6ns)
+    /// - AdjacentNetwork range: 0.0005σ to 0.005σ (50-500ns)
+    /// - RemoteNetwork range: 0.25σ to 2.5σ (25-250μs)
+    ///
+    /// Run with `--tools threshold-relative` to get timing-oracle tested with
+    /// each attacker model as a separate tool instance.
+    pub fn threshold_relative() -> Self {
+        Self {
+            preset: BenchmarkPreset::ThresholdRelative,
+            samples_per_class: 10_000,
+            datasets_per_point: 50,
+            // Effect sizes covering all three attacker model thresholds
+            // σ = 100,000ns, so:
+            //
+            // SharedHardware (θ = 0.6ns):
+            //   0.5θ = 0.3ns  = 0.000003σ
+            //   1θ   = 0.6ns  = 0.000006σ
+            //   2θ   = 1.2ns  = 0.000012σ
+            //   5θ   = 3ns    = 0.00003σ
+            //   10θ  = 6ns    = 0.00006σ
+            //
+            // AdjacentNetwork (θ = 100ns):
+            //   0.5θ = 50ns   = 0.0005σ
+            //   1θ   = 100ns  = 0.001σ
+            //   2θ   = 200ns  = 0.002σ
+            //   5θ   = 500ns  = 0.005σ
+            //
+            // RemoteNetwork (θ = 50μs):
+            //   0.5θ = 25μs   = 0.25σ
+            //   1θ   = 50μs   = 0.5σ
+            //   2θ   = 100μs  = 1.0σ
+            //   5θ   = 250μs  = 2.5σ
+            effect_multipliers: vec![
+                0.0,        // FPR test (no effect)
+                // SharedHardware range (0.6ns threshold)
+                0.000003,   // 0.3ns  (0.5θ)
+                0.000006,   // 0.6ns  (1θ)
+                0.000012,   // 1.2ns  (2θ)
+                0.00003,    // 3ns    (5θ)
+                0.00006,    // 6ns    (10θ)
+                // AdjacentNetwork range (100ns threshold)
+                0.0005,     // 50ns   (0.5θ)
+                0.001,      // 100ns  (1θ)
+                0.002,      // 200ns  (2θ)
+                0.005,      // 500ns  (5θ)
+                // RemoteNetwork range (50μs threshold)
+                0.25,       // 25μs   (0.5θ)
+                0.5,        // 50μs   (1θ)
+                1.0,        // 100μs  (2θ)
+                2.5,        // 250μs  (5θ)
+            ],
+            effect_patterns: vec![EffectPattern::Shift],
+            // Test across noise models to ensure robustness
+            noise_models: vec![
+                NoiseModel::AR1 { phi: -0.5 },
+                NoiseModel::IID,
+                NoiseModel::AR1 { phi: 0.5 },
+            ],
+            // Test all three attacker models for timing-oracle
+            attacker_models: vec![
+                Some(AttackerModel::SharedHardware),
+                Some(AttackerModel::AdjacentNetwork),
+                Some(AttackerModel::RemoteNetwork),
+            ],
+            use_realistic: false,
+            realistic_base_ns: 1000,
+        }
+    }
+
+    /// SharedHardware stress test: Tests detection across a wide effect range
+    ///
+    /// Purpose: Validate that timing-oracle correctly detects both small and
+    /// very large effects when using the SharedHardware attacker model (θ = 0.6ns).
+    /// This tests whether the Bayesian prior handles extreme effect sizes correctly.
+    ///
+    /// Effect range: 0ns to 100μs (0 to ~166,667× threshold)
+    ///
+    /// | Multiplier | Effect    | Relation to θ       |
+    /// |------------|-----------|---------------------|
+    /// | 0.0        | 0ns       | Null (FPR)          |
+    /// | 0.000003   | 0.3ns     | 0.5× threshold      |
+    /// | 0.000006   | 0.6ns     | 1× threshold        |
+    /// | 0.00001    | 1ns       | ~2× threshold       |
+    /// | 0.00002    | 2ns       | ~3× threshold       |
+    /// | 0.00005    | 5ns       | ~8× threshold       |
+    /// | 0.0001     | 10ns      | ~17× threshold      |
+    /// | 0.0005     | 50ns      | ~83× threshold      |
+    /// | 0.001      | 100ns     | ~167× threshold     |
+    /// | 0.005      | 500ns     | ~833× threshold     |
+    /// | 0.01       | 1μs       | ~1,667× threshold   |
+    /// | 0.1        | 10μs      | ~16,667× threshold  |
+    /// | 1.0        | 100μs     | ~166,667× threshold |
+    pub fn shared_hardware_stress() -> Self {
+        Self {
+            preset: BenchmarkPreset::SharedHardwareStress,
+            samples_per_class: 10_000,
+            datasets_per_point: 20,
+            // Wide range from below threshold to far above
+            // σ = 100,000ns, SharedHardware θ = 0.6ns
+            effect_multipliers: vec![
+                0.0,        // 0ns (FPR test)
+                0.000003,   // 0.3ns (below threshold)
+                0.000006,   // 0.6ns (at threshold)
+                0.00001,    // 1ns
+                0.00002,    // 2ns
+                0.00005,    // 5ns
+                0.0001,     // 10ns
+                0.0005,     // 50ns
+                0.001,      // 100ns
+                0.005,      // 500ns
+                0.01,       // 1μs
+                0.1,        // 10μs
+                1.0,        // 100μs
+            ],
+            effect_patterns: vec![EffectPattern::Shift],
+            noise_models: vec![
+                NoiseModel::IID,
+                NoiseModel::AR1 { phi: 0.5 },
+                NoiseModel::AR1 { phi: -0.5 },
+            ],
+            // Fixed SharedHardware model only
+            attacker_models: vec![Some(AttackerModel::SharedHardware)],
+            use_realistic: false,
+            realistic_base_ns: 1000,
+        }
+    }
+
+    /// Calculate total number of configuration points (excluding attacker model dimension)
     pub fn total_points(&self) -> usize {
         self.effect_multipliers.len() * self.effect_patterns.len() * self.noise_models.len()
+    }
+
+    /// Calculate total number of configuration points including attacker model dimension
+    pub fn total_points_with_attacker(&self) -> usize {
+        self.total_points() * self.attacker_models.len()
     }
 
     /// Calculate total number of datasets to generate
@@ -272,13 +450,28 @@ impl SweepConfig {
         self.total_points() * self.datasets_per_point
     }
 
-    /// Iterate over all configuration points
+    /// Iterate over all configuration points (without attacker model)
     pub fn iter_configs(&self) -> impl Iterator<Item = (EffectPattern, f64, NoiseModel)> + '_ {
         self.effect_patterns.iter().flat_map(move |&pattern| {
             self.effect_multipliers.iter().flat_map(move |&mult| {
                 self.noise_models
                     .iter()
                     .map(move |&noise| (pattern, mult, noise))
+            })
+        })
+    }
+
+    /// Iterate over all configuration points including attacker model
+    pub fn iter_configs_with_attacker(
+        &self,
+    ) -> impl Iterator<Item = (EffectPattern, f64, NoiseModel, Option<AttackerModel>)> + '_ {
+        self.effect_patterns.iter().flat_map(move |&pattern| {
+            self.effect_multipliers.iter().flat_map(move |&mult| {
+                self.noise_models.iter().flat_map(move |&noise| {
+                    self.attacker_models
+                        .iter()
+                        .map(move |&model| (pattern, mult, noise, model))
+                })
             })
         })
     }
@@ -297,6 +490,8 @@ pub struct BenchmarkResult {
     pub effect_sigma_mult: f64,
     /// Noise model
     pub noise_model: String,
+    /// Attacker model threshold in nanoseconds (None = tool default)
+    pub attacker_threshold_ns: Option<f64>,
     /// Dataset ID within this config point
     pub dataset_id: usize,
     /// Samples per class
@@ -311,6 +506,15 @@ pub struct BenchmarkResult {
     pub time_ms: u64,
     /// Samples actually used (for adaptive tools)
     pub samples_used: Option<usize>,
+    /// Outcome status (Pass, Fail, Inconclusive, Unmeasurable, etc.)
+    pub status: String,
+    /// Standardized outcome category for cross-tool comparison.
+    pub outcome: crate::adapters::OutcomeCategory,
+}
+
+/// Convert an AttackerModel to its threshold in nanoseconds.
+pub fn attacker_threshold_ns(model: Option<AttackerModel>) -> Option<f64> {
+    model.map(|m| m.to_threshold_ns())
 }
 
 /// Collection of all benchmark results.
@@ -369,9 +573,16 @@ impl SweepResults {
             .results
             .iter()
             .filter(|r| {
+                // Use relative tolerance for floating point comparison,
+                // with exact match for zero
+                let effect_matches = if effect_mult == 0.0 {
+                    r.effect_sigma_mult == 0.0
+                } else {
+                    (r.effect_sigma_mult - effect_mult).abs() / effect_mult.abs() < 0.01
+                };
                 r.tool == tool
                     && r.effect_pattern == pattern
-                    && (r.effect_sigma_mult - effect_mult).abs() < 0.001
+                    && effect_matches
                     && r.noise_model == noise
             })
             .collect();
@@ -413,54 +624,68 @@ impl SweepResults {
                     noise.name()
                 };
 
-                let matching: Vec<&BenchmarkResult> = self
-                    .results
-                    .iter()
-                    .filter(|r| {
-                        r.tool == tool
-                            && r.effect_pattern == pattern.name()
-                            && (r.effect_sigma_mult - mult).abs() < 0.001
-                            && r.noise_model == expected_noise
-                    })
-                    .collect();
+                // Iterate over attacker models to properly separate results
+                for &attacker_model in &self.config.attacker_models {
+                    let expected_threshold = attacker_threshold_ns(attacker_model);
 
-                if matching.is_empty() {
-                    continue;
+                    let matching: Vec<&BenchmarkResult> = self
+                        .results
+                        .iter()
+                        .filter(|r| {
+                            // Use relative tolerance for floating point comparison,
+                            // with a small absolute tolerance for values near zero
+                            let effect_matches = if mult == 0.0 {
+                                r.effect_sigma_mult == 0.0
+                            } else {
+                                (r.effect_sigma_mult - mult).abs() / mult.abs() < 0.01
+                            };
+                            r.tool == tool
+                                && r.effect_pattern == pattern.name()
+                                && effect_matches
+                                && r.noise_model == expected_noise
+                                && r.attacker_threshold_ns == expected_threshold
+                        })
+                        .collect();
+
+                    if matching.is_empty() {
+                        continue;
+                    }
+
+                    let detected_count = matching.iter().filter(|r| r.detected).count();
+                    let n = matching.len();
+                    let rate = detected_count as f64 / n as f64;
+                    let (ci_low, ci_high) = Self::wilson_ci(detected_count, n, 1.96);
+
+                    let mut times: Vec<u64> = matching.iter().map(|r| r.time_ms).collect();
+                    times.sort();
+                    let median_time_ms = times[times.len() / 2];
+
+                    let samples_used: Vec<usize> = matching
+                        .iter()
+                        .filter_map(|r| r.samples_used)
+                        .collect();
+                    let median_samples = if samples_used.is_empty() {
+                        None
+                    } else {
+                        let mut sorted = samples_used.clone();
+                        sorted.sort();
+                        Some(sorted[sorted.len() / 2])
+                    };
+
+                    summaries.push(PointSummary {
+                        tool: tool.clone(),
+                        effect_pattern: pattern.name().to_string(),
+                        effect_sigma_mult: mult,
+                        noise_model: expected_noise.clone(),
+                        attacker_threshold_ns: expected_threshold,
+                        n_datasets: n,
+                        detection_rate: rate,
+                        ci_low,
+                        ci_high,
+                        median_time_ms,
+                        median_samples,
+                    });
                 }
-
-                let detected_count = matching.iter().filter(|r| r.detected).count();
-                let n = matching.len();
-                let rate = detected_count as f64 / n as f64;
-                let (ci_low, ci_high) = Self::wilson_ci(detected_count, n, 1.96);
-
-                let mut times: Vec<u64> = matching.iter().map(|r| r.time_ms).collect();
-                times.sort();
-                let median_time_ms = times[times.len() / 2];
-
-                let samples_used: Vec<usize> = matching
-                    .iter()
-                    .filter_map(|r| r.samples_used)
-                    .collect();
-                let median_samples = if samples_used.is_empty() {
-                    None
-                } else {
-                    let mut sorted = samples_used.clone();
-                    sorted.sort();
-                    Some(sorted[sorted.len() / 2])
-                };
-
-                summaries.push(PointSummary {
-                    tool: tool.clone(),
-                    effect_pattern: pattern.name().to_string(),
-                    effect_sigma_mult: mult,
-                    noise_model: expected_noise,
-                    n_datasets: n,
-                    detection_rate: rate,
-                    ci_low,
-                    ci_high,
-                    median_time_ms,
-                    median_samples,
-                });
             }
         }
 
@@ -479,6 +704,8 @@ pub struct PointSummary {
     pub effect_sigma_mult: f64,
     /// Noise model
     pub noise_model: String,
+    /// Attacker threshold in nanoseconds (None = tool default)
+    pub attacker_threshold_ns: Option<f64>,
     /// Number of datasets tested
     pub n_datasets: usize,
     /// Detection rate (FPR when mult=0, Power when mult>0)
@@ -530,9 +757,8 @@ impl SweepRunner {
     /// Aggregated results from all tools and configurations
     ///
     /// # Parallelization Strategy
-    /// Uses (dataset × tool) level parallelism for maximum CPU utilization.
-    /// Each work item is a single (dataset, tool) pair, allowing tools to run
-    /// in parallel across different datasets.
+    /// Uses (dataset × tool × attacker_model) level parallelism for maximum CPU utilization.
+    /// Each work item is a single (dataset, tool, attacker_model) triple.
     pub fn run<F>(&self, config: &SweepConfig, mut progress: F) -> SweepResults
     where
         F: FnMut(f64, &str),
@@ -541,9 +767,6 @@ impl SweepRunner {
 
         let start = Instant::now();
         let mut results = SweepResults::new(config.clone());
-
-        let total_work = config.total_datasets() * self.tools.len();
-        let completed = AtomicUsize::new(0);
 
         // Step 1: Collect dataset configs
         let dataset_configs: Vec<(EffectPattern, f64, NoiseModel, usize)> = config
@@ -594,22 +817,34 @@ impl SweepRunner {
 
         progress(0.05, "Running tools...");
 
-        // Step 3: Create (dataset × tool) work items
-        let work_items: Vec<(usize, usize)> = (0..datasets.len())
+        // Step 3: Create (dataset × tool × attacker_model) work items
+        // For tools that don't support attacker_model, only include one work item with None
+        let work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
             .flat_map(|dataset_idx| {
-                (0..self.tools.len()).map(move |tool_idx| (dataset_idx, tool_idx))
+                (0..self.tools.len()).flat_map(move |tool_idx| {
+                    if self.tools[tool_idx].supports_attacker_model() {
+                        // Tool supports attacker model: iterate over all configured models
+                        config.attacker_models.iter().map(move |&model| (dataset_idx, tool_idx, model)).collect::<Vec<_>>()
+                    } else {
+                        // Tool doesn't support attacker model: only run once with None
+                        vec![(dataset_idx, tool_idx, None)]
+                    }
+                })
             })
             .collect();
 
-        // Step 4: Process all (dataset × tool) pairs in parallel
+        let total_work = work_items.len();
+        let completed = AtomicUsize::new(0);
+
+        // Step 4: Process all (dataset × tool × attacker_model) triples in parallel
         #[cfg(feature = "parallel")]
         let all_results: Vec<BenchmarkResult> = if config.use_realistic {
             // Sequential for realistic mode
             work_items
                 .iter()
-                .map(|&(dataset_idx, tool_idx)| {
+                .map(|&(dataset_idx, tool_idx, attacker_model)| {
                     let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
                     progress(done as f64 / total_work as f64, &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
                     result
@@ -619,9 +854,9 @@ impl SweepRunner {
             // Parallel for synthetic mode - this is where we get the speedup!
             work_items
                 .par_iter()
-                .map(|&(dataset_idx, tool_idx)| {
+                .map(|&(dataset_idx, tool_idx, attacker_model)| {
                     let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
                     completed.fetch_add(1, Ordering::Relaxed);
                     result
                 })
@@ -631,9 +866,9 @@ impl SweepRunner {
         #[cfg(not(feature = "parallel"))]
         let all_results: Vec<BenchmarkResult> = work_items
             .iter()
-            .map(|&(dataset_idx, tool_idx)| {
+            .map(|&(dataset_idx, tool_idx, attacker_model)| {
                 let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
                 progress(done as f64 / total_work as f64, &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
                 result
@@ -724,10 +959,17 @@ impl SweepRunner {
 
         progress(0.05, "Running tools...");
 
-        // Step 3: Create (dataset × tool) work items, filtering already-completed items
-        let all_work_items: Vec<(usize, usize)> = (0..datasets.len())
+        // Step 3: Create (dataset × tool × attacker_model) work items
+        // For tools that don't support attacker_model, only include one work item with None
+        let all_work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
             .flat_map(|dataset_idx| {
-                (0..self.tools.len()).map(move |tool_idx| (dataset_idx, tool_idx))
+                (0..self.tools.len()).flat_map(move |tool_idx| {
+                    if self.tools[tool_idx].supports_attacker_model() {
+                        config.attacker_models.iter().map(move |&model| (dataset_idx, tool_idx, model)).collect::<Vec<_>>()
+                    } else {
+                        vec![(dataset_idx, tool_idx, None)]
+                    }
+                })
             })
             .collect();
 
@@ -735,22 +977,23 @@ impl SweepRunner {
         let resumed_count = checkpoint.as_ref().map(|c| c.resumed_count).unwrap_or(0);
 
         // Filter out completed work items if resuming
-        let work_items: Vec<(usize, usize)> = if let Some(ref writer) = checkpoint {
+        let work_items: Vec<(usize, usize, Option<AttackerModel>)> = if let Some(ref writer) = checkpoint {
             all_work_items
                 .into_iter()
-                .filter(|&(dataset_idx, tool_idx)| {
+                .filter(|&(dataset_idx, tool_idx, attacker_model)| {
                     let (pattern, mult, noise, dataset_id, _) = &datasets[dataset_idx];
                     let noise_name = if config.use_realistic {
                         format!("{}-realistic", noise.name())
                     } else {
                         noise.name()
                     };
-                    let key = WorkItemKey::new(
+                    let key = WorkItemKey::new_with_attacker(
                         self.tools[tool_idx].name(),
                         &pattern.name(),
                         *mult,
                         &noise_name,
                         *dataset_id,
+                        attacker_threshold_ns(attacker_model),
                     );
                     !writer.is_completed(&key)
                 })
@@ -769,15 +1012,15 @@ impl SweepRunner {
 
         let completed = AtomicUsize::new(resumed_count);
 
-        // Step 4: Process all (dataset × tool) pairs
+        // Step 4: Process all (dataset × tool × attacker_model) triples
         #[cfg(feature = "parallel")]
         let all_results: Vec<BenchmarkResult> = if config.use_realistic {
             // Sequential for realistic mode
             work_items
                 .iter()
-                .map(|&(dataset_idx, tool_idx)| {
+                .map(|&(dataset_idx, tool_idx, attacker_model)| {
                     let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
 
                     // Write incrementally if checkpoint enabled
                     if let Some(ref writer) = checkpoint {
@@ -798,9 +1041,9 @@ impl SweepRunner {
             // Parallel for synthetic mode
             work_items
                 .par_iter()
-                .map(|&(dataset_idx, tool_idx)| {
+                .map(|&(dataset_idx, tool_idx, attacker_model)| {
                     let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                    let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
 
                     // Write incrementally if checkpoint enabled
                     if let Some(ref writer) = checkpoint {
@@ -818,9 +1061,9 @@ impl SweepRunner {
         #[cfg(not(feature = "parallel"))]
         let all_results: Vec<BenchmarkResult> = work_items
             .iter()
-            .map(|&(dataset_idx, tool_idx)| {
+            .map(|&(dataset_idx, tool_idx, attacker_model)| {
                 let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx);
+                let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
 
                 // Write incrementally if checkpoint enabled
                 if let Some(ref writer) = checkpoint {
@@ -919,10 +1162,18 @@ impl SweepRunner {
         dataset_id: usize,
         dataset: &GeneratedDataset,
         tool_idx: usize,
+        attacker_model: Option<AttackerModel>,
     ) -> BenchmarkResult {
         let tool = &self.tools[tool_idx];
         let tool_start = Instant::now();
-        let result = tool.analyze(dataset);
+
+        // Use attacker model if tool supports it, otherwise use default analyze
+        let result = if tool.supports_attacker_model() && attacker_model.is_some() {
+            tool.analyze_with_attacker_model(dataset, attacker_model)
+        } else {
+            tool.analyze(dataset)
+        };
+
         let time_ms = tool_start.elapsed().as_millis() as u64;
 
         let noise_name = if config.use_realistic {
@@ -937,6 +1188,7 @@ impl SweepRunner {
             effect_pattern: pattern.name().to_string(),
             effect_sigma_mult: mult,
             noise_model: noise_name,
+            attacker_threshold_ns: attacker_threshold_ns(attacker_model),
             dataset_id,
             samples_per_class: config.samples_per_class,
             detected: result.detected_leak,
@@ -944,6 +1196,8 @@ impl SweepRunner {
             p_value: None,
             time_ms,
             samples_used: Some(result.samples_used),
+            status: result.status,
+            outcome: result.outcome,
         }
     }
 }
@@ -958,7 +1212,7 @@ mod tests {
         let config = SweepConfig::quick();
         assert_eq!(config.samples_per_class, 5_000);
         assert_eq!(config.datasets_per_point, 20);
-        assert_eq!(config.effect_multipliers.len(), 4); // [0, 0.02, 0.05, 0.1]
+        assert_eq!(config.effect_multipliers.len(), 5); // [0, 0.00005, 0.02, 0.05, 0.1]
         assert_eq!(config.effect_patterns.len(), 2);
         assert_eq!(config.noise_models.len(), 3); // [IID, AR(0.5), AR(-0.5)]
     }
@@ -966,10 +1220,10 @@ mod tests {
     #[test]
     fn test_sweep_config_total_points() {
         let config = SweepConfig::quick();
-        // 4 multipliers * 2 patterns * 3 noise = 24 points
-        assert_eq!(config.total_points(), 24);
-        // 24 points * 20 datasets = 480 total
-        assert_eq!(config.total_datasets(), 480);
+        // 5 multipliers * 2 patterns * 3 noise = 30 points
+        assert_eq!(config.total_points(), 30);
+        // 30 points * 20 datasets = 600 total
+        assert_eq!(config.total_datasets(), 600);
     }
 
     #[test]
@@ -982,6 +1236,7 @@ mod tests {
             effect_multipliers: vec![0.0, 1.0],
             effect_patterns: vec![EffectPattern::Null, EffectPattern::Shift],
             noise_models: vec![NoiseModel::IID],
+            attacker_models: vec![Some(AttackerModel::SharedHardware)],
             use_realistic: false,
             realistic_base_ns: 1000,
         };

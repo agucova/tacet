@@ -1,0 +1,166 @@
+---
+title: Attacker Models
+description: Choosing the right threat model for your timing tests
+sidebar:
+  order: 4
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The **attacker model** determines the minimum timing difference (threshold theta, θ) that counts as a security-relevant leak. There is no single correct threshold—your choice is a statement about your threat model.
+
+## Available Presets
+
+| Preset | θ | Use Case |
+|--------|---|----------|
+| `SharedHardware` | 0.6 ns (~2 cycles @ 3GHz) | SGX, cross-VM, containers, hyperthreading |
+| `PostQuantum` | 3.3 ns (~10 cycles) | Post-quantum cryptography |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 (Timeless Timing Attacks) |
+| `RemoteNetwork` | 50 μs | Internet, legacy services |
+| `Research` | 0 | Profiling, debugging (not for CI) |
+
+## Choosing a Model
+
+### SharedHardware (θ = 0.6 ns)
+
+Use when the attacker has **co-resident access** to the same physical hardware:
+
+- **SGX enclaves** - Attacker in host OS can measure enclave timing
+- **Cross-VM attacks** - Attacker VM on same physical host
+- **Containers** - Attacker in adjacent container
+- **Hyperthreading** - Attacker on sibling logical core
+
+At this threshold, even 1-2 CPU cycles of timing variation is considered a leak.
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+```
+
+### AdjacentNetwork (θ = 100 ns)
+
+Use when the attacker is on the **local network** or uses **HTTP/2 request multiplexing**:
+
+- **LAN attacker** - Same network segment
+- **HTTP/2 APIs** - [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) enable LAN-like precision remotely
+- **Internal microservices** - Service-to-service calls
+
+```rust
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+```
+
+<Aside type="tip" title="Modern web APIs">
+If your API uses HTTP/2 or HTTP/3, treat it as `AdjacentNetwork` even if clients connect from the internet. Request multiplexing eliminates network jitter, enabling precision timing attacks.
+</Aside>
+
+### RemoteNetwork (θ = 50 μs)
+
+Use when the attacker measures timing over the **general internet**:
+
+- **Legacy HTTP/1.1 services** - No request multiplexing
+- **Public APIs** - General internet exposure
+- **Email/FTP** - Traditional protocols
+
+```rust
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+```
+
+### Research (θ → 0)
+
+Use for **debugging and profiling only**. Detects any statistical timing difference, no matter how small.
+
+<Aside type="caution">
+Don't use `Research` in CI—it will detect irrelevant differences that don't represent security vulnerabilities.
+</Aside>
+
+```rust
+TimingOracle::for_attacker(AttackerModel::Research)
+```
+
+### Custom Threshold
+
+For specific requirements:
+
+```rust
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
+```
+
+## Decision Guide
+
+```
+Is your code running in SGX, containers, or VMs where
+an attacker could be co-resident?
+    │
+    ├── Yes → SharedHardware (0.6 ns)
+    │
+    └── No
+        │
+        Does your API use HTTP/2, HTTP/3, or gRPC?
+            │
+            ├── Yes → AdjacentNetwork (100 ns)
+            │
+            └── No
+                │
+                Is the service on a private LAN?
+                    │
+                    ├── Yes → AdjacentNetwork (100 ns)
+                    │
+                    └── No → RemoteNetwork (50 μs)
+```
+
+## Threshold Floor Adjustment
+
+The library may automatically elevate the threshold if your requested θ is below what the measurement setup can reliably detect. This is called **θ_floor**.
+
+For example, if you request `SharedHardware` (0.6 ns) but the timer resolution is 42 ns (Apple Silicon), the effective threshold will be elevated to ~21 ns.
+
+When this happens:
+- The result includes both `theta_user` (what you requested) and `theta_eff` (what was used)
+- A `ThresholdElevated` diagnostic is set
+- The recommendation field explains the situation
+
+```rust
+match outcome {
+    Outcome::Pass { diagnostics, .. } => {
+        if diagnostics.theta_eff > diagnostics.theta_user {
+            println!("Note: Threshold elevated from {:.1} ns to {:.1} ns",
+                     diagnostics.theta_user, diagnostics.theta_eff);
+        }
+    }
+    // ...
+}
+```
+
+## Examples
+
+### SGX Enclave
+
+```rust
+// Testing enclave code - attacker has cycle-level access
+let outcome = TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .time_budget(Duration::from_secs(60))  // More time for tight threshold
+    .test(inputs, |data| enclave_operation(data));
+```
+
+### gRPC Microservice
+
+```rust
+// Internal service - attacker could be on LAN or use HTTP/2
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| service_handler(data));
+```
+
+### Legacy REST API
+
+```rust
+// HTTP/1.1 API over internet
+let outcome = TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+    .test(inputs, |data| api_handler(data));
+```
+
+## Further Reading
+
+- [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) - Why HTTP/2 enables LAN-like precision
+- [Remote Timing Attacks are Practical](https://crypto.stanford.edu/~dabo/papers/ssl-timing.pdf) - Classic paper on internet timing attacks
+- [Microarchitectural Timing Channels](https://ieeexplore.ieee.org/document/8835325) - Survey of shared hardware attacks

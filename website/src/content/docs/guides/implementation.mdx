@@ -1,0 +1,271 @@
+---
+title: Implementation Guide
+description: Platform-specific considerations, measurement protocols, and performance optimization
+sidebar:
+  order: 3
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+This guide provides detailed implementation guidance for the timing-oracle library, covering platform-specific considerations, measurement protocols, and performance optimization techniques.
+
+## Timer Implementation
+
+### Platform-Specific Timers
+
+timing-oracle uses the highest-resolution timer available on each platform:
+
+| Platform | Standard Timer | Resolution | PMU Timer | PMU Resolution | Requirements |
+|----------|----------------|------------|-----------|----------------|--------------|
+| x86_64 Linux | `rdtsc` | ~0.3 ns | `perf_event` | ~0.3 ns | sudo or CAP_PERFMON |
+| x86_64 macOS | `rdtsc` | ~0.3 ns | N/A | N/A | N/A |
+| ARM64 Linux | `cntvct_el0` | ~1-40 ns | `perf_event` | ~0.3 ns | sudo or CAP_PERFMON |
+| ARM64 macOS | `cntvct_el0` | ~41 ns | `kperf` | ~1 ns | sudo |
+
+<Aside>
+ARM64 Linux resolution varies by SoC: ARMv8.6+ (Graviton4) ~1 ns, Ampere Altra ~40 ns, Raspberry Pi 4 ~18 ns.
+</Aside>
+
+### Timer Selection Logic
+
+Implementations select timers in this order:
+
+1. **PMU timer** if available and requested (highest precision)
+2. **Platform-native cycle counter** (`rdtsc` on x86_64, `cntvct_el0` on ARM64)
+3. **OS high-resolution timer** (`clock_gettime` on POSIX) as fallback
+
+### Serialization Barriers
+
+To prevent out-of-order execution from affecting measurements:
+
+**x86_64:**
+```asm
+; Before rdtsc
+mfence
+lfence
+rdtsc
+; After rdtsc (if measuring end time)
+rdtscp  ; or lfence after rdtsc
+```
+
+**ARM64:**
+```asm
+; Before cntvct_el0
+isb
+mrs x0, cntvct_el0
+; After (if measuring end time)
+isb
+```
+
+---
+
+## Pre-flight Checks
+
+Pre-flight checks detect common problems before measurement begins.
+
+### Timer Sanity
+
+Verify the timer behaves correctly:
+
+1. **Monotonicity**: Read timer twice; second reading MUST be ≥ first
+2. **Reasonable rate**: Timer should advance at a plausible rate
+3. **Resolution check**: If trivial operation always returns 0 ticks, timer is too coarse
+
+### Harness Sanity (Fixed-vs-Fixed)
+
+Detects bugs in the test harness itself:
+
+1. Split the baseline (fixed) samples in half
+2. Run the full statistical analysis comparing the two halves
+3. If a "leak" is detected between identical inputs, the harness has a problem
+
+Common causes of harness sanity failures:
+- Generator called inside the timed region
+- Side effects from previous operations affecting timing
+- Memory allocation during measurement
+
+### Stationarity Check
+
+Non-stationarity (drift over time) violates bootstrap assumptions:
+
+1. Divide samples into W windows (default: 10)
+2. Compute median and IQR within each window
+3. Flag `stationarity_suspect = true` if max window median differs significantly from min
+
+When stationarity is suspect, continue the test but emit a quality warning.
+
+---
+
+## Measurement Protocol
+
+### Input Pre-generation
+
+All inputs MUST be generated *before* the measurement loop begins. Generating inputs inside the timed region causes false positives due to RNG timing variation.
+
+**Correct pattern:**
+```
+1. Pre-generate all baseline inputs into array
+2. Pre-generate all sample inputs into array
+3. Create randomized schedule of which class to measure
+4. For each measurement:
+   a. Select input from pre-generated array
+   b. Start timer
+   c. Execute operation
+   d. Stop timer
+   e. Record (class, timing) pair
+```
+
+### Interleaved Randomized Sampling
+
+Interleave baseline and sample measurements in randomized order to prevent systematic drift from biasing one class:
+
+1. Create a schedule array with equal counts of baseline/sample labels
+2. Shuffle the schedule using a seeded RNG (for reproducibility)
+3. Execute measurements in schedule order
+
+### Outlier Handling (Winsorization)
+
+Cap (don't drop) outliers to preserve signal from tail-heavy leaks:
+
+1. Pool all timing samples (both classes)
+2. Compute t_cap = 99.99th percentile of pooled data
+3. For each sample: y_t ← min(y_t, t_cap)
+
+**Quality thresholds for capping rate:**
+
+| Capped % | Quality | Action |
+|----------|---------|--------|
+| < 0.1% | Normal | Silent |
+| 0.1–1% | Warning | Emit quality warning |
+| 1–5% | Acceptable | Note in diagnostics |
+| > 5% | TooNoisy | Quality gate triggered |
+
+---
+
+## Adaptive Batching
+
+On platforms with coarse timer resolution, fast operations may complete in fewer ticks than needed for reliable measurement.
+
+### When Batching is Needed
+
+Enable batching when pilot measurement shows fewer than 5 ticks per operation call.
+
+**Pilot measurement procedure:**
+1. Run ~100 warmup iterations
+2. Measure median ticks per operation
+3. If median < 5 ticks, enable batching
+
+### Batch Size Selection
+
+```
+K = clamp(ceil(50 / ticks_per_call), 1, 20)
+```
+
+The maximum of 20 prevents microarchitectural artifacts from accumulating within a batch.
+
+### Batched Measurement
+
+When batching is enabled:
+1. Execute the operation K times consecutively
+2. Record the total time for all K executions as one sample
+3. The threshold scales: θ_batch = K × θ
+4. Reported effects are divided by K
+
+### When to Disable Batching
+
+Batching should be disabled when:
+- Timer resolution is fine enough (≥5 ticks per call)
+- Using PMU-based timers (kperf, perf_event)
+- Operation is inherently slow (>210 ns on ~42 ns resolution timer)
+
+---
+
+## Measurability Detection
+
+Some operations are too fast to measure reliably even with maximum batching.
+
+### Unmeasurable Threshold
+
+If ticks per call < 5 even with K=20 batching, return `Unmeasurable`:
+
+```
+ticks_per_call < 5 with K = 20 → operation_ns < (5 × tick_ns) / 20
+```
+
+For a 42 ns timer, this means operations faster than ~10 ns cannot be reliably measured.
+
+### Unmeasurable Response
+
+When an operation is unmeasurable, provide actionable guidance:
+- Suggest using a PMU timer if available
+- Suggest testing a more complex operation
+- Report the operation's estimated timing and the timer's resolution
+
+---
+
+## Performance Optimization
+
+### Parallel Bootstrap
+
+The 2,000-iteration block bootstrap is embarrassingly parallel. Use thread pools (rayon) to parallelize across CPU cores.
+
+**Implementation notes:**
+- Each thread needs its own RNG instance (seeded deterministically)
+- Accumulate covariance contributions using thread-local storage, then reduce
+- Typical speedup: 4-8x on multi-core systems
+
+### Memory-Efficient Covariance Accumulation
+
+Use Welford's online algorithm for numerically stable mean and covariance accumulation:
+
+```
+# For each bootstrap sample Δ*:
+n += 1
+delta = Δ* - mean
+mean += delta / n
+M2 += outer(delta, Δ* - mean)
+
+# Final covariance:
+Σ = M2 / (n - 1)
+```
+
+This avoids storing all bootstrap samples in memory.
+
+---
+
+## Platform-Specific Notes
+
+### x86_64
+
+**rdtsc behavior:**
+- Modern CPUs have invariant TSC (constant rate regardless of frequency scaling)
+- Check CPUID for `InvariantTSC` feature flag
+- If not invariant, results may be affected by frequency scaling
+
+**perf_event access:**
+- Requires `CAP_PERFMON` capability or `perf_event_paranoid ≤ 2`
+- To check: `cat /proc/sys/kernel/perf_event_paranoid`
+- To enable: `echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid`
+
+### Apple Silicon (ARM64 macOS)
+
+**cntvct_el0 characteristics:**
+- Fixed 24 MHz frequency on M1/M2/M3 (~41.67 ns resolution)
+- Not affected by performance/efficiency core differences
+- Always available without privileges
+
+**kperf access:**
+- Requires root privileges (no capability alternative)
+- Uses undocumented private framework
+- May break across macOS versions
+
+### ARM64 Linux
+
+**cntvct_el0 variations:**
+- Frequency varies by SoC
+- Some cloud instances (Graviton4) have 1 GHz counters (~1 ns)
+- Older SoCs may have 25-54 MHz counters (~18-40 ns)
+
+**perf_event access:**
+- Same as x86_64: requires `CAP_PERFMON` or `perf_event_paranoid ≤ 2`
+- Hardware PMU support varies by SoC

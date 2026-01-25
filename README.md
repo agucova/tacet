@@ -55,6 +55,8 @@ fn constant_time_compare() {
 
 The macro handles measurement and statistical analysis, returning an `Outcome` with pass/fail/inconclusive plus detailed diagnostics.
 
+> **📖 Important:** The baseline input must be chosen to create timing asymmetry with the sample input. For comparison functions, baseline should **match** the secret so it runs the full comparison (slow) while random samples exit early (fast). See [Choosing Input Classes](docs/guide.md#choosing-your-input-classes) for details.
+
 ---
 
 ## What It Catches

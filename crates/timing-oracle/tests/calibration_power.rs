@@ -213,7 +213,7 @@ fn power_validation_curve_pq_sentinel() {
 #[test]
 #[ignore]
 fn power_validation_curve_shared_hardware_pmu() {
-    if !TimerBackend::pmu_available() {
+    if !TimerBackend::cycle_accurate_available() {
         eprintln!("[power_validation_curve_shared_hardware_pmu] Skipped: PMU timer not available (run with sudo)");
         return;
     }
@@ -231,7 +231,7 @@ fn power_validation_curve_shared_hardware_pmu() {
 #[test]
 #[ignore]
 fn power_validation_curve_pq_sentinel_pmu() {
-    if !TimerBackend::pmu_available() {
+    if !TimerBackend::cycle_accurate_available() {
         eprintln!("[power_validation_curve_pq_sentinel_pmu] Skipped: PMU timer not available (run with sudo)");
         return;
     }

@@ -18,3 +18,28 @@ pub const B_TAIL: [f64; 9] = [-0.5, -0.375, -0.25, -0.125, 0.0, 0.125, 0.25, 0.3
 
 /// Natural log of 2*pi, used in multivariate normal log-pdf computation.
 pub const LOG_2PI: f64 = 1.8378770664093453;
+
+// =============================================================================
+// Default configuration constants (spec §3.4)
+// =============================================================================
+
+/// Default pass threshold for Bayesian decision: P(leak) < 0.05 means Pass.
+pub const DEFAULT_PASS_THRESHOLD: f64 = 0.05;
+
+/// Default fail threshold for Bayesian decision: P(leak) > 0.95 means Fail.
+pub const DEFAULT_FAIL_THRESHOLD: f64 = 0.95;
+
+/// Default number of bootstrap iterations for covariance estimation.
+pub const DEFAULT_BOOTSTRAP_ITERATIONS: usize = 2000;
+
+/// Default number of calibration samples per class.
+pub const DEFAULT_CALIBRATION_SAMPLES: usize = 5000;
+
+/// Default batch size for adaptive sampling loop.
+pub const DEFAULT_BATCH_SIZE: usize = 1000;
+
+/// Default maximum samples per class before stopping.
+pub const DEFAULT_MAX_SAMPLES: usize = 1_000_000;
+
+/// Default time budget in seconds.
+pub const DEFAULT_TIME_BUDGET_SECS: u64 = 60;

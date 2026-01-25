@@ -1,0 +1,234 @@
+---
+title: JavaScript API
+description: API documentation for the JavaScript NAPI bindings
+sidebar:
+  order: 5
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import { PackageManagers } from 'starlight-package-managers';
+
+This document covers the JavaScript/TypeScript bindings for timing-oracle via NAPI-RS.
+
+## Installation
+
+<PackageManagers pkg="@timing-oracle/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+
+## Quick Start
+
+```typescript
+import { TimingOracle, AttackerModel } from '@timing-oracle/js';
+import crypto from 'crypto';
+
+const result = TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .timeBudget(30_000)  // 30 seconds
+  .test(
+    {
+      baseline: () => Buffer.alloc(32, 0),
+      sample: () => crypto.randomBytes(32),
+    },
+    (input) => myCryptoFunction(input)
+  );
+
+if (result.isFail()) {
+  console.error(`Timing leak: ${result.exploitabilityString()}`);
+  process.exit(1);
+}
+
+// Or use assertion style
+result.assertNoLeak();  // throws TimingLeakError if Fail
+```
+
+---
+
+## TimingOracle API
+
+### `TimingOracle.forAttacker(model: AttackerModel)`
+
+Create a TimingOracle for a specific attacker model.
+
+```typescript
+enum AttackerModel {
+  SharedHardware,    // 0.6 ns threshold - SGX, containers
+  PostQuantum,       // 3.3 ns threshold - PQ crypto
+  AdjacentNetwork,   // 100 ns threshold - LAN, HTTP/2
+  RemoteNetwork,     // 50 us threshold - Internet
+  Research,          // ~0 threshold - Detect any difference
+}
+```
+
+### Builder Methods
+
+```typescript
+TimingOracle
+  .forAttacker(AttackerModel.AdjacentNetwork)
+  .timeBudget(30_000)         // Time budget in ms (default: 30,000)
+  .maxSamples(100_000)        // Max samples per class (default: 100,000)
+  .customThreshold(500)       // Custom threshold in ns
+  .passThreshold(0.05)        // Pass if P(leak) < this
+  .failThreshold(0.95)        // Fail if P(leak) > this
+  .seed(12345)                // Random seed
+  .showProgress(true)         // Print progress to stderr
+  .test(inputs, operation);
+```
+
+### `test<T>(inputs, operation)`
+
+Run the timing test.
+
+```typescript
+interface InputPair<T> {
+  baseline: () => T;  // Generate baseline input (typically all zeros)
+  sample: () => T;    // Generate sample input (typically random)
+}
+```
+
+---
+
+## TimingTestResult
+
+The `test()` method returns a `TimingTestResult` with helper methods:
+
+### Outcome Predicates
+
+```typescript
+result.isPass()         // No leak detected
+result.isFail()         // Leak detected
+result.isInconclusive() // Could not decide
+result.isUnmeasurable() // Operation too fast
+result.isConclusive()   // Pass or Fail
+```
+
+### String Formatters
+
+```typescript
+result.outcomeString()           // "Pass", "Fail", etc.
+result.exploitabilityString()    // "SharedHardwareOnly", "Http2Multiplexing", etc.
+result.qualityString()           // "Excellent", "Good", "Poor", "TooNoisy"
+result.leakProbabilityPercent()  // "12.3%"
+result.toString()                // Human-readable summary
+```
+
+### Assertion
+
+```typescript
+result.assertNoLeak();  // throws TimingLeakError if Fail
+```
+
+---
+
+## Error Classes
+
+```typescript
+import {
+  TimingOracleError,
+  TimingLeakError,
+  CalibrationError,
+  InsufficientSamplesError,
+} from '@timing-oracle/js';
+
+try {
+  result.assertNoLeak();
+} catch (e) {
+  if (e instanceof TimingLeakError) {
+    console.error(`Leak: ${e.result.exploitabilityString()}`);
+  }
+}
+```
+
+---
+
+## Low-Level API
+
+For advanced use cases, you can use the low-level functions directly.
+
+### `collectSamples()`
+
+Collect timing samples with automatic batch K detection.
+
+```typescript
+import { collectSamples } from '@timing-oracle/js';
+
+const samples = collectSamples(
+  10_000,
+  () => new Uint8Array(32).fill(0),
+  () => crypto.getRandomValues(new Uint8Array(32)),
+  (input) => myOperation(input)
+);
+```
+
+### `analyze()`
+
+Run complete analysis on pre-collected timing data.
+
+```typescript
+import { analyze, calibrateTimer, configAdjacentNetwork } from '@timing-oracle/js';
+
+const result = analyze(
+  BigInt64Array.from(baselineSamples),
+  BigInt64Array.from(sampleSamples),
+  configAdjacentNetwork(),
+  calibrateTimer().frequencyHz
+);
+```
+
+### Adaptive Sampling
+
+```typescript
+import {
+  calibrateSamples,
+  adaptiveStepBatch,
+  AdaptiveState,
+  collectBatches,
+} from '@timing-oracle/js';
+
+const calibration = calibrateSamples(calBaseline, calSample, config, timer.frequencyHz);
+const state = new AdaptiveState();
+
+for (const batch of collectBatches(1000, baselineGen, sampleGen, operation)) {
+  const step = adaptiveStepBatch(calibration, state, batch.baseline, batch.sample, config, elapsed);
+  if (step.isDecision) break;
+}
+```
+
+---
+
+## Result Types
+
+### `Outcome`
+
+```typescript
+enum Outcome {
+  Pass,         // No leak detected
+  Fail,         // Leak confirmed
+  Inconclusive, // Cannot decide
+  Unmeasurable, // Operation too fast
+}
+```
+
+### `Exploitability`
+
+```typescript
+enum Exploitability {
+  SharedHardwareOnly,  // < 10 ns
+  Http2Multiplexing,   // 10-100 ns
+  StandardRemote,      // 100 ns - 10 us
+  ObviousLeak,         // > 10 us
+}
+```
+
+---
+
+## Platform Notes
+
+### Timer Resolution
+
+- **x86_64**: High resolution (~0.3-0.5 ns) via `rdtsc`
+- **Apple Silicon**: Lower resolution (~42 ns) via `cntvct_el0`
+
+On Apple Silicon, the library automatically uses adaptive batching to compensate.
+
+<Aside>
+Privileged timers (`PmuTimer`, `LinuxPerfTimer`) are not currently exposed in the JS bindings. Use the Rust API directly for cycle-accurate measurements.
+</Aside>

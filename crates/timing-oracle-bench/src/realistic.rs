@@ -100,10 +100,10 @@ pub struct RealisticBlockedData {
 pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
     let wall_start = Instant::now();
 
-    // Initialize PMU timer - panics if unavailable (requires sudo)
-    // This ensures we get cycle-accurate measurements (~1ns resolution)
+    // Initialize cycle-accurate timer - panics if unavailable (requires sudo on ARM64)
+    // This ensures we get cycle-accurate measurements (~0.3ns resolution)
     // instead of the coarse cntvct_el0 timer (~42ns on Apple Silicon)
-    let mut timer = TimerSpec::PreferPmu.create_timer();
+    let (mut timer, _fallback_reason) = TimerSpec::RequireCycleAccurate.create_timer();
     let cycles_per_ns = timer.cycles_per_ns();
     let resolution_ns = timer.resolution_ns();
 
@@ -351,10 +351,10 @@ pub fn realistic_to_generated(dataset: &RealisticDataset) -> crate::GeneratedDat
 mod tests {
     use super::*;
 
-    /// Skip test if PMU is not available (requires sudo on macOS/Linux)
-    fn skip_if_no_pmu() -> bool {
-        if !TimerSpec::pmu_available() {
-            eprintln!("Skipping test: PMU not available (requires sudo)");
+    /// Skip test if cycle-accurate timing is not available (requires sudo on ARM64)
+    fn skip_if_no_cycle_accurate() -> bool {
+        if !TimerSpec::cycle_accurate_available() {
+            eprintln!("Skipping test: cycle-accurate timing not available (requires sudo on ARM64)");
             return true;
         }
         false
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn test_collect_null_dataset() {
-        if skip_if_no_pmu() {
+        if skip_if_no_cycle_accurate() {
             return;
         }
 
@@ -390,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_collect_fixed_delay_dataset() {
-        if skip_if_no_pmu() {
+        if skip_if_no_cycle_accurate() {
             return;
         }
 
@@ -421,7 +421,7 @@ mod tests {
 
     #[test]
     fn test_interleaved_ordering() {
-        if skip_if_no_pmu() {
+        if skip_if_no_cycle_accurate() {
             return;
         }
 
@@ -450,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_deterministic_ordering() {
-        if skip_if_no_pmu() {
+        if skip_if_no_cycle_accurate() {
             return;
         }
 
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn test_timer_uses_precise_counter() {
-        if skip_if_no_pmu() {
+        if skip_if_no_cycle_accurate() {
             return;
         }
 

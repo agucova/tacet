@@ -22,6 +22,8 @@ import {
   type TimerInfo,
 } from "./collector.js";
 
+import { TimingTestResult } from "./result.js";
+
 /** Input pair generators for baseline and sample classes. */
 export interface InputPair<T> {
   /** Generate baseline input (typically all zeros). */
@@ -30,7 +32,7 @@ export interface InputPair<T> {
   sample: () => T;
 }
 
-/** Extended result with additional metadata. */
+/** Extended result with additional metadata (deprecated, use TimingTestResult). */
 export interface TestResult extends AnalysisResult {
   /** Batching info from pilot phase. */
   batchingInfo: BatchingInfo;
@@ -43,7 +45,7 @@ export interface TestResult extends AnalysisResult {
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModel, Outcome } from '@timing-oracle/node';
+ * import { TimingOracle, AttackerModel, Outcome } from '@timing-oracle/js';
  * import crypto from 'crypto';
  *
  * const result = TimingOracle
@@ -65,6 +67,7 @@ export interface TestResult extends AnalysisResult {
  */
 export class TimingOracle {
   private config: Config;
+  private _showProgress = false;
 
   private constructor(attackerModel: AttackerModel) {
     this.config = defaultConfig(attackerModel);
@@ -147,6 +150,19 @@ export class TimingOracle {
   }
 
   /**
+   * Enable progress output to stderr.
+   *
+   * When enabled, prints progress updates during the test:
+   * `[12.3s] P(leak)=2.1%, samples=45000`
+   *
+   * @param enabled Whether to show progress (default: true)
+   */
+  showProgress(enabled: boolean = true): this {
+    this._showProgress = enabled;
+    return this;
+  }
+
+  /**
    * Run the timing test.
    *
    * This is the main entry point. It:
@@ -158,7 +174,7 @@ export class TimingOracle {
    * @param operation The operation to test
    * @returns Test result with outcome, effect size, and diagnostics
    */
-  test<T>(inputs: InputPair<T>, operation: (input: T) => void): TestResult {
+  test<T>(inputs: InputPair<T>, operation: (input: T) => void): TimingTestResult {
     const startTime = performance.now();
     const timeBudgetMs = this.config.timeBudgetMs;
     const maxSamples = this.config.maxSamples;
@@ -203,11 +219,10 @@ export class TimingOracle {
 
     // Check if we got a decision from calibration samples alone
     if (stepResult.isDecision && stepResult.result) {
-      return {
-        ...stepResult.result,
-        batchingInfo,
-        timerInfo,
-      };
+      if (this._showProgress) {
+        process.stderr.write("\n");
+      }
+      return new TimingTestResult(stepResult.result, batchingInfo, timerInfo);
     }
 
     // Adaptive loop
@@ -247,16 +262,27 @@ export class TimingOracle {
         currentElapsed
       );
 
+      // Show progress if enabled
+      if (this._showProgress) {
+        const pct = (stepResult.currentProbability * 100).toFixed(1);
+        const n = state.totalBaseline;
+        const elapsed = currentElapsed.toFixed(1);
+        process.stderr.write(`\r[${elapsed}s] P(leak)=${pct}%, samples=${n}`);
+      }
+
       if (stepResult.isDecision && stepResult.result) {
-        return {
-          ...stepResult.result,
-          batchingInfo,
-          timerInfo,
-        };
+        if (this._showProgress) {
+          process.stderr.write("\n");
+        }
+        return new TimingTestResult(stepResult.result, batchingInfo, timerInfo);
       }
     }
 
     // Budget exceeded - run final analysis on ALL collected samples
+    if (this._showProgress) {
+      process.stderr.write("\n");
+    }
+
     const finalBaseline = new BigInt64Array(allBaseline);
     const finalSample = new BigInt64Array(allSample);
 
@@ -267,11 +293,7 @@ export class TimingOracle {
       timerInfo.frequencyHz
     );
 
-    return {
-      ...finalResult,
-      batchingInfo,
-      timerInfo,
-    };
+    return new TimingTestResult(finalResult, batchingInfo, timerInfo);
   }
 
   /**
@@ -332,3 +354,14 @@ export {
   type CollectedSamples,
   type TimerInfo,
 } from "./collector.js";
+
+// Re-export result wrapper
+export { TimingTestResult } from "./result.js";
+
+// Re-export error classes
+export {
+  TimingOracleError,
+  TimingLeakError,
+  CalibrationError,
+  InsufficientSamplesError,
+} from "./errors.js";

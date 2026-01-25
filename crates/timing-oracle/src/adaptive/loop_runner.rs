@@ -19,7 +19,10 @@ use crate::adaptive::{
     QualityGateConfig, QualityGateResult,
 };
 use crate::analysis::bayes::compute_bayes_gibbs;
-use crate::constants::DEFAULT_SEED;
+use crate::constants::{
+    DEFAULT_BATCH_SIZE, DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD,
+    DEFAULT_SEED,
+};
 use crate::measurement::winsorize_f64;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
 use timing_oracle_core::adaptive::{
@@ -62,11 +65,11 @@ pub struct AdaptiveConfig {
 impl Default for AdaptiveConfig {
     fn default() -> Self {
         Self {
-            batch_size: 1000,
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            batch_size: DEFAULT_BATCH_SIZE,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
             time_budget: Duration::from_secs(30),
-            max_samples: 1_000_000,
+            max_samples: DEFAULT_MAX_SAMPLES,
             theta_ns: 100.0,
             seed: DEFAULT_SEED,
             quality_gates: QualityGateConfig::default(),

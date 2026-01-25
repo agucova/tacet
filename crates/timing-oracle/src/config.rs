@@ -4,6 +4,11 @@
 
 use std::time::Duration;
 
+use crate::constants::{
+    DEFAULT_BATCH_SIZE, DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_CALIBRATION_SAMPLES,
+    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD,
+    DEFAULT_TIME_BUDGET_SECS,
+};
 use crate::types::AttackerModel;
 
 /// Configuration options for `TimingOracle`.
@@ -228,14 +233,14 @@ impl Default for Config {
         #[allow(deprecated)]
         Self {
             // Decision thresholds
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
 
             // Resource limits
-            time_budget: Duration::from_secs(60),
-            max_samples: 1_000_000,
-            batch_size: 1_000,
-            calibration_samples: 5_000,
+            time_budget: Duration::from_secs(DEFAULT_TIME_BUDGET_SECS),
+            max_samples: DEFAULT_MAX_SAMPLES,
+            batch_size: DEFAULT_BATCH_SIZE,
+            calibration_samples: DEFAULT_CALIBRATION_SAMPLES,
 
             // Effect thresholds
             min_effect_of_concern_ns: 10.0,
@@ -252,7 +257,7 @@ impl Default for Config {
 
             // Bayesian inference
             prior_no_leak: 0.75,
-            cov_bootstrap_iterations: 2_000,
+            cov_bootstrap_iterations: DEFAULT_BOOTSTRAP_ITERATIONS,
 
             // Sample splitting
             calibration_fraction: 0.3,

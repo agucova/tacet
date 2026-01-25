@@ -36,16 +36,16 @@ bindings/cpp/*.o
 bindings/cpp/test_cpp_wrapper
 
 # =============================================================================
-# Go Bindings (go/timingoracle)
+# Go Bindings
 # =============================================================================
 
 # Go test binaries
-go/timingoracle/*.test
-go/timingoracle/examples/simple/simple
+crates/timing-oracle-go/*.test
+crates/timing-oracle-go/examples/simple/simple
 
 # Coverage files
-go/timingoracle/*.out
-go/timingoracle/coverage.html
+crates/timing-oracle-go/*.out
+crates/timing-oracle-go/coverage.html
 
 # =============================================================================
 # Node.js/NAPI Bindings (crates/timing-oracle-napi)
@@ -60,6 +60,22 @@ crates/timing-oracle-napi/*.node
 
 # TypeScript compiled output (generated during build)
 crates/timing-oracle-napi/dist/
+
+# =============================================================================
+# Documentation Website (website/)
+# =============================================================================
+
+# Dependencies
+website/node_modules/
+
+# Build output
+website/dist/
+
+# Astro cache
+website/.astro/
+
+# Wrangler
+website/.wrangler/
 
 # =============================================================================
 # IDE / Editor

@@ -20,6 +20,31 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// Standardized outcome category for cross-tool comparison.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutcomeCategory {
+    /// Tool determined no timing leak exists.
+    Pass,
+    /// Tool determined a timing leak exists.
+    Fail,
+    /// Tool could not reach a decision (insufficient samples, unmeasurable, etc.).
+    Inconclusive,
+    /// An error occurred during analysis.
+    Error,
+}
+
+impl OutcomeCategory {
+    /// Convert to lowercase string for CSV output.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail => "fail",
+            Self::Inconclusive => "inconclusive",
+            Self::Error => "error",
+        }
+    }
+}
+
 /// Result from a timing analysis tool.
 #[derive(Debug, Clone)]
 pub struct ToolResult {
@@ -33,6 +58,8 @@ pub struct ToolResult {
     pub leak_probability: Option<f64>,
     /// Tool-specific status message.
     pub status: String,
+    /// Standardized outcome category for cross-tool comparison.
+    pub outcome: OutcomeCategory,
 }
 
 /// Common interface for timing side-channel detection tools.
@@ -68,6 +95,28 @@ pub trait ToolAdapter: Send + Sync {
     /// Whether this tool benefits from interleaved data.
     fn uses_interleaved(&self) -> bool {
         false
+    }
+
+    /// Whether this tool supports configurable attacker models.
+    ///
+    /// Only timing-oracle currently supports this. Other tools ignore
+    /// the attacker_model parameter.
+    fn supports_attacker_model(&self) -> bool {
+        false
+    }
+
+    /// Analyze with a specific attacker model.
+    ///
+    /// For tools that support attacker models (timing-oracle), this overrides
+    /// the default attacker model for this single analysis.
+    /// For other tools, this is equivalent to `analyze()`.
+    fn analyze_with_attacker_model(
+        &self,
+        dataset: &GeneratedDataset,
+        _attacker_model: Option<AttackerModel>,
+    ) -> ToolResult {
+        // Default: ignore attacker_model, use regular analyze
+        self.analyze(dataset)
     }
 }
 
@@ -173,6 +222,7 @@ impl ToolAdapter for TimingOracleAdapter {
                 decision_time_ms: elapsed_ms,
                 leak_probability: Some(leak_probability),
                 status: format!("Pass (P={:.1}%)", leak_probability * 100.0),
+                outcome: OutcomeCategory::Pass,
             },
             Outcome::Fail {
                 leak_probability,
@@ -189,6 +239,7 @@ impl ToolAdapter for TimingOracleAdapter {
                     leak_probability * 100.0,
                     exploitability
                 ),
+                outcome: OutcomeCategory::Fail,
             },
             Outcome::Inconclusive {
                 leak_probability,
@@ -204,6 +255,7 @@ impl ToolAdapter for TimingOracleAdapter {
                     decision_time_ms: elapsed_ms,
                     leak_probability: Some(leak_probability),
                     status: format!("Inconclusive: {:?}", reason),
+                    outcome: OutcomeCategory::Inconclusive,
                 }
             }
             Outcome::Unmeasurable { recommendation, .. } => ToolResult {
@@ -212,6 +264,7 @@ impl ToolAdapter for TimingOracleAdapter {
                 decision_time_ms: elapsed_ms,
                 leak_probability: None,
                 status: format!("Unmeasurable: {}", recommendation),
+                outcome: OutcomeCategory::Inconclusive,
             },
             Outcome::Research(research) => ToolResult {
                 detected_leak: matches!(
@@ -222,6 +275,14 @@ impl ToolAdapter for TimingOracleAdapter {
                 decision_time_ms: elapsed_ms,
                 leak_probability: None,
                 status: format!("Research: {:?}", research.status),
+                outcome: if matches!(
+                    research.status,
+                    timing_oracle::result::ResearchStatus::EffectDetected
+                ) {
+                    OutcomeCategory::Fail
+                } else {
+                    OutcomeCategory::Pass
+                },
             },
         }
     }
@@ -231,6 +292,109 @@ impl ToolAdapter for TimingOracleAdapter {
     // temporal correlation information for covariance estimation.
     fn uses_interleaved(&self) -> bool {
         false // Use blocked for now; the statistical model is the main advantage
+    }
+
+    fn supports_attacker_model(&self) -> bool {
+        true
+    }
+
+    fn analyze_with_attacker_model(
+        &self,
+        dataset: &GeneratedDataset,
+        attacker_model: Option<AttackerModel>,
+    ) -> ToolResult {
+        // Use provided attacker model, or fall back to self's default
+        let actual_model = attacker_model.unwrap_or(self.attacker_model);
+
+        let start = Instant::now();
+
+        let baseline_ns: Vec<f64> = dataset.blocked.baseline.iter().map(|&c| c as f64).collect();
+        let test_ns: Vec<f64> = dataset.blocked.test.iter().map(|&c| c as f64).collect();
+
+        let mut oracle = TimingOracle::for_attacker(actual_model);
+
+        if let Some(budget) = self.time_budget {
+            oracle = oracle.time_budget(budget);
+        }
+        if let Some(max) = self.max_samples {
+            oracle = oracle.max_samples(max);
+        }
+
+        let outcome = oracle.analyze_raw_samples(&baseline_ns, &test_ns);
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+
+        match outcome {
+            Outcome::Pass {
+                leak_probability,
+                samples_used,
+                ..
+            } => ToolResult {
+                detected_leak: false,
+                samples_used,
+                decision_time_ms: elapsed_ms,
+                leak_probability: Some(leak_probability),
+                status: format!("Pass (P={:.1}%)", leak_probability * 100.0),
+                outcome: OutcomeCategory::Pass,
+            },
+            Outcome::Fail {
+                leak_probability,
+                samples_used,
+                exploitability,
+                ..
+            } => ToolResult {
+                detected_leak: true,
+                samples_used,
+                decision_time_ms: elapsed_ms,
+                leak_probability: Some(leak_probability),
+                status: format!(
+                    "Fail (P={:.1}%, {:?})",
+                    leak_probability * 100.0,
+                    exploitability
+                ),
+                outcome: OutcomeCategory::Fail,
+            },
+            Outcome::Inconclusive {
+                leak_probability,
+                samples_used,
+                reason,
+                ..
+            } => {
+                ToolResult {
+                    detected_leak: false,
+                    samples_used,
+                    decision_time_ms: elapsed_ms,
+                    leak_probability: Some(leak_probability),
+                    status: format!("Inconclusive: {:?}", reason),
+                    outcome: OutcomeCategory::Inconclusive,
+                }
+            }
+            Outcome::Unmeasurable { recommendation, .. } => ToolResult {
+                detected_leak: false,
+                samples_used: 0,
+                decision_time_ms: elapsed_ms,
+                leak_probability: None,
+                status: format!("Unmeasurable: {}", recommendation),
+                outcome: OutcomeCategory::Inconclusive,
+            },
+            Outcome::Research(research) => ToolResult {
+                detected_leak: matches!(
+                    research.status,
+                    timing_oracle::result::ResearchStatus::EffectDetected
+                ),
+                samples_used: research.samples_used,
+                decision_time_ms: elapsed_ms,
+                leak_probability: None,
+                status: format!("Research: {:?}", research.status),
+                outcome: if matches!(
+                    research.status,
+                    timing_oracle::result::ResearchStatus::EffectDetected
+                ) {
+                    OutcomeCategory::Fail
+                } else {
+                    OutcomeCategory::Pass
+                },
+            },
+        }
     }
 }
 
@@ -298,6 +462,7 @@ impl ToolAdapter for DudectAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for t-test".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -316,6 +481,7 @@ impl ToolAdapter for DudectAdapter {
                 summary.max_tau,
                 self.t_threshold
             ),
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -387,6 +553,7 @@ impl ToolAdapter for RtlfAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: None,
                     status: format!("Failed to create temp dir: {}", e),
+                    outcome: OutcomeCategory::Error,
                 };
             }
         };
@@ -402,6 +569,7 @@ impl ToolAdapter for RtlfAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Failed to write input: {}", e),
+                outcome: OutcomeCategory::Error,
             };
         }
 
@@ -417,6 +585,7 @@ impl ToolAdapter for RtlfAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value),
                     status: format!("p={:.4}, alpha={:.2}", p_value, self.alpha),
+                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
                 }
             }
             Err(e) => ToolResult {
@@ -425,6 +594,7 @@ impl ToolAdapter for RtlfAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Error: {}", e),
+                outcome: OutcomeCategory::Error,
             },
         }
     }
@@ -604,6 +774,7 @@ impl ToolAdapter for SilentAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: None,
                     status: format!("Failed to create temp dir: {}", e),
+                    outcome: OutcomeCategory::Error,
                 };
             }
         };
@@ -619,6 +790,7 @@ impl ToolAdapter for SilentAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Failed to write input: {}", e),
+                outcome: OutcomeCategory::Error,
             };
         }
 
@@ -644,6 +816,7 @@ impl ToolAdapter for SilentAdapter {
                         "stat={:.3}, alpha={:.2}, delta={:.0}",
                         stat, self.alpha, self.delta
                     ),
+                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
                 }
             }
             Err(e) => ToolResult {
@@ -652,6 +825,7 @@ impl ToolAdapter for SilentAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Error: {}", e),
+                outcome: OutcomeCategory::Error,
             },
         }
     }
@@ -790,6 +964,7 @@ impl ToolAdapter for RtlfDockerAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Failed to create temp dir: {}", e),
+                outcome: OutcomeCategory::Error,
             };
         }
 
@@ -803,6 +978,7 @@ impl ToolAdapter for RtlfDockerAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Failed to write input: {}", e),
+                outcome: OutcomeCategory::Error,
             };
         }
 
@@ -821,6 +997,7 @@ impl ToolAdapter for RtlfDockerAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value), // Convert p-value to "leak probability"
                     status: format!("p={:.4}, alpha={:.2}", p_value, self.alpha),
+                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
                 }
             }
             Err(e) => ToolResult {
@@ -829,6 +1006,7 @@ impl ToolAdapter for RtlfDockerAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Error: {}", e),
+                outcome: OutcomeCategory::Error,
             },
         }
     }
@@ -967,6 +1145,7 @@ impl ToolAdapter for TimingTvlaAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for t-test".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -980,6 +1159,7 @@ impl ToolAdapter for TimingTvlaAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: None, // TVLA doesn't give probabilities
             status: format!("|t|={:.2}, threshold={:.1}", t_stat.abs(), self.t_threshold),
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -1066,6 +1246,7 @@ impl ToolAdapter for KsTestAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for KS test".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -1079,6 +1260,7 @@ impl ToolAdapter for KsTestAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: Some(1.0 - p_value),
             status: format!("D={:.4}, p={:.4}, alpha={:.2}", d_stat, p_value, self.alpha),
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -1210,6 +1392,7 @@ impl ToolAdapter for AndersonDarlingAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for AD test".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -1223,6 +1406,7 @@ impl ToolAdapter for AndersonDarlingAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: Some(1.0 - p_value),
             status: format!("A²={:.4}, p={:.4}, alpha={:.2}", a2_stat, p_value, self.alpha),
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -1447,6 +1631,7 @@ impl ToolAdapter for MonaAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for box test (need >= 100 per class)".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -1462,6 +1647,7 @@ impl ToolAdapter for MonaAdapter {
             } else {
                 "no non-overlapping box found".to_string()
             },
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -1598,6 +1784,7 @@ impl ToolAdapter for RtlfNativeAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for RTLF (need >= 100 per class)".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -1621,6 +1808,7 @@ impl ToolAdapter for RtlfNativeAdapter {
             } else {
                 format!("no significant deciles, max_excess={:.2}", max_excess)
             },
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -1868,6 +2056,7 @@ impl ToolAdapter for SilentNativeAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: "Insufficient samples for SILENT (need >= 30 per class)".to_string(),
+                outcome: OutcomeCategory::Inconclusive,
             };
         }
 
@@ -1888,6 +2077,7 @@ impl ToolAdapter for SilentNativeAdapter {
                 "diff={:.1}ns, CI_lower={:.1}ns, Δ={:.1}ns",
                 observed_diff, ci_lower, delta_used
             ),
+            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
         }
     }
 
@@ -2052,6 +2242,7 @@ impl ToolAdapter for TlsfuzzerAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: None,
                     status: format!("Failed to create temp dir: {}", e),
+                    outcome: OutcomeCategory::Error,
                 };
             }
         };
@@ -2066,6 +2257,7 @@ impl ToolAdapter for TlsfuzzerAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Failed to write input: {}", e),
+                outcome: OutcomeCategory::Error,
             };
         }
 
@@ -2086,6 +2278,7 @@ impl ToolAdapter for TlsfuzzerAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value),
                     status: format!("{}(p={:.4}), alpha={:.2}", test_name, p_value, self.alpha),
+                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
                 }
             }
             Err(e) => ToolResult {
@@ -2094,6 +2287,7 @@ impl ToolAdapter for TlsfuzzerAdapter {
                 decision_time_ms: start.elapsed().as_millis() as u64,
                 leak_probability: None,
                 status: format!("Error: {}", e),
+                outcome: OutcomeCategory::Error,
             },
         }
     }
@@ -2288,6 +2482,7 @@ impl ToolAdapter for StubAdapter {
             decision_time_ms: 0,
             leak_probability: None,
             status: format!("{} not available", self.name),
+            outcome: OutcomeCategory::Error,
         }
     }
 }

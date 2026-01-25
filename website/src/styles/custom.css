@@ -1,0 +1,36 @@
+/* Custom styles for timing-oracle documentation */
+
+:root {
+  /* Primary brand colors - subtle blue-gray for technical docs */
+  --sl-color-accent-low: #1e2937;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #93c5fd;
+
+  /* Improve code block contrast */
+  --sl-color-bg-inline-code: rgba(59, 130, 246, 0.1);
+}
+
+/* Better code block styling */
+.expressive-code {
+  border-radius: 0.5rem;
+}
+
+/* Improve table readability */
+table {
+  font-size: 0.9rem;
+}
+
+/* Highlight important callouts */
+.starlight-aside--caution {
+  --sl-color-asides-text-accent: #f59e0b;
+}
+
+.starlight-aside--danger {
+  --sl-color-asides-text-accent: #ef4444;
+}
+
+/* Terminal output styling */
+pre[data-language="text"] {
+  background: #1a1a1a;
+  color: #e5e5e5;
+}

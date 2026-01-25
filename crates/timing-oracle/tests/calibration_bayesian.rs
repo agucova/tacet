@@ -118,7 +118,7 @@ fn bayesian_calibration_validation_remote_network() {
 #[test]
 #[ignore]
 fn bayesian_calibration_validation_pmu() {
-    if !TimerBackend::pmu_available() {
+    if !TimerBackend::cycle_accurate_available() {
         eprintln!("[bayesian_calibration_validation_pmu] Skipped: PMU timer not available");
         return;
     }

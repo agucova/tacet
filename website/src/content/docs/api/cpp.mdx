@@ -1,0 +1,324 @@
+---
+title: C++ API
+description: API documentation for the C++ bindings
+sidebar:
+  order: 3
+---
+
+C++ wrapper for timing-oracle, providing RAII semantics and modern C++ idioms.
+
+## Quick Reference
+
+```cpp
+#include <timing_oracle.hpp>
+#include <iostream>
+#include <cstring>
+#include <random>
+
+int main() {
+    auto result = timing_oracle::test(
+        timing_oracle::AttackerModel::AdjacentNetwork,
+        32,  // input size
+        [](bool is_baseline, uint8_t* out, size_t size) {
+            if (is_baseline) {
+                std::memset(out, 0, size);
+            } else {
+                std::random_device rd;
+                std::generate(out, out + size, [&rd]() { return rd(); });
+            }
+        },
+        [](const uint8_t* input, size_t size) {
+            my_crypto_function(input, size);
+        }
+    );
+
+    switch (result.outcome()) {
+        case timing_oracle::Outcome::Pass:
+            std::cout << "No leak detected\n";
+            break;
+        case timing_oracle::Outcome::Fail:
+            std::cout << "Leak: " << result.effect().shift_ns << " ns\n";
+            break;
+        case timing_oracle::Outcome::Inconclusive:
+            std::cout << "Inconclusive\n";
+            break;
+        case timing_oracle::Outcome::Unmeasurable:
+            std::cout << "Too fast to measure\n";
+            break;
+    }
+}
+```
+
+---
+
+## Installation
+
+The C++ wrapper is a header-only library that wraps the C bindings.
+
+```bash
+git clone https://github.com/agucova/timing-oracle
+cd timing-oracle
+cargo build --release -p timing-oracle-c
+
+# Headers at:
+#   crates/timing-oracle-c/include/timing_oracle.h   (C API)
+#   crates/timing-oracle-c/include/timing_oracle.hpp (C++ wrapper)
+# Library at: target/release/libtiming_oracle_c.{a,so,dylib}
+```
+
+---
+
+## Namespace
+
+All C++ API types are in the `timing_oracle` namespace.
+
+```cpp
+namespace timing_oracle {
+    enum class AttackerModel { ... };
+    enum class Outcome { ... };
+    struct Effect { ... };
+    struct Result { ... };
+    struct Config { ... };
+    Result test(...);
+}
+```
+
+---
+
+## Configuration
+
+### AttackerModel
+
+```cpp
+enum class AttackerModel {
+    SharedHardware,    // ~0.6 ns threshold
+    PostQuantum,       // ~3.3 ns threshold
+    AdjacentNetwork,   // 100 ns threshold (default)
+    RemoteNetwork,     // 50 μs threshold
+    Research,          // ~0 threshold
+    Custom             // User-defined threshold
+};
+```
+
+### Config Builder
+
+```cpp
+auto config = timing_oracle::Config::builder()
+    .attacker_model(timing_oracle::AttackerModel::SharedHardware)
+    .time_budget_secs(60.0)
+    .max_samples(50000)
+    .pass_threshold(0.01)
+    .fail_threshold(0.99)
+    .build();
+
+auto result = timing_oracle::test(config, 32, generator, operation);
+```
+
+---
+
+## Test Function
+
+### Lambda-based API
+
+```cpp
+template<typename Generator, typename Operation>
+Result test(
+    AttackerModel model,
+    size_t input_size,
+    Generator&& generator,
+    Operation&& operation
+);
+```
+
+**Generator signature:**
+```cpp
+void generator(bool is_baseline, uint8_t* output, size_t size);
+```
+
+**Operation signature:**
+```cpp
+void operation(const uint8_t* input, size_t size);
+```
+
+### Config-based API
+
+```cpp
+template<typename Generator, typename Operation>
+Result test(
+    const Config& config,
+    size_t input_size,
+    Generator&& generator,
+    Operation&& operation
+);
+```
+
+---
+
+## Result Types
+
+### Outcome
+
+```cpp
+enum class Outcome {
+    Pass,         // No leak detected
+    Fail,         // Leak confirmed
+    Inconclusive, // Cannot decide
+    Unmeasurable  // Operation too fast
+};
+```
+
+### Result
+
+```cpp
+struct Result {
+    Outcome outcome() const;
+    double leak_probability() const;
+    Effect effect() const;
+    Exploitability exploitability() const;
+    Quality quality() const;
+    InconclusiveReason inconclusive_reason() const;
+    size_t samples_used() const;
+    std::string recommendation() const;
+
+    // Convenience methods
+    bool passed() const { return outcome() == Outcome::Pass; }
+    bool failed() const { return outcome() == Outcome::Fail; }
+    bool is_conclusive() const;
+};
+```
+
+### Effect
+
+```cpp
+struct Effect {
+    double shift_ns;
+    double tail_ns;
+    std::pair<double, double> credible_interval;
+    EffectPattern pattern;
+
+    double total_ns() const {
+        return std::sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
+    }
+};
+```
+
+### Exploitability
+
+```cpp
+enum class Exploitability {
+    SharedHardwareOnly,  // < 10 ns
+    Http2Multiplexing,   // 10-100 ns
+    StandardRemote,      // 100 ns - 10 μs
+    ObviousLeak          // > 10 μs
+};
+```
+
+---
+
+## Complete Example
+
+```cpp
+#include <timing_oracle.hpp>
+#include <iostream>
+#include <cstring>
+#include <random>
+#include <array>
+
+std::array<uint8_t, 32> secret = {/* ... */};
+
+int main() {
+    // Use a seeded RNG for reproducibility in tests
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<uint8_t> dist(0, 255);
+
+    auto result = timing_oracle::test(
+        timing_oracle::AttackerModel::AdjacentNetwork,
+        32,
+        [&](bool is_baseline, uint8_t* out, size_t size) {
+            if (is_baseline) {
+                std::copy(secret.begin(), secret.end(), out);
+            } else {
+                std::generate(out, out + size, [&]() { return dist(rng); });
+            }
+        },
+        [](const uint8_t* input, size_t size) {
+            // Constant-time comparison
+            volatile uint8_t result = 0;
+            for (size_t i = 0; i < size; i++) {
+                result |= (secret[i] ^ input[i]);
+            }
+        }
+    );
+
+    std::cout << "Outcome: ";
+    switch (result.outcome()) {
+        case timing_oracle::Outcome::Pass:
+            std::cout << "PASS - No timing leak\n";
+            std::cout << "Leak probability: "
+                      << (result.leak_probability() * 100) << "%\n";
+            break;
+
+        case timing_oracle::Outcome::Fail:
+            std::cout << "FAIL - Timing leak detected!\n";
+            std::cout << "Effect: " << result.effect().shift_ns << " ns shift, "
+                      << result.effect().tail_ns << " ns tail\n";
+            std::cout << "Exploitability: ";
+            switch (result.exploitability()) {
+                case timing_oracle::Exploitability::SharedHardwareOnly:
+                    std::cout << "Shared hardware only\n"; break;
+                case timing_oracle::Exploitability::Http2Multiplexing:
+                    std::cout << "HTTP/2 multiplexing\n"; break;
+                case timing_oracle::Exploitability::StandardRemote:
+                    std::cout << "Standard remote\n"; break;
+                case timing_oracle::Exploitability::ObviousLeak:
+                    std::cout << "Obvious leak\n"; break;
+            }
+            break;
+
+        case timing_oracle::Outcome::Inconclusive:
+            std::cout << "INCONCLUSIVE\n";
+            break;
+
+        case timing_oracle::Outcome::Unmeasurable:
+            std::cout << "UNMEASURABLE - " << result.recommendation() << "\n";
+            break;
+    }
+
+    return result.failed() ? 1 : 0;
+}
+```
+
+### Compilation
+
+```bash
+g++ -std=c++17 -o timing_test timing_test.cpp \
+    -I/path/to/timing-oracle/crates/timing-oracle-c/include \
+    -L/path/to/timing-oracle/target/release \
+    -ltiming_oracle_c
+```
+
+---
+
+## Exception Safety
+
+The C++ wrapper is exception-safe:
+
+- **Generator exceptions**: Caught and translated to `Unmeasurable` result
+- **Operation exceptions**: Caught and translated to `Unmeasurable` result
+- **Memory**: RAII ensures no leaks
+
+```cpp
+// Safe to throw from callbacks
+auto result = timing_oracle::test(
+    timing_oracle::AttackerModel::AdjacentNetwork,
+    32,
+    [](bool is_baseline, uint8_t* out, size_t size) {
+        if (size > 1024) {
+            throw std::invalid_argument("Input too large");
+        }
+        // ...
+    },
+    operation
+);
+// Exception is caught, result.outcome() == Outcome::Unmeasurable
+```

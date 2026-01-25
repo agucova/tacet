@@ -10,11 +10,9 @@ use napi_derive::napi;
 
 use timing_oracle::adaptive::{calibrate, CalibrationConfig};
 use timing_oracle_core::adaptive::{
-    adaptive_step, AdaptiveOutcome, AdaptiveState as CoreAdaptiveState,
-    AdaptiveStepConfig, Calibration as CoreCalibration, InconclusiveReason as CoreInconclusiveReason,
-    StepResult,
+    adaptive_step, AdaptiveOutcome, AdaptiveState as CoreAdaptiveState, AdaptiveStepConfig,
+    Calibration as CoreCalibration, InconclusiveReason as CoreInconclusiveReason, StepResult,
 };
-use timing_oracle_core::math::sqrt;
 
 use crate::types::*;
 
@@ -349,242 +347,71 @@ pub fn analyze(
     Ok(result)
 }
 
-// Helper functions
-
-fn classify_effect_pattern(shift_ns: f64, tail_ns: f64) -> EffectPattern {
-    let shift_abs = shift_ns.abs();
-    let tail_abs = tail_ns.abs();
-
-    if shift_abs < 1.0 && tail_abs < 1.0 {
-        EffectPattern::Indeterminate
-    } else if shift_abs > tail_abs * 2.0 {
-        EffectPattern::UniformShift
-    } else if tail_abs > shift_abs * 2.0 {
-        EffectPattern::TailEffect
-    } else {
-        EffectPattern::Mixed
-    }
-}
-
-fn build_diagnostics_from_posterior(
-    posterior: Option<&timing_oracle_core::adaptive::Posterior>,
-    calibration: Option<&CoreCalibration>,
-) -> Diagnostics {
-    let mut diag = Diagnostics::default();
-
-    if let Some(p) = posterior {
-        diag.effective_sample_size = p.n as u32;
-        diag.projection_mismatch_q = p.projection_mismatch_q;
-        diag.projection_mismatch_ok = calibration
-            .map(|c| p.projection_mismatch_q <= c.projection_mismatch_thresh)
-            .unwrap_or(true);
-
-        diag.lambda_mean = p.lambda_mean.unwrap_or(1.0);
-        diag.lambda_mixing_ok = p.lambda_mixing_ok.unwrap_or(true);
-    }
-
-    if let Some(cal) = calibration {
-        diag.dependence_length = cal.block_length as u32;
-        diag.discrete_mode = cal.discrete_mode;
-        diag.timer_resolution_ns = cal.timer_resolution_ns;
-    }
-
-    diag
-}
-
+// Helper function: Convert AdaptiveOutcome to AnalysisResult using FFI summary types.
+// This uses the canonical effect pattern classification from core (spec §3.4.6).
 fn build_result_from_outcome(
     outcome: &AdaptiveOutcome,
-    config: &Config,
+    _config: &Config,
     calibration: Option<&CoreCalibration>,
 ) -> AnalysisResult {
-    match outcome {
-        AdaptiveOutcome::LeakDetected {
-            posterior,
-            samples_per_class,
-            elapsed_secs,
-        } => {
-            let shift_ns = posterior.beta_proj[0];
-            let tail_ns = posterior.beta_proj[1];
-            let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
+    use timing_oracle_core::ffi_summary::{InconclusiveReasonKind, OutcomeType};
 
-            AnalysisResult {
-                outcome: Outcome::Fail,
-                leak_probability: posterior.leak_probability,
-                effect: EffectEstimate {
-                    shift_ns,
-                    tail_ns,
-                    credible_interval_low: total_effect - ci_width,
-                    credible_interval_high: total_effect + ci_width,
-                    pattern: classify_effect_pattern(shift_ns, tail_ns),
-                    interpretation_caveat: None,
-                },
-                quality: MeasurementQuality::Good,
-                samples_used: *samples_per_class as u32,
-                elapsed_secs: *elapsed_secs,
-                exploitability: Exploitability::from_effect_ns(total_effect),
-                inconclusive_reason: InconclusiveReason::None,
-                mde_shift_ns: 0.0,
-                mde_tail_ns: 0.0,
-                timer_resolution_ns: calibration.map(|c| c.timer_resolution_ns).unwrap_or(0.0),
-                theta_user_ns: config.theta_ns(),
-                theta_eff_ns: calibration.map(|c| c.theta_eff).unwrap_or(config.theta_ns()),
-                recommendation: String::new(),
-                diagnostics: build_diagnostics_from_posterior(Some(posterior), calibration),
-            }
-        }
+    // Get the calibration - required for summary conversion
+    let cal = calibration.expect("Calibration required for result conversion");
+    let summary = outcome.to_summary(cal);
 
-        AdaptiveOutcome::NoLeakDetected {
-            posterior,
-            samples_per_class,
-            elapsed_secs,
-        } => {
-            let shift_ns = posterior.beta_proj[0];
-            let tail_ns = posterior.beta_proj[1];
-            let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
+    // Map OutcomeType to NAPI Outcome
+    let outcome_enum = match summary.outcome_type {
+        OutcomeType::Pass => Outcome::Pass,
+        OutcomeType::Fail => Outcome::Fail,
+        OutcomeType::Inconclusive | OutcomeType::ThresholdElevated => Outcome::Inconclusive,
+    };
 
-            AnalysisResult {
-                outcome: Outcome::Pass,
-                leak_probability: posterior.leak_probability,
-                effect: EffectEstimate {
-                    shift_ns,
-                    tail_ns,
-                    credible_interval_low: total_effect - ci_width,
-                    credible_interval_high: total_effect + ci_width,
-                    pattern: classify_effect_pattern(shift_ns, tail_ns),
-                    interpretation_caveat: None,
-                },
-                quality: MeasurementQuality::Good,
-                samples_used: *samples_per_class as u32,
-                elapsed_secs: *elapsed_secs,
-                exploitability: Exploitability::SharedHardwareOnly,
-                inconclusive_reason: InconclusiveReason::None,
-                mde_shift_ns: 0.0,
-                mde_tail_ns: 0.0,
-                timer_resolution_ns: calibration.map(|c| c.timer_resolution_ns).unwrap_or(0.0),
-                theta_user_ns: config.theta_ns(),
-                theta_eff_ns: calibration.map(|c| c.theta_eff).unwrap_or(config.theta_ns()),
-                recommendation: String::new(),
-                diagnostics: build_diagnostics_from_posterior(Some(posterior), calibration),
-            }
-        }
+    // Map InconclusiveReasonKind to NAPI InconclusiveReason
+    let inconclusive_reason = match summary.inconclusive_reason {
+        InconclusiveReasonKind::None => InconclusiveReason::None,
+        InconclusiveReasonKind::DataTooNoisy => InconclusiveReason::DataTooNoisy,
+        InconclusiveReasonKind::NotLearning => InconclusiveReason::NotLearning,
+        InconclusiveReasonKind::WouldTakeTooLong => InconclusiveReason::WouldTakeTooLong,
+        InconclusiveReasonKind::TimeBudgetExceeded => InconclusiveReason::TimeBudgetExceeded,
+        InconclusiveReasonKind::SampleBudgetExceeded => InconclusiveReason::SampleBudgetExceeded,
+        InconclusiveReasonKind::ConditionsChanged => InconclusiveReason::ConditionsChanged,
+        InconclusiveReasonKind::ThresholdElevated => InconclusiveReason::ThresholdElevated,
+    };
 
-        AdaptiveOutcome::ThresholdElevated {
-            posterior,
-            theta_user,
-            theta_eff,
-            achievable_at_max,
-            samples_per_class,
-            elapsed_secs,
-            ..
-        } => {
-            let shift_ns = posterior.beta_proj[0];
-            let tail_ns = posterior.beta_proj[1];
-            let total_effect = sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-            let ci_width = 1.96 * sqrt(posterior.beta_proj_cov[(0, 0)] + posterior.beta_proj_cov[(1, 1)]);
-
-            let recommendation = if *achievable_at_max {
-                format!(
-                    "Threshold elevated from {:.0}ns to {:.1}ns. More samples could achieve the requested threshold.",
-                    theta_user, theta_eff
-                )
-            } else {
-                format!(
-                    "Threshold elevated from {:.0}ns to {:.1}ns. Use a cycle counter for better resolution.",
-                    theta_user, theta_eff
-                )
-            };
-
-            AnalysisResult {
-                outcome: Outcome::Inconclusive,
-                leak_probability: posterior.leak_probability,
-                effect: EffectEstimate {
-                    shift_ns,
-                    tail_ns,
-                    credible_interval_low: total_effect - ci_width,
-                    credible_interval_high: total_effect + ci_width,
-                    pattern: classify_effect_pattern(shift_ns, tail_ns),
-                    interpretation_caveat: None,
-                },
-                quality: MeasurementQuality::Good,
-                samples_used: *samples_per_class as u32,
-                elapsed_secs: *elapsed_secs,
-                exploitability: Exploitability::SharedHardwareOnly,
-                inconclusive_reason: InconclusiveReason::ThresholdElevated,
-                mde_shift_ns: 0.0,
-                mde_tail_ns: 0.0,
-                timer_resolution_ns: calibration.map(|c| c.timer_resolution_ns).unwrap_or(0.0),
-                theta_user_ns: *theta_user,
-                theta_eff_ns: *theta_eff,
-                recommendation,
-                diagnostics: build_diagnostics_from_posterior(Some(posterior), calibration),
-            }
-        }
-
-        AdaptiveOutcome::Inconclusive {
-            reason,
-            posterior,
-            samples_per_class,
-            elapsed_secs,
-        } => {
-            let (shift_ns, tail_ns) = posterior
-                .as_ref()
-                .map(|p| (p.beta_proj[0], p.beta_proj[1]))
-                .unwrap_or((0.0, 0.0));
-
-            let (inconclusive_reason, recommendation) = convert_inconclusive_reason(reason);
-
-            AnalysisResult {
-                outcome: Outcome::Inconclusive,
-                leak_probability: posterior.as_ref().map(|p| p.leak_probability).unwrap_or(0.5),
-                effect: EffectEstimate {
-                    shift_ns,
-                    tail_ns,
-                    credible_interval_low: 0.0,
-                    credible_interval_high: 0.0,
-                    pattern: classify_effect_pattern(shift_ns, tail_ns),
-                    interpretation_caveat: None,
-                },
-                quality: MeasurementQuality::Poor,
-                samples_used: *samples_per_class as u32,
-                elapsed_secs: *elapsed_secs,
-                exploitability: Exploitability::SharedHardwareOnly,
-                inconclusive_reason,
-                mde_shift_ns: 0.0,
-                mde_tail_ns: 0.0,
-                timer_resolution_ns: calibration.map(|c| c.timer_resolution_ns).unwrap_or(0.0),
-                theta_user_ns: config.theta_ns(),
-                theta_eff_ns: calibration.map(|c| c.theta_eff).unwrap_or(config.theta_ns()),
-                recommendation,
-                diagnostics: build_diagnostics_from_posterior(posterior.as_ref(), calibration),
-            }
-        }
-    }
-}
-
-fn convert_inconclusive_reason(reason: &CoreInconclusiveReason) -> (InconclusiveReason, String) {
-    match reason {
-        CoreInconclusiveReason::DataTooNoisy { guidance, .. } => {
-            (InconclusiveReason::DataTooNoisy, guidance.clone())
-        }
-        CoreInconclusiveReason::NotLearning { guidance, .. } => {
-            (InconclusiveReason::NotLearning, guidance.clone())
-        }
-        CoreInconclusiveReason::WouldTakeTooLong { guidance, .. } => {
-            (InconclusiveReason::WouldTakeTooLong, guidance.clone())
-        }
-        CoreInconclusiveReason::TimeBudgetExceeded { .. } => {
-            (InconclusiveReason::TimeBudgetExceeded, "Increase time budget or reduce threshold".to_string())
-        }
-        CoreInconclusiveReason::SampleBudgetExceeded { .. } => {
-            (InconclusiveReason::SampleBudgetExceeded, "Increase sample budget or reduce threshold".to_string())
-        }
-        CoreInconclusiveReason::ConditionsChanged { guidance, .. } => {
-            (InconclusiveReason::ConditionsChanged, guidance.clone())
-        }
-        CoreInconclusiveReason::ThresholdElevated { guidance, .. } => {
-            (InconclusiveReason::ThresholdElevated, guidance.clone())
-        }
+    AnalysisResult {
+        outcome: outcome_enum,
+        leak_probability: summary.leak_probability,
+        effect: EffectEstimate {
+            shift_ns: summary.effect.shift_ns,
+            tail_ns: summary.effect.tail_ns,
+            credible_interval_low: summary.effect.ci_low_ns,
+            credible_interval_high: summary.effect.ci_high_ns,
+            pattern: summary.effect.pattern.into(),
+            interpretation_caveat: summary.effect.interpretation_caveat,
+        },
+        quality: summary.quality.into(),
+        samples_used: summary.samples_per_class as u32,
+        elapsed_secs: summary.elapsed_secs,
+        exploitability: summary.exploitability.into(),
+        inconclusive_reason,
+        mde_shift_ns: summary.mde_shift_ns,
+        mde_tail_ns: summary.mde_tail_ns,
+        timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
+        theta_user_ns: summary.theta_user,
+        theta_eff_ns: summary.theta_eff,
+        recommendation: summary.recommendation,
+        diagnostics: Diagnostics {
+            dependence_length: summary.diagnostics.dependence_length as u32,
+            effective_sample_size: summary.diagnostics.effective_sample_size as u32,
+            stationarity_ratio: summary.diagnostics.stationarity_ratio,
+            stationarity_ok: summary.diagnostics.stationarity_ok,
+            projection_mismatch_q: summary.diagnostics.projection_mismatch_q,
+            projection_mismatch_ok: summary.diagnostics.projection_mismatch_ok,
+            discrete_mode: summary.diagnostics.discrete_mode,
+            timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
+            lambda_mean: summary.diagnostics.lambda_mean,
+            lambda_mixing_ok: summary.diagnostics.lambda_mixing_ok,
+        },
     }
 }

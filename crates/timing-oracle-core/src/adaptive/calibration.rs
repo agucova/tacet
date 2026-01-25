@@ -257,6 +257,24 @@ impl Calibration {
         }
         n as f64 / self.samples_per_second
     }
+
+    /// Convert to an FFI-friendly summary containing only scalar fields.
+    pub fn to_summary(&self) -> crate::ffi_summary::CalibrationSummary {
+        crate::ffi_summary::CalibrationSummary {
+            block_length: self.block_length,
+            calibration_samples: self.calibration_samples,
+            discrete_mode: self.discrete_mode,
+            timer_resolution_ns: self.timer_resolution_ns,
+            theta_ns: self.theta_ns,
+            theta_eff: self.theta_eff,
+            theta_floor_initial: self.theta_floor_initial,
+            theta_tick: self.theta_tick,
+            mde_shift_ns: self.mde_shift_ns,
+            mde_tail_ns: self.mde_tail_ns,
+            projection_mismatch_thresh: self.projection_mismatch_thresh,
+            samples_per_second: self.samples_per_second,
+        }
+    }
 }
 
 /// Configuration for calibration phase (no_std compatible).

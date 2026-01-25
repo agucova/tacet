@@ -3,10 +3,15 @@
 //! These types mirror the core types but are designed for napi-rs FFI.
 
 use napi_derive::napi;
+use timing_oracle_core::constants::{
+    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD,
+    DEFAULT_TIME_BUDGET_SECS,
+};
 use timing_oracle_core::result::{
     EffectPattern as CoreEffectPattern, Exploitability as CoreExploitability,
     MeasurementQuality as CoreMeasurementQuality,
 };
+use timing_oracle_core::types::AttackerModel as CoreAttackerModel;
 
 /// Attacker model determines the minimum effect threshold (theta) for leak detection.
 #[napi]
@@ -25,15 +30,20 @@ pub enum AttackerModel {
 }
 
 impl AttackerModel {
+    /// Convert to core AttackerModel type.
+    pub fn to_core(&self) -> CoreAttackerModel {
+        match self {
+            AttackerModel::SharedHardware => CoreAttackerModel::SharedHardware,
+            AttackerModel::PostQuantum => CoreAttackerModel::PostQuantumSentinel,
+            AttackerModel::AdjacentNetwork => CoreAttackerModel::AdjacentNetwork,
+            AttackerModel::RemoteNetwork => CoreAttackerModel::RemoteNetwork,
+            AttackerModel::Research => CoreAttackerModel::Research,
+        }
+    }
+
     /// Convert to threshold in nanoseconds.
     pub fn to_threshold_ns(&self) -> f64 {
-        match self {
-            AttackerModel::SharedHardware => 0.6,
-            AttackerModel::PostQuantum => 3.3,
-            AttackerModel::AdjacentNetwork => 100.0,
-            AttackerModel::RemoteNetwork => 50_000.0,
-            AttackerModel::Research => 0.0,
-        }
+        self.to_core().to_threshold_ns()
     }
 }
 
@@ -253,10 +263,10 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             attacker_model: AttackerModel::AdjacentNetwork,
-            max_samples: 100_000,
-            time_budget_ms: 30_000,
-            pass_threshold: 0.05,
-            fail_threshold: 0.95,
+            max_samples: DEFAULT_MAX_SAMPLES as u32,
+            time_budget_ms: (DEFAULT_TIME_BUDGET_SECS * 1000) as u32,
+            pass_threshold: DEFAULT_PASS_THRESHOLD,
+            fail_threshold: DEFAULT_FAIL_THRESHOLD,
             seed: None,
             custom_threshold_ns: None,
         }
