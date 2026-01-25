@@ -429,14 +429,16 @@ fn has_invariant_tsc() -> bool {
     // Also indicated by constant_tsc and nonstop_tsc flags in /proc/cpuinfo
     let result: u32;
     unsafe {
+        // Note: ebx is reserved by LLVM for PIC, so we save/restore it manually
         core::arch::asm!(
+            "push rbx",
             "mov eax, 0x80000007",
             "cpuid",
+            "pop rbx",
             out("edx") result,
             out("eax") _,
-            out("ebx") _,
             out("ecx") _,
-            options(nostack, nomem)
+            options(nostack)
         );
     }
     (result & (1 << 8)) != 0
@@ -449,14 +451,16 @@ fn get_cpuid_base_freq() -> Option<u64> {
     // First check if leaf 0x16 is supported
     let max_leaf: u32;
     unsafe {
+        // Note: ebx is reserved by LLVM for PIC, so we save/restore it manually
         core::arch::asm!(
+            "push rbx",
             "mov eax, 0",
             "cpuid",
+            "pop rbx",
             out("eax") max_leaf,
-            out("ebx") _,
             out("ecx") _,
             out("edx") _,
-            options(nostack, nomem)
+            options(nostack)
         );
     }
 
@@ -471,13 +475,14 @@ fn get_cpuid_base_freq() -> Option<u64> {
     let base_mhz: u32;
     unsafe {
         core::arch::asm!(
+            "push rbx",
             "mov eax, 0x16",
             "cpuid",
+            "pop rbx",
             out("eax") base_mhz,
-            out("ebx") _,
             out("ecx") _,
             out("edx") _,
-            options(nostack, nomem)
+            options(nostack)
         );
     }
 
