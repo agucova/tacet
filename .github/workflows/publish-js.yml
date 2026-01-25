@@ -102,7 +102,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-          registry-url: 'https://registry.npmjs.org'
+          # Note: registry-url is intentionally omitted for trusted publishing (OIDC)
+          # Adding it causes setup-node to expect NODE_AUTH_TOKEN which breaks OIDC
 
       - name: Verify artifacts
         run: |
