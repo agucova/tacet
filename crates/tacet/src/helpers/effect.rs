@@ -383,17 +383,21 @@ fn get_x86_64_tsc_freq_hz() -> u64 {
     calibrate_tsc_frequency()
 }
 
-/// Linux: Try to get TSC frequency from sysfs.
+/// Linux: Try to get TSC frequency from sysfs or CPUID.
 ///
 /// Note: We intentionally do NOT use /proc/cpuinfo "cpu MHz" because:
-/// - It reports the *current* CPU frequency (can be boosted by turbo)
-/// - TSC on modern Intel CPUs runs at a constant rate (base frequency)
-/// - Using boosted frequency leads to ~25-30% overestimation
+/// - It may report current frequency (varies with scaling/turbo) or boot frequency
+/// - TSC on modern Intel CPUs with invariant TSC runs at base frequency
+/// - See: https://lwn.net/Articles/162548/
 ///
-/// If sysfs is not available, we fall back to calibration which is accurate.
+/// Fallback chain:
+/// 1. sysfs tsc_freq_khz (most reliable, but not always available)
+/// 2. CPUID leaf 0x16 base frequency (Skylake+, accurate for invariant TSC)
+/// 3. Calibration against Instant::now() (always accurate, but slower)
 #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
 fn get_tsc_freq_linux() -> Option<u64> {
-    // sysfs tsc_freq_khz (most reliable, kernel 4.12+)
+    // Method 1: sysfs tsc_freq_khz (most reliable when available)
+    // Only exposed in some kernels (Google's, or with tsc_freq_khz driver)
     if let Ok(content) = std::fs::read_to_string("/sys/devices/system/cpu/cpu0/tsc_freq_khz") {
         if let Ok(khz) = content.trim().parse::<u64>() {
             let freq = khz * 1000;
@@ -403,8 +407,85 @@ fn get_tsc_freq_linux() -> Option<u64> {
         }
     }
 
-    // Fall back to calibration (don't use /proc/cpuinfo - it's unreliable for TSC)
+    // Method 2: CPUID leaf 0x16 - Processor Frequency Information (Skylake+)
+    // Returns base frequency in MHz, which matches TSC on invariant TSC systems
+    // Only use if CPU has invariant TSC (constant_tsc flag)
+    if has_invariant_tsc() {
+        if let Some(freq) = get_cpuid_base_freq() {
+            if is_reasonable_tsc_freq(freq) {
+                return Some(freq);
+            }
+        }
+    }
+
+    // Fall back to calibration
     None
+}
+
+/// Check if CPU has invariant TSC (constant rate regardless of frequency scaling).
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+fn has_invariant_tsc() -> bool {
+    // Check CPUID.80000007H:EDX[8] - Invariant TSC
+    // Also indicated by constant_tsc and nonstop_tsc flags in /proc/cpuinfo
+    let result: u32;
+    unsafe {
+        core::arch::asm!(
+            "mov eax, 0x80000007",
+            "cpuid",
+            out("edx") result,
+            out("eax") _,
+            out("ebx") _,
+            out("ecx") _,
+            options(nostack, nomem)
+        );
+    }
+    (result & (1 << 8)) != 0
+}
+
+/// Get processor base frequency from CPUID leaf 0x16 (Skylake+).
+/// Returns frequency in Hz, or None if not available.
+#[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+fn get_cpuid_base_freq() -> Option<u64> {
+    // First check if leaf 0x16 is supported
+    let max_leaf: u32;
+    unsafe {
+        core::arch::asm!(
+            "mov eax, 0",
+            "cpuid",
+            out("eax") max_leaf,
+            out("ebx") _,
+            out("ecx") _,
+            out("edx") _,
+            options(nostack, nomem)
+        );
+    }
+
+    if max_leaf < 0x16 {
+        return None; // CPUID leaf 0x16 not supported (pre-Skylake)
+    }
+
+    // CPUID leaf 0x16: Processor Frequency Information
+    // EAX = Base frequency in MHz
+    // EBX = Max frequency in MHz
+    // ECX = Bus/reference frequency in MHz
+    let base_mhz: u32;
+    unsafe {
+        core::arch::asm!(
+            "mov eax, 0x16",
+            "cpuid",
+            out("eax") base_mhz,
+            out("ebx") _,
+            out("ecx") _,
+            out("edx") _,
+            options(nostack, nomem)
+        );
+    }
+
+    if base_mhz > 0 {
+        Some(base_mhz as u64 * 1_000_000)
+    } else {
+        None
+    }
 }
 
 /// macOS: Try to get TSC frequency from sysctl.
