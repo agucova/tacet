@@ -18,7 +18,7 @@ Before trusting results from timing tests, verify the test harness itself works:
 **1. Identical inputs should pass:**
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 
 let inputs = InputPair::new(
     || [0u8; 32],

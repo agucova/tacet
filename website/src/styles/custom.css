@@ -1,36 +1,645 @@
-/* Custom styles for timing-oracle documentation */
+/* Tacet Design System - Starlight Overrides */
+
+/* ============================================
+   STARLIGHT CSS VARIABLE OVERRIDES
+   ============================================ */
 
 :root {
-  /* Primary brand colors - subtle blue-gray for technical docs */
-  --sl-color-accent-low: #1e2937;
-  --sl-color-accent: #3b82f6;
-  --sl-color-accent-high: #93c5fd;
+    /* Accent colors */
+    --sl-color-accent-low: var(--tacet-accent-muted);
+    --sl-color-accent: var(--tacet-accent);
+    --sl-color-accent-high: var(--tacet-accent-hover);
 
-  /* Improve code block contrast */
-  --sl-color-bg-inline-code: rgba(59, 130, 246, 0.1);
+    /* Background colors */
+    --sl-color-bg: var(--tacet-bg-base);
+    --sl-color-bg-nav: var(--tacet-bg-elevated);
+    --sl-color-bg-sidebar: var(--tacet-bg-base);
+
+    /* Borders */
+    --sl-color-hairline: var(--tacet-border);
+    --sl-color-hairline-light: var(--tacet-border-subtle);
+
+    /* Text colors */
+    --sl-color-text: var(--tacet-text-primary);
+    --sl-color-text-accent: var(--tacet-accent);
+
+    /* Gray scale for dark mode */
+    --sl-color-gray-1: var(--tacet-text-primary);
+    --sl-color-gray-2: var(--tacet-text-secondary);
+    --sl-color-gray-3: var(--tacet-text-muted);
+    --sl-color-gray-4: var(--tacet-border);
+    --sl-color-gray-5: var(--tacet-bg-subtle);
+    --sl-color-gray-6: var(--tacet-bg-elevated);
+    --sl-color-gray-7: var(--tacet-bg-base);
+
+    /* White/black */
+    --sl-color-white: var(--tacet-text-primary);
+    --sl-color-black: var(--tacet-bg-base);
+
+    /* Typography */
+    --sl-font: var(--tacet-font-body);
+    --sl-font-system: var(--tacet-font-body);
+    --sl-font-system-mono: var(--tacet-font-code);
+
+    /* Line height */
+    --sl-line-height: 1.55;
+    --sl-line-height-headings: 1.3;
 }
 
-/* Better code block styling */
+/* ============================================
+   TYPOGRAPHY
+   ============================================ */
+
+/* Headings: JetBrains Mono Medium */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    font-family: var(--tacet-font-heading);
+    font-weight: 500;
+    line-height: var(--sl-line-height-headings);
+}
+
+/* Body: Recursive (Linear Mono) */
+body {
+    font-family: var(--tacet-font-body);
+    font-variation-settings:
+        "MONO" 0,
+        "CASL" 0;
+    line-height: var(--sl-line-height);
+    background: var(--tacet-bg-base);
+    color: var(--tacet-text-primary);
+}
+
+a.site-title svg {
+    height: 2.5rem !important;
+}
+
+/* Content area */
+.sl-markdown-content {
+    font-family: var(--tacet-font-body);
+    font-variation-settings:
+        "MONO" 0.7,
+        "CASL" 0;
+    line-height: var(--sl-line-height);
+}
+
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.sl-markdown-content h4 {
+    font-family: var(--tacet-font-heading);
+    font-weight: 500;
+}
+
+/* ============================================
+   LINKS
+   ============================================ */
+
+a {
+    color: var(--tacet-accent);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--tacet-accent-hover);
+    text-decoration: underline;
+}
+
+/* ============================================
+   PROSE CONTENT (Lists, Paragraphs, etc.)
+   ============================================ */
+
+/* Paragraphs */
+.sl-markdown-content p {
+    margin-bottom: 1rem;
+}
+
+/* Lists */
+.sl-markdown-content ul,
+.sl-markdown-content ol {
+    margin-bottom: 1rem;
+    padding-left: 1.5rem;
+}
+
+.sl-markdown-content ul {
+    list-style-type: disc;
+}
+
+.sl-markdown-content ol {
+    list-style-type: decimal;
+}
+
+.sl-markdown-content li {
+    margin-bottom: 0.5rem;
+}
+
+.sl-markdown-content li::marker {
+    color: var(--tacet-text-muted);
+}
+
+/* Nested lists */
+.sl-markdown-content ul ul,
+.sl-markdown-content ol ol,
+.sl-markdown-content ul ol,
+.sl-markdown-content ol ul {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Blockquotes */
+.sl-markdown-content blockquote {
+    border-left: 3px solid var(--tacet-border);
+    padding-left: 1rem;
+    margin: 1rem 0;
+    color: var(--tacet-text-secondary);
+    font-style: italic;
+}
+
+/* Horizontal rules */
+.sl-markdown-content hr {
+    border: none;
+    border-top: 1px solid var(--tacet-border);
+    margin: 2rem 0;
+}
+
+/* Strong and emphasis */
+.sl-markdown-content strong {
+    font-weight: 600;
+    color: var(--tacet-text-primary);
+}
+
+.sl-markdown-content em {
+    font-style: italic;
+}
+
+/* ============================================
+   SIDEBAR
+   ============================================ */
+
+.sidebar {
+    background: var(--tacet-bg-base);
+}
+
+/* Sidebar links */
+.sidebar-content a {
+    color: var(--tacet-text-secondary);
+}
+
+.sidebar-content a:hover {
+    color: var(--tacet-text-primary);
+}
+
+/* Active sidebar item */
+.sidebar-content a[aria-current="page"] {
+    color: var(--tacet-text-primary) !important;
+    border-left: 2px solid var(--tacet-accent) !important;
+    border-radius: 0 !important;
+    padding-left: 0.5rem !important;
+    margin-left: -0.5rem !important;
+    background: transparent !important;
+}
+
+/* Override Starlight's default rounded border on active sidebar item */
+ul.top-level a[aria-current="page"],
+.sidebar a[aria-current="page"],
+nav.sidebar a[aria-current="page"] {
+    border-radius: 0 !important;
+}
+
+/* ============================================
+   HEADER
+   ============================================ */
+
+header.header {
+    background: var(--tacet-bg-elevated);
+    border-bottom: 1px solid var(--tacet-border);
+}
+
+/* ============================================
+   CODE BLOCKS
+   ============================================ */
+
+/* Inline code */
+code:not(pre code) {
+    font-family: var(--tacet-font-code);
+    font-size: 0.9em;
+    background-color: var(--tacet-bg-elevated);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    color: var(--tacet-text-primary);
+}
+
+/* Code blocks via Expressive Code */
 .expressive-code {
-  border-radius: 0.5rem;
+    border-radius: 8px;
+    border: 1px solid var(--tacet-border);
 }
 
-/* Improve table readability */
-table {
-  font-size: 0.9rem;
+.expressive-code pre {
+    background: var(--tacet-bg-elevated) !important;
 }
 
-/* Highlight important callouts */
+/* ============================================
+   ASIDES (Callouts)
+   ============================================ */
+
+/* Base aside styling - quiet and understated */
+.starlight-aside {
+    background: var(--tacet-bg-elevated);
+    border-left: 2px solid var(--tacet-aside-note);
+    border-radius: 0 6px 6px 0;
+    padding: 0.875rem 1.25rem;
+}
+
+/* All aside types use muted borders */
+.starlight-aside--note {
+    border-left-color: var(--tacet-aside-note);
+}
+
+.starlight-aside--tip {
+    border-left-color: var(--tacet-aside-tip);
+}
+
 .starlight-aside--caution {
-  --sl-color-asides-text-accent: #f59e0b;
+    border-left-color: var(--tacet-aside-caution);
 }
 
+/* Only danger uses accent color - it should stand out */
 .starlight-aside--danger {
-  --sl-color-asides-text-accent: #ef4444;
+    border-left-color: var(--tacet-aside-danger);
 }
 
-/* Terminal output styling */
-pre[data-language="text"] {
-  background: #1a1a1a;
-  color: #e5e5e5;
+/* Aside titles - use accent color for visibility */
+.starlight-aside__title {
+    font-family: var(--tacet-font-heading);
+    font-weight: 500;
+    color: var(--tacet-accent) !important;
+}
+
+/* Aside icons - use accent color to match title */
+.starlight-aside__icon {
+    color: var(--tacet-accent) !important;
+}
+
+/* Tip icon - slightly smaller */
+.starlight-aside--tip .starlight-aside__icon {
+    font-size: 0.875em;
+}
+
+/* Danger aside title can be slightly more prominent */
+.starlight-aside--danger .starlight-aside__title {
+    color: var(--tacet-text-primary) !important;
+}
+
+.starlight-aside--danger .starlight-aside__icon {
+    color: var(--tacet-aside-danger) !important;
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+
+table {
+    font-size: 0.875rem;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+th {
+    font-family: var(--tacet-font-heading);
+    font-weight: 500;
+    text-align: left;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--tacet-border);
+    color: var(--tacet-text-secondary);
+}
+
+td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--tacet-border-subtle);
+}
+
+td:first-child {
+    font-family: var(--tacet-font-code);
+}
+
+/* ============================================
+   CONTENT LAYOUT
+   ============================================ */
+
+/* Main content panel */
+.content-panel {
+    max-width: 48rem;
+}
+
+/* ============================================
+   CARDS (LinkCards, CardGrid)
+   ============================================ */
+
+.card {
+    background: var(--tacet-bg-elevated);
+    border: 1px solid var(--tacet-border);
+    border-radius: 8px;
+}
+
+.card:hover {
+    border-color: var(--tacet-accent);
+}
+
+/* ============================================
+   TABS
+   ============================================ */
+
+/* Remove left indentation from tablist */
+.tablist-wrapper [role="tablist"] {
+    border-bottom: none;
+    padding-left: 0;
+}
+
+/* First tab - remove left padding to align with content */
+.tablist-wrapper [role="tab"] {
+    font-family: var(--tacet-font-heading);
+    font-size: 0.875rem;
+}
+
+.tablist-wrapper .tab:first-child [role="tab"] {
+    padding-left: 0;
+}
+
+.tablist-wrapper [role="tab"][aria-selected="true"] {
+    color: var(--tacet-accent);
+    border-bottom-color: var(--tacet-accent);
+}
+
+/* Tab panels - add visual hierarchy */
+.tablist-wrapper ~ [role="tabpanel"] {
+    margin-top: 0;
+    padding: 0rem;
+    padding-left: 0.8rem;
+    border-left: 2px solid var(--tacet-border);
+    margin-left: 0;
+}
+
+/* Code blocks inside tabs - remove extra margin */
+.tablist-wrapper ~ [role="tabpanel"] .expressive-code {
+    margin: 0;
+}
+
+/* ============================================
+   SEARCH
+   ============================================ */
+
+.search-input {
+    background: var(--tacet-bg-elevated);
+    border: 1px solid var(--tacet-border);
+}
+
+/* ============================================
+   PAGINATION (Prev/Next)
+   ============================================ */
+
+.pagination-links a {
+    background: var(--tacet-bg-elevated);
+    border: 1px solid var(--tacet-border);
+    border-radius: 8px;
+}
+
+.pagination-links a:hover {
+    border-color: var(--tacet-accent);
+}
+
+/* ============================================
+   TABLE OF CONTENTS
+   ============================================ */
+
+starlight-toc a {
+    color: var(--tacet-text-muted);
+}
+
+starlight-toc a:hover {
+    color: var(--tacet-text-primary);
+}
+
+starlight-toc a[aria-current="true"] {
+    color: var(--tacet-accent);
+}
+
+/* ============================================
+   FOOTER (if default exists)
+   ============================================ */
+
+footer {
+    border-top: 1px solid var(--tacet-border);
+    color: var(--tacet-text-muted);
+}
+
+/* ============================================
+   MOBILE MENU
+   ============================================ */
+
+.mobile-preferences {
+    background: var(--tacet-bg-elevated);
+}
+
+/* ============================================
+   TERMINAL OUTPUT STYLING
+   ============================================ */
+
+pre[data-language="text"],
+pre[data-language=""] {
+    background: var(--tacet-bg-elevated);
+    color: var(--tacet-text-primary);
+}
+
+/* ============================================
+   ASCII DIAGRAMS
+   ============================================ */
+
+pre:has(code:not([class*="language-"])) {
+    font-family: var(--tacet-font-code);
+    background: var(--tacet-bg-elevated);
+    border: 1px solid var(--tacet-border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    line-height: 1.4;
+}
+
+/* ============================================
+   HERO (Splash Page)
+   ============================================ */
+
+/* Stack hero content vertically and center */
+.hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 4rem 1rem;
+    gap: 2rem;
+}
+
+/* Logo image above content */
+.hero > img {
+    max-width: 320px;
+    height: auto;
+    order: -1;
+}
+
+/* Content stack (contains h1, tagline, actions) */
+.hero .stack {
+    align-items: center;
+    text-align: center;
+}
+
+.hero .copy {
+    align-items: center;
+}
+
+/* Hide empty title */
+.hero h1 {
+    display: none;
+}
+
+/* Hero tagline */
+.hero .tagline {
+    font-size: 1.25rem;
+    color: var(--tacet-text-secondary);
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+/* Hero actions centered */
+.hero .actions {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+/* ============================================
+   SPLASH PAGE CONTENT CENTERING
+   ============================================ */
+
+/* On splash page, make main-pane take full width and center content */
+[data-has-hero] .main-pane {
+    width: 100%;
+    max-width: 100%;
+}
+
+/* Center the content panel on splash page */
+[data-has-hero] .content-panel {
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+/* Center the container on splash page */
+[data-has-hero] .sl-container {
+    width: 100%;
+    max-width: 56rem;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+/* Center content below hero on splash page */
+[data-has-hero] .sl-markdown-content {
+    width: 100%;
+    max-width: 48rem;
+    margin: 0 auto;
+    padding: 0 1rem;
+}
+
+/* ============================================
+   BUTTONS (Hero Actions)
+   ============================================ */
+
+/* Primary action button - dark text on coral */
+.sl-link-button.primary {
+    background: var(--tacet-accent) !important;
+    color: var(--tacet-bg-base) !important;
+    border: none !important;
+    font-weight: 500;
+}
+
+.sl-link-button.primary:hover {
+    background: var(--tacet-accent-hover) !important;
+    color: var(--tacet-bg-base) !important;
+    text-decoration: none !important;
+}
+
+/* Secondary/minimal action button */
+.sl-link-button.minimal {
+    color: var(--tacet-text-secondary) !important;
+    background: transparent !important;
+}
+
+.sl-link-button.minimal:hover {
+    color: var(--tacet-text-primary) !important;
+}
+
+/* ============================================
+   CODE BLOCKS - Expressive Code Overrides
+   ============================================ */
+
+/* Remove the terminal-style header bar */
+.expressive-code .frame.is-terminal .header,
+.expressive-code .frame .header,
+.expressive-code figcaption.header {
+    display: none !important;
+}
+
+/* Outer wrapper - has the border */
+.expressive-code {
+    margin: 1rem 0;
+    border: 1px solid var(--tacet-border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--tacet-bg-elevated);
+}
+
+/* Inner figure - no border, no margin */
+.expressive-code figure,
+.expressive-code figure.frame {
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+}
+
+/* Frame background */
+.expressive-code .frame {
+    background: transparent !important;
+}
+
+/* Pre element */
+.expressive-code pre {
+    padding: 0.3rem 0.4rem !important;
+    margin: 0 !important;
+    background: var(--tacet-bg-elevated) !important;
+    border: none !important;
+    border-radius: 0 !important;
+}
+
+/* Code block text styling */
+.expressive-code code {
+    font-family: var(--tacet-font-code);
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+/* Allow code wrapping on small screens */
+@media (max-width: 50rem) {
+    .expressive-code pre {
+        white-space: pre-wrap !important;
+        word-wrap: break-word !important;
+        overflow-wrap: break-word !important;
+    }
+
+    .expressive-code code {
+        white-space: pre-wrap !important;
+        word-break: break-word !important;
+    }
 }

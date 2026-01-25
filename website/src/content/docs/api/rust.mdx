@@ -7,12 +7,12 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-Complete API documentation for the Rust implementation of timing-oracle.
+Complete API documentation for the Rust implementation of tacet.
 
 ## Quick Reference
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 // Create inputs using closures
 let inputs = InputPair::new(
@@ -42,7 +42,7 @@ if outcome.failed() {
 ### Attacker Model Presets
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 
 // Shared hardware: SGX, cross-VM, containers (~0.6ns / ~2 cycles)
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
@@ -74,7 +74,7 @@ TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 ### Configuration Methods
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+use tacet::{TimingOracle, AttackerModel, TimerSpec};
 use std::time::Duration;
 
 let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -204,7 +204,7 @@ pub enum InconclusiveReason {
 ### InputPair
 
 ```rust
-use timing_oracle::helpers::InputPair;
+use tacet::helpers::InputPair;
 
 // Create input pair with closures
 let inputs = InputPair::new(
@@ -238,7 +238,7 @@ let inputs = InputPair::new(|| [0u8; 32], || rand::random());
 With the `macros` feature:
 
 ```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel};
+use tacet::{timing_test_checked, TimingOracle, AttackerModel};
 
 let outcome = timing_test_checked! {
     oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)

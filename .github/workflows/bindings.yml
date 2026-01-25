@@ -4,18 +4,18 @@ on:
   push:
     branches: [main]
     paths:
-      - 'crates/timing-oracle-c/**'
-      - 'crates/timing-oracle-napi/**'
-      - 'crates/timing-oracle-go/**'
-      - 'crates/timing-oracle-core/**'
+      - 'crates/tacet-c/**'
+      - 'crates/tacet-napi/**'
+      - 'crates/tacet-go/**'
+      - 'crates/tacet-core/**'
       - 'bindings/**'
       - '.github/workflows/bindings.yml'
   pull_request:
     paths:
-      - 'crates/timing-oracle-c/**'
-      - 'crates/timing-oracle-napi/**'
-      - 'crates/timing-oracle-go/**'
-      - 'crates/timing-oracle-core/**'
+      - 'crates/tacet-c/**'
+      - 'crates/tacet-napi/**'
+      - 'crates/tacet-go/**'
+      - 'crates/tacet-core/**'
       - 'bindings/**'
   workflow_dispatch:
 
@@ -45,17 +45,17 @@ jobs:
         with:
           shared-key: "c-lib-${{ matrix.os }}"
 
-      - name: Build timing-oracle-c
-        run: cargo build --release -p timing-oracle-c
+      - name: Build tacet-c
+        run: cargo build --release -p tacet-c
 
       - name: Upload C library artifact
         uses: actions/upload-artifact@v6
         with:
-          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          name: libtacet_c-${{ matrix.artifact_name }}
           path: |
-            target/release/libtiming_oracle_c.a
-            target/release/libtiming_oracle_c.dylib
-            target/release/libtiming_oracle_c.so
+            target/release/libtacet_c.a
+            target/release/libtacet_c.dylib
+            target/release/libtacet_c.so
           if-no-files-found: ignore
           retention-days: 1
 
@@ -79,7 +79,7 @@ jobs:
       - name: Download C library
         uses: actions/download-artifact@v6
         with:
-          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          name: libtacet_c-${{ matrix.artifact_name }}
           path: target/release
 
       - name: Install CMocka (Ubuntu)
@@ -91,7 +91,7 @@ jobs:
         run: brew install cmocka
 
       - name: Build C tests
-        working-directory: crates/timing-oracle-c/tests
+        working-directory: crates/tacet-c/tests
         run: |
           mkdir -p build
           cd build
@@ -99,8 +99,8 @@ jobs:
           make
 
       - name: Run C tests
-        working-directory: crates/timing-oracle-c/tests/build
-        run: ./timing_oracle_tests
+        working-directory: crates/tacet-c/tests/build
+        run: ./tacet_tests
         env:
           LD_LIBRARY_PATH: ${{ github.workspace }}/target/release
           DYLD_LIBRARY_PATH: ${{ github.workspace }}/target/release
@@ -114,11 +114,11 @@ jobs:
           fi
 
           clang++ -std=c++20 $CXX_FLAGS \
-            -I crates/timing-oracle-c/include \
+            -I crates/tacet-c/include \
             -I bindings/cpp \
             bindings/cpp/test_cpp_wrapper.cpp \
             -L target/release \
-            -ltiming_oracle_c \
+            -ltacet_c \
             -o /tmp/test_cpp_wrapper
 
           DYLD_LIBRARY_PATH=${{ github.workspace }}/target/release \
@@ -137,7 +137,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     defaults:
       run:
-        working-directory: crates/timing-oracle-napi
+        working-directory: crates/tacet-napi
     steps:
       - uses: actions/checkout@v6
 
@@ -145,7 +145,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "crates/timing-oracle-napi"
+          workspaces: "crates/tacet-napi"
           shared-key: "napi-${{ matrix.os }}"
 
       - uses: oven-sh/setup-bun@v2
@@ -187,21 +187,21 @@ jobs:
       - name: Download C library
         uses: actions/download-artifact@v6
         with:
-          name: libtiming_oracle_c-${{ matrix.artifact_name }}
+          name: libtacet_c-${{ matrix.artifact_name }}
           path: target/release
 
       - uses: actions/setup-go@v6
         with:
           go-version: '1.21'
           cache: true
-          cache-dependency-path: crates/timing-oracle-go/go.mod
+          cache-dependency-path: crates/tacet-go/go.mod
 
       - name: Setup library for CGo
         run: |
-          mkdir -p crates/timing-oracle-go/internal/ffi/lib/${{ matrix.lib_dir }}
-          cp target/release/libtiming_oracle_c.a \
-             crates/timing-oracle-go/internal/ffi/lib/${{ matrix.lib_dir }}/
+          mkdir -p crates/tacet-go/internal/ffi/lib/${{ matrix.lib_dir }}
+          cp target/release/libtacet_c.a \
+             crates/tacet-go/internal/ffi/lib/${{ matrix.lib_dir }}/
 
       - name: Run Go tests
-        working-directory: crates/timing-oracle-go
+        working-directory: crates/tacet-go
         run: go test -v -timeout 5m ./...

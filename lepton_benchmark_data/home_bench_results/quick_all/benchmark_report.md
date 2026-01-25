@@ -18,7 +18,7 @@
 | mona | 0.0% ± 8.1% |
 | rtlf | 15.0% ± 15.4% |
 | silent | 15.0% ± 15.4% |
-| timing-oracle | 0.0% ± 8.1% |
+| tacet | 0.0% ± 8.1% |
 | timing-tvla | 0.0% ± 8.1% |
 | tlsfuzzer | 10.0% ± 13.7% |
 
@@ -32,7 +32,7 @@
 | mona | 100% | 100% |
 | rtlf | 100% | 100% |
 | silent | 100% | 100% |
-| timing-oracle | 100% | 100% |
+| tacet | 100% | 100% |
 | timing-tvla | 100% | 100% |
 | tlsfuzzer | 100% | 100% |
 
@@ -104,7 +104,7 @@
 | shift | 1σ | iid | 100.0% | [83.9%, 100.0%] | 7711 |
 | shift | 5σ | iid | 100.0% | [83.9%, 100.0%] | 7572 |
 
-### timing-oracle
+### tacet
 
 | Pattern | Effect | Noise | Rate | 95% CI | Time (ms) |
 |---------|--------|-------|------|--------|----------|

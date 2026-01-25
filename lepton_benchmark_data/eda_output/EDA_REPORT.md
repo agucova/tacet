@@ -7,7 +7,7 @@ This analysis examines the performance of timing side-channel detection tools on
 **Dataset:**
 - 43,200 individual trial results
 - 864 aggregated conditions
-- Tools compared: ad-test, dudect, ks-test, mona, rtlf-native, silent-native, timing-oracle, timing-tvla
+- Tools compared: ad-test, dudect, ks-test, mona, rtlf-native, silent-native, tacet, timing-tvla
 - Effect sizes: 0.0 to 0.005 σ
 - Noise models: ar1-0.2-realistic, ar1-0.4-realistic, ar1-0.6-realistic, ar1-0.8-realistic, ar1-n0.2-realistic, ar1-n0.4-realistic, ar1-n0.6-realistic, ar1-n0.8-realistic, iid-realistic
 
@@ -20,7 +20,7 @@ This analysis examines the performance of timing side-channel detection tools on
 | dudect | 0.000 | ✓ Good |
 | mona | 0.000 | ✓ Good |
 | silent-native | 0.000 | ✓ Good |
-| timing-oracle | 0.000 | ✓ Good |
+| tacet | 0.000 | ✓ Good |
 | timing-tvla | 0.000 | ✓ Good |
 | rtlf-native | 0.069 | ✓ Good |
 | ks-test | 0.293 | ✗ High |
@@ -39,7 +39,7 @@ The AD-test and KS-test show very high FPR (~0.90), making them unreliable for C
 | mona          |     0     | ✓         |            0.89 |           1    |            0     |                  0 |
 | rtlf-native   |     0.069 | ✓         |            0.9  |           1    |            0     |               4789 |
 | silent-native |     0     | ✓         |            0.89 |           1    |            0     |               7700 |
-| timing-oracle |     0     | ✓         |            0.33 |           0.38 |            0.002 |                 25 |
+| tacet |     0     | ✓         |            0.33 |           0.38 |            0.002 |                 25 |
 | timing-tvla   |     0     | ✓         |            0.89 |           1    |            0     |                  0 |
 
 ### 3. Speed vs Accuracy Trade-off
@@ -51,13 +51,13 @@ The AD-test and KS-test show very high FPR (~0.90), making them unreliable for C
 | timing-tvla | 0ms | #3 |
 | ks-test | 1ms | #4 |
 | dudect | 11ms | #5 |
-| timing-oracle | 25ms | #6 |
+| tacet | 25ms | #6 |
 | rtlf-native | 4789ms | #7 |
 | silent-native | 7700ms | #8 |
 
 ## Conclusions
 
-1. **timing-oracle** achieves excellent FPR control while maintaining competitive power
+1. **tacet** achieves excellent FPR control while maintaining competitive power
 2. **AD-test and KS-test** have severely inflated FPR (~90%) and should not be used for decision-making
 3. **RTLF and SILENT** maintain good FPR but at the cost of slower execution
 4. **DudeCT** shows moderate FPR but fast execution

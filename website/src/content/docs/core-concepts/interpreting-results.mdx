@@ -25,7 +25,7 @@ Every test returns one of four outcomes:
 <Tabs>
 <TabItem label="Rust">
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 let inputs = InputPair::new(|| [0u8; 32], || rand::random());
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -53,30 +53,30 @@ match outcome {
 </TabItem>
 <TabItem label="Go">
 ```go
-inputs := timingoracle.NewInputPair(
+inputs := tacet.NewInputPair(
     func() []byte { return make([]byte, 32) },
     func() []byte { b := make([]byte, 32); rand.Read(b); return b },
 )
 
-outcome := timingoracle.ForAttacker(timingoracle.AdjacentNetwork).
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
     Test(inputs, func(data []byte) { myFunction(data) })
 
 switch o := outcome.(type) {
-case *timingoracle.Pass:
+case *tacet.Pass:
     fmt.Printf("No leak (P=%.1f%%)\n", o.LeakProbability*100)
-case *timingoracle.Fail:
+case *tacet.Fail:
     fmt.Printf("Leak detected (P=%.1f%%)\n", o.LeakProbability*100)
-case *timingoracle.Inconclusive:
+case *tacet.Inconclusive:
     fmt.Printf("Inconclusive: %s\n", o.Reason)
-case *timingoracle.Unmeasurable:
+case *tacet.Unmeasurable:
     fmt.Printf("Cannot measure: %s\n", o.Recommendation)
 }
 ```
 </TabItem>
 <TabItem label="C">
 ```c
-timing_oracle_outcome_t outcome;
-timing_oracle_test(oracle, inputs, measure_fn, &outcome);
+tacet_outcome_t outcome;
+tacet_test(oracle, inputs, measure_fn, &outcome);
 
 switch (outcome.tag) {
     case TIMING_ORACLE_PASS:
@@ -113,7 +113,7 @@ This is different from a p-value:
 | Converges with more data | Can produce more false positives with more data |
 
 <Aside type="tip" title="Why this matters">
-With classical t-tests (like DudeCT), running more samples can increase false positive rates. timing-oracle's Bayesian approach converges toward the true answer as you collect more data.
+With classical t-tests (like DudeCT), running more samples can increase false positive rates. tacet's Bayesian approach converges toward the true answer as you collect more data.
 </Aside>
 
 ### Probability thresholds

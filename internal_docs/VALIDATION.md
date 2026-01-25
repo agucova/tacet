@@ -1,6 +1,6 @@
 # Statistical Validation Suite
 
-This document describes the statistical validation suite for `timing-oracle`, which rigorously validates the library's false positive rate (FPR), statistical power, Bayesian calibration, effect estimation accuracy, and coverage properties.
+This document describes the statistical validation suite for `tacet`, which rigorously validates the library's false positive rate (FPR), statistical power, Bayesian calibration, effect estimation accuracy, and coverage properties.
 
 ## Overview
 
@@ -33,7 +33,7 @@ cargo test --release \
   --test calibration_coverage
 
 # Generate plots
-uv run crates/timing-oracle/scripts/plot_calibration.py ./calibration_data --output ./plots
+uv run crates/tacet/scripts/plot_calibration.py ./calibration_data --output ./plots
 ```
 
 ### Full Validation
@@ -55,7 +55,7 @@ cargo test --release \
   -- --ignored
 
 # Generate plots
-uv run crates/timing-oracle/scripts/plot_calibration.py ./calibration_data --output ./plots
+uv run crates/tacet/scripts/plot_calibration.py ./calibration_data --output ./plots
 ```
 
 ## Test Categories

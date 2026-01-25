@@ -1,23 +1,31 @@
-# timing-oracle
+<p align="center">
+  <img src="website/public/logo.svg" alt="Tacet" width="300" />
+</p>
 
-**Detect timing side channels with statistically rigorous methods.**
+<p align="center">
+  <strong>Detect timing side channels with statistically rigorous methods.</strong>
+</p>
 
-Available for Rust, JavaScript/TypeScript, C/C++, and Go.
+<p align="center">
+  Available for Rust, JavaScript/TypeScript, C/C++, and Go.
+</p>
+
+---
 
 | Language | Package | Install |
 |----------|---------|---------|
-| Rust | `timing-oracle` | `cargo add timing-oracle --dev` |
-| JavaScript | `timing-oracle` | `bun add timing-oracle` |
-| C/C++ | source | [Build instructions](https://timingoracle.agus.sh/getting-started/installation) |
-| Go | `timing-oracle-go` | `go get github.com/agucova/timing-oracle/bindings/go` |
+| Rust | `tacet` | `cargo add tacet --dev` |
+| JavaScript | `tacet` | `bun add tacet` |
+| C/C++ | source | [Build instructions](https://tacet.sh/getting-started/installation) |
+| Go | `tacet-go` | `go get github.com/agucova/tacet/bindings/go` |
 
-**[Documentation →](https://timingoracle.agus.sh)**
+**[Documentation →](https://tacet.sh)**
 
 ```
 $ cargo test --test aes_timing -- --nocapture
 
 [aes128_block_encrypt_constant_time]
-timing-oracle
+tacet
 ──────────────────────────────────────────────────────────────
 
   Samples: 6000 per class
@@ -34,7 +42,7 @@ timing-oracle
 ## Quick Start
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 #[test]
 fn constant_time_compare() {
@@ -59,7 +67,7 @@ fn constant_time_compare() {
 }
 ```
 
-> **Important:** The baseline input must be chosen to create timing asymmetry with the sample input. For comparison functions, baseline should **match** the secret so it runs the full comparison (slow) while random samples exit early (fast). See [Choosing Input Classes](https://timingoracle.agus.sh/core-concepts/two-class-pattern) for details.
+> **Important:** The baseline input must be chosen to create timing asymmetry with the sample input. For comparison functions, baseline should **match** the secret so it runs the full comparison (slow) while random samples exit early (fast). See [Choosing Input Classes](https://tacet.sh/core-concepts/two-class-pattern) for details.
 
 ---
 
@@ -68,7 +76,7 @@ fn constant_time_compare() {
 ```rust
 // ✗ This looks constant-time but isn't (early-exit on mismatch)
 fn naive_compare(a: &[u8], b: &[u8]) -> bool {
-    a == b  // ← timing-oracle detects this in ~1 second
+    a == b  // ← tacet detects this in ~1 second
 }
 
 // ✓ This is actually constant-time
@@ -77,14 +85,14 @@ fn ct_compare(a: &[u8], b: &[u8]) -> bool {
 }
 ```
 
-## Why timing-oracle?
+## Why Tacet?
 
 Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
 
-timing-oracle gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
+Tacet gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
 
-| | DudeCT | timing-oracle |
-|---|--------|---------------|
+| | DudeCT | Tacet |
+|---|--------|-------|
 | **Output** | t-statistic + p-value | Probability of leak (0–100%) |
 | **False positives** | Unbounded (more samples → more FPs) | Converges to correct answer |
 | **Effect size** | Not provided | Estimated in nanoseconds |
@@ -93,7 +101,7 @@ timing-oracle gives you what you actually want: **the probability your code has 
 
 ## Real-World Validation
 
-While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](https://timingoracle.agus.sh/case-studies/rsa-timing-anomaly).
+While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](https://tacet.sh/case-studies/rsa-timing-anomaly).
 
 ---
 
@@ -157,7 +165,7 @@ sudo -E cargo test --test timing_tests -- --test-threads=1
 sudo cargo test --test timing_tests -- --test-threads=1
 ```
 
-See [CI Integration](https://timingoracle.agus.sh/guides/ci-integration) for more details.
+See [CI Integration](https://tacet.sh/guides/ci-integration) for more details.
 
 ## Platform Support
 
@@ -172,12 +180,12 @@ See [CI Integration](https://timingoracle.agus.sh/guides/ci-integration) for mor
 
 ## Documentation
 
-- [Installation](https://timingoracle.agus.sh/getting-started/installation)
-- [Quick Start](https://timingoracle.agus.sh/getting-started/quick-start)
-- [Two-Class Pattern](https://timingoracle.agus.sh/core-concepts/two-class-pattern) — Choosing input classes
-- [Attacker Models](https://timingoracle.agus.sh/core-concepts/attacker-models) — Choosing thresholds
-- [CI Integration](https://timingoracle.agus.sh/guides/ci-integration)
-- [API Reference (Rust)](https://docs.rs/timing-oracle)
+- [Installation](https://tacet.sh/getting-started/installation)
+- [Quick Start](https://tacet.sh/getting-started/quick-start)
+- [Two-Class Pattern](https://tacet.sh/core-concepts/two-class-pattern) — Choosing input classes
+- [Attacker Models](https://tacet.sh/core-concepts/attacker-models) — Choosing thresholds
+- [CI Integration](https://tacet.sh/guides/ci-integration)
+- [API Reference (Rust)](https://docs.rs/tacet)
 
 ## References
 

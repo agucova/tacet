@@ -53,7 +53,7 @@ default-filter = """
   binary(unit) |
   binary(core) |
   (binary(crypto) & test(/rustcrypto::blake2::rustcrypto_blake2b512_ct/)) |
-  (binary(aead_timing) & test(/chacha20poly1305_encrypt/))
+  (binary(crypto) & test(/rustcrypto::chacha20poly1305::rustcrypto_chacha20poly1305_encrypt_ct/))
 )
 """
 
@@ -65,7 +65,7 @@ status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
-default-filter = "binary(crypto) | binary(core) | binary(aead_timing) | binary(pqcrypto_timing)"
+default-filter = "binary(crypto) | binary(core)"
 
 # Full suite (~30min, excludes calibration and investigation)
 # Usage: cargo nextest run --profile full
@@ -133,7 +133,7 @@ status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
-default-filter = "(binary(crypto) & test(/^ring::/)) | (binary(aead_timing) & test(/aes_256_gcm|ring_chacha/))"
+default-filter = "binary(crypto) & test(/^ring::/)"
 
 # dalek ecosystem tests
 # Usage: cargo nextest run --profile dalek
@@ -153,7 +153,7 @@ status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "180s", terminate-after = 3 }
 retries = 0
-default-filter = "binary(pqcrypto_timing)"
+default-filter = "binary(crypto) & test(/^pqcrypto::/)"
 
 # =============================================================================
 # Platform-Specific Profiles

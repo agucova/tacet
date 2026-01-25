@@ -1,0 +1,479 @@
+//! Curve25519 timing tests - inspired by DudeCT's donna/donnabad examples
+//!
+//! Tests X25519 ECDH scalar multiplication for timing leaks using DudeCT's two-class pattern:
+//! - Class 0: Fixed scalars/basepoints
+//! - Class 1: Random scalars/basepoints
+//!
+//! This tests whether Curve25519 implementations have data-dependent timing.
+//!
+//! IMPORTANT: Both closures must execute IDENTICAL code paths - only the DATA differs.
+//! Pre-generate inputs outside closures to avoid measuring RNG time.
+
+use std::time::Duration;
+use tacet::helpers::InputPair;
+use tacet::{skip_if_unreliable, AttackerModel, Outcome, TimingOracle};
+use x25519_dalek::x25519;
+
+fn rand_bytes_32() -> [u8; 32] {
+    let mut arr = [0u8; 32];
+    for byte in &mut arr {
+        *byte = rand::random();
+    }
+    arr
+}
+
+// ============================================================================
+// X25519 Scalar Multiplication Tests
+// ============================================================================
+
+/// X25519 scalar multiplication should be constant-time
+///
+/// Uses DudeCT's two-class pattern: fixed scalar vs random scalars
+/// Tests whether the X25519 implementation has data-dependent timing
+#[test]
+fn x25519_scalar_mult_constant_time() {
+    // Fixed basepoint (standard X25519 base point)
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    // Use a valid fixed scalar (not all-zeros which is pathological)
+    let fixed_scalar: [u8; 32] = [
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
+    ];
+
+    // Pre-generate inputs using InputPair helper
+    let scalars = InputPair::new(|| fixed_scalar, rand_bytes_32);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(scalars, |scalar| {
+            let result = x25519(*scalar, basepoint);
+            std::hint::black_box(result);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_scalar_mult_constant_time");
+
+    eprintln!("\n[x25519_scalar_mult_constant_time]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // X25519 implementations should be constant-time
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "X25519 should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+/// X25519 with different basepoints - should still be constant-time
+///
+/// Tests whether scalar multiplication depends on basepoint data
+#[test]
+fn x25519_different_basepoints_constant_time() {
+    let scalar = rand_bytes_32();
+
+    // Use two non-pathological basepoints (NOT all-zeros which is the identity point)
+    // Basepoint 0: Standard X25519 basepoint (well-known, non-pathological)
+    let basepoint_standard = x25519_dalek::X25519_BASEPOINT_BYTES;
+    // Basepoint 1: A different valid point derived from the standard basepoint
+    // This creates a valid curve point that's different from the standard basepoint
+    let basepoint_derived = x25519([0x42u8; 32], x25519_dalek::X25519_BASEPOINT_BYTES);
+
+    // DudeCT compliant: pass basepoints directly, no branching in closure
+    let inputs = InputPair::new(move || basepoint_standard, move || basepoint_derived);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |basepoint| {
+            // Uniform code path: same operations for both classes
+            let result = x25519(scalar, *basepoint);
+            std::hint::black_box(result);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_different_basepoints_constant_time");
+
+    eprintln!("\n[x25519_different_basepoints_constant_time]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Different basepoints shouldn't cause significant timing differences
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "Should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+/// X25519 multiple operations - tests for cumulative timing effects
+#[test]
+fn x25519_multiple_operations_constant_time() {
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    // Use valid fixed scalars (not all-zeros)
+    let fixed_scalars: [[u8; 32]; 3] = [
+        [
+            0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a,
+            0x33, 0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c,
+            0x8b, 0x3a, 0x6d, 0x5e,
+        ],
+        [
+            0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5, 0xe6, 0xf7,
+            0x08, 0x19, 0x2a, 0x3b, 0x4c, 0x5d, 0x6e, 0x7f, 0x80, 0x91, 0xa2, 0xb3, 0xc4, 0xd5,
+            0xe6, 0xf7, 0x08, 0x19,
+        ],
+        [
+            0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee,
+            0xff, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
+            0xdd, 0xee, 0xff, 0x00,
+        ],
+    ];
+
+    // Pre-generate inputs using InputPair - 3 scalars per sample
+    let scalars = InputPair::new(
+        || fixed_scalars,
+        || [rand_bytes_32(), rand_bytes_32(), rand_bytes_32()],
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(scalars, |scalar_set| {
+            let mut total = 0u8;
+            for scalar in scalar_set {
+                let result = x25519(*scalar, basepoint);
+                total ^= result[0];
+            }
+            std::hint::black_box(total);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_multiple_operations_constant_time");
+
+    eprintln!("\n[x25519_multiple_operations_constant_time]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Multiple operations should maintain constant-time properties
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "X25519 multiple operations should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0, exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+/// Scalar clamping timing
+///
+/// Tests whether scalar clamping (key preparation) has timing dependencies on data
+#[test]
+fn x25519_scalar_clamping_constant_time() {
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    // Use a valid fixed scalar (not all-zeros)
+    let base_fixed_scalar: [u8; 32] = [
+        0x4e, 0x5a, 0xb4, 0x34, 0x9d, 0x4c, 0x14, 0x82, 0x1b, 0xc8, 0x5b, 0x26, 0x8f, 0x0a, 0x33,
+        0x9c, 0x7f, 0x4b, 0x2e, 0x8e, 0x1d, 0x6a, 0x3c, 0x5f, 0x9a, 0x2d, 0x7e, 0x4c, 0x8b, 0x3a,
+        0x6d, 0x5e,
+    ];
+
+    // Pre-generate inputs using InputPair - both pre-clamped
+    let scalars = InputPair::new(
+        || {
+            // Pre-clamp fixed scalar
+            let mut scalar = base_fixed_scalar;
+            scalar[0] &= 248;
+            scalar[31] &= 127;
+            scalar[31] |= 64;
+            scalar
+        },
+        || {
+            // Pre-clamp random scalar
+            let mut scalar = rand_bytes_32();
+            scalar[0] &= 248;
+            scalar[31] &= 127;
+            scalar[31] |= 64;
+            scalar
+        },
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(scalars, |scalar| {
+            let result = x25519(*scalar, basepoint);
+            std::hint::black_box(result);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_scalar_clamping_constant_time");
+
+    eprintln!("\n[x25519_scalar_clamping_constant_time]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Scalar clamping should be constant-time
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "Scalar clamping should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+// ============================================================================
+// Comparative Tests (Different Scalar Patterns)
+// ============================================================================
+
+/// Compare high vs low Hamming weight scalars
+///
+/// Tests if the number of 1-bits in scalar affects timing
+#[test]
+fn x25519_hamming_weight_independence() {
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    let inputs = InputPair::new(|| [0x00u8; 32], || [0xFFu8; 32]);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |scalar| {
+            let result = x25519(*scalar, basepoint);
+            std::hint::black_box(result);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_hamming_weight_independence");
+
+    eprintln!("\n[x25519_hamming_weight_independence]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Hamming weight should not affect timing significantly
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "Should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+/// Test sequential vs scattered byte patterns in scalar
+#[test]
+fn x25519_byte_pattern_independence() {
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    // DudeCT compliant: inline array creation (same pattern as hamming_weight test)
+    // Sequential: [0, 1, 2, ..., 31]
+    // Reverse: [31, 30, 29, ..., 0]
+    let inputs = InputPair::new(
+        || {
+            [
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22,
+                23, 24, 25, 26, 27, 28, 29, 30, 31u8,
+            ]
+        },
+        || {
+            [
+                31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11,
+                10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0u8,
+            ]
+        },
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |scalar| {
+            // Uniform code path: same operations for both classes
+            let result = x25519(*scalar, basepoint);
+            std::hint::black_box(result);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_byte_pattern_independence");
+
+    eprintln!("\n[x25519_byte_pattern_independence]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Byte pattern should not affect timing
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "Should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}
+
+/// Full ECDH exchange timing
+///
+/// Tests complete key exchange operation for timing leaks.
+/// Uses the same pattern as x25519_hamming_weight_independence (which passes):
+/// - Fixed pubkey outside the closure
+/// - Two different scalars using inline array literals
+#[test]
+fn x25519_ecdh_exchange_constant_time() {
+    // Use the standard X25519 basepoint as the "peer's public key"
+    // This is the same pattern as x25519_hamming_weight_independence which passes
+    let peer_pubkey = x25519_dalek::X25519_BASEPOINT_BYTES;
+
+    // Test with uniform scalar patterns (like hamming_weight but different values)
+    // Using 0x55 vs 0xAA - alternating bit patterns that are also simple
+    let inputs = InputPair::new(|| [0x55u8; 32], || [0xAAu8; 32]);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |secret_scalar| {
+            // Perform scalar multiplication (ECDH) - fixed pubkey, varying scalar
+            let shared = x25519(*secret_scalar, peer_pubkey);
+            std::hint::black_box(shared);
+        });
+
+    let outcome = skip_if_unreliable!(outcome, "x25519_ecdh_exchange_constant_time");
+
+    eprintln!("\n[x25519_ecdh_exchange_constant_time]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    // Full ECDH exchange should be constant-time
+    match &outcome {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
+            panic!(
+                "ECDH exchange should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0,
+                exploitability
+            );
+        }
+        Outcome::Inconclusive {
+            leak_probability, ..
+        } => {
+            eprintln!("Inconclusive: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Unmeasurable { .. } => {}
+        Outcome::Research(_) => {}
+    }
+}

@@ -1,11 +1,11 @@
 ---
 title: Specification (v5.6)
-description: Authoritative specification for timing-oracle's statistical methodology and requirements
+description: Authoritative specification for tacet's statistical methodology and requirements
 sidebar:
   order: 1
 ---
 
-This document is the authoritative specification for timing-oracle, a Bayesian timing side-channel detection system. It defines the statistical methodology, abstract types, and requirements that implementations MUST follow to be conformant.
+This document is the authoritative specification for tacet, a Bayesian timing side-channel detection system. It defines the statistical methodology, abstract types, and requirements that implementations MUST follow to be conformant.
 
 For implementation guidance, see the [Implementation Guide](/guides/implementation). For language-specific APIs, see the [Rust API](/api/rust), [C API](/api/c), or [Go API](/api/go). For interpreting results, see the [User Guide](/guides/user-guide).
 
@@ -37,7 +37,7 @@ Timing side-channel attacks exploit data-dependent execution time in cryptograph
 
 ### 1.2 Solution
 
-timing-oracle addresses these issues with:
+tacet addresses these issues with:
 
 1. **Quantile-based statistics**: Compare nine deciles to capture both uniform shifts and tail effects
 2. **Adaptive Bayesian inference**: Collect samples until confident, with natural early stopping
@@ -335,7 +335,7 @@ IssueCode =
 
 ## 3. Statistical Methodology
 
-This section describes the mathematical foundation of timing-oracle. All formulas in this section are normative; implementations MUST produce equivalent results.
+This section describes the mathematical foundation of tacet. All formulas in this section are normative; implementations MUST produce equivalent results.
 
 ### 3.1 Test Statistic: Quantile Differences
 

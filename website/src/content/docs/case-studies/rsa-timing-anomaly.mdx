@@ -1,11 +1,11 @@
 ---
 title: RSA Timing Anomaly
-description: Investigation into RSA decryption timing leaks discovered while testing timing-oracle
+description: Investigation into RSA decryption timing leaks discovered while testing tacet
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-This case study documents the investigation into RSA timing anomalies discovered while testing timing-oracle, which led to the rediscovery of timing vulnerabilities related to [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack).
+This case study documents the investigation into RSA timing anomalies discovered while testing tacet, which led to the rediscovery of timing vulnerabilities related to [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack).
 
 ## Summary
 
@@ -19,7 +19,7 @@ Even with RSA blinding enabled, averaging enough measurements (~500) reveals per
 
 ## Test Setup
 
-- **Library**: timing-oracle (Rust)
+- **Library**: tacet (Rust)
 - **RSA Implementation**: `rsa` crate (RustCrypto)
 - **Key Size**: RSA-1024
 - **Platform**: macOS ARM64 (Apple Silicon)
@@ -151,7 +151,7 @@ The `rsa` crate has since implemented additional mitigations:
 - Cache-resistant implementations
 
 <Aside type="caution">
-Always use the latest version of cryptographic libraries and verify constant-time properties with tools like timing-oracle.
+Always use the latest version of cryptographic libraries and verify constant-time properties with tools like tacet.
 </Aside>
 
 ---
@@ -162,7 +162,7 @@ Always use the latest version of cryptographic libraries and verify constant-tim
 
 2. **Microarchitectural state matters**: Branch predictors and cache state can create timing differences even when the algorithm is "constant-time" in the abstract.
 
-3. **Statistical tools work**: timing-oracle correctly identified this vulnerability without any prior knowledge of RSA internals.
+3. **Statistical tools work**: tacet correctly identified this vulnerability without any prior knowledge of RSA internals.
 
 4. **Effect decomposition is useful**: The `UniformShift` pattern indicates a systematic timing difference (branch prediction/cache effects), not just random noise.
 
@@ -171,5 +171,5 @@ Always use the latest version of cryptographic libraries and verify constant-tim
 ## References
 
 - [CVE-2023-49092 (Marvin Attack)](https://rustsec.org/advisories/RUSTSEC-2023-0071.html)
-- [Full investigation report](https://github.com/agucova/timing-oracle/blob/main/docs/investigation-rsa-timing-anomaly.md)
+- [Full investigation report](https://github.com/agucova/tacet/blob/main/docs/investigation-rsa-timing-anomaly.md)
 - Jancar, J., et al. (2023). "Marvin Attack: RSA Decryption Is Vulnerable to Timing Attacks"

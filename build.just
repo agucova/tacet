@@ -18,14 +18,14 @@ minimal:
 # Build only the main library
 [group('build')]
 lib:
-    cargo build --release -p timing-oracle --lib
+    cargo build --release -p tacet --lib
 
 # Build only the core crate
 [group('build')]
 core:
-    cargo build --release -p timing-oracle-core
+    cargo build --release -p tacet-core
 
 # Build only the macros crate
 [group('build')]
 macros:
-    cargo build --release -p timing-oracle-macros
+    cargo build --release -p tacet-macros

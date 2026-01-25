@@ -2,7 +2,7 @@
 
 **Date:** January 2026
 **Datasets:** Overnight benchmark (100,800 measurements), Fine-threshold benchmark (48,600 measurements)
-**Tools Evaluated:** timing-oracle, SILENT, dudect, TVLA, KS-test, AD-test, MONA
+**Tools Evaluated:** tacet, SILENT, dudect, TVLA, KS-test, AD-test, MONA
 
 ## Executive Summary
 
@@ -10,14 +10,14 @@ This report presents a comprehensive evaluation of timing side-channel detection
 
 | Tool | FPR at H₀ | Power at 0.001σ | Autocorr. Robust | Avg. Time |
 |------|-----------|-----------------|------------------|-----------|
-| **timing-oracle** | **0%** | **100%** | **Yes** | 260ms |
+| **tacet** | **0%** | **100%** | **Yes** | 260ms |
 | **SILENT** | **0%** | **100%** | **Yes** | 4,170ms |
 | dudect | 100% | 100% | No | 22ms |
 | TVLA | 96% | 100% | No | <1ms |
 | KS-test | 100% | 100% | No | 9ms |
 | AD-test | 100% | 100% | No | <1ms |
 
-**Conclusion:** Only timing-oracle and SILENT are suitable for production use. Other tools produce catastrophic false positive rates (94-100%) under realistic conditions, making them unsuitable for CI/CD pipelines.
+**Conclusion:** Only tacet and SILENT are suitable for production use. Other tools produce catastrophic false positive rates (94-100%) under realistic conditions, making them unsuitable for CI/CD pipelines.
 
 ---
 
@@ -38,7 +38,7 @@ The challenge lies in achieving both:
 
 | Tool | Method | Reference |
 |------|--------|-----------|
-| timing-oracle | Bayesian 9-quantile with practical significance threshold | This work |
+| tacet | Bayesian 9-quantile with practical significance threshold | This work |
 | SILENT | Bootstrap-based quantile comparison | arXiv:2504.19821 |
 | dudect | Welch's t-test (t > 4.5) | Reparaz et al. 2017 |
 | TVLA | Test Vector Leakage Assessment (t > 4.5) | Goodwill et al. 2011 |
@@ -70,13 +70,13 @@ The most critical metric for production use is the False Positive Rate—the pro
 
 ![FPR Comparison](figures/fpr_comparison.png)
 
-**Key Finding:** timing-oracle achieves 0% FPR while all other tools (except SILENT in fine-threshold data) show FPR of 94-100%.
+**Key Finding:** tacet achieves 0% FPR while all other tools (except SILENT in fine-threshold data) show FPR of 94-100%.
 
 ### 2.2 FPR by Tool (Overnight Data, effect=0)
 
 | Tool | FPR | 95% CI | Trials |
 |------|-----|--------|--------|
-| timing-oracle | 0.0% | [0.0%, 0.2%] | 2,400 |
+| tacet | 0.0% | [0.0%, 0.2%] | 2,400 |
 | TVLA | 94.5% | [93.5%, 95.4%] | 2,400 |
 | dudect | 100.0% | [99.8%, 100%] | 2,400 |
 | KS-test | 100.0% | [99.8%, 100%] | 2,400 |
@@ -91,7 +91,7 @@ The catastrophic FPR of classical tools stems from a fundamental conceptual mism
 
 2. **Code Path Differences:** Even when effect=0, the benchmark executes different code paths for baseline vs. sample classes. This introduces tiny (~1-10 cycle) timing differences that are statistically detectable but not exploitable.
 
-3. **timing-oracle's Solution:** Uses a practical significance threshold (100ns for AdjacentNetwork model) that filters out statistically-real but practically-irrelevant timing differences.
+3. **tacet's Solution:** Uses a practical significance threshold (100ns for AdjacentNetwork model) that filters out statistically-real but practically-irrelevant timing differences.
 
 ---
 
@@ -109,18 +109,18 @@ Power measures the probability of correctly detecting a timing leak when one exi
 
 | Tool | 0σ | 0.0001σ | 0.001σ | 0.01σ | 0.1σ |
 |------|-----|---------|--------|-------|------|
-| timing-oracle | 0% | 0% | **100%** | 100% | 100% |
+| tacet | 0% | 0% | **100%** | 100% | 100% |
 | SILENT | 0% | 0% | **100%** | 100% | 100% |
 | dudect | 100%* | 100% | 100% | 100% | 100% |
 | TVLA | 96%* | 96% | 96% | 96% | 96% |
 
 *Values at 0σ represent FPR, not power.
 
-**Interpretation:** timing-oracle and SILENT correctly have 0% detection at sub-threshold effects (0-0.0008σ) and achieve 100% detection once the effect exceeds the practical significance threshold (~0.001σ = 100ns).
+**Interpretation:** tacet and SILENT correctly have 0% detection at sub-threshold effects (0-0.0008σ) and achieve 100% detection once the effect exceeds the practical significance threshold (~0.001σ = 100ns).
 
 ### 3.3 Detection Threshold
 
-For timing-oracle with AdjacentNetwork model (θ=100ns), the detection threshold is approximately:
+For tacet with AdjacentNetwork model (θ=100ns), the detection threshold is approximately:
 - **0.001σ** where σ ≈ 100μs in realistic timing measurements
 - This corresponds to **100ns**, matching the configured practical significance threshold
 
@@ -148,8 +148,8 @@ The following heatmaps show detection rates across the (μ, Φ) parameter space 
 
 ### 4.2 Tool-by-Tool Analysis
 
-#### timing-oracle
-![timing-oracle Heatmap](figures/silent_style_timing_oracle.png)
+#### tacet
+![tacet Heatmap](figures/silent_style_tacet.png)
 
 **Analysis:**
 - H₀ region (μ=0): Uniformly white/light across all Φ values → 0% FPR regardless of autocorrelation
@@ -160,7 +160,7 @@ The following heatmaps show detection rates across the (μ, Φ) parameter space 
 ![SILENT Heatmap](figures/silent_style_silent.png)
 
 **Analysis:**
-- Similar pattern to timing-oracle
+- Similar pattern to tacet
 - Both tools show robust FPR control across autocorrelation levels
 - Transition from H₀ to H₁ behavior occurs around 0.001σ
 
@@ -183,12 +183,12 @@ The following heatmaps show detection rates across the (μ, Φ) parameter space 
 
 | Tool | FPR at Φ=0 | FPR at Φ=0.8 | FPR Change |
 |------|------------|--------------|------------|
-| timing-oracle | 0% | 0% | +0% |
+| tacet | 0% | 0% | +0% |
 | SILENT | 0% | 0% | +0% |
 | dudect | 100% | 100% | +0% |
 | TVLA | 96% | 93% | -3% |
 
-**Conclusion:** timing-oracle and SILENT maintain stable FPR across all autocorrelation levels. Classical tools already have catastrophic FPR, so autocorrelation effects are secondary.
+**Conclusion:** tacet and SILENT maintain stable FPR across all autocorrelation levels. Classical tools already have catastrophic FPR, so autocorrelation effects are secondary.
 
 ---
 
@@ -208,7 +208,7 @@ Different timing vulnerabilities manifest as different distributional changes:
 
 ![Pattern Detection](figures/pattern_detection.png)
 
-### 5.2 timing-oracle Pattern Performance
+### 5.2 tacet Pattern Performance
 
 | Pattern | 0σ | 0.001σ | 0.01σ | 0.1σ | 1σ |
 |---------|-----|--------|-------|------|-----|
@@ -220,11 +220,11 @@ Different timing vulnerabilities manifest as different distributional changes:
 
 ### 5.3 Bimodal Pattern Limitation
 
-timing-oracle fails to detect bimodal patterns at any effect size. This is a known limitation:
+tacet fails to detect bimodal patterns at any effect size. This is a known limitation:
 
-**Root Cause:** The bimodal pattern simulates rare slow operations (5% probability of 5× slower). These affect the p95+ quantiles, but timing-oracle's 9-quantile method analyzes only the p10-p90 range for robustness against outliers.
+**Root Cause:** The bimodal pattern simulates rare slow operations (5% probability of 5× slower). These affect the p95+ quantiles, but tacet's 9-quantile method analyzes only the p10-p90 range for robustness against outliers.
 
-**Mitigation:** For systems where rare slow operations are security-relevant, supplement timing-oracle with tail-specific tests.
+**Mitigation:** For systems where rare slow operations are security-relevant, supplement tacet with tail-specific tests.
 
 ---
 
@@ -243,12 +243,12 @@ timing-oracle fails to detect bimodal patterns at any effect size. This is a kno
 | AD-test | 1ms | 1ms | 0ms |
 | KS-test | 3ms | 9ms | 25ms |
 | dudect | 22ms | 22ms | 0ms |
-| **timing-oracle** | **267ms** | **260ms** | **17ms** |
+| **tacet** | **267ms** | **260ms** | **17ms** |
 | SILENT | 4,170ms | 4,170ms | - |
 
 ### 6.3 Speed-Accuracy Trade-off
 
-timing-oracle is ~260× slower than the fastest tools but provides:
+tacet is ~260× slower than the fastest tools but provides:
 - Correct FPR control (0% vs 94-100%)
 - Practical significance filtering
 - Exploitability assessment
@@ -261,7 +261,7 @@ For CI/CD use, 267ms per test is acceptable (tests complete in seconds, not minu
 
 ### 7.1 For Production CI/CD
 
-**Use timing-oracle** as the primary tool:
+**Use tacet** as the primary tool:
 - ✓ 0% false positive rate under realistic conditions
 - ✓ 100% power for exploitable effects (≥0.001σ)
 - ✓ Robust to autocorrelated noise
@@ -271,13 +271,13 @@ For CI/CD use, 267ms per test is acceptable (tests complete in seconds, not minu
 ### 7.2 For Research/Exploration
 
 Consider a multi-tool approach:
-- **timing-oracle:** Primary decision tool
+- **tacet:** Primary decision tool
 - **dudect/TVLA:** Quick screening (expect false positives)
 - **Tail-specific tests:** If bimodal patterns are a concern
 
 ### 7.3 Configuration Guidelines
 
-| Threat Model | timing-oracle Preset | Threshold |
+| Threat Model | tacet Preset | Threshold |
 |--------------|---------------------|-----------|
 | SGX/Containers | `SharedHardware` | ~2 cycles |
 | LAN/HTTP2 | `AdjacentNetwork` | 100ns |
@@ -287,15 +287,15 @@ Consider a multi-tool approach:
 
 ## 8. Conclusions
 
-1. **timing-oracle is production-ready** for timing side-channel detection under realistic measurement conditions.
+1. **tacet is production-ready** for timing side-channel detection under realistic measurement conditions.
 
 2. **Classical tools are unsuitable** for production use—they produce 94-100% false positive rates by detecting statistical noise as "leaks."
 
-3. **The fundamental issue** is practical vs. statistical significance: tiny code path differences create statistically-detectable timing variations that are not exploitable. timing-oracle is the only evaluated tool (alongside SILENT) that incorporates this distinction.
+3. **The fundamental issue** is practical vs. statistical significance: tiny code path differences create statistically-detectable timing variations that are not exploitable. tacet is the only evaluated tool (alongside SILENT) that incorporates this distinction.
 
 4. **Bimodal patterns remain a challenge** for quantile-based methods—this is a known trade-off for outlier robustness.
 
-5. **Autocorrelation is a non-issue** for timing-oracle but should be considered when interpreting results from classical tools.
+5. **Autocorrelation is a non-issue** for tacet but should be considered when interpreting results from classical tools.
 
 ---
 
@@ -322,4 +322,4 @@ jupyter nbconvert --execute eda_benchmark.ipynb
 
 ---
 
-*Report generated from timing-oracle benchmark analysis pipeline.*
+*Report generated from tacet benchmark analysis pipeline.*

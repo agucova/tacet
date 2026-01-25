@@ -1,0 +1,245 @@
+//! crypto::ring::aes_gcm
+//!
+//! AES-256-GCM AEAD timing tests using the ring crate.
+//! Crate: ring
+//! Family: AEAD
+//! Expected: All Pass (constant-time with AES-NI)
+//!
+//! ring uses hardware AES-NI when available.
+//!
+//! IMPORTANT: Both closures must execute IDENTICAL code paths - only the DATA differs.
+//! Pre-generate inputs outside closures to avoid measuring RNG time.
+
+use ring::aead::{self, LessSafeKey, UnboundKey, AES_256_GCM};
+use std::time::Duration;
+use tacet::helpers::InputPair;
+use tacet::{skip_if_unreliable, AttackerModel, Exploitability, Outcome, TimingOracle};
+
+fn rand_bytes_64() -> [u8; 64] {
+    let mut arr = [0u8; 64];
+    for byte in &mut arr {
+        *byte = rand::random();
+    }
+    arr
+}
+
+// ============================================================================
+// Core AES-GCM Tests
+// ============================================================================
+
+/// AES-256-GCM encryption should be constant-time
+#[test]
+fn ring_aes256gcm_encrypt_ct() {
+    let key_bytes: [u8; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+    let key = LessSafeKey::new(unbound_key);
+    let nonce_bytes: [u8; 12] = [0u8; 12];
+
+    let fixed_plaintext: [u8; 64] = [0x42; 64];
+    let inputs = InputPair::new(|| fixed_plaintext, rand_bytes_64);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |plaintext| {
+            let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+            let mut in_out = plaintext.to_vec();
+            let tag = key
+                .seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut in_out)
+                .unwrap();
+            std::hint::black_box(tag.as_ref()[0]);
+        });
+
+    eprintln!("\n[ring_aes256gcm_encrypt_ct]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_encrypt_ct");
+
+    match &outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail { leak_probability, exploitability, .. } => {
+            panic!(
+                "AES-256-GCM encryption should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0, exploitability
+            );
+        }
+        Outcome::Inconclusive { reason, .. } => {
+            eprintln!("Inconclusive: {:?}", reason);
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Unmeasurable: {}", recommendation);
+        }
+        &Outcome::Research(_) => {}
+    }
+
+    if let Some(exp) = get_exploitability(&outcome) {
+        assert!(
+            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            "AES-256-GCM encryption should have low exploitability (got {:?})",
+            exp
+        );
+    }
+}
+
+/// AES-256-GCM decryption should be constant-time
+#[test]
+fn ring_aes256gcm_decrypt_ct() {
+    const SAMPLES: usize = 30_000;
+
+    let key_bytes: [u8; 32] = [0x5a; 32];
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+    let key = LessSafeKey::new(unbound_key);
+    let nonce_bytes: [u8; 12] = [0u8; 12];
+
+    let fixed_plaintext = [0x42u8; 64];
+    let mut fixed_ct = fixed_plaintext.to_vec();
+    let fixed_nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+    key.seal_in_place_append_tag(fixed_nonce, aead::Aad::empty(), &mut fixed_ct)
+        .unwrap();
+
+    let random_cts: Vec<Vec<u8>> = (0..SAMPLES)
+        .map(|_| {
+            let pt = rand_bytes_64();
+            let mut ct = pt.to_vec();
+            let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+            key.seal_in_place_append_tag(nonce, aead::Aad::empty(), &mut ct)
+                .unwrap();
+            ct
+        })
+        .collect();
+
+    let idx = std::cell::Cell::new(0usize);
+    let fixed_ct_clone = fixed_ct.clone();
+    let inputs = InputPair::new(
+        move || fixed_ct_clone.clone(),
+        move || {
+            let i = idx.get();
+            idx.set((i + 1) % SAMPLES);
+            random_cts[i].clone()
+        },
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |ct| {
+            let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+            let mut ct_mut = ct.clone();
+            let pt = key
+                .open_in_place(nonce, aead::Aad::empty(), &mut ct_mut)
+                .unwrap();
+            std::hint::black_box(pt[0]);
+        });
+
+    eprintln!("\n[ring_aes256gcm_decrypt_ct]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_decrypt_ct");
+
+    match &outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail { leak_probability, exploitability, .. } => {
+            panic!(
+                "AES-256-GCM decryption should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0, exploitability
+            );
+        }
+        Outcome::Inconclusive { reason, .. } => {
+            eprintln!("Inconclusive: {:?}", reason);
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Unmeasurable: {}", recommendation);
+        }
+        &Outcome::Research(_) => {}
+    }
+
+    if let Some(exp) = get_exploitability(&outcome) {
+        assert!(
+            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            "AES-256-GCM decryption should have low exploitability (got {:?})",
+            exp
+        );
+    }
+}
+
+/// Compare all-zeros vs all-ones plaintext for AES-GCM
+#[test]
+fn ring_aes256gcm_hamming() {
+    let key_bytes: [u8; 32] = [0x42; 32];
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+    let key = LessSafeKey::new(unbound_key);
+    let nonce_counter = std::sync::atomic::AtomicU64::new(0);
+
+    let inputs = InputPair::new(|| [0x00u8; 64], || [0xFFu8; 64]);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.15)
+        .fail_threshold(0.99)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |plaintext| {
+            let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut nonce_bytes = [0u8; 12];
+            nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
+            let nonce = aead::Nonce::assume_unique_for_key(nonce_bytes);
+
+            let mut in_out = plaintext.to_vec();
+            let tag = key
+                .seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut in_out)
+                .unwrap();
+            std::hint::black_box(tag.as_ref()[0]);
+        });
+
+    eprintln!("\n[ring_aes256gcm_hamming]");
+    eprintln!("{}", tacet::output::format_outcome(&outcome));
+
+    let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_hamming");
+
+    match &outcome {
+        Outcome::Pass { leak_probability, .. } => {
+            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
+        }
+        Outcome::Fail { leak_probability, exploitability, .. } => {
+            panic!(
+                "AES-GCM Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
+                leak_probability * 100.0, exploitability
+            );
+        }
+        Outcome::Inconclusive { reason, .. } => {
+            eprintln!("Inconclusive: {:?}", reason);
+        }
+        Outcome::Unmeasurable { recommendation, .. } => {
+            eprintln!("Unmeasurable: {}", recommendation);
+        }
+        &Outcome::Research(_) => {}
+    }
+
+    if let Some(exp) = get_exploitability(&outcome) {
+        assert!(
+            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            "AES-GCM Hamming weight should not affect timing (got {:?})",
+            exp
+        );
+    }
+}
+
+// ============================================================================
+// Helper functions
+// ============================================================================
+
+fn get_exploitability(outcome: &Outcome) -> Option<Exploitability> {
+    match outcome {
+        Outcome::Fail { exploitability, .. } => Some(*exploitability),
+        _ => None,
+    }
+}

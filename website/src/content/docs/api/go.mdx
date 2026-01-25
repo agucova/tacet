@@ -5,7 +5,7 @@ sidebar:
   order: 4
 ---
 
-Go bindings for timing-oracle.
+Go bindings for tacet.
 
 ## Quick Reference
 
@@ -17,31 +17,31 @@ import (
     "log"
     "time"
 
-    timingoracle "github.com/agucova/timing-oracle/crates/timing-oracle-go"
+    tacet "github.com/agucova/tacet/crates/tacet-go"
 )
 
 func main() {
-    result, err := timingoracle.Test(
-        timingoracle.NewZeroGenerator(0),  // Baseline: all zeros
-        timingoracle.FuncOperation(func(input []byte) {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),  // Baseline: all zeros
+        tacet.FuncOperation(func(input []byte) {
             myCryptoFunction(input)
         }),
         32,  // Input size in bytes
-        timingoracle.WithAttacker(timingoracle.AdjacentNetwork),
-        timingoracle.WithTimeBudget(30 * time.Second),
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(30 * time.Second),
     )
     if err != nil {
         log.Fatal(err)
     }
 
     switch result.Outcome {
-    case timingoracle.Pass:
+    case tacet.Pass:
         fmt.Printf("No leak: P(leak)=%.1f%%\n", result.LeakProbability*100)
-    case timingoracle.Fail:
+    case tacet.Fail:
         fmt.Printf("Leak: %.1f ns, %s\n", result.Effect.TotalNs(), result.Exploitability)
-    case timingoracle.Inconclusive:
+    case tacet.Inconclusive:
         fmt.Printf("Inconclusive: %s\n", result.InconclusiveReason)
-    case timingoracle.Unmeasurable:
+    case tacet.Unmeasurable:
         fmt.Printf("Too fast: %s\n", result.Recommendation)
     }
 }
@@ -52,8 +52,8 @@ func main() {
 ## Installation
 
 ```bash
-go get github.com/agucova/timing-oracle/crates/timing-oracle-go
-go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
+go get github.com/agucova/tacet/crates/tacet-go
+go generate github.com/agucova/tacet/crates/tacet-go/...
 ```
 
 The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
@@ -87,23 +87,23 @@ If you prefer to build the native library yourself instead of downloading pre-bu
 
 ```bash
 # Clone the repository
-git clone https://github.com/agucova/timing-oracle
-cd timing-oracle
+git clone https://github.com/agucova/tacet
+cd tacet
 
 # Build the C library
-cargo build -p timing-oracle-c --release
+cargo build -p tacet-c --release
 
 # Strip debug symbols (reduces size from ~26MB to ~12MB)
-strip -S target/release/libtiming_oracle_c.a  # macOS
-# or: strip --strip-debug target/release/libtiming_oracle_c.a  # Linux
+strip -S target/release/libtacet_c.a  # macOS
+# or: strip --strip-debug target/release/libtacet_c.a  # Linux
 
 # Copy to the appropriate platform directory
-mkdir -p crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)
-cp target/release/libtiming_oracle_c.a \
-   crates/timing-oracle-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)/
+mkdir -p crates/tacet-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)
+cp target/release/libtacet_c.a \
+   crates/tacet-go/internal/ffi/lib/$(go env GOOS)_$(go env GOARCH)/
 
 # Verify it works
-cd crates/timing-oracle-go
+cd crates/tacet-go
 go test -v -short -run TestTimerWorks
 ```
 
@@ -112,7 +112,7 @@ go test -v -short -run TestTimerWorks
 To download a specific version of the library:
 
 ```bash
-TIMING_ORACLE_VERSION=v0.1.0 go generate github.com/agucova/timing-oracle/crates/timing-oracle-go/...
+TIMING_ORACLE_VERSION=v0.1.0 go generate github.com/agucova/tacet/crates/tacet-go/...
 ```
 
 ---
@@ -184,13 +184,13 @@ type Generator interface {
 
 ```go
 // Fixed zero bytes for baseline, random for sample
-timingoracle.NewZeroGenerator(seed)
+tacet.NewZeroGenerator(seed)
 
 // Fixed value for baseline, random for sample
-timingoracle.NewFixedGenerator(fixedValue, seed)
+tacet.NewFixedGenerator(fixedValue, seed)
 
 // Custom generator from function
-timingoracle.FuncGenerator(func(isBaseline bool, output []byte) {
+tacet.FuncGenerator(func(isBaseline bool, output []byte) {
     // ...
 })
 ```
@@ -205,7 +205,7 @@ type Operation interface {
 
 ```go
 // From function
-timingoracle.FuncOperation(func(input []byte) {
+tacet.FuncOperation(func(input []byte) {
     myCryptoFunction(input)
 })
 ```
@@ -293,27 +293,27 @@ import (
     "fmt"
     "time"
 
-    "github.com/agucova/timing-oracle/crates/timing-oracle-go"
+    "github.com/agucova/tacet/crates/tacet-go"
 )
 
 func main() {
     secret := make([]byte, 32)
     copy(secret, []byte("my-secret-key-here-32-bytes-long"))
 
-    result, _ := timingoracle.Test(
-        timingoracle.NewFixedGenerator(secret, 42),
-        timingoracle.FuncOperation(func(input []byte) {
+    result, _ := tacet.Test(
+        tacet.NewFixedGenerator(secret, 42),
+        tacet.FuncOperation(func(input []byte) {
             subtle.ConstantTimeCompare(secret, input)
         }),
         32,
-        timingoracle.WithAttacker(timingoracle.AdjacentNetwork),
-        timingoracle.WithTimeBudget(30*time.Second),
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(30*time.Second),
     )
 
     switch result.Outcome {
-    case timingoracle.Pass:
+    case tacet.Pass:
         fmt.Println("Constant-time comparison verified")
-    case timingoracle.Fail:
+    case tacet.Fail:
         fmt.Printf("Timing leak detected! Effect: %.1f ns\n", result.Effect.TotalNs())
     default:
         fmt.Printf("Test incomplete: %v\n", result.Outcome)

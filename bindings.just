@@ -14,17 +14,17 @@ bindings_dir := justfile_directory() + "/bindings"
 cpp_bindings_dir := bindings_dir + "/cpp"
 
 # C bindings paths (cbindgen-based, in-crate)
-c_crate_dir := justfile_directory() + "/crates/timing-oracle-c"
+c_crate_dir := justfile_directory() + "/crates/tacet-c"
 c_include_dir := c_crate_dir + "/include"
 c_examples_dir := c_crate_dir + "/examples"
 
 # Go bindings path (CGo-based)
-go_dir := justfile_directory() + "/crates/timing-oracle-go"
+go_dir := justfile_directory() + "/crates/tacet-go"
 
 # Library paths
-c_lib := justfile_directory() + "/target/release/libtiming_oracle_c.a"
-c_dylib := justfile_directory() + "/target/release/libtiming_oracle_c.dylib"
-c_so := justfile_directory() + "/target/release/libtiming_oracle_c.so"
+c_lib := justfile_directory() + "/target/release/libtacet_c.a"
+c_dylib := justfile_directory() + "/target/release/libtacet_c.dylib"
+c_so := justfile_directory() + "/target/release/libtacet_c.so"
 
 # ============================================================================
 # MAIN COMMANDS
@@ -35,8 +35,8 @@ c_so := justfile_directory() + "/target/release/libtiming_oracle_c.so"
 all: c cpp-test go-test
     @echo ""
     @echo "All bindings built and tested successfully!"
-    @echo "  C:   {{c_include_dir}}/timing_oracle.h"
-    @echo "  C++: {{cpp_bindings_dir}}/timing_oracle.hpp"
+    @echo "  C:   {{c_include_dir}}/tacet.h"
+    @echo "  C++: {{cpp_bindings_dir}}/tacet.hpp"
     @echo "  Go:  {{go_dir}}"
 
 # Build C library (foundation for all bindings)
@@ -50,9 +50,9 @@ build: c
 # Build C bindings (generates header via cbindgen)
 [group('bindings')]
 c:
-    @echo "Building timing-oracle-c library..."
-    cargo build --release -p timing-oracle-c
-    @echo "C header generated at {{c_include_dir}}/timing_oracle.h"
+    @echo "Building tacet-c library..."
+    cargo build --release -p tacet-c
+    @echo "C header generated at {{c_include_dir}}/tacet.h"
     @echo "Static library at {{c_lib}}"
 
 # Build C example: simple (one-shot analysis)
@@ -64,7 +64,7 @@ c-example-simple: c
         -o {{c_examples_dir}}/simple \
         {{c_examples_dir}}/simple.c \
         -L{{justfile_directory()}}/target/release \
-        -ltiming_oracle_c -lpthread -lm
+        -ltacet_c -lpthread -lm
     @echo "Built: {{c_examples_dir}}/simple"
 
 # Build C example: adaptive (adaptive sampling loop)
@@ -76,7 +76,7 @@ c-example-adaptive: c
         -o {{c_examples_dir}}/adaptive \
         {{c_examples_dir}}/adaptive.c \
         -L{{justfile_directory()}}/target/release \
-        -ltiming_oracle_c -lpthread -lm
+        -ltacet_c -lpthread -lm
     @echo "Built: {{c_examples_dir}}/adaptive"
 
 # Build C example: simple_callback (callback-based API)
@@ -88,7 +88,7 @@ c-example-simple-callback: c
         -o {{c_examples_dir}}/simple_callback \
         {{c_examples_dir}}/simple_callback.c \
         -L{{justfile_directory()}}/target/release \
-        -ltiming_oracle_c -lpthread -lm
+        -ltacet_c -lpthread -lm
     @echo "Built: {{c_examples_dir}}/simple_callback"
 
 # Build all C examples
@@ -122,7 +122,7 @@ c-tests: c
     cd {{c_crate_dir}}/tests/build && cmake -DCMAKE_BUILD_TYPE=Release ..
     cd {{c_crate_dir}}/tests/build && make
     @echo "Running fast C tests..."
-    cd {{c_crate_dir}}/tests/build && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./timing_oracle_tests fast
+    cd {{c_crate_dir}}/tests/build && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./tacet_tests fast
 
 # Run all C tests including slow integration tests
 [group('bindings')]
@@ -132,7 +132,7 @@ c-tests-all: c
     cd {{c_crate_dir}}/tests/build && cmake -DCMAKE_BUILD_TYPE=Release ..
     cd {{c_crate_dir}}/tests/build && make
     @echo "Running all C tests (including slow tests)..."
-    cd {{c_crate_dir}}/tests/build && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./timing_oracle_tests all
+    cd {{c_crate_dir}}/tests/build && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./tacet_tests all
 
 # Run C tests with AddressSanitizer
 [group('bindings')]
@@ -142,7 +142,7 @@ c-tests-asan: c
     cd {{c_crate_dir}}/tests/build-asan && cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_C_FLAGS="-fsanitize=address -fno-omit-frame-pointer" ..
     cd {{c_crate_dir}}/tests/build-asan && make
     @echo "Running C tests with ASan..."
-    cd {{c_crate_dir}}/tests/build-asan && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./timing_oracle_tests fast
+    cd {{c_crate_dir}}/tests/build-asan && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./tacet_tests fast
 
 # ============================================================================
 # C++ BINDINGS (header-only wrapper over C)
@@ -168,7 +168,7 @@ cpp-test: c
         -I{{cpp_bindings_dir}} \
         {{cpp_bindings_dir}}/test_cpp_wrapper.cpp \
         -L{{justfile_directory()}}/target/release \
-        -ltiming_oracle_c \
+        -ltacet_c \
         -o /tmp/test_cpp_wrapper
     @echo "Running C++ tests..."
     DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release /tmp/test_cpp_wrapper
@@ -214,7 +214,7 @@ go-test-short: c
 # ============================================================================
 
 # Path to NAPI crate
-napi_crate_dir := justfile_directory() + "/crates/timing-oracle-napi"
+napi_crate_dir := justfile_directory() + "/crates/tacet-napi"
 
 # Run Node.js/Bun binding tests
 [group('bindings')]
@@ -262,7 +262,7 @@ check:
     fi
 
     lib_time=$(get_mtime "$lib_file")
-    header_file="{{c_include_dir}}/timing_oracle.h"
+    header_file="{{c_include_dir}}/tacet.h"
 
     if [[ -f "$header_file" ]]; then
         header_time=$(get_mtime "$header_file")
@@ -272,7 +272,7 @@ check:
     fi
 
     # Check C++ wrapper
-    cpp_file="{{cpp_bindings_dir}}/timing_oracle.hpp"
+    cpp_file="{{cpp_bindings_dir}}/tacet.hpp"
     if [[ -f "$cpp_file" ]]; then
         echo "C++ wrapper: present (header-only, no generation needed)"
     else
@@ -280,7 +280,7 @@ check:
     fi
 
     # Check Go bindings
-    go_file="{{go_dir}}/timing_oracle.go"
+    go_file="{{go_dir}}/tacet.go"
     if [[ -f "$go_file" ]]; then
         echo "Go bindings: present (CGo-based)"
     else

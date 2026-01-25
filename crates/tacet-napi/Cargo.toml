@@ -1,0 +1,41 @@
+[package]
+name = "tacet-napi"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Node.js/Bun bindings for tacet via napi-rs"
+keywords = ["security", "cryptography", "timing", "side-channel", "nodejs"]
+categories = ["cryptography", "api-bindings"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# napi-rs for Node.js bindings
+napi = { version = "2.16", default-features = false, features = [
+    "napi8",
+    "tokio_rt",
+    "serde-json",
+] }
+napi-derive = "2.16"
+
+# Core analysis (no timing, just statistics)
+tacet-core = { path = "../tacet-core", features = ["std", "parallel"] }
+
+# Calibration from main crate
+tacet = { path = "../tacet", default-features = false }
+
+# Random number generation
+rand = "0.9"
+rand_xoshiro = "0.7"
+
+# Error handling
+thiserror = "2"
+
+[build-dependencies]
+napi-build = "2.1"
+
+[profile.release]
+lto = true
+opt-level = 3

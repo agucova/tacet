@@ -8,16 +8,16 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 import { PackageManagers } from 'starlight-package-managers';
 
-This document covers the JavaScript/TypeScript bindings for timing-oracle via NAPI-RS.
+This document covers the JavaScript/TypeScript bindings for tacet via NAPI-RS.
 
 ## Installation
 
-<PackageManagers pkg="@timing-oracle/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+<PackageManagers pkg="@tacet/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
 
 ## Quick Start
 
 ```typescript
-import { TimingOracle, AttackerModel } from '@timing-oracle/js';
+import { TimingOracle, AttackerModel } from '@tacet/js';
 import crypto from 'crypto';
 
 const result = TimingOracle
@@ -126,7 +126,7 @@ import {
   TimingLeakError,
   CalibrationError,
   InsufficientSamplesError,
-} from '@timing-oracle/js';
+} from '@tacet/js';
 
 try {
   result.assertNoLeak();
@@ -148,7 +148,7 @@ For advanced use cases, you can use the low-level functions directly.
 Collect timing samples with automatic batch K detection.
 
 ```typescript
-import { collectSamples } from '@timing-oracle/js';
+import { collectSamples } from '@tacet/js';
 
 const samples = collectSamples(
   10_000,
@@ -163,7 +163,7 @@ const samples = collectSamples(
 Run complete analysis on pre-collected timing data.
 
 ```typescript
-import { analyze, calibrateTimer, configAdjacentNetwork } from '@timing-oracle/js';
+import { analyze, calibrateTimer, configAdjacentNetwork } from '@tacet/js';
 
 const result = analyze(
   BigInt64Array.from(baselineSamples),
@@ -181,7 +181,7 @@ import {
   adaptiveStepBatch,
   AdaptiveState,
   collectBatches,
-} from '@timing-oracle/js';
+} from '@tacet/js';
 
 const calibration = calibrateSamples(calBaseline, calSample, config, timer.frequencyHz);
 const state = new AdaptiveState();

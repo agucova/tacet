@@ -7,7 +7,7 @@ sidebar:
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-timing-oracle uses **two-class testing** to detect timing side channels. You provide two types of inputs (baseline and sample) and the library measures whether they take different amounts of time. If your code is constant-time, both classes complete in the same duration. If there's a timing leak, one class is consistently faster or slower than the other.
+tacet uses **two-class testing** to detect timing side channels. You provide two types of inputs (baseline and sample) and the library measures whether they take different amounts of time. If your code is constant-time, both classes complete in the same duration. If there's a timing leak, one class is consistently faster or slower than the other.
 
 This page explains how to choose input classes that will actually reveal timing leaks in your code.
 
@@ -16,7 +16,7 @@ This page explains how to choose input classes that will actually reveal timing 
 Let's start with an example where the input class choice is straightforward: testing whether a hash function has data-dependent timing.
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use sha3::{Sha3_256, Digest};
 
 let inputs = InputPair::new(

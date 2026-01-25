@@ -5,12 +5,12 @@ sidebar:
   order: 2
 ---
 
-C bindings for timing-oracle, providing low-overhead timing side-channel detection.
+C bindings for tacet, providing low-overhead timing side-channel detection.
 
 ## Quick Reference
 
 ```c
-#include <timing_oracle.h>
+#include <tacet.h>
 
 // Callback for sample collection
 void collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
@@ -54,12 +54,12 @@ int main(void) {
 ## Building
 
 ```bash
-git clone https://github.com/agucova/timing-oracle
-cd timing-oracle
-cargo build --release -p timing-oracle-c
+git clone https://github.com/agucova/tacet
+cd tacet
+cargo build --release -p tacet-c
 
-# Headers at: crates/timing-oracle-c/include/timing_oracle.h
-# Library at: target/release/libtiming_oracle_c.{a,so,dylib}
+# Headers at: crates/tacet-c/include/tacet.h
+# Library at: target/release/libtacet_c.{a,so,dylib}
 ```
 
 ---
@@ -336,7 +336,7 @@ typedef enum {
 ## Complete Example
 
 ```c
-#include <timing_oracle.h>
+#include <tacet.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -427,7 +427,7 @@ int main(void) {
 
 ```bash
 cc -O3 -Wall -std=c11 -o timing_test timing_test.c \
-    -I/path/to/timing-oracle/crates/timing-oracle-c/include \
-    -L/path/to/timing-oracle/target/release \
-    -ltiming_oracle_c -lpthread -lm
+    -I/path/to/tacet/crates/tacet-c/include \
+    -L/path/to/tacet/target/release \
+    -ltacet_c -lpthread -lm
 ```

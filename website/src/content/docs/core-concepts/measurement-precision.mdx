@@ -62,7 +62,7 @@ If your tests are hitting the measurement floor, you have several options:
 Use the `CyclePrecision` timer preset to request cycle-accurate measurements:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+use tacet::{TimingOracle, AttackerModel, TimerSpec};
 
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
     .timer_spec(TimerSpec::CyclePrecision)  // Explicitly request cycle-accurate timer

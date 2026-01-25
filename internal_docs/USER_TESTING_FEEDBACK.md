@@ -2,7 +2,7 @@
 
 This document captures feedback from a simulated "new user" experience implementing a test suite based on [dudect examples](https://github.com/oreparaz/dudect/tree/master/examples), using only the public documentation (not source code).
 
-**Test file created:** `crates/timing-oracle/tests/dudect_examples.rs`
+**Test file created:** `crates/tacet/tests/dudect_examples.rs`
 
 ---
 

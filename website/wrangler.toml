@@ -1,5 +1,11 @@
-name = "timing-oracle-docs"
+name = "tacet-docs"
 compatibility_date = "2025-01-01"
+account_id = "d2fe37c02a1d31f3239f9c30c8907db7"
 
-[site]
-bucket = "./dist"
+[[routes]]
+pattern = "tacet.sh"
+custom_domain = true
+
+[assets]
+directory = "./dist"
+not_found_handling = "404-page"

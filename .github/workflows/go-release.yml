@@ -48,27 +48,27 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Build static library
-        run: cargo build -p timing-oracle-c --release --target ${{ matrix.rust_target }}
+        run: cargo build -p tacet-c --release --target ${{ matrix.rust_target }}
 
       - name: Strip debug symbols (macOS)
         if: startsWith(matrix.os, 'macos')
-        run: strip -S target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a
+        run: strip -S target/${{ matrix.rust_target }}/release/libtacet_c.a
 
       - name: Strip debug symbols (Linux)
         if: startsWith(matrix.os, 'ubuntu')
-        run: strip --strip-debug target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a
+        run: strip --strip-debug target/${{ matrix.rust_target }}/release/libtacet_c.a
 
       - name: Rename artifact
         run: |
           mkdir -p artifacts
-          cp target/${{ matrix.rust_target }}/release/libtiming_oracle_c.a \
-             artifacts/libtiming_oracle_c-${{ matrix.target }}.a
+          cp target/${{ matrix.rust_target }}/release/libtacet_c.a \
+             artifacts/libtacet_c-${{ matrix.target }}.a
 
       - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
-          name: libtiming_oracle_c-${{ matrix.target }}
-          path: artifacts/libtiming_oracle_c-${{ matrix.target }}.a
+          name: libtacet_c-${{ matrix.target }}
+          path: artifacts/libtacet_c-${{ matrix.target }}.a
 
   upload-release:
     name: Upload to Release
@@ -122,17 +122,17 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v6
         with:
-          name: libtiming_oracle_c-${{ matrix.target }}
-          path: crates/timing-oracle-go/internal/ffi/lib/${{ matrix.target }}/
+          name: libtacet_c-${{ matrix.target }}
+          path: crates/tacet-go/internal/ffi/lib/${{ matrix.target }}/
 
       - name: Rename library
         run: |
-          cd crates/timing-oracle-go/internal/ffi/lib/${{ matrix.target }}
-          mv libtiming_oracle_c-${{ matrix.target }}.a libtiming_oracle_c.a
+          cd crates/tacet-go/internal/ffi/lib/${{ matrix.target }}
+          mv libtacet_c-${{ matrix.target }}.a libtacet_c.a
 
       - name: Fix lib directory structure
         run: |
-          cd crates/timing-oracle-go/internal/ffi/lib
+          cd crates/tacet-go/internal/ffi/lib
           # Convert darwin-arm64 to darwin_arm64 format expected by CGo
           for dir in */; do
             newname="${dir//-/_}"
@@ -143,9 +143,9 @@ jobs:
           ls -la
 
       - name: Build Go bindings
-        working-directory: crates/timing-oracle-go
+        working-directory: crates/tacet-go
         run: go build -v ./...
 
       - name: Test Go bindings
-        working-directory: crates/timing-oracle-go
+        working-directory: crates/tacet-go
         run: go test -v -short -run TestTimerWorks .

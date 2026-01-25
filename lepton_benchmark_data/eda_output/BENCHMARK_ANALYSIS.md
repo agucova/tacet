@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-**Key Finding:** timing-oracle achieves **0% false positive rate** while correctly detecting
+**Key Finding:** tacet achieves **0% false positive rate** while correctly detecting
 effects at its configured 100ns threshold. Other tools either have inflated FPR (AD-test: 36%,
 KS-test: 29%) or detect impractically small effects.
 
@@ -10,7 +10,7 @@ KS-test: 29%) or detect impractically small effects.
 
 - **σ (standard deviation):** 100,000 ns (100 μs)
 - **Effect sizes tested:** 0ns to 500ns
-- **Key threshold:** 100ns (timing-oracle's AdjacentNetwork preset)
+- **Key threshold:** 100ns (tacet's AdjacentNetwork preset)
 - **Samples per class:** 10,000
 - **Datasets per condition:** 50
 - **Noise models:** 9 (IID + AR(1) with φ ∈ [-0.8, 0.8])
@@ -24,7 +24,7 @@ KS-test: 29%) or detect impractically small effects.
 | DudeCT | 0.0% | ✓ Excellent |
 | MONA | 0.0% | ✓ Excellent |
 | SILENT | 0.0% | ✓ Excellent |
-| timing-oracle | 0.0% | ✓ Excellent |
+| tacet | 0.0% | ✓ Excellent |
 | TVLA | 0.0% | ✓ Excellent |
 | RTLF | 6.9% | ⚠ Marginal |
 | KS-test | 29.3% | ✗ Broken |
@@ -37,7 +37,7 @@ KS-test: 29%) or detect impractically small effects.
 | DudeCT | 0.0% | 100% | 100% | 11ms |
 | MONA | 0.0% | 100% | 100% | 0ms |
 | SILENT | 0.0% | 100% | 100% | 7700ms |
-| timing-oracle | 0.0% | 100% | 100% | 25ms |
+| tacet | 0.0% | 100% | 100% | 25ms |
 | TVLA | 0.0% | 100% | 100% | 0ms |
 | RTLF | 6.9% | 100% | 100% | 4789ms |
 | KS-test | 29.3% | 100% | 100% | 1ms |
@@ -45,9 +45,9 @@ KS-test: 29%) or detect impractically small effects.
 
 ## Interpretation
 
-### Why timing-oracle shows "lower power" at small effects
+### Why tacet shows "lower power" at small effects
 
-This is **intentional behavior**, not a flaw. timing-oracle is configured with a threshold
+This is **intentional behavior**, not a flaw. tacet is configured with a threshold
 (100ns for AdjacentNetwork) below which timing differences are considered unexploitable.
 Effects of 10-80ns are:
 
@@ -69,8 +69,8 @@ AD-test and KS-test have **~30-36% FPR** at effect=0. This means:
 
 ### Recommendation
 
-For CI use with timing-oracle's AdjacentNetwork preset:
-- ✅ **timing-oracle** — 0% FPR, 100% power at threshold, 25ms execution
+For CI use with tacet's AdjacentNetwork preset:
+- ✅ **tacet** — 0% FPR, 100% power at threshold, 25ms execution
 - ⚠ **RTLF** — 7% FPR (marginal), but 4.8s execution time
 - ❌ **AD-test, KS-test** — Broken (30%+ FPR)
 - ⚠ **DudeCT, MONA, TVLA, SILENT** — 0% FPR but overly sensitive (detect 10ns effects)

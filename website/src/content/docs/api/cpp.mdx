@@ -5,15 +5,15 @@ sidebar:
   order: 3
 ---
 
-Header-only C++ wrapper for timing-oracle, providing RAII semantics, modern C++ idioms, and a fluent builder API.
+Header-only C++ wrapper for tacet, providing RAII semantics, modern C++ idioms, and a fluent builder API.
 
 ## Quick Reference
 
 ```cpp
-#include <timing_oracle.hpp>
+#include <tacet.hpp>
 #include <iostream>
 
-using namespace timing_oracle;
+using namespace tacet;
 using namespace std::chrono_literals;
 
 int main() {
@@ -40,14 +40,14 @@ int main() {
 The C++ wrapper is a header-only library that wraps the C bindings.
 
 ```bash
-git clone https://github.com/agucova/timing-oracle
-cd timing-oracle
-cargo build --release -p timing-oracle-c
+git clone https://github.com/agucova/tacet
+cd tacet
+cargo build --release -p tacet-c
 
 # Headers at:
-#   crates/timing-oracle-c/include/timing_oracle.h
-#   bindings/cpp/timing_oracle.hpp
-# Library at: target/release/libtiming_oracle_c.{a,so,dylib}
+#   crates/tacet-c/include/tacet.h
+#   bindings/cpp/tacet.hpp
+# Library at: target/release/libtacet_c.{a,so,dylib}
 ```
 
 Requires C++20 for `std::span` and `std::chrono_literals`.
@@ -317,9 +317,9 @@ try {
     auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
         .timeBudget(30s)
         .test(collector);
-} catch (const timing_oracle::CalibrationError& e) {
+} catch (const tacet::CalibrationError& e) {
     std::cerr << "Calibration failed: " << e.what() << std::endl;
-} catch (const timing_oracle::Error& e) {
+} catch (const tacet::Error& e) {
     std::cerr << "Error: " << e.what() << std::endl;
 }
 ```
@@ -337,12 +337,12 @@ Exception types:
 ## Complete Example
 
 ```cpp
-#include <timing_oracle.hpp>
+#include <tacet.hpp>
 #include <iostream>
 #include <random>
 #include <cstring>
 
-using namespace timing_oracle;
+using namespace tacet;
 using namespace std::chrono_literals;
 
 // Platform-specific timer
@@ -414,10 +414,10 @@ int main() {
 
 ```bash
 clang++ -std=c++20 -stdlib=libc++ -O3 -o timing_test timing_test.cpp \
-    -I/path/to/timing-oracle/crates/timing-oracle-c/include \
-    -I/path/to/timing-oracle/bindings/cpp \
-    -L/path/to/timing-oracle/target/release \
-    -ltiming_oracle_c
+    -I/path/to/tacet/crates/tacet-c/include \
+    -I/path/to/tacet/bindings/cpp \
+    -L/path/to/tacet/target/release \
+    -ltacet_c
 ```
 
 ---

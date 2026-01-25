@@ -7,11 +7,11 @@ sidebar:
 
 import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-If you're familiar with [DudeCT](https://github.com/oreparaz/dudect), this guide shows how to translate your existing patterns to timing-oracle.
+If you're familiar with [DudeCT](https://github.com/oreparaz/dudect), this guide shows how to translate your existing patterns to tacet.
 
 ## Key differences
 
-| DudeCT | timing-oracle |
+| DudeCT | tacet |
 |--------|---------------|
 | t-statistic (larger = worse) | Probability of leak (0-100%) |
 | Fixed threshold (t > 4.5) | Attacker model presets |
@@ -26,7 +26,7 @@ DudeCT outputs a t-statistic. A t > 4.5 traditionally indicates a leak, but:
 - More samples can push t higher even for small effects
 - You need to interpret whether the effect is exploitable
 
-timing-oracle gives you:
+tacet gives you:
 - **Probability of leak**: "72% chance the effect exceeds your threshold"
 - **Effect size in nanoseconds**: "~50ns timing difference"
 - **Exploitability assessment**: "Exploitable via HTTP/2 multiplexing"
@@ -56,9 +56,9 @@ void prepare_inputs(input_t *inputs, uint8_t *classes, int n) {
 }
 ```
 </TabItem>
-<TabItem label="timing-oracle (Rust)">
+<TabItem label="tacet (Rust)">
 ```rust
-use timing_oracle::helpers::InputPair;
+use tacet::helpers::InputPair;
 
 let inputs = InputPair::new(
     || [0u8; 32],           // Class 0: fixed
@@ -66,11 +66,11 @@ let inputs = InputPair::new(
 );
 ```
 </TabItem>
-<TabItem label="timing-oracle (C)">
+<TabItem label="tacet (C)">
 ```c
-#include <timing_oracle.h>
+#include <tacet.h>
 
-timing_oracle_inputs_t inputs = {
+tacet_inputs_t inputs = {
     .baseline = baseline_generator,  // Returns fixed data
     .sample = sample_generator,      // Returns random data
     .ctx = NULL
@@ -90,7 +90,7 @@ uint8_t do_one_computation(uint8_t *data) {
 }
 ```
 </TabItem>
-<TabItem label="timing-oracle (Rust)">
+<TabItem label="tacet (Rust)">
 ```rust
 let outcome = oracle.test(inputs, |data| {
     // Perform the operation to test
@@ -98,7 +98,7 @@ let outcome = oracle.test(inputs, |data| {
 });
 ```
 </TabItem>
-<TabItem label="timing-oracle (C)">
+<TabItem label="tacet (C)">
 ```c
 void measure_fn(const uint8_t* data, size_t len, void* ctx) {
     // Perform the operation to test
@@ -127,9 +127,9 @@ if (ctx.t > 4.5) {
 }
 ```
 </TabItem>
-<TabItem label="timing-oracle (Rust)">
+<TabItem label="tacet (Rust)">
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .test(inputs, |data| crypto_operation(&data));
@@ -138,21 +138,21 @@ println!("{outcome}");  // Formatted output with colors
 assert!(outcome.passed(), "Timing leak detected");
 ```
 </TabItem>
-<TabItem label="timing-oracle (C)">
+<TabItem label="tacet (C)">
 ```c
-timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
-timing_oracle_outcome_t outcome;
+tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
+tacet_outcome_t outcome;
 
-timing_oracle_test(oracle, &inputs, measure_fn, NULL, &outcome);
+tacet_test(oracle, &inputs, measure_fn, NULL, &outcome);
 
-timing_oracle_print(&outcome);  // Formatted output
+tacet_print(&outcome);  // Formatted output
 
 if (outcome.tag == TIMING_ORACLE_FAIL) {
     fprintf(stderr, "Timing leak detected\n");
     exit(1);
 }
 
-timing_oracle_free(oracle);
+tacet_free(oracle);
 ```
 </TabItem>
 </Tabs>
@@ -194,12 +194,12 @@ int main() {
 }
 ```
 
-### Equivalent timing-oracle test
+### Equivalent tacet test
 
 <Tabs>
 <TabItem label="Rust">
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
 use aes::Aes128;
 
@@ -227,7 +227,7 @@ fn test_aes_constant_time() {
 </TabItem>
 <TabItem label="C">
 ```c
-#include <timing_oracle.h>
+#include <tacet.h>
 #include <aes.h>
 
 static uint8_t key[16] = { 0x42, /* ... */ };
@@ -250,21 +250,21 @@ void measure_aes(const uint8_t* data, size_t len, void* ctx) {
 int main() {
     AES_set_encrypt_key(key, 128, &aes_key);
 
-    timing_oracle_inputs_t inputs = {
+    tacet_inputs_t inputs = {
         .baseline = baseline_gen,
         .sample = sample_gen,
         .data_len = 16,
         .ctx = NULL
     };
 
-    timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
-    timing_oracle_outcome_t outcome;
+    tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
+    tacet_outcome_t outcome;
 
-    timing_oracle_test(oracle, &inputs, measure_aes, NULL, &outcome);
-    timing_oracle_print(&outcome);
+    tacet_test(oracle, &inputs, measure_aes, NULL, &outcome);
+    tacet_print(&outcome);
 
     int result = (outcome.tag == TIMING_ORACLE_FAIL) ? 1 : 0;
-    timing_oracle_free(oracle);
+    tacet_free(oracle);
     return result;
 }
 ```
@@ -273,9 +273,9 @@ int main() {
 
 ## Interpreting results
 
-### DudeCT t-statistic → timing-oracle probability
+### DudeCT t-statistic → tacet probability
 
-| DudeCT t-statistic | Interpretation | timing-oracle equivalent |
+| DudeCT t-statistic | Interpretation | tacet equivalent |
 |--------------------|----------------|-------------------------|
 | t < 4.5 | No leak | `Outcome::Pass` (P < 5%) |
 | t > 4.5 | Leak detected | `Outcome::Fail` (P > 95%) |
@@ -285,11 +285,11 @@ int main() {
 
 In DudeCT, collecting more samples can increase t even for tiny effects that aren't security-relevant. You might get t = 10 for a 0.1ns difference that no attacker could exploit.
 
-In timing-oracle, more samples means more confidence in the *same* answer. The probability converges toward the true state: either there's an exploitable leak or there isn't.
+In tacet, more samples means more confidence in the *same* answer. The probability converges toward the true state: either there's an exploitable leak or there isn't.
 
 ## Attacker models vs fixed thresholds
 
-DudeCT uses a fixed t = 4.5 threshold. timing-oracle lets you specify your threat model:
+DudeCT uses a fixed t = 4.5 threshold. tacet lets you specify your threat model:
 
 ```rust
 // "Is there a leak exploitable by a LAN attacker?" (100ns threshold)
@@ -306,9 +306,9 @@ This is a more meaningful question than "is there any statistical difference?"
 
 ## What's different about the two-class pattern
 
-Both DudeCT and timing-oracle use the two-class pattern (fixed vs random inputs). The key insight is the same: if code is constant-time, both classes take the same time.
+Both DudeCT and tacet use the two-class pattern (fixed vs random inputs). The key insight is the same: if code is constant-time, both classes take the same time.
 
-However, timing-oracle's documentation emphasizes:
+However, tacet's documentation emphasizes:
 - **For comparison functions**, baseline must match the secret
 - **For most crypto**, zeros vs random is the right pattern
 
@@ -351,9 +351,9 @@ fn vec_eq(runner: &mut CtRunner, rng: &mut BenchRng) {
 ctbench_main!(vec_eq);
 ```
 </TabItem>
-<TabItem label="timing-oracle">
+<TabItem label="tacet">
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 
 #[test]
 fn test_vec_eq_constant_time() {
@@ -381,7 +381,7 @@ fn test_vec_eq_constant_time() {
 
 **Key differences from dudect-bencher:**
 
-| dudect-bencher | timing-oracle |
+| dudect-bencher | tacet |
 |----------------|---------------|
 | `Class::Left` / `Class::Right` | Baseline / Sample closures |
 | `runner.run_one(class, \|\| ...)` | `oracle.test(inputs, \|data\| ...)` |
@@ -389,7 +389,7 @@ fn test_vec_eq_constant_time() {
 | t-statistic output | Probability + effect size |
 
 <Aside type="tip">
-timing-oracle's adaptive loop automatically determines when to stop, so you don't need to manually specify iteration counts or check t-statistics in a loop.
+tacet's adaptive loop automatically determines when to stop, so you don't need to manually specify iteration counts or check t-statistics in a loop.
 </Aside>
 
 ## Next steps

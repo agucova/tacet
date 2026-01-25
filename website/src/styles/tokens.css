@@ -1,0 +1,52 @@
+/* Tacet Design System Tokens */
+
+:root {
+  /* Base (Dark Mode Only) */
+  --tacet-bg-base: #0C0C0C;
+  --tacet-bg-elevated: #161616;
+  --tacet-bg-subtle: #1E1E1E;
+  --tacet-border: #2A2A2A;
+  --tacet-border-subtle: #1E1E1E;
+
+  /* Text */
+  --tacet-text-primary: #F5F5F5;
+  --tacet-text-secondary: #A0A0A0;
+  --tacet-text-muted: #6B6B6B;
+
+  /* Accent (Coral Red) */
+  --tacet-accent: #FF6060;
+  --tacet-accent-hover: #FF7A7A;
+  --tacet-accent-muted: rgba(255, 96, 96, 0.15);
+
+  /* Semantic Colors (for asides) - muted, desaturated */
+  --tacet-aside-note: #4A4A4A;
+  --tacet-aside-tip: #5A5A5A;
+  --tacet-aside-caution: #6B5A4A;
+  --tacet-aside-danger: var(--tacet-accent);
+
+  /* Typography */
+  --tacet-font-heading: 'JetBrains Mono', ui-monospace, monospace;
+  --tacet-font-body: 'Recursive', ui-monospace, monospace;
+  --tacet-font-code: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Type Scale */
+  --tacet-text-xs: 0.75rem;
+  --tacet-text-sm: 0.875rem;
+  --tacet-text-base: 1rem;
+  --tacet-text-lg: 1.125rem;
+  --tacet-text-xl: 1.25rem;
+  --tacet-text-2xl: 1.5rem;
+  --tacet-text-3xl: 2rem;
+
+  /* Spacing */
+  --tacet-space-1: 0.25rem;
+  --tacet-space-2: 0.5rem;
+  --tacet-space-3: 0.75rem;
+  --tacet-space-4: 1rem;
+  --tacet-space-6: 1.5rem;
+  --tacet-space-8: 2rem;
+  --tacet-space-12: 3rem;
+
+  /* Force dark color scheme */
+  color-scheme: dark;
+}

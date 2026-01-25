@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-`timing-oracle` is a Rust library for detecting timing side channels in cryptographic code. It uses statistical methodology to compare timing distributions between baseline and sample inputs, outputting leak probability, effect sizes, and exploitability assessments.
+`tacet` is a Rust library for detecting timing side channels in cryptographic code. It uses statistical methodology to compare timing distributions between baseline and sample inputs, outputting leak probability, effect sizes, and exploitability assessments.
 
 ## Documentation Structure
 
@@ -23,7 +23,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Profiling (LLM-friendly)
 
-Use `just profile bench` or `just profile tests` to produce folded stack output at `PROFILE_DIR` (default `/var/tmp/timing-oracle-profile`). Then run `just profile summary target=bench` (or `target=tests`) for a quick top-leaf summary; the folded stacks are plain text and safe to `grep`/`sort`/`awk`.
+Use `just profile bench` or `just profile tests` to produce folded stack output at `PROFILE_DIR` (default `/var/tmp/tacet-profile`). Then run `just profile summary target=bench` (or `target=tests`) for a quick top-leaf summary; the folded stacks are plain text and safe to `grep`/`sort`/`awk`.
 
 
 ```bash
@@ -56,8 +56,8 @@ The `kperf`/`perf` features compile in advanced timer support that users can opt
 The timing oracle follows a two-phase adaptive Bayesian pipeline:
 
 **Phase 1: Calibration** (5,000 samples)
-1. **Preflight checks** (`crates/timing-oracle/src/preflight/`) - Validates measurement setup before analysis
-2. **Measurement** (`crates/timing-oracle/src/measurement/`) - High-resolution cycle counting with interleaved sampling
+1. **Preflight checks** (`crates/tacet/src/preflight/`) - Validates measurement setup before analysis
+2. **Measurement** (`crates/tacet/src/measurement/`) - High-resolution cycle counting with interleaved sampling
 3. **Outlier filtering** - Symmetric percentile-based trimming (99.9th percentile)
 4. **Covariance estimation** - Block bootstrap (2,000 iterations, block length ~n^(1/3))
 5. **Prior setup** - MDE-based priors from calibration data
@@ -67,14 +67,14 @@ The timing oracle follows a two-phase adaptive Bayesian pipeline:
 2. **Posterior update** - Scale covariance (Σ_rate / n), compute posterior P(leak > θ | data)
 3. **Decision check** - Pass if P < 0.05, Fail if P > 0.95
 4. **Quality gates** - Stop early if data too noisy, not learning, or budget exceeded
-5. **Effect decomposition** (`crates/timing-oracle/src/analysis/effect.rs`) - Separates uniform shift from tail effects
+5. **Effect decomposition** (`crates/tacet/src/analysis/effect.rs`) - Separates uniform shift from tail effects
 
 ### Module Structure
 
-- `TimingOracle` (`crates/timing-oracle/src/oracle.rs`) - Builder-pattern entry point via `for_attacker(AttackerModel)`
-- `Config` (`crates/timing-oracle/src/config.rs`) - All tunable parameters (time_budget, max_samples, thresholds)
-- `Outcome` (`crates/timing-oracle/src/result.rs`) - Output enum: Pass, Fail, Inconclusive, Unmeasurable
-- `helpers` (`crates/timing-oracle/src/helpers.rs`) - Utilities for generating test inputs (`InputPair`, `byte_arrays_32`, `byte_vecs`)
+- `TimingOracle` (`crates/tacet/src/oracle.rs`) - Builder-pattern entry point via `for_attacker(AttackerModel)`
+- `Config` (`crates/tacet/src/config.rs`) - All tunable parameters (time_budget, max_samples, thresholds)
+- `Outcome` (`crates/tacet/src/result.rs`) - Output enum: Pass, Fail, Inconclusive, Unmeasurable
+- `helpers` (`crates/tacet/src/helpers.rs`) - Utilities for generating test inputs (`InputPair`, `byte_arrays_32`, `byte_vecs`)
 - `adaptive/` - Adaptive sampling loop
   - `calibration.rs` - Calibration phase: covariance estimation, prior setup
   - `loop_runner.rs` - Adaptive sampling loop with posterior updates
@@ -153,9 +153,9 @@ This compensates for timer quantization while avoiding microarchitectural artifa
 ### Test Organization
 
 **Core Validation Tests:**
-- `crates/timing-oracle/tests/known_leaky.rs` - Tests that MUST detect timing leaks (early-exit comparison, branches) [2 tests]
-- `crates/timing-oracle/tests/known_safe.rs` - Tests that MUST NOT false-positive (XOR, constant-time comparison) [2 tests]
-- `crates/timing-oracle/tests/calibration.rs` - Statistical validation (false positive rate, Bayesian calibration) [2 tests, 100 trials each]
+- `crates/tacet/tests/known_leaky.rs` - Tests that MUST detect timing leaks (early-exit comparison, branches) [2 tests]
+- `crates/tacet/tests/known_safe.rs` - Tests that MUST NOT false-positive (XOR, constant-time comparison) [2 tests]
+- `crates/tacet/tests/calibration.rs` - Statistical validation (false positive rate, Bayesian calibration) [2 tests, 100 trials each]
 
 **Comprehensive Integration Tests:**
 
@@ -165,26 +165,26 @@ All integration tests use **DudeCT's two-class pattern**:
 
 This pattern tests for data-dependent timing rather than specific value comparisons.
 
-- `crates/timing-oracle/tests/crypto_attacks.rs` - Real-world crypto timing attacks (AES S-box, modular exponentiation, cache effects, effect patterns, exploitability thresholds) [20 tests total]
+- `crates/tacet/tests/crypto_attacks.rs` - Real-world crypto timing attacks (AES S-box, modular exponentiation, cache effects, effect patterns, exploitability thresholds) [20 tests total]
   - 4 cache-based tests (AES, cache lines, memory patterns)
   - 2 modular exponentiation tests (square-and-multiply, bit patterns)
   - 3 table lookup tests (L1/L2/L3 cache)
   - 3 effect pattern validation tests (UniformShift, TailEffect, Mixed)
   - 4 exploitability threshold tests (Negligible, PossibleLAN, LikelyLAN, PossibleRemote)
   - 4 tests marked `#[ignore]` for thorough validation
-- `crates/timing-oracle/tests/async_timing.rs` - Async/await and concurrent task timing [9 tests total]
+- `crates/tacet/tests/async_timing.rs` - Async/await and concurrent task timing [9 tests total]
   - 2 baseline tests (executor overhead, block_on symmetry)
   - 3 leak detection tests (conditional await, early exit, sleep duration)
   - 2 concurrent task tests (crosstalk, spawn count)
   - 2 optional thorough tests (runtime comparison, flag effectiveness)
-- `crates/timing-oracle/tests/aes_timing.rs` - AES-128 encryption timing tests inspired by DudeCT [7 tests total]
+- `crates/tacet/tests/aes_timing.rs` - AES-128 encryption timing tests inspired by DudeCT [7 tests total]
   - Block encryption with zeros vs random plaintexts
   - Different keys with fixed plaintext
   - Multiple blocks cumulative timing
   - Key initialization timing
   - Hamming weight independence (0x00 vs 0xFF)
   - Byte pattern independence (sequential vs reverse)
-- `crates/timing-oracle/tests/ecc_timing.rs` - Curve25519/X25519 elliptic curve timing tests [8 tests total]
+- `crates/tacet/tests/ecc_timing.rs` - Curve25519/X25519 elliptic curve timing tests [8 tests total]
   - Scalar multiplication with zeros vs random scalars
   - Different basepoints timing
   - Multiple operations cumulative timing
@@ -192,22 +192,22 @@ This pattern tests for data-dependent timing rather than specific value comparis
   - Hamming weight independence (0x00 vs 0xFF)
   - Byte pattern independence (sequential vs reverse)
   - Full ECDH key exchange timing
-- `crates/timing-oracle/tests/hash_timing.rs` - SHA-3 and BLAKE2 hash timing tests [10 tests total]
+- `crates/tacet/tests/hash_timing.rs` - SHA-3 and BLAKE2 hash timing tests [10 tests total]
   - SHA3-256, SHA3-384, SHA3-512 constant-time tests
   - BLAKE2b-512, BLAKE2s-256 constant-time tests
   - Incremental hashing tests (update + finalize)
   - Hamming weight independence for each hash variant
-- `crates/timing-oracle/tests/aead_timing.rs` - AEAD cipher timing tests [8 tests total]
+- `crates/tacet/tests/aead_timing.rs` - AEAD cipher timing tests [8 tests total]
   - ChaCha20-Poly1305 encryption/decryption (RustCrypto)
   - AES-256-GCM encryption/decryption (ring)
   - Nonce independence tests
   - Hamming weight independence tests
-- `crates/timing-oracle/tests/rsa_timing.rs` - RSA-2048 timing tests [6 tests total]
+- `crates/tacet/tests/rsa_timing.rs` - RSA-2048 timing tests [6 tests total]
   - RSA encryption/decryption with PKCS#1 v1.5
   - RSA signing/verification (SHA-256)
   - Hamming weight independence (all-zeros vs all-ones)
   - Key size comparison (2048 vs 4096, informational)
-- `crates/timing-oracle/tests/pqcrypto_timing.rs` - Post-quantum crypto timing tests [12 tests total]
+- `crates/tacet/tests/pqcrypto_timing.rs` - Post-quantum crypto timing tests [12 tests total]
   - ML-KEM (Kyber-768): encapsulation/decapsulation
   - ML-DSA (Dilithium3): signing/verification
   - Falcon-512: signing/verification
@@ -241,7 +241,7 @@ See `TESTING.md` for detailed documentation of each test category.
 
 ```rust
 // Recommended: Use attacker model presets to define your threat model
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 use std::time::Duration;
 
 let inputs = InputPair::new(
@@ -282,7 +282,7 @@ match outcome {
 ### Choosing an Attacker Model
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 use std::time::Duration;
 
 // Internet-facing API: attacker measures over general internet
@@ -304,7 +304,7 @@ TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 ### Configuration Options
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 use std::time::Duration;
 
 // Quick check during development
@@ -325,7 +325,7 @@ TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 ### Macro API (with `macros` feature)
 
 ```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use tacet::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
 use std::time::Duration;
 
 // timing_test_checked! returns Outcome with all four variants
@@ -360,7 +360,7 @@ match outcome {
 The adaptive oracle uses a time budget to balance speed vs accuracy:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 use std::time::Duration;
 
 // Quick check during development (~10 seconds)
@@ -385,7 +385,7 @@ To disable (e.g., for debugging):
 
 ```toml
 [dependencies]
-timing-oracle = { version = "0.1", default-features = false }
+tacet = { version = "0.1", default-features = false }
 ```
 
 ### Performance Tips
@@ -425,7 +425,7 @@ cargo build --no-default-features
 The adaptive oracle handles reliability through its outcome types:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome};
+use tacet::{TimingOracle, AttackerModel, Outcome};
 use std::time::Duration;
 
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -473,7 +473,7 @@ Environment variable `TIMING_ORACLE_UNRELIABLE_POLICY` can override: set to `fai
 
 **Primary audience:** Cryptographic library authors, security auditors, and researchers studying side-channel attacks. These are technically sophisticated users who care deeply about correctness and need tools they can trust. They arrive at the docs with a specific job: verify their code doesn't leak timing information.
 
-**Context:** Users are often under pressure—auditing code before a release, investigating a potential vulnerability, or validating a new implementation. They need to quickly understand if timing-oracle is credible, how to use it, and how to interpret results.
+**Context:** Users are often under pressure—auditing code before a release, investigating a potential vulnerability, or validating a new implementation. They need to quickly understand if tacet is credible, how to use it, and how to interpret results.
 
 ### Brand Personality
 

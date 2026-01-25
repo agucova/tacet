@@ -1,0 +1,17 @@
+[package]
+name = "tacet-c"
+version = "0.2.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "C bindings for tacet with support for C measurement loops"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+
+[dependencies]
+tacet-core = { path = "../tacet-core" }
+
+[build-dependencies]
+cbindgen = "0.29"

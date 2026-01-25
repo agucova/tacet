@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: How to add timing-oracle to your project
+description: How to add tacet to your project
 sidebar:
   order: 1
 ---
@@ -8,15 +8,15 @@ sidebar:
 import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 import { PackageManagers } from 'starlight-package-managers';
 
-timing-oracle is available for multiple languages. Choose your platform:
+tacet is available for multiple languages. Choose your platform:
 
 <Tabs>
 <TabItem label="Rust">
 
-Add timing-oracle as a dev dependency:
+Add tacet as a dev dependency:
 
 ```bash
-cargo add timing-oracle --dev
+cargo add tacet --dev
 cargo add rand --dev  # For random input generation
 ```
 
@@ -24,7 +24,7 @@ Or add to your `Cargo.toml`:
 
 ```toml
 [dev-dependencies]
-timing-oracle = "0.1"
+tacet = "0.1"
 rand = "0.8"
 ```
 
@@ -41,13 +41,13 @@ rand = "0.8"
 **Minimal build:**
 ```toml
 [dev-dependencies]
-timing-oracle = { version = "0.1", default-features = false }
+tacet = { version = "0.1", default-features = false }
 ```
 
 </TabItem>
 <TabItem label="JavaScript">
 
-<PackageManagers pkg="timing-oracle" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+<PackageManagers pkg="tacet" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
 
 Native bindings via NAPI-RS, supporting Node.js and Bun on:
 - Linux (x86_64, aarch64)
@@ -55,7 +55,7 @@ Native bindings via NAPI-RS, supporting Node.js and Bun on:
 - Windows (x86_64)
 
 ```javascript
-import { TimingOracle, AttackerModel } from 'timing-oracle';
+import { TimingOracle, AttackerModel } from 'tacet';
 
 const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
   .test(
@@ -71,30 +71,30 @@ const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
 Build the C bindings from source:
 
 ```bash
-git clone https://github.com/agucova/timing-oracle
-cd timing-oracle
-cargo build --release -p timing-oracle-c
+git clone https://github.com/agucova/tacet
+cd tacet
+cargo build --release -p tacet-c
 
 # Headers:
-#   C:   crates/timing-oracle-c/include/timing_oracle.h
-#   C++: bindings/cpp/timing_oracle.hpp
+#   C:   crates/tacet-c/include/tacet.h
+#   C++: bindings/cpp/tacet.hpp
 # Library:
-#   target/release/libtiming_oracle_c.{a,so,dylib}
+#   target/release/libtacet_c.{a,so,dylib}
 ```
 
 **C usage:**
 ```c
-#include <timing_oracle.h>
+#include <tacet.h>
 
-timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
-timing_oracle_outcome_t outcome;
-timing_oracle_test(oracle, &inputs, measure_fn, &outcome);
+tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
+tacet_outcome_t outcome;
+tacet_test(oracle, &inputs, measure_fn, &outcome);
 ```
 
 **C++ usage:**
 ```cpp
-#include <timing_oracle.hpp>
-using namespace timing_oracle;
+#include <tacet.hpp>
+using namespace tacet;
 
 auto outcome = TimingOracle::forAttacker(AttackerModel::AdjacentNetwork)
     .test(inputs, [](auto& data) { myFunction(data); });
@@ -106,18 +106,18 @@ See [C API](/api/c) and [C++ API](/api/cpp) for full documentation.
 <TabItem label="Go">
 
 ```bash
-go get github.com/agucova/timing-oracle/bindings/go
+go get github.com/agucova/tacet/bindings/go
 ```
 
 ```go
-import timingoracle "github.com/agucova/timing-oracle/bindings/go"
+import tacet "github.com/agucova/tacet/bindings/go"
 
-inputs := timingoracle.NewInputPair(
+inputs := tacet.NewInputPair(
     func() []byte { return make([]byte, 32) },
     func() []byte { b := make([]byte, 32); rand.Read(b); return b },
 )
 
-outcome := timingoracle.ForAttacker(timingoracle.AdjacentNetwork).
+outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
     Test(inputs, func(data []byte) { myFunction(data) })
 ```
 
@@ -143,7 +143,7 @@ On platforms with coarse timer resolution (macOS ARM64), the library automatical
 For cycle-accurate measurements on ARM64, use `TimerSpec::CyclePrecision`:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+use tacet::{TimingOracle, AttackerModel, TimerSpec};
 
 TimingOracle::for_attacker(AttackerModel::SharedHardware)
     .timer_spec(TimerSpec::CyclePrecision)  // Request cycle-accurate timer

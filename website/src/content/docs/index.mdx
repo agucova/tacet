@@ -1,46 +1,55 @@
 ---
-title: timing-oracle
+title: " "
 description: Detect timing side channels in cryptographic code with statistically rigorous methods
+template: splash
+hero:
+  tagline: Detect timing side channels in cryptographic code with statistically rigorous methods.
+  image:
+    file: ../../assets/logo.svg
+    alt: Tacet
+  actions:
+    - text: Get Started
+      link: /getting-started/quick-start
+      icon: right-arrow
+    - text: View on GitHub
+      link: https://github.com/agucova/tacet
+      icon: github
+      variant: minimal
 ---
 
 import { Tabs, TabItem, Code, LinkCard, CardGrid } from '@astrojs/starlight/components';
 
-**timing-oracle** detects timing side channels in cryptographic code. Unlike naive statistical tests, it gives you reliable answers even under system noise, broken timers, and non-stationary conditions, reporting leak probability, effect sizes, and exploitability assessments.
-
-Available for **Rust**, **JavaScript/TypeScript**, **C/C++**, and **Go**.
-
-```
-$ cargo test --test aes_timing -- --nocapture
-
-[aes128_block_encrypt_constant_time]
-timing-oracle
-──────────────────────────────────────────────────────────────
-
-  Samples: 6000 per class
-  Quality: Good
-
-  ✓ No timing leak detected
-
-    Probability of leak: 0.0%
-    95% CI: 0.0–12.5 ns
-
-──────────────────────────────────────────────────────────────
-```
-
-## Get started
+## Install
 
 <Tabs>
 <TabItem label="Rust">
 ```bash
-cargo add timing-oracle --dev
+cargo add tacet --dev
 ```
+</TabItem>
+<TabItem label="JavaScript">
+```bash
+bun add tacet
+```
+</TabItem>
+<TabItem label="C/C++">
+See [build instructions](/getting-started/installation).
+</TabItem>
+<TabItem label="Go">
+```bash
+go get github.com/agucova/tacet/bindings/go
+```
+</TabItem>
+</Tabs>
+
+## Quick example
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 let inputs = InputPair::new(
-    || [0u8; 32],
-    || rand::random::<[u8; 32]>(),
+    || [0u8; 32],                 // Baseline: all zeros
+    || rand::random::<[u8; 32]>() // Sample: random data
 );
 
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -48,100 +57,31 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         my_crypto_function(&data);
     });
 
-println!("{outcome}");  // Formatted output with colors
-assert!(outcome.passed(), "Timing leak detected");
-```
-</TabItem>
-<TabItem label="JavaScript">
-```bash
-bun add timing-oracle
+assert!(outcome.passed(), "Timing leak detected: {:?}", outcome);
 ```
 
-```javascript
-import { TimingOracle, AttackerModel } from 'timing-oracle';
+## Why Tacet?
 
-const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
-  .test(
-    () => new Uint8Array(32).fill(0),
-    () => crypto.getRandomValues(new Uint8Array(32)),
-    (data) => myCryptoFunction(data)
-  );
+Existing tools like [DudeCT](https://github.com/oreparaz/dudect) output t-statistics and p-values. Tacet gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
 
-if (outcome.failed) {
-  console.error('Timing leak:', outcome.exploitability);
-}
-```
-</TabItem>
-<TabItem label="C/C++">
-```c
-#include <timing_oracle.h>
-
-timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
-timing_oracle_outcome_t outcome;
-timing_oracle_test(oracle, &inputs, measure_fn, &outcome);
-
-if (outcome.tag == TIMING_ORACLE_FAIL) {
-    printf("Leak detected: %s\n", outcome.fail.exploitability);
-}
-```
-</TabItem>
-<TabItem label="Go">
-```bash
-go get github.com/agucova/timing-oracle/bindings/go
-```
-
-```go
-import timingoracle "github.com/agucova/timing-oracle/bindings/go"
-
-inputs := timingoracle.NewInputPair(
-    func() []byte { return make([]byte, 32) },
-    func() []byte { b := make([]byte, 32); rand.Read(b); return b },
-)
-
-outcome := timingoracle.ForAttacker(timingoracle.AdjacentNetwork).
-    Test(inputs, func(data []byte) { myCryptoFunction(data) })
-
-if outcome.Failed() {
-    log.Fatalf("Timing leak: %s", outcome.Exploitability())
-}
-```
-</TabItem>
-</Tabs>
-
-## Why timing-oracle?
-
-Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
-
-timing-oracle gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be. And when conditions are bad, it tells you instead of giving false confidence.
-
-| | DudeCT | timing-oracle |
-|---|--------|---------------|
+| | DudeCT | Tacet |
+|---|--------|-------|
 | **Output** | t-statistic + p-value | Probability of leak (0–100%) |
-| **False positives** | Unbounded (more samples → more FPs) | Converges to correct answer |
+| **False positives** | Unbounded | Converges to correct answer |
 | **Effect size** | Not provided | Estimated in nanoseconds |
 | **Exploitability** | Manual interpretation | Automatic classification |
-| **System noise** | Silent false positives/negatives | Detects and reports "Inconclusive" |
-| **Timer issues** | Fails silently | Adapts or warns you |
 | **CI-friendly** | Flaky without tuning | Works out of the box |
 
 ## Real-world validation
 
-While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate, a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](/case-studies/rsa-timing-anomaly).
-
-## Key features
-
-- **Bayesian analysis**: Get actual probabilities, not just p-values
-- **Robust under noise**: Block bootstrap handles autocorrelation; quality gates detect non-stationarity
-- **Timer-aware**: Adaptive batching for coarse timers; threshold elevation when precision is insufficient
-- **No false confidence**: Returns "Inconclusive" when it can't give you a reliable answer
-- **Effect decomposition**: Separates uniform shifts from tail effects, with exploitability classification
+While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](/case-studies/rsa-timing-anomaly).
 
 ## Next steps
 
 <CardGrid>
   <LinkCard
     title="Installation"
-    description="Add timing-oracle to your project"
+    description="Add Tacet to your project"
     href="/getting-started/installation"
   />
   <LinkCard
@@ -155,8 +95,8 @@ While testing the library, I incidentally rediscovered [CVE-2023-49092](https://
     href="/core-concepts/two-class-pattern"
   />
   <LinkCard
-    title="Migration from DudeCT"
-    description="Already know DudeCT? Start here"
-    href="/getting-started/from-dudect"
+    title="Attacker Models"
+    description="Choose the right threshold"
+    href="/core-concepts/attacker-models"
   />
 </CardGrid>

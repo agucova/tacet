@@ -7,14 +7,14 @@ sidebar:
 
 import { Aside, Tabs, TabItem, Code } from '@astrojs/starlight/components';
 
-Timing tests require more care in CI than typical unit tests. This guide covers how to run timing-oracle reliably in CI environments.
+Timing tests require more care in CI than typical unit tests. This guide covers how to run tacet reliably in CI environments.
 
 ## Basic test setup
 
 A basic test with formatted output:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use std::time::Duration;
 
 #[test]
@@ -117,7 +117,7 @@ CI runners are often noisier than local development machines. The library provid
 Skip tests that can't produce reliable results (fail-open):
 
 ```rust
-use timing_oracle::skip_if_unreliable;
+use tacet::skip_if_unreliable;
 
 #[test]
 fn test_crypto() {
@@ -137,7 +137,7 @@ fn test_crypto() {
 Require reliable results, failing on uncertainty (fail-closed):
 
 ```rust
-use timing_oracle::require_reliable;
+use tacet::require_reliable;
 
 #[test]
 fn test_security_critical() {

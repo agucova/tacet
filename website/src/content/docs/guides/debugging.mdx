@@ -14,7 +14,7 @@ This guide helps diagnose issues when timing tests don't behave as expected.
 Before investigating other issues, confirm your test harness is working:
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 
 // Test 1: Identical inputs should pass
 let inputs = InputPair::new(

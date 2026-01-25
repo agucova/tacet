@@ -1,13 +1,13 @@
-# timing-oracle workspace commands
+# tacet workspace commands
 # Run with: just <command> [subcommand]
 
 # Crate directory
-oracle_crate := "crates/timing-oracle"
+oracle_crate := "crates/tacet"
 
 # Default output directories (at repo root)
 data_dir := env("CALIBRATION_DATA_DIR", justfile_directory() + "/calibration_data")
 plot_dir := env("CALIBRATION_PLOT_DIR", justfile_directory() + "/plots")
-profile_dir := env("PROFILE_DIR", "/var/tmp/timing-oracle-profile")
+profile_dir := env("PROFILE_DIR", "/var/tmp/tacet-profile")
 
 # Load subcommand modules
 mod build
@@ -51,19 +51,19 @@ pre-push: ci test::crypto calibrate::quick
 
 # Dry-run publish for all crates
 publish-dry:
-    cargo publish -p timing-oracle-core --dry-run
-    cargo publish -p timing-oracle-macros --dry-run
-    cargo publish -p timing-oracle --dry-run
+    cargo publish -p tacet-core --dry-run
+    cargo publish -p tacet-macros --dry-run
+    cargo publish -p tacet --dry-run
 
 # Publish all crates (in dependency order)
 publish:
-    cargo publish -p timing-oracle-core
-    @echo "Waiting for crates.io to index timing-oracle-core..."
+    cargo publish -p tacet-core
+    @echo "Waiting for crates.io to index tacet-core..."
     sleep 30
-    cargo publish -p timing-oracle-macros
-    @echo "Waiting for crates.io to index timing-oracle-macros..."
+    cargo publish -p tacet-macros
+    @echo "Waiting for crates.io to index tacet-macros..."
     sleep 30
-    cargo publish -p timing-oracle
+    cargo publish -p tacet
 
 # ============================================================================
 # CLEANUP
@@ -120,14 +120,14 @@ env:
 
 # Print version info
 version:
-    @cargo pkgid -p timing-oracle | cut -d# -f2
+    @cargo pkgid -p tacet | cut -d# -f2
 
 # Show workspace members
 workspace:
     @echo "Workspace members:"
-    @echo "  timing-oracle-core   - Core types and traits"
-    @echo "  timing-oracle-macros - Proc macros (timing_test!, timing_test_checked!)"
-    @echo "  timing-oracle        - Main library"
+    @echo "  tacet-core   - Core types and traits"
+    @echo "  tacet-macros - Proc macros (timing_test!, timing_test_checked!)"
+    @echo "  tacet        - Main library"
 
 # Show all available recipes
 help:

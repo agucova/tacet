@@ -1,6 +1,6 @@
 ---
 title: How It Works
-description: The statistical methodology behind timing-oracle
+description: The statistical methodology behind tacet
 sidebar:
   order: 1
 ---
@@ -8,12 +8,12 @@ sidebar:
 import { Aside } from '@astrojs/starlight/components';
 
 <Aside>
-**For curious users and practitioners.** This page explains the statistical methodology in accessible terms. You can use timing-oracle effectively without understanding these details. Start with [Quick Start](/getting-started/quick-start) instead.
+**For curious users and practitioners.** This page explains the statistical methodology in accessible terms. You can use tacet effectively without understanding these details. Start with [Quick Start](/getting-started/quick-start) instead.
 
 **For statisticians and researchers:** This is a simplified overview. For the complete mathematical specification with formal definitions, see the [Specification](/reference/specification).
 </Aside>
 
-This page describes the statistical methodology used by timing-oracle to detect timing side channels.
+This page describes the statistical methodology used by tacet to detect timing side channels.
 
 ## The core idea
 
@@ -27,7 +27,7 @@ This page describes the statistical methodology used by timing-oracle to detect 
 
 ## Two-phase pipeline
 
-timing-oracle uses an adaptive two-phase approach:
+tacet uses an adaptive two-phase approach:
 
 ```
                     Timing Samples
@@ -80,7 +80,7 @@ This adaptive approach:
 
 ## Quantile-based statistics
 
-Rather than comparing means (which can miss distributional differences), timing-oracle compares **nine deciles** between baseline and sample classes:
+Rather than comparing means (which can miss distributional differences), tacet compares **nine deciles** between baseline and sample classes:
 
 $$
 \begin{aligned}
@@ -156,7 +156,7 @@ $$
 | $P(\text{leak}) > 0.95$ | **Fail**: confident there's a leak |
 | $0.05 \leq P(\text{leak}) \leq 0.95$ | Continue collecting or **Inconclusive** |
 
-This is different from DudeCT's t-test approach. DudeCT asks "is there *any* statistical difference?" while timing-oracle asks "is there a *security-relevant* difference above my threshold $\theta$?"
+This is different from DudeCT's t-test approach. DudeCT asks "is there *any* statistical difference?" while tacet asks "is there a *security-relevant* difference above my threshold $\theta$?"
 
 ## Quality gates
 

@@ -1,15 +1,15 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/timing-oracle",
-    "crates/timing-oracle-core",
-    "crates/timing-oracle-macros",
-    "crates/timing-oracle-c",
-    "crates/timing-oracle-napi",
-    "crates/timing-oracle-bench",
+    "crates/tacet",
+    "crates/tacet-core",
+    "crates/tacet-macros",
+    "crates/tacet-c",
+    "crates/tacet-napi",
+    "crates/tacet-bench",
 ]
 exclude = [
-    "crates/timing-oracle/target/dudect-benchmarks",
+    "crates/tacet/target/dudect-benchmarks",
 ]
 
 # Shared settings for all workspace members
@@ -17,7 +17,7 @@ exclude = [
 edition = "2021"
 rust-version = "1.85"
 license = "MPL-2.0"
-repository = "https://github.com/agucova/timing-oracle"
+repository = "https://github.com/agucova/tacet"
 
 [profile.release]
 debug = true

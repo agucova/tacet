@@ -140,6 +140,7 @@ in
     enable = true;
     channel = "stable";
     components = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" "rust-src" ];
+    targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" ];
   };
 
   languages.go.enable = true;
@@ -180,6 +181,11 @@ in
     # Documentation website (Starlight + CF Workers)
     bun
     nodePackages.wrangler
+
+    # WASM development
+    wasmtime
+    wasm-pack
+    wasm-bindgen-cli
   ];
 
   env = {

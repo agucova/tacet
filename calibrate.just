@@ -5,7 +5,7 @@ set fallback
 # Import variables from parent
 data_dir := env("CALIBRATION_DATA_DIR", justfile_directory() + "/calibration_data")
 plot_dir := env("CALIBRATION_PLOT_DIR", justfile_directory() + "/plots")
-oracle_crate := "crates/timing-oracle"
+oracle_crate := "crates/tacet"
 
 # All calibration test files
 calibration_tests := "--test calibration_fpr --test calibration_power --test calibration_bayesian --test calibration_estimation --test calibration_coverage"
@@ -15,7 +15,7 @@ calibration_tests := "--test calibration_fpr --test calibration_power --test cal
 iteration:
     mkdir -p {{data_dir}}
     sudo -E CALIBRATION_TIER=iteration CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle \
+        cargo test --release -p tacet \
         {{calibration_tests}} \
         -- --nocapture
 
@@ -24,7 +24,7 @@ iteration:
 quick:
     mkdir -p {{data_dir}}
     CALIBRATION_TIER=quick CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle \
+        cargo test --release -p tacet \
         {{calibration_tests}} \
         -- --nocapture
 
@@ -33,7 +33,7 @@ quick:
 full:
     mkdir -p {{data_dir}}
     CALIBRATION_TIER=full CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle \
+        cargo test --release -p tacet \
         {{calibration_tests}} \
         -- --nocapture
 
@@ -42,7 +42,7 @@ full:
 full-pmu:
     mkdir -p {{data_dir}}
     sudo -E CALIBRATION_TIER=full CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle \
+        cargo test --release -p tacet \
         {{calibration_tests}} \
         -- --nocapture
 
@@ -51,7 +51,7 @@ full-pmu:
 validation:
     mkdir -p {{data_dir}}
     sudo -E CALIBRATION_TIER=validation CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle \
+        cargo test --release -p tacet \
         {{calibration_tests}} \
         -- --ignored --nocapture
 
@@ -60,7 +60,7 @@ validation:
 stress:
     mkdir -p {{data_dir}}
     CALIBRATION_ENABLE_STRESS=1 CALIBRATION_DATA_DIR={{data_dir}} \
-        cargo test --release -p timing-oracle --test calibration_stress -- --nocapture
+        cargo test --release -p tacet --test calibration_stress -- --nocapture
 
 # Generate plots from calibration data
 [group('calibrate')]

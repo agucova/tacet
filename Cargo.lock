@@ -2018,6 +2018,116 @@ dependencies = [
 ]
 
 [[package]]
+name = "tacet"
+version = "0.2.0"
+dependencies = [
+ "aes",
+ "aes-gcm",
+ "blake2",
+ "chacha20poly1305",
+ "cipher",
+ "colored",
+ "criterion",
+ "curve25519-dalek",
+ "dudect-bencher",
+ "indicatif",
+ "kperf-rs",
+ "libc",
+ "nalgebra 0.34.1",
+ "num-bigint",
+ "num-traits",
+ "perf-event2",
+ "pqcrypto-dilithium",
+ "pqcrypto-falcon",
+ "pqcrypto-kyber",
+ "pqcrypto-sphincsplus",
+ "pqcrypto-traits",
+ "rand 0.9.2",
+ "rand_distr 0.5.1",
+ "rand_xoshiro",
+ "rayon",
+ "regex",
+ "ring",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sha3",
+ "statrs",
+ "subtle",
+ "tacet-core",
+ "tacet-macros",
+ "tempfile",
+ "thread-priority",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "trybuild",
+ "x25519-dalek",
+]
+
+[[package]]
+name = "tacet-bench"
+version = "0.2.0"
+dependencies = [
+ "clap 4.5.53",
+ "indicatif",
+ "rand 0.8.5",
+ "rand_distr 0.4.3",
+ "rayon",
+ "serde_json",
+ "tacet",
+ "tempfile",
+]
+
+[[package]]
+name = "tacet-c"
+version = "0.2.0"
+dependencies = [
+ "cbindgen",
+ "tacet-core",
+]
+
+[[package]]
+name = "tacet-core"
+version = "0.2.0"
+dependencies = [
+ "colored",
+ "hashbrown",
+ "libm",
+ "nalgebra 0.34.1",
+ "proptest",
+ "rand 0.9.2",
+ "rand_distr 0.5.1",
+ "rand_xoshiro",
+ "rayon",
+ "serde",
+]
+
+[[package]]
+name = "tacet-macros"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "tacet-napi"
+version = "0.2.0"
+dependencies = [
+ "napi",
+ "napi-build",
+ "napi-derive",
+ "rand 0.9.2",
+ "rand_xoshiro",
+ "tacet",
+ "tacet-core",
+ "thiserror",
+]
+
+[[package]]
 name = "target-triple"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2095,116 +2205,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
-]
-
-[[package]]
-name = "timing-oracle"
-version = "0.1.5"
-dependencies = [
- "aes",
- "aes-gcm",
- "blake2",
- "chacha20poly1305",
- "cipher",
- "colored",
- "criterion",
- "curve25519-dalek",
- "dudect-bencher",
- "indicatif",
- "kperf-rs",
- "libc",
- "nalgebra 0.34.1",
- "num-bigint",
- "num-traits",
- "perf-event2",
- "pqcrypto-dilithium",
- "pqcrypto-falcon",
- "pqcrypto-kyber",
- "pqcrypto-sphincsplus",
- "pqcrypto-traits",
- "rand 0.9.2",
- "rand_distr 0.5.1",
- "rand_xoshiro",
- "rayon",
- "regex",
- "ring",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "sha3",
- "statrs",
- "subtle",
- "tempfile",
- "thread-priority",
- "timing-oracle-core",
- "timing-oracle-macros",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "trybuild",
- "x25519-dalek",
-]
-
-[[package]]
-name = "timing-oracle-bench"
-version = "0.1.0"
-dependencies = [
- "clap 4.5.53",
- "indicatif",
- "rand 0.8.5",
- "rand_distr 0.4.3",
- "rayon",
- "serde_json",
- "tempfile",
- "timing-oracle",
-]
-
-[[package]]
-name = "timing-oracle-c"
-version = "0.1.0"
-dependencies = [
- "cbindgen",
- "timing-oracle-core",
-]
-
-[[package]]
-name = "timing-oracle-core"
-version = "0.1.5"
-dependencies = [
- "colored",
- "hashbrown",
- "libm",
- "nalgebra 0.34.1",
- "proptest",
- "rand 0.9.2",
- "rand_distr 0.5.1",
- "rand_xoshiro",
- "rayon",
- "serde",
-]
-
-[[package]]
-name = "timing-oracle-macros"
-version = "0.1.5"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
-name = "timing-oracle-napi"
-version = "0.1.0"
-dependencies = [
- "napi",
- "napi-build",
- "napi-derive",
- "rand 0.9.2",
- "rand_xoshiro",
- "thiserror",
- "timing-oracle",
- "timing-oracle-core",
 ]
 
 [[package]]

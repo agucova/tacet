@@ -1,0 +1,14 @@
+[package]
+name = "tacet-wasm-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]  # Exclude from parent workspace
+
+[[bin]]
+name = "wasm-bench"
+path = "src/main.rs"
+
+[dependencies]
+# No dependencies - pure Rust for WASM compatibility

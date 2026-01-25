@@ -1,6 +1,6 @@
 # Profiling commands
 
-profile_dir := env("PROFILE_DIR", "/var/tmp/timing-oracle-profile")
+profile_dir := env("PROFILE_DIR", "/var/tmp/tacet-profile")
 
 profile-dir:
     @echo "Profile output dir: {{profile_dir}}"
@@ -33,17 +33,17 @@ tests:
     echo "Wrote {{profile_dir}}/tests.folded"
     wc -l "{{profile_dir}}/tests.folded"
 
-# Profile the benchmark crate (quick preset, timing-oracle only)
+# Profile the benchmark crate (quick preset, tacet only)
 [group('profile')]
 bench:
     set -euo pipefail
     mkdir -p {{profile_dir}}
     echo "Profiling benchmark; output dir: {{profile_dir}}"
-    cargo build --release -p timing-oracle-bench
+    cargo build --release -p tacet-bench
     if [ "$(uname)" = "Darwin" ]; then \
         xctrace record --template 'Time Profiler' --time-limit 10s \
             --output "{{profile_dir}}/bench.trace" --target-stdout - --launch -- \
-            ./target/release/benchmark --preset quick --tools timing-oracle \
+            ./target/release/benchmark --preset quick --tools tacet \
             --samples 1000 --datasets 3 --effects 0,0.1 --patterns shift --noise iid; \
         xctrace export --input "{{profile_dir}}/bench.trace" \
             --xpath '/trace-toc/run[@number="1"]/data/table[@schema="time-profile"]' \
@@ -51,7 +51,7 @@ bench:
         nix-shell -p inferno --run "inferno-collapse-xctrace {{profile_dir}}/bench.xml > {{profile_dir}}/bench.folded"; \
     else \
         sudo sysctl -w kernel.perf_event_max_sample_rate=1000; \
-        sudo nix-shell -p linuxPackages.perf inferno --run "perf record -g --call-graph dwarf -F 999 -o {{profile_dir}}/perf-bench.data -- ./target/release/benchmark --preset quick --tools timing-oracle --samples 1000 --datasets 3 --effects 0,0.1 --patterns shift --noise iid"; \
+        sudo nix-shell -p linuxPackages.perf inferno --run "perf record -g --call-graph dwarf -F 999 -o {{profile_dir}}/perf-bench.data -- ./target/release/benchmark --preset quick --tools tacet --samples 1000 --datasets 3 --effects 0,0.1 --patterns shift --noise iid"; \
         sudo nix-shell -p linuxPackages.perf inferno --run "perf script -i {{profile_dir}}/perf-bench.data | inferno-collapse-perf" > "{{profile_dir}}/bench.folded"; \
     fi
     echo "Wrote {{profile_dir}}/bench.folded"

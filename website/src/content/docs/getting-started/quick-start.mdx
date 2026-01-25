@@ -12,7 +12,7 @@ This guide walks through writing and running your first timing test. You've seen
 ## Add the dependencies
 
 ```bash
-cargo add timing-oracle --dev
+cargo add tacet --dev
 cargo add rand --dev  # For random input generation
 cargo add subtle --dev  # For the constant-time comparison example
 ```
@@ -22,7 +22,7 @@ cargo add subtle --dev  # For the constant-time comparison example
 Create a test file (e.g., `tests/timing.rs`):
 
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use tacet::{TimingOracle, AttackerModel, helpers::InputPair};
 use std::time::Duration;
 
 #[test]
@@ -70,7 +70,7 @@ You should see output like:
 
 ```
 [test_constant_time_compare]
-timing-oracle
+tacet
 ──────────────────────────────────────────────────────────────
 
   Samples: 6000 per class

@@ -185,7 +185,7 @@ Basic usage for each language:
 <Tabs>
 <TabItem label="Rust">
 ```rust
-use timing_oracle::{TimingOracle, AttackerModel};
+use tacet::{TimingOracle, AttackerModel};
 
 // Preset
 TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -196,7 +196,7 @@ TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
 </TabItem>
 <TabItem label="JavaScript">
 ```javascript
-import { TimingOracle, AttackerModel } from 'timing-oracle';
+import { TimingOracle, AttackerModel } from 'tacet';
 
 // Preset
 TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
@@ -208,19 +208,19 @@ TimingOracle.forAttacker({ Custom: { thresholdNs: 500.0 } })
 <TabItem label="C">
 ```c
 // Preset
-timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
+tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
 
 // Custom threshold
-timing_oracle_t* oracle = timing_oracle_for_attacker_custom(500.0);
+tacet_t* oracle = tacet_for_attacker_custom(500.0);
 ```
 </TabItem>
 <TabItem label="Go">
 ```go
 // Preset
-oracle := timingoracle.ForAttacker(timingoracle.AdjacentNetwork)
+oracle := tacet.ForAttacker(tacet.AdjacentNetwork)
 
 // Custom threshold
-oracle := timingoracle.ForAttackerCustom(500.0)
+oracle := tacet.ForAttackerCustom(500.0)
 ```
 </TabItem>
 </Tabs>
