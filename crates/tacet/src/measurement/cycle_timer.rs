@@ -1,9 +1,27 @@
 //! Unified timer abstraction for cycle-accurate timing across platforms.
 //!
 //! This module provides:
-//! - `BoxedTimer` - An enum wrapping all timer implementations
-//! - `TimerSpec` - Specification for which timer to use
-//! - `TimerError` - Errors from timer selection
+//! - [`BoxedTimer`] - An enum wrapping all timer implementations
+//! - [`TimerSpec`] - Specification for which timer to use
+//! - [`TimerError`] - Errors from timer selection
+//!
+//! # Timer Selection Rationale
+//!
+//! For timing side-channel detection, `TimerSpec::Auto` prefers register-based timers
+//! (`rdtsc`, `cntvct_el0`) over PMU-based timers (`kperf`, `perf_event`):
+//!
+//! **Attackers measure wall-clock time.** When a remote attacker times your API,
+//! they observe wall-clock duration—not CPU cycles. `rdtsc` (invariant TSC) and
+//! `cntvct_el0` directly measure wall-clock time, matching what attackers observe.
+//! PMU cycle counters measure something different: actual CPU cycles executed,
+//! which can vary with frequency scaling even when wall-clock time is constant.
+//!
+//! **No privilege requirements.** Register reads work in containers, VMs, and CI
+//! environments without special configuration.
+//!
+//! PMU-based timers (`kperf`, `perf_event`) remain available via explicit
+//! [`TimerSpec::Kperf`] or [`TimerSpec::PerfEvent`] for microarchitectural research
+//! or when you need true CPU cycle counts.
 //!
 //! # Timer Implementations
 //!
@@ -19,8 +37,8 @@
 //! # User vs Power User APIs
 //!
 //! For most users, `TimerSpec::Auto` provides sensible defaults:
-//! - Uses the best available timer for your platform
-//! - Falls back gracefully when cycle-accurate timing is unavailable
+//! - Uses register-based timers that measure wall-clock time
+//! - No elevated privileges required
 //!
 //! Power users (e.g., kernel developers) can select specific timers:
 //! - Via enum variants: `TimerSpec::Rdtsc`, `TimerSpec::Kperf`, etc.
@@ -226,11 +244,13 @@ impl std::fmt::Debug for BoxedTimer {
 /// - [`StdInstant`](TimerSpec::StdInstant) - std::time::Instant (portable fallback)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TimerSpec {
-    /// Auto-detect: try cycle-accurate timer first (if running as root), fall back to system timer.
+    /// Use the system timer (rdtsc/cntvct_el0).
     ///
-    /// This is the recommended default. When running with sudo, it automatically
-    /// uses cycle-accurate timing (~0.3ns). Otherwise, it falls back to the system
-    /// timer with adaptive batching to compensate for coarser resolution.
+    /// This is the recommended default. Register-based timers measure wall-clock
+    /// time, which matches what attackers observe. No elevated privileges required.
+    ///
+    /// On ARM64 with coarse timers (~42ns on Apple Silicon), adaptive batching
+    /// automatically compensates for resolution.
     #[default]
     Auto,
 
@@ -387,48 +407,16 @@ impl TimerSpec {
         ]
     }
 
-    /// Check if running with elevated privileges.
-    ///
-    /// Returns true if we have elevated privileges that would make fallback unexpected.
-    fn has_elevated_privileges() -> bool {
-        #[cfg(target_os = "macos")]
-        {
-            // On macOS, check if running as root
-            std::process::Command::new("id")
-                .arg("-u")
-                .output()
-                .map(|o| o.stdout == b"0\n")
-                .unwrap_or(false)
-        }
-
-        #[cfg(target_os = "linux")]
-        {
-            // On Linux, check if running as root or have CAP_PERFMON
-            // Simple check for running as root first
-            std::process::Command::new("id")
-                .arg("-u")
-                .output()
-                .map(|o| o.stdout == b"0\n")
-                .unwrap_or(false)
-        }
-
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-        {
-            false
-        }
-    }
-
     /// Create a timer based on this specification.
-    ///
-    /// # Cycle-Accurate Timer Auto-Detection
-    ///
-    /// When `Auto` or `RequireCycleAccurate` is specified:
-    /// - On macOS ARM64: Tries kperf (requires sudo)
-    /// - On Linux: Tries perf_event (requires sudo or CAP_PERFMON)
-    /// - Falls back to system timer if cycle-accurate timing is unavailable
     ///
     /// Returns a tuple of (timer, fallback_reason) where fallback_reason indicates
     /// why the timer fell back from high-precision timing (if at all).
+    ///
+    /// # Timer Selection
+    ///
+    /// - `Auto` and `SystemTimer`: Use register-based timers (rdtsc/cntvct_el0)
+    /// - `RequireCycleAccurate`: Try PMU timers (kperf/perf_event), panic if unavailable
+    /// - Platform-specific variants: Use the specified timer directly
     pub fn create_timer(&self) -> (BoxedTimer, TimerFallbackReason) {
         match self {
             TimerSpec::SystemTimer => (
@@ -489,98 +477,10 @@ impl TimerSpec {
             },
 
             TimerSpec::Auto => {
-                #[allow(unused_variables)]
-                let has_elevated = Self::has_elevated_privileges();
-
-                // Try cycle-accurate timer first on supported platforms
-                #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
-                {
-                    use super::kperf::PmuError;
-                    let timer = match PmuTimer::new() {
-                        Ok(pmu) => (BoxedTimer::Kperf(pmu), TimerFallbackReason::None),
-                        Err(PmuError::ConcurrentAccess) => {
-                            tracing::warn!(
-                                "Cycle counter (kperf) locked by another process. \
-                                 Falling back to system timer."
-                            );
-                            eprintln!(
-                                "\u{26A0} Cycle-accurate timing unavailable (concurrent access) \
-                                 \u{2014} using coarse timer (~42ns).\n  \
-                                 If using cargo test, run with --test-threads=1."
-                            );
-                            (
-                                BoxedTimer::Standard(Timer::new()),
-                                TimerFallbackReason::ConcurrentAccess,
-                            )
-                        }
-                        Err(_) if has_elevated => {
-                            tracing::warn!(
-                                "Running with elevated privileges but cycle counter (kperf) \
-                                 unavailable. Falling back to system timer. Check system configuration."
-                            );
-                            eprintln!(
-                                "\u{26A0} Cycle-accurate timing unavailable despite elevated \
-                                 privileges \u{2014} using coarse timer (~42ns).\n  \
-                                 Check system configuration."
-                            );
-                            (
-                                BoxedTimer::Standard(Timer::new()),
-                                TimerFallbackReason::CycleCounterUnavailable,
-                            )
-                        }
-                        Err(_) => {
-                            // Normal fallback without elevated privileges
-                            (
-                                BoxedTimer::Standard(Timer::new()),
-                                TimerFallbackReason::NoPrivileges,
-                            )
-                        }
-                    };
-                    timer
-                }
-
-                #[cfg(all(target_os = "linux", feature = "perf"))]
-                {
-                    let timer = match LinuxPerfTimer::new() {
-                        Ok(perf) => (BoxedTimer::Perf(perf), TimerFallbackReason::None),
-                        Err(_) if has_elevated => {
-                            tracing::warn!(
-                                "Running with elevated privileges but cycle counter (perf_event) \
-                                 unavailable. Falling back to system timer. Check kernel perf_event support."
-                            );
-                            eprintln!(
-                                "\u{26A0} Cycle-accurate timing unavailable despite elevated \
-                                 privileges \u{2014} using coarse timer.\n  \
-                                 Check kernel perf_event support (CONFIG_PERF_EVENTS) or \
-                                 perf_event_paranoid setting."
-                            );
-                            (
-                                BoxedTimer::Standard(Timer::new()),
-                                TimerFallbackReason::CycleCounterUnavailable,
-                            )
-                        }
-                        Err(_) => {
-                            // Normal fallback without elevated privileges
-                            (
-                                BoxedTimer::Standard(Timer::new()),
-                                TimerFallbackReason::NoPrivileges,
-                            )
-                        }
-                    };
-                    timer
-                }
-
-                // Fall back to system timer (non-ARM or no cycle counter feature)
-                #[cfg(not(any(
-                    all(target_os = "macos", target_arch = "aarch64", feature = "kperf"),
-                    all(target_os = "linux", feature = "perf")
-                )))]
-                {
-                    (
-                        BoxedTimer::Standard(Timer::new()),
-                        TimerFallbackReason::None,
-                    )
-                }
+                // Prefer register-based timers: they measure wall-clock time (what attackers
+                // observe) and require no special privileges.
+                // Use TimerSpec::Kperf or TimerSpec::PerfEvent explicitly for PMU access.
+                (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
             }
 
             TimerSpec::RequireCycleAccurate => {

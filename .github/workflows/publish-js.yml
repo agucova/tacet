@@ -113,11 +113,11 @@ jobs:
         if: inputs.dry_run == true
         run: npm publish --dry-run --access public
 
-      # Uses npm trusted publishing (OIDC)
-      # Configure at: https://www.npmjs.com/package/@tacet/js/access
       - name: Publish to npm
         if: inputs.dry_run != true
-        run: npm publish --access public
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-jsr:
     needs: build

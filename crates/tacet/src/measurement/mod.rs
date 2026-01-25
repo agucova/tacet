@@ -4,13 +4,24 @@
 //! - High-resolution cycle counting with platform-specific implementations
 //! - Sample collection with randomized interleaved design
 //! - Symmetric outlier filtering for robust analysis
-//! - Unified timer abstraction for cross-platform cycle-accurate timing
+//! - Unified timer abstraction for cross-platform timing
 //!
-//! # Timer Selection
+//! # Timer Selection Rationale
 //!
-//! By default, timing uses platform timers:
-//! - **x86_64**: `rdtsc` instruction (~0.3ns resolution, cycle-accurate)
+//! By default (`TimerSpec::Auto`), tacet uses register-based timers:
+//! - **x86_64**: `rdtsc` instruction (~0.3ns resolution)
 //! - **aarch64**: `cntvct_el0` virtual timer (resolution varies by SoC)
+//!
+//! These are preferred for timing side-channel detection because **attackers
+//! measure wall-clock time**. When a remote attacker times your API, they observe
+//! wall-clock duration. `rdtsc` (invariant TSC) and `cntvct_el0` directly measure
+//! this, matching what attackers can observe.
+//!
+//! PMU-based timers (`kperf`, `perf_event`) measure CPU cycles, which can differ
+//! from wall-clock time due to frequency scaling. They're available via explicit
+//! [`TimerSpec::Kperf`] or [`TimerSpec::PerfEvent`] for microarchitectural research.
+//!
+//! # ARM64 Timer Resolution
 //!
 //! ARM64 timer resolution depends on the SoC's counter frequency:
 //! - ARMv8.6+ (Graviton4): ~1ns (1 GHz mandated by spec)
@@ -18,41 +29,29 @@
 //! - Ampere Altra: ~40ns (25 MHz)
 //! - Raspberry Pi 4: ~18ns (54 MHz)
 //!
-//! # Automatic Cycle-Accurate Timer Detection
+//! On platforms with coarse resolution, adaptive batching compensates automatically.
 //!
-//! When running with sudo/root privileges, the library automatically uses
-//! cycle-accurate timing:
-//! - **macOS ARM64**: kperf (PMCCNTR_EL0, ~0.3ns resolution)
-//! - **Linux**: perf_event (~0.3ns resolution)
+//! # Explicit Timer Selection
 //!
-//! No code changes needed - just run with sudo:
-//!
-//! ```bash
-//! cargo build --release
-//! sudo ./target/release/your_binary
-//! ```
-//!
-//! # Manual Timer Selection
-//!
-//! Use `TimerSpec` to explicitly control timer selection:
+//! Use [`TimerSpec`] to control timer selection:
 //!
 //! ```ignore
 //! use tacet::{TimingOracle, TimerSpec};
 //!
-//! // Force system timer (no cycle-accurate timing)
+//! // Default: register-based timer (rdtsc/cntvct_el0)
 //! let result = TimingOracle::new()
-//!     .timer_spec(TimerSpec::SystemTimer)
+//!     .timer_spec(TimerSpec::Auto)
 //!     .test(...);
 //!
-//! // Require cycle-accurate timing (panics if unavailable)
+//! // Require PMU cycle counter (panics if unavailable)
 //! let result = TimingOracle::new()
 //!     .timer_spec(TimerSpec::RequireCycleAccurate)
 //!     .test(...);
 //! ```
 //!
-//! # Power User: Platform-Specific Timers
+//! # Platform-Specific Timers
 //!
-//! For kernel developers or those who need specific timing primitives:
+//! For kernel developers or microarchitectural research:
 //!
 //! ```ignore
 //! use tacet::TimerSpec;
@@ -65,7 +64,7 @@
 //! let timer = TimerSpec::Rdtsc;
 //!
 //! #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-//! let timer = TimerSpec::Kperf;
+//! let timer = TimerSpec::Kperf;  // Requires sudo
 //! ```
 
 pub mod affinity;

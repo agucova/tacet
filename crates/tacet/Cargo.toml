@@ -102,6 +102,9 @@ progress-bars = ["dep:indicatif"]
 # Thread priority control for measurement (not available on WASM)
 thread-priority = ["dep:thread-priority"]
 
+# Power analysis module for power/EM side-channel detection
+power = []
+
 # Internal features - use default features instead
 kperf = ["dep:kperf-rs"]  # libc is always available for CPU affinity
 perf = ["dep:perf_event2"]

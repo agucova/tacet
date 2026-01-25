@@ -26,7 +26,7 @@ ARM64 Linux resolution varies by SoC: AWS Graviton4 ~1ns, Ampere Altra ~40ns, Ra
 
 ## Enabling cycle-accurate timers
 
-Use `TimerSpec::CyclePrecision` to request cycle-accurate measurements. This uses kperf on macOS ARM64 and perf\_event on Linux:
+Use `TimerSpec::RequireCycleAccurate` to request cycle-accurate measurements. This uses kperf on macOS ARM64 and perf\_event on Linux:
 
 <Tabs>
 <TabItem label="macOS ARM64">
@@ -159,11 +159,11 @@ Operations completing faster than ~10ns on Apple Silicon (or proportionally fast
 Operation too fast to measure
   Operation: ~5ns
   Timer resolution: ~42ns
-  Recommendation: Use TimerSpec::CyclePrecision with sudo (~1ns resolution)
+  Recommendation: Use TimerSpec::RequireCycleAccurate with sudo (~1ns resolution)
 ```
 
 Options:
-1. Use `TimerSpec::CyclePrecision` for higher resolution
+1. Use `TimerSpec::RequireCycleAccurate` for higher resolution
 2. Test a larger workload (more iterations, larger input)
 3. Accept that ultra-fast operations may not be measurable
 
