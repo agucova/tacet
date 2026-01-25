@@ -1,6 +1,17 @@
-# tacet-go
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agucova/tacet/main/website/public/logo-dark-bg.svg" alt="tacet-go" width="340" />
+</p>
 
-Go bindings for [tacet](https://github.com/agucova/tacet), a library for detecting timing side channels in cryptographic code.
+<p align="center">
+  <strong>Go bindings for tacet – detect side channels in cryptographic code.</strong>
+</p>
+
+<p align="center">
+  <a href="https://pkg.go.dev/github.com/agucova/tacet/crates/tacet-go"><img src="https://pkg.go.dev/badge/github.com/agucova/tacet/crates/tacet-go.svg" alt="Go Reference"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
+</p>
+
+---
 
 ## Installation
 

@@ -11,24 +11,26 @@ This reference describes the timer implementations used by tacet on different pl
 
 ## Timer selection
 
-By default (`TimerSpec::Auto`), tacet uses register-based timers:
+`TimerSpec::Auto` uses platform-specific logic to select the best timer:
 
-| Platform | Default Timer | Resolution | PMU Timer | Resolution |
-|----------|---------------|------------|-----------|------------|
-| x86_64 Linux | `rdtsc` | ~0.3ns | `perf_event` | ~0.3ns |
-| x86_64 macOS | `rdtsc` | ~0.3ns | N/A | N/A |
-| ARM64 Linux | `cntvct_el0` | 1-40ns | `perf_event` | ~0.3ns |
-| ARM64 macOS | `cntvct_el0` | ~42ns | `kperf` | ~1ns |
+| Platform | Auto Behavior | Fallback | PMU Timer (explicit) |
+|----------|---------------|----------|----------------------|
+| x86_64 Linux | `rdtsc` (~0.3ns) | N/A | `perf_event` (~0.3ns) |
+| x86_64 macOS | `rdtsc` (~0.3ns) | N/A | N/A |
+| ARM64 Linux | `perf_event` (~0.3ns, needs sudo) | `cntvct_el0` (1-40ns) | `perf_event` |
+| ARM64 macOS | `kperf` (~1ns, needs sudo) | `cntvct_el0` (~42ns) | `kperf` |
 
 <Aside>
-ARM64 Linux resolution varies by SoC: AWS Graviton4 ~1ns, Ampere Altra ~40ns, Raspberry Pi 4 ~18ns.
+**ARM64 Auto behavior:** Tries PMU timer first (with sudo), falls back to system timer if unavailable. This ensures high precision when possible while maintaining graceful degradation.
 </Aside>
 
-## Why register-based timers?
+## Timer selection rationale
 
-tacet defaults to register-based timers (`rdtsc`, `cntvct_el0`) because **attackers measure wall-clock time**. When a remote attacker times your API, they observe wall-clock duration—not CPU cycles. `rdtsc` (invariant TSC) and `cntvct_el0` directly measure wall-clock time, matching what attackers can observe.
+**On x86_64:** `rdtsc` (invariant TSC) is already high-precision (~0.3ns) and measures wall-clock time, which is what attackers observe. No need for PMU access.
 
-PMU-based timers (`kperf`, `perf_event`) measure CPU cycles, which can differ from wall-clock time due to frequency scaling. They're available via `TimerSpec::Kperf` or `TimerSpec::PerfEvent` for microarchitectural research or when you need true cycle counts.
+**On ARM64:** System timers (`cntvct_el0`) are often too coarse (42ns on Apple Silicon, 40ns on Neoverse N1). Auto tries PMU timers first for better precision, falling back gracefully if sudo is unavailable.
+
+PMU-based timers (`kperf`, `perf_event`) are available via explicit `TimerSpec::Kperf` or `TimerSpec::PerfEvent` for microarchitectural research.
 
 ## Requiring high-precision timing
 

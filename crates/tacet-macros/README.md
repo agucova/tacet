@@ -1,6 +1,18 @@
-# tacet-macros
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agucova/tacet/main/website/public/logo-dark-bg.svg" alt="tacet-macros" width="340" />
+</p>
 
-**Proc macros for timing side-channel tests.**
+<p align="center">
+  <strong>Proc macros for side-channel tests.</strong>
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/tacet-macros"><img src="https://img.shields.io/crates/v/tacet-macros" alt="crates.io"></a>
+  <a href="https://docs.rs/tacet-macros"><img src="https://img.shields.io/docsrs/tacet-macros" alt="docs.rs"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
+</p>
+
+---
 
 This crate provides the `timing_test!` and `timing_test_checked!` macros for [`tacet`](https://lib.rs/crates/tacet). You typically don't need to depend on this crate directly.
 

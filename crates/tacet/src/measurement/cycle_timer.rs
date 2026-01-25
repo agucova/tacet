@@ -7,21 +7,23 @@
 //!
 //! # Timer Selection Rationale
 //!
-//! For timing side-channel detection, `TimerSpec::Auto` prefers register-based timers
-//! (`rdtsc`, `cntvct_el0`) over PMU-based timers (`kperf`, `perf_event`):
+//! `TimerSpec::Auto` uses platform-specific logic to select the best timer:
 //!
-//! **Attackers measure wall-clock time.** When a remote attacker times your API,
-//! they observe wall-clock duration—not CPU cycles. `rdtsc` (invariant TSC) and
-//! `cntvct_el0` directly measure wall-clock time, matching what attackers observe.
-//! PMU cycle counters measure something different: actual CPU cycles executed,
-//! which can vary with frequency scaling even when wall-clock time is constant.
+//! **On x86_64:** Uses `rdtsc` (invariant TSC). This is wall-clock time, no privileges
+//! needed, and already high-precision (~0.3ns).
 //!
-//! **No privilege requirements.** Register reads work in containers, VMs, and CI
-//! environments without special configuration.
+//! **On ARM64:** Tries PMU timers (`kperf`, `perf_event`) first, falls back to
+//! `cntvct_el0` if unavailable. ARM64 system timers are often too coarse (42ns on
+//! Apple Silicon, 40ns on Neoverse N1), so we prioritize PMU access when available.
+//! Falls back gracefully without sudo.
 //!
-//! PMU-based timers (`kperf`, `perf_event`) remain available via explicit
-//! [`TimerSpec::Kperf`] or [`TimerSpec::PerfEvent`] for microarchitectural research
-//! or when you need true CPU cycle counts.
+//! **Why prefer wall-clock on x86_64?** Attackers measure wall-clock time, not CPU
+//! cycles. `rdtsc` (invariant TSC) directly measures wall-clock time, matching what
+//! attackers observe. PMU cycle counters measure CPU cycles, which can differ from
+//! wall-clock due to frequency scaling.
+//!
+//! PMU-based timers remain available via explicit [`TimerSpec::Kperf`] or
+//! [`TimerSpec::PerfEvent`] for microarchitectural research.
 //!
 //! # Timer Implementations
 //!
@@ -245,13 +247,15 @@ impl std::fmt::Debug for BoxedTimer {
 /// - [`StdInstant`](TimerSpec::StdInstant) - std::time::Instant (portable fallback)
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum TimerSpec {
-    /// Use the system timer (rdtsc/cntvct_el0).
+    /// Auto-detect the best available timer for your platform.
     ///
-    /// This is the recommended default. Register-based timers measure wall-clock
-    /// time, which matches what attackers observe. No elevated privileges required.
+    /// This is the recommended default. Behavior:
+    /// - **x86_64**: Uses `rdtsc` (~0.3ns, no privileges needed)
+    /// - **ARM64**: Tries PMU timer first (kperf/perf_event with sudo), falls back
+    ///   to `cntvct_el0` if unavailable. Adaptive batching compensates for coarse
+    ///   timers when needed.
     ///
-    /// On ARM64 with coarse timers (~42ns on Apple Silicon), adaptive batching
-    /// automatically compensates for resolution.
+    /// On ARM64 without sudo, falls back gracefully to system timer.
     #[default]
     Auto,
 
@@ -434,7 +438,8 @@ impl TimerSpec {
     ///
     /// # Timer Selection
     ///
-    /// - `Auto` and `SystemTimer`: Use register-based timers (rdtsc/cntvct_el0)
+    /// - `Auto`: x86_64 uses rdtsc; ARM64 tries PMU (kperf/perf_event) first, falls back to cntvct_el0
+    /// - `SystemTimer`: Always use register-based timer (rdtsc/cntvct_el0)
     /// - `RequireHighPrecision`: Use high-precision timer (rdtsc/kperf/perf_event), panic if unavailable
     /// - `RequireCycleAccurate`: Use PMU cycle counter (kperf/perf_event), panic if unavailable
     /// - Platform-specific variants: Use the specified timer directly
@@ -498,10 +503,62 @@ impl TimerSpec {
             },
 
             TimerSpec::Auto => {
-                // Prefer register-based timers: they measure wall-clock time (what attackers
-                // observe) and require no special privileges.
-                // Use TimerSpec::Kperf or TimerSpec::PerfEvent explicitly for PMU access.
-                (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                // On x86_64: rdtsc is already high-precision, use it directly
+                #[cfg(target_arch = "x86_64")]
+                {
+                    return (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None);
+                }
+
+                // On ARM64: try PMU timers first (cntvct_el0 is often coarse),
+                // fall back to system timer if PMU unavailable
+                #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
+                {
+                    use super::kperf::PmuError;
+                    match PmuTimer::new() {
+                        Ok(pmu) => (BoxedTimer::Kperf(pmu), TimerFallbackReason::None),
+                        Err(PmuError::ConcurrentAccess) => {
+                            tracing::warn!(
+                                "Cycle counter (kperf) locked by another process. \
+                                 Falling back to system timer."
+                            );
+                            (
+                                BoxedTimer::Standard(Timer::new()),
+                                TimerFallbackReason::ConcurrentAccess,
+                            )
+                        }
+                        Err(_) => {
+                            // No sudo or other error - fall back to system timer
+                            (
+                                BoxedTimer::Standard(Timer::new()),
+                                TimerFallbackReason::NoPrivileges,
+                            )
+                        }
+                    }
+                }
+
+                #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
+                {
+                    match LinuxPerfTimer::new() {
+                        Ok(perf) => return (BoxedTimer::Perf(perf), TimerFallbackReason::None),
+                        Err(_) => {
+                            // No sudo or other error - fall back to system timer
+                            (
+                                BoxedTimer::Standard(Timer::new()),
+                                TimerFallbackReason::NoPrivileges,
+                            )
+                        }
+                    }
+                }
+
+                // Other platforms or no perf feature: use system timer
+                #[cfg(not(any(
+                    target_arch = "x86_64",
+                    all(target_os = "macos", target_arch = "aarch64", feature = "kperf"),
+                    all(target_os = "linux", target_arch = "aarch64", feature = "perf")
+                )))]
+                {
+                    (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                }
             }
 
             #[allow(clippy::needless_return)] // Returns needed in cfg blocks for early exit

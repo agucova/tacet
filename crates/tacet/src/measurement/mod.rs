@@ -8,18 +8,18 @@
 //!
 //! # Timer Selection Rationale
 //!
-//! By default (`TimerSpec::Auto`), tacet uses register-based timers:
-//! - **x86_64**: `rdtsc` instruction (~0.3ns resolution)
-//! - **aarch64**: `cntvct_el0` virtual timer (resolution varies by SoC)
+//! `TimerSpec::Auto` uses platform-specific logic:
+//! - **x86_64**: `rdtsc` (~0.3ns, wall-clock time, no privileges needed)
+//! - **ARM64**: Tries PMU first (`kperf`/`perf_event` with sudo), falls back to
+//!   `cntvct_el0` if unavailable. ARM64 system timers are often too coarse.
 //!
-//! These are preferred for timing side-channel detection because **attackers
-//! measure wall-clock time**. When a remote attacker times your API, they observe
-//! wall-clock duration. `rdtsc` (invariant TSC) and `cntvct_el0` directly measure
-//! this, matching what attackers can observe.
+//! **Why this matters:** On x86_64, `rdtsc` (invariant TSC) is already high-precision
+//! and measures wall-clock time (what attackers observe). On ARM64, system timers
+//! are often coarse (42ns on Apple Silicon, 40ns on Neoverse N1), so we prioritize
+//! PMU access when available for better precision.
 //!
-//! PMU-based timers (`kperf`, `perf_event`) measure CPU cycles, which can differ
-//! from wall-clock time due to frequency scaling. They're available via explicit
-//! [`TimerSpec::Kperf`] or [`TimerSpec::PerfEvent`] for microarchitectural research.
+//! PMU-based timers are available via explicit [`TimerSpec::Kperf`] or
+//! [`TimerSpec::PerfEvent`] for microarchitectural research.
 //!
 //! # ARM64 Timer Resolution
 //!

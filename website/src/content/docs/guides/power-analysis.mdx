@@ -1,0 +1,910 @@
+---
+title: Power Side-Channel Analysis
+description: Guide to detecting power and EM leakage with tacet's power module
+sidebar:
+  order: 4
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+<Aside type="caution">
+**Experimental feature:** Power side-channel analysis support is experimental and under active development. Currently only available via the tacet Rust crate. API and methodology may change in future releases.
+</Aside>
+
+This guide is intended for **security researchers and hardware evaluators** with experience in power analysis or electromagnetic (EM) side-channel attacks. It assumes familiarity with concepts like TVLA, DPA, CPA, and the two-class (fixed-vs-random) testing methodology.
+
+## Overview
+
+tacet's power module applies Bayesian inference to detect data-dependent power consumption in pre-collected trace datasets. Unlike traditional t-test or Welch's test approaches (TVLA, DudeCT), it:
+
+- **Quantifies uncertainty** via posterior probabilities rather than p-values
+- **Handles temporal dependence** through IACT-based effective sample size
+- **Provides effect localization** with per-partition posterior probabilities
+- **Adapts to high dimension** (up to d=32) with regularized covariance estimation
+
+The statistical engine is shared with timing analysis (see Specification §7), extended to handle multidimensional power features extracted from trace partitioning.
+
+## Quick start
+
+Enable the `power` feature:
+
+```toml
+[dependencies]
+tacet = { version = "0.2", features = ["power"] }
+```
+
+Basic usage:
+
+```rust
+use tacet::power::{analyze, Config, Dataset, Trace, Class, PowerUnits};
+
+// Create dataset from your traces
+let dataset = Dataset {
+    traces: vec![
+        Trace {
+            class: Class::Fixed,
+            samples: vec![/* power measurements as f32 */],
+            markers: None,
+            id: 0,
+        },
+        // ... more traces (interleaved Fixed and Random)
+    ],
+    units: PowerUnits::Volts,
+    sample_rate_hz: Some(1e9),  // 1 GS/s
+    meta: Default::default(),
+};
+
+// Analyze with default configuration
+let report = analyze(&Config::default(), &dataset);
+
+// Check results
+println!("Leak probability: {:.1}%", report.leak_probability * 100.0);
+println!("Max effect: {:.2} {} (CI: [{:.2}, {:.2}])",
+    report.max_effect,
+    report.units.as_str(),
+    report.max_effect_ci95.0,
+    report.max_effect_ci95.1
+);
+```
+
+## Acquisition and data preparation
+
+### The two-class pattern
+
+Power analysis uses the **DudeCT two-class pattern** to detect data-dependent leakage:
+
+**Fixed class:** Device operates on **constant data** (typically all zeros: `0x00...00`)
+- Same plaintext/key/operand for all Fixed traces
+- If implementation is constant-time, traces should cluster (low variance)
+
+**Random class:** Device operates on **random data**
+- Different plaintext/key/operand for each Random trace
+- If implementation is constant-time, should have similar variance to Fixed
+- If data-dependent, variance will differ from Fixed
+
+**Example for AES:**
+```rust
+// Fixed: encrypt plaintext=0x00000000000000000000000000000000 with key=0x000...000
+// Random: encrypt plaintext=rand() with key=0x000...000
+// (or vice versa: fixed plaintext, random key)
+```
+
+The Bayesian engine detects differences in feature distributions between classes. If power consumption is data-dependent, the two classes will show systematically different patterns.
+
+### Acquisition setup
+
+Typical measurement setup:
+
+```
+┌─────────────────┐
+│  Target Device  │ ← Trigger signal
+│  (DUT)          │
+└────────┬────────┘
+         │ Power/EM probe
+         ▼
+┌─────────────────┐
+│  Oscilloscope/  │ ← Acquisition controller
+│  Digitizer      │   (Python/MATLAB/ChipWhisperer)
+└────────┬────────┘
+         │ Trace files (.npy, .bin, .mat)
+         ▼
+┌─────────────────┐
+│  tacet analysis │
+└─────────────────┘
+```
+
+**Acquisition workflow:**
+
+1. **Configure trigger:** Align traces to operation start (e.g., AES first round begins)
+2. **Interleave classes:** Alternate Fixed and Random (FRFRFR...) — **critical for validity**
+3. **Label each trace:** Tag with `Class::Fixed` or `Class::Random` during acquisition
+4. **Record metadata:** Units, sample rate, timestamps
+5. **Optional stage markers:** Record boundaries if analyzing multi-stage operations
+6. **Export:** Save as binary arrays for tacet
+
+<Aside type="caution">
+**Interleaving is critical for validity:** Environmental drift (temperature, voltage, EM interference) creates systematic differences between acquisition blocks. If you collect all Fixed traces then all Random traces (blocked acquisition), drift will masquerade as cryptographic leakage, causing **false positives**.
+
+The IACT model handles temporal autocorrelation *within* each class but cannot distinguish environmental drift *between* blocks from true data-dependent differences.
+
+tacet warns if classes are fully separated and span >1 hour (`BlockedAcquisitionDetected`), but even 30-minute blocks can drift. **Best practice:** interleave at finest granularity (FRFRFR... or small blocks of 10-50 traces).
+</Aside>
+
+**Supported devices:**
+- Oscilloscopes: Keysight, Tektronix, Rigol (CSV/binary export)
+- ChipWhisperer (`.npy`)
+- Riscure Inspector (`.bin`, `.mat`)
+- PicoScope (Python API)
+- Custom ADCs (any source producing `Vec<f32>`)
+
+### Trace structure
+
+```rust
+use tacet::power::{Trace, Class};
+
+let trace = Trace {
+    class: Class::Fixed,           // or Class::Random
+    samples: vec![/* f32 values */],
+    markers: None,                  // or Some(vec![...]) for multi-stage
+    id: 0,                          // unique trace ID (preserves acquisition order)
+};
+```
+
+**Requirements:**
+- Samples: `f32` values (ADC counts, volts, millivolts—units tracked separately)
+- Equal length: All traces same sample count (unless using stage markers)
+- Minimum count: 1,000+ traces recommended (500 per class minimum)
+- Balanced classes preferred but not required
+
+The library processes traces in acquisition order, preserving temporal structure for IACT estimation.
+
+### Stage markers (optional)
+
+For multi-stage operations (AES rounds, RSA modexp steps), markers segment traces for independent analysis:
+
+```rust
+use tacet::power::{Marker, StageId};
+
+let markers = vec![
+    Marker { stage: StageId("key_schedule".into()), start: 0,    end: 800 },
+    Marker { stage: StageId("round_00".into()),     start: 800,  end: 1600 },
+    Marker { stage: StageId("round_01".into()),     start: 1600, end: 2400 },
+    // ... more rounds ...
+];
+
+let trace = Trace {
+    class: Class::Fixed,
+    samples: vec![/* 10000 samples */],
+    markers: Some(markers),
+    id: 0,
+};
+```
+
+**Marker extraction methods:**
+1. Manual annotation (inspect averaged trace)
+2. Hardware triggers at stage boundaries
+3. Algorithmic detection (peak finding, zero-crossing)
+4. GPIO toggles from instrumented firmware
+
+**Benefits:**
+- Isolate leakage sources ("Round 3 leaks, others safe")
+- Stage-specific threshold estimates (varying SNR across stages)
+- Handle variable-length stages (automatic resampling to median length)
+
+### Data format conversion
+
+<Tabs>
+<TabItem label="ChipWhisperer (.npy)">
+
+```python
+import numpy as np
+from tacet_python import Trace, Class, Dataset, PowerUnits  # hypothetical binding
+
+traces_fixed = np.load("fixed_traces.npy")   # Shape: (n_traces, n_samples)
+traces_random = np.load("random_traces.npy")
+
+dataset_traces = []
+for i, samples in enumerate(traces_fixed):
+    dataset_traces.append(Trace(
+        class_=Class.Fixed,
+        samples=samples.tolist(),
+        markers=None,
+        id=i
+    ))
+
+for i, samples in enumerate(traces_random):
+    dataset_traces.append(Trace(
+        class_=Class.Random,
+        samples=samples.tolist(),
+        markers=None,
+        id=len(traces_fixed) + i
+    ))
+
+dataset = Dataset(
+    traces=dataset_traces,
+    units=PowerUnits.Arbitrary("ChipWhisperer ADC"),
+    sample_rate_hz=29.5e6,  # Lite: 29.5 MS/s
+    meta={}
+)
+```
+
+</TabItem>
+
+<TabItem label="MATLAB (.mat)">
+
+```rust
+use matfile::MatFile;
+use tacet::power::{Trace, Class, Dataset, PowerUnits};
+
+let mat = MatFile::load("traces.mat")?;
+let traces_fixed: Vec<Vec<f32>> = mat.find_by_name("traces_fixed")?.data()?;
+let traces_random: Vec<Vec<f32>> = mat.find_by_name("traces_random")?.data()?;
+
+let mut dataset_traces = Vec::new();
+for (id, samples) in traces_fixed.into_iter().enumerate() {
+    dataset_traces.push(Trace {
+        class: Class::Fixed,
+        samples,
+        markers: None,
+        id: id as u64,
+    });
+}
+for (id, samples) in traces_random.into_iter().enumerate() {
+    dataset_traces.push(Trace {
+        class: Class::Random,
+        samples,
+        markers: None,
+        id: (traces_fixed.len() + id) as u64,
+    });
+}
+
+let dataset = Dataset {
+    traces: dataset_traces,
+    units: PowerUnits::Volts,
+    sample_rate_hz: Some(1e9),  // 1 GS/s
+    meta: Default::default(),
+};
+```
+
+</TabItem>
+
+<TabItem label="Raw binary">
+
+```rust
+use std::fs::File;
+use std::io::Read;
+use tacet::power::{Trace, Class, Dataset, PowerUnits};
+
+fn load_binary_traces(path: &str, n_traces: usize, n_samples: usize)
+    -> Result<Vec<Vec<f32>>, std::io::Error>
+{
+    let mut file = File::open(path)?;
+    let mut buffer = vec![0u8; n_traces * n_samples * 4];  // 4 bytes per f32
+    file.read_exact(&mut buffer)?;
+
+    Ok(buffer
+        .chunks_exact(4)
+        .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .collect::<Vec<_>>()
+        .chunks_exact(n_samples)
+        .map(|chunk| chunk.to_vec())
+        .collect())
+}
+
+let traces_fixed = load_binary_traces("fixed.bin", 5000, 10000)?;
+let traces_random = load_binary_traces("random.bin", 5000, 10000)?;
+// ... construct Dataset (same as MATLAB example)
+```
+
+</TabItem>
+
+<TabItem label="CSV (oscilloscope)">
+
+```rust
+use csv::ReaderBuilder;
+use tacet::power::{Trace, Class, Dataset, PowerUnits};
+
+fn load_csv_trace(path: &str) -> Result<Vec<f32>, Box<dyn std::error::Error>> {
+    let mut reader = ReaderBuilder::new()
+        .has_headers(true)
+        .from_path(path)?;
+
+    Ok(reader.records()
+        .map(|r| r.unwrap().get(1).unwrap().parse::<f32>().unwrap())  // Col 1: voltage
+        .collect())
+}
+
+let mut dataset_traces = Vec::new();
+for i in 0..5000 {
+    let samples = load_csv_trace(&format!("traces/fixed_{:04}.csv", i))?;
+    dataset_traces.push(Trace {
+        class: Class::Fixed,
+        samples,
+        markers: None,
+        id: i as u64,
+    });
+}
+for i in 0..5000 {
+    let samples = load_csv_trace(&format!("traces/random_{:04}.csv", i))?;
+    dataset_traces.push(Trace {
+        class: Class::Random,
+        samples,
+        markers: None,
+        id: (5000 + i) as u64,
+    });
+}
+
+let dataset = Dataset {
+    traces: dataset_traces,
+    units: PowerUnits::Millivolts,
+    sample_rate_hz: Some(2.5e9),  // 2.5 GS/s
+    meta: Default::default(),
+};
+```
+
+</TabItem>
+</Tabs>
+
+## Configuration
+
+### Feature families
+
+Three feature families extract different statistics from partitioned traces:
+
+<Tabs>
+<TabItem label="Mean (default)">
+
+**Mean**: Average power per partition. Fast and effective for first-order leakage.
+
+```rust
+use tacet::power::{Config, FeatureFamily};
+
+let config = Config {
+    features: FeatureFamily::Mean,
+    ..Default::default()
+};
+```
+
+**Dimension:** d = partitions × stages
+
+**Use when:**
+- First-order leakage expected (power ∝ Hamming weight)
+- Large datasets (n > 1000)
+- Quick exploratory analysis
+
+</TabItem>
+
+<TabItem label="Robust3">
+
+**Robust3**: Median, 10th percentile, 90th percentile per partition. Robust to outliers, sensitive to tail effects.
+
+```rust
+let config = Config {
+    features: FeatureFamily::Robust3,
+    ..Default::default()
+};
+```
+
+**Dimension:** d = 3 × partitions × stages
+
+**Requirements:**
+- n_eff ≥ 150 (automatic fallback to Mean if violated)
+- Emits warning if n_eff < 300
+
+**Use when:**
+- Outliers or glitches in traces
+- Tail-based leakage (cache misses appear in tails)
+
+<Aside type="caution">
+Robust3 requires 3× more data due to higher dimension. Use `force_robust3: true` to override fallback.
+</Aside>
+
+</TabItem>
+
+<TabItem label="CenteredSquare">
+
+**CenteredSquare**: Centered second moment per partition. Detects variance-based (second-order) leakage.
+
+```rust
+let config = Config {
+    features: FeatureFamily::CenteredSquare,
+    ..Default::default()
+};
+```
+
+**Dimension:** d = partitions × stages
+
+**Use when:**
+- First-order leakage is masked (boolean masking countermeasures)
+- Variance-based leakage expected
+- Testing masked implementations
+
+</TabItem>
+</Tabs>
+
+### Partitioning
+
+Control spatial resolution (how traces are divided into bins):
+
+```rust
+use tacet::power::{Config, PartitionConfig};
+use std::collections::HashMap;
+
+// Global: same partition count for all stages
+let config = Config {
+    partitions: PartitionConfig::Global { count: 32 },  // Default
+    ..Default::default()
+};
+
+// Per-stage: custom partition count per stage
+let mut per_stage = HashMap::new();
+per_stage.insert("key_schedule".into(), 16);
+per_stage.insert("round_0".into(), 64);
+
+let config = Config {
+    partitions: PartitionConfig::PerStage(per_stage),
+    ..Default::default()
+};
+```
+
+**Trade-offs:**
+- **Fewer partitions (8-16):** Coarse spatial resolution, lower dimension, less data needed
+- **More partitions (64-128):** Fine spatial resolution, higher dimension, more data needed
+
+**Default:** 32 (balances resolution vs data requirements)
+
+If total dimension exceeds `d_max` (default 32), adjacent partitions merge automatically.
+
+### Dimension limit
+
+```rust
+let config = Config {
+    d_max: 64,  // Allow higher dimension (default: 32)
+    ..Default::default()
+};
+```
+
+Higher dimension requires more data to avoid Overstressed regime (r = d/n_eff > 0.15).
+
+**When to increase d_max:**
+- Many stages needing fine partitioning
+- Large dataset (n > 5000)
+- Willing to accept Stressed regime warnings
+
+**When to keep default:**
+- Limited data (n < 2000)
+- Want WellConditioned regime (r ≤ 0.05)
+
+### Preprocessing
+
+```rust
+use tacet::power::{Config, Preprocessing};
+
+let config = Config {
+    preprocessing: Preprocessing {
+        dc_removal: true,           // Subtract per-trace mean (recommended)
+        scale_normalization: false, // Divide by per-trace std (NOT recommended)
+        winsor_percentile: 0.9999,  // Outlier clipping (normative)
+    },
+    ..Default::default()
+};
+```
+
+**DC removal (safe):** Removes baseline drift between traces
+
+**Scale normalization (use with caution):** Masks amplitude-based leakage. Only enable if amplitude variations are purely environmental noise.
+
+**Winsorization (always enabled):** Clips extreme outliers at 99.99th/0.01th percentiles. Winsorization rate reported in diagnostics.
+
+### Threshold tuning
+
+```rust
+let config = Config {
+    floor_multiplier: 2.0,  // More conservative (default: 1.0)
+    ..Default::default()
+};
+```
+
+Effective threshold: θ_eff = floor_multiplier × θ_floor
+
+- **1.0 (default):** Detect anything above measurement resolution
+- **2.0-3.0:** More conservative, reduce noise sensitivity
+- **< 1.0:** Not recommended (below measurement floor)
+
+## Interpreting results
+
+### Report structure
+
+```rust
+let report = analyze(&config, &dataset);
+
+// Effect estimates
+println!("Max effect: {:.2} {}", report.max_effect, report.units.as_str());
+println!("95% CI: [{:.2}, {:.2}]",
+    report.max_effect_ci95.0,
+    report.max_effect_ci95.1
+);
+
+// Leak probability
+println!("P(leak > θ_eff): {:.1}%", report.leak_probability * 100.0);
+
+// Threshold context (prominent in output)
+println!("Measurement floor (θ_floor): {:.2} {}", report.theta_floor, report.units.as_str());
+println!("Effective threshold (θ_eff): {:.2} {}", report.theta_eff, report.units.as_str());
+
+// Dimension diagnostics
+println!("Dimension: {} (regime: {:?})", report.dimension.d, report.dimension.regime);
+println!("Effective samples: {:.0} (r = {:.4})",
+    report.dimension.n_eff,
+    report.dimension.r
+);
+```
+
+### Localization
+
+Top features identify where leakage occurs:
+
+```rust
+for hotspot in report.top_features.iter().take(5) {
+    println!("Stage: {:?}, Partition: {}, Type: {:?}",
+        hotspot.stage,
+        hotspot.partition,
+        hotspot.feature_type
+    );
+    println!("  Effect: {:.2} {} ({:.1}% exceed θ_eff)",
+        hotspot.effect_mean,
+        report.units.as_str(),
+        hotspot.exceed_prob * 100.0
+    );
+}
+```
+
+Use to:
+- Identify leaking stages ("Round 3 problematic, others OK")
+- Pinpoint spatial location (partition index in trace)
+- Understand feature type (Mean/Median/Tail/CenteredSquare)
+
+### Stage-wise reports
+
+If markers present:
+
+```rust
+if let Some(stages) = &report.stages {
+    for stage in stages {
+        println!("\n{}: P(leak)={:.1}%, effect={:.2} {}",
+            stage.stage.0,
+            stage.leak_probability * 100.0,
+            stage.max_effect,
+            report.units.as_str()
+        );
+    }
+}
+```
+
+### Dimension diagnostics
+
+**Regime** indicates covariance estimation quality:
+
+| Regime | r = d/n_eff | Interpretation |
+|--------|-------------|----------------|
+| WellConditioned | ≤ 0.05 | Excellent: covariance well-estimated |
+| Stressed | 0.05-0.15 | Acceptable: automatic regularization applied |
+| Overstressed | > 0.15 | Poor: reduce d or collect more data |
+
+**If Overstressed:**
+1. Reduce `d_max` (forces partition merging)
+2. Use Mean instead of Robust3 (3× dimension reduction)
+3. Collect more traces (increase n_eff)
+4. Use coarser partitions
+
+## Common pitfalls
+
+### 1. Blocked acquisition
+
+**Problem:** All Fixed traces, then all Random (or vice versa).
+
+**Consequence:** Environmental drift causes **false positives**—high leak probability even for constant-time code.
+
+**Detection:** `BlockedAcquisitionDetected` warning (if classes fully separated and span >1 hour).
+
+**Solution:**
+- Re-acquire with interleaving (FRFRFR... or small blocks)
+- If impossible, treat results as exploratory only
+- Monitor temperature/voltage logs to assess drift magnitude
+
+### 2. Class-dependent alignment
+
+**Problem:** Computing alignment template from only one class.
+
+**Consequence:** Leaks class information into preprocessing, creates artificial differences.
+
+**Correct:**
+```rust
+use tacet::power::{Config, Alignment};
+
+let config = Config {
+    alignment: Alignment::TemplateXCorr {
+        max_shift: 100,
+        // Template computed from BOTH classes (pooled calibration)
+    },
+    ..Default::default()
+};
+```
+
+### 3. Insufficient data for Robust3
+
+**Problem:** Using Robust3 with n_eff < 150.
+
+**Symptoms:** `Robust3Fallback` warning, automatic fallback to Mean.
+
+**Solution:**
+- Collect more traces
+- Use Mean feature family
+- Set `force_robust3: true` (not recommended unless justified)
+
+### 4. Ignoring regime warnings
+
+**Problem:** Proceeding with Overstressed regime (r > 0.15).
+
+**Consequence:** Unreliable covariance, inflated leak probabilities.
+
+**Solution:** See [Dimension diagnostics](#dimension-diagnostics).
+
+### 5. Scale normalization masking leakage
+
+**Problem:** Enabling `scale_normalization` when amplitude carries information.
+
+**Example:** Hamming weight leakage manifests as amplitude differences—per-trace std normalization removes this signal.
+
+**When safe:**
+- Amplitude variations are purely environmental
+- Only timing-based features matter (peak arrival time)
+
+**Default:** OFF (safe choice)
+
+## Advanced topics
+
+### Alignment
+
+For traces with trigger jitter:
+
+<Tabs>
+<TabItem label="None">
+
+```rust
+use tacet::power::{Config, Alignment};
+
+let config = Config {
+    alignment: Alignment::None,  // Default if markers present
+    ..Default::default()
+};
+```
+
+Use when markers handle segmentation or jitter is minimal.
+
+</TabItem>
+
+<TabItem label="Cross-correlation">
+
+```rust
+let config = Config {
+    alignment: Alignment::TemplateXCorr {
+        max_shift: 200,  // Max shift in samples
+    },
+    ..Default::default()
+};
+```
+
+Aligns to pooled template (both classes). Use for moderate jitter with consistent waveform.
+
+Warnings:
+- `HighAlignmentVariance` if shift std > 10% trace length
+- `HighAlignmentClipping` if >5% traces clipped
+
+</TabItem>
+
+<TabItem label="Edge alignment">
+
+```rust
+let config = Config {
+    alignment: Alignment::EdgeAlign {
+        region: (1000, 2000),  // Search window
+    },
+    ..Default::default()
+};
+```
+
+Aligns to edge/peak in region. Faster than cross-correlation for simple waveforms.
+
+</TabItem>
+</Tabs>
+
+### Calibration subset size
+
+```rust
+let config = Config {
+    calibration_traces: 1000,  // Default: 500
+    ..Default::default()
+};
+```
+
+Calibration traces estimate V_cal, IACT, θ_floor, and Bayesian prior.
+
+**Trade-off:**
+- More calibration → better estimates, fewer inference traces
+- Fewer calibration → more inference traces, noisier estimates
+
+**Default (500)** usually adequate.
+
+### Bootstrap iterations
+
+```rust
+let config = Config {
+    bootstrap_iterations: 5000,  // Default: 2000
+    ..Default::default()
+};
+```
+
+For covariance estimation. Increase if dimension is high (d > 20) or covariance is complex.
+
+### Reproducibility
+
+```rust
+let config = Config {
+    seed: Some(42),  // Fixed RNG seed
+    ..Default::default()
+};
+```
+
+For reproducible bootstrap and Gibbs sampling in publications.
+
+## Example workflows
+
+### Workflow 1: Quick check
+
+```rust
+let dataset = load_dataset("traces.bin")?;
+let report = analyze(&Config::default(), &dataset);
+
+if report.leak_probability > 0.95 {
+    println!("⚠️ Strong leakage: {:.2} {}", report.max_effect, report.units.as_str());
+    for hotspot in report.top_features.iter().take(3) {
+        println!("  Partition {}: {:.2} {}",
+            hotspot.partition,
+            hotspot.effect_mean,
+            report.units.as_str()
+        );
+    }
+} else {
+    println!("✓ No significant leakage (P={:.1}%)", report.leak_probability * 100.0);
+}
+```
+
+### Workflow 2: Multi-stage analysis
+
+```rust
+let dataset = load_dataset_with_markers("aes_traces.bin")?;
+let config = Config {
+    partitions: PartitionConfig::Global { count: 64 },
+    ..Default::default()
+};
+let report = analyze(&config, &dataset);
+
+if let Some(stages) = &report.stages {
+    let mut leaky: Vec<_> = stages.iter()
+        .filter(|s| s.leak_probability > 0.5)
+        .collect();
+    leaky.sort_by(|a, b| b.leak_probability.partial_cmp(&a.leak_probability).unwrap());
+
+    for s in leaky {
+        println!("{}: P={:.1}%, effect={:.2} {}",
+            s.stage.0,
+            s.leak_probability * 100.0,
+            s.max_effect,
+            report.units.as_str()
+        );
+    }
+}
+```
+
+### Workflow 3: Second-order analysis
+
+```rust
+// First: check first-order
+let config_1st = Config {
+    features: FeatureFamily::Mean,
+    ..Default::default()
+};
+let report_1st = analyze(&config_1st, &dataset);
+
+if report_1st.leak_probability < 0.5 {
+    println!("✓ First-order masking effective (P={:.1}%)",
+        report_1st.leak_probability * 100.0);
+} else {
+    println!("⚠️ First-order leakage!");
+}
+
+// Second: check second-order
+let config_2nd = Config {
+    features: FeatureFamily::CenteredSquare,
+    ..Default::default()
+};
+let report_2nd = analyze(&config_2nd, &dataset);
+
+if report_2nd.leak_probability > 0.95 {
+    println!("⚠️ Second-order leakage: {:.2} {}²",
+        report_2nd.max_effect,
+        report_2nd.units.as_str()
+    );
+} else {
+    println!("✓ No second-order leakage (P={:.1}%)",
+        report_2nd.leak_probability * 100.0);
+}
+```
+
+### Workflow 4: Parameter sweep
+
+```rust
+for count in [8, 16, 32, 64, 128] {
+    let config = Config {
+        partitions: PartitionConfig::Global { count },
+        ..Default::default()
+    };
+    let report = analyze(&config, &dataset);
+
+    println!("Partitions: {}", count);
+    println!("  d={} ({:?}), P(leak)={:.1}%, θ_floor={:.2} {}",
+        report.dimension.d,
+        report.dimension.regime,
+        report.leak_probability * 100.0,
+        report.theta_floor,
+        report.units.as_str()
+    );
+}
+```
+
+## Diagnostics reference
+
+```rust
+let diag = &report.diagnostics;
+
+// IACT
+println!("IACT: {:.2} (cal: {:.2})", diag.iact_combined, diag.iact_cal);
+
+// Gibbs sampler health
+println!("Gibbs ESS: {:.0}", diag.gibbs_ess);
+println!("Lambda mixing: {}", diag.lambda_mixing_ok);
+println!("Kappa mixing: {}", diag.kappa_mixing_ok);
+
+// Quality issues
+for issue in &diag.issues {
+    println!("⚠️ {:?}: {}", issue.code, issue.message);
+}
+```
+
+**Key issues:**
+- `OverstressedRegime` → reduce d or collect more data
+- `StressedRegime` → consider reducing d
+- `HighWinsorRate` → outliers present, check acquisition
+- `LowEffectiveSamples` → n_eff < 100, need more data
+- `BlockedAcquisitionDetected` → drift likely
+
+## Performance tips
+
+1. **Use release mode:** `cargo build --release --features power`
+2. **Parallel enabled by default:** `parallel` feature (4-8× speedup)
+3. **Reduce dimension for large datasets:**
+   - Start with Mean (not Robust3)
+   - Coarser partitions (16-32, not 64-128)
+   - Lower `d_max`
+
+## Further reading
+
+- **Specification §7:** Normative power module specification
+- **TVLA methodology:** [Test Vector Leakage Assessment](https://www.cryptography.com/public/pdf/TVLA.pdf)
+- **DudeCT paper:** Reparaz et al., "Dude, is my code constant time?" (DATE 2016)
+- **Side-channel analysis:** Mangard et al., "Power Analysis Attacks" (2007)
+
+---
+
+**Need help?** Report issues at [github.com/agucova/tacet/issues](https://github.com/agucova/tacet/issues).

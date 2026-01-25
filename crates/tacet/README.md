@@ -1,6 +1,18 @@
-# tacet
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agucova/tacet/main/website/public/logo-dark-bg.svg" alt="tacet" width="340" />
+</p>
 
-**Detect timing side channels in Rust code with statistically rigorous methods.**
+<p align="center">
+  <strong>Detect side channels in Rust code with statistically rigorous methods.</strong>
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/tacet"><img src="https://img.shields.io/crates/v/tacet" alt="crates.io"></a>
+  <a href="https://docs.rs/tacet"><img src="https://img.shields.io/docsrs/tacet" alt="docs.rs"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
+</p>
+
+---
 
 ```
 $ cargo test --test aes_timing -- --nocapture
@@ -75,6 +87,10 @@ Choose your threat model to define what timing differences matter:
 | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs |
 | `RemoteNetwork` | 50 μs | Public internet APIs |
 | `Research` | 0 | Detect any difference |
+
+## Beyond Timing
+
+Experimental support for power and EM side-channel analysis is available via the `power` feature. See the [documentation](https://tacet.sh/guides/power-analysis) for details.
 
 ## Documentation
 

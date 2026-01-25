@@ -341,8 +341,8 @@ impl Collector {
 
         // Create balanced schedule
         let mut schedule: Vec<Class> = Vec::with_capacity(samples_per_class * 2);
-        schedule.extend(std::iter::repeat(Class::Baseline).take(samples_per_class));
-        schedule.extend(std::iter::repeat(Class::Sample).take(samples_per_class));
+        schedule.extend(std::iter::repeat_n(Class::Baseline, samples_per_class));
+        schedule.extend(std::iter::repeat_n(Class::Sample, samples_per_class));
 
         // Shuffle for randomized interleaving
         schedule.shuffle(&mut rng);

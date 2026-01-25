@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Timing side-channel detection for JavaScript/TypeScript</strong><br>
+  <strong>Side-channel detection for JavaScript/TypeScript</strong><br>
   Detect timing leaks in cryptographic code using statistical analysis.
 </p>
 

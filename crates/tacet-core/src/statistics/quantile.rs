@@ -51,7 +51,7 @@ fn decile_indices(n: usize, k: usize) -> (usize, usize) {
     // h = (n*k + 5) / 10 using integer arithmetic
     let h_numerator = n * k + 5;
     let floor_h = h_numerator / 10; // Integer division = floor
-    let has_fraction = (h_numerator % 10) != 0;
+    let has_fraction = !h_numerator.is_multiple_of(10);
     let ceil_h = if has_fraction { floor_h + 1 } else { floor_h };
 
     // Convert 1-based h to 0-based index, clamped to valid range

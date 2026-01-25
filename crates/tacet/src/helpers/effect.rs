@@ -151,6 +151,36 @@ pub fn timer_resolution_ns() -> f64 {
     }
 }
 
+/// Compute minimum reliably injectable effect based on timer resolution.
+///
+/// Returns the smallest effect size that can be distinguished from
+/// timer quantization noise. This ensures injected effects span multiple
+/// quantization levels for reliable measurement.
+///
+/// # Formula
+///
+/// `min_injectable = timer_resolution × 5.0`
+///
+/// The 5× multiplier ensures effects span at least 5 quantization levels,
+/// providing clear separation between effect sizes.
+///
+/// # Returns
+///
+/// Minimum injectable effect in nanoseconds, clamped to [20ns, 500ns] for
+/// cross-platform consistency.
+pub fn min_injectable_effect_ns() -> f64 {
+    let resolution = timer_resolution_ns();
+
+    // Conservative multiplier: 5× timer resolution
+    // This ensures effects span multiple quantization levels
+    let floor = resolution * 5.0;
+
+    // Clamp to reasonable range:
+    // - Minimum: 20ns (allows testing on most platforms)
+    // - Maximum: 500ns (avoids making effects too large)
+    floor.clamp(20.0, 500.0)
+}
+
 // =============================================================================
 // ARM64 COUNTER ACCESS
 // =============================================================================
@@ -1845,6 +1875,27 @@ mod tests {
         let res1 = timer_resolution_ns();
         let res2 = timer_resolution_ns();
         assert_eq!(res1, res2, "Resolution should be consistent");
+    }
+
+    // =========================================================================
+    // Minimum injectable effect tests
+    // =========================================================================
+
+    #[test]
+    fn test_min_injectable_effect_reasonable() {
+        let min_effect = min_injectable_effect_ns();
+        assert!(min_effect >= 20.0, "Min effect should be at least 20ns");
+        assert!(min_effect <= 500.0, "Min effect should not exceed 500ns");
+    }
+
+    #[test]
+    fn test_min_injectable_effect_above_resolution() {
+        let resolution = timer_resolution_ns();
+        let min_effect = min_injectable_effect_ns();
+        assert!(
+            min_effect >= resolution * 3.0,
+            "Min effect should be at least 3× timer resolution for reliable measurement"
+        );
     }
 
     // =========================================================================

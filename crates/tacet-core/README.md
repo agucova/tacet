@@ -1,6 +1,18 @@
-# tacet-core
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agucova/tacet/main/website/public/logo-dark-bg.svg" alt="tacet-core" width="340" />
+</p>
 
-**Core statistical analysis for timing side-channel detection.**
+<p align="center">
+  <strong>Core statistical analysis for side-channel detection.</strong>
+</p>
+
+<p align="center">
+  <a href="https://crates.io/crates/tacet-core"><img src="https://img.shields.io/crates/v/tacet-core" alt="crates.io"></a>
+  <a href="https://docs.rs/tacet-core"><img src="https://img.shields.io/docsrs/tacet-core" alt="docs.rs"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
+</p>
+
+---
 
 This crate provides the fundamental statistical algorithms used by [`tacet`](https://lib.rs/crates/tacet), designed to work in `no_std` environments (embedded, WASM, SGX enclaves) with only an allocator.
 

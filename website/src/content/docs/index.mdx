@@ -1,9 +1,9 @@
 ---
 title: " "
-description: Detect timing side channels in cryptographic code with statistically rigorous methods
+description: Detect side channels in cryptographic code with statistically rigorous methods
 template: splash
 hero:
-  tagline: Detect timing side channels in cryptographic code with statistically rigorous methods.
+  tagline: Detect side channels in cryptographic code with statistically rigorous methods.
   image:
     file: ../../assets/logo.svg
     alt: Tacet
@@ -29,7 +29,7 @@ cargo add tacet --dev
 </TabItem>
 <TabItem label="JavaScript">
 ```bash
-bun add tacet
+bun add @tacet/js
 ```
 </TabItem>
 <TabItem label="C/C++">
@@ -75,6 +75,10 @@ Existing tools like [DudeCT](https://github.com/oreparaz/dudect) output t-statis
 ## Real-world validation
 
 While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](/case-studies/rsa-timing-anomaly).
+
+## Beyond timing
+
+Experimental support for power and EM side-channel analysis is available in the Rust crate via the `power` feature. See the [Power Analysis Guide](/guides/power-analysis) for details.
 
 ## Next steps
 

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>Detect timing side channels with statistically rigorous methods.</strong><br>
+  <strong>Detect side channels with statistically rigorous methods.</strong><br>
   Available for Rust, JavaScript/TypeScript, C/C++, and Go.
 </p>
 
@@ -19,7 +19,7 @@
 | Language | Package | Install |
 |----------|---------|---------|
 | Rust | `tacet` | `cargo add tacet --dev` |
-| JavaScript | `tacet` | `bun add tacet` |
+| JavaScript | `@tacet/js` | `bun add @tacet/js` |
 | C/C++ | source | [Build instructions](https://tacet.sh/getting-started/installation) |
 | Go | `tacet-go` | `go get github.com/agucova/tacet/bindings/go` |
 
@@ -179,6 +179,8 @@ See [CI Integration](https://tacet.sh/guides/ci-integration) for more details.
 | Apple Silicon | kperf | ~1 ns | Requires `sudo` + `--test-threads=1` |
 | Apple Silicon | cntvct | ~42 ns | Default, uses adaptive batching |
 | Linux ARM64 | perf_event | ~1 ns | Requires `sudo` or `CAP_PERFMON` |
+
+**Beyond timing:** Experimental support for power and EM side-channel analysis is available in the Rust crate via the `power` feature. See the [Power Analysis Guide](https://tacet.sh/guides/power-analysis).
 
 ---
 

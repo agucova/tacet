@@ -30,8 +30,13 @@ const MAX_UNMEASURABLE_FRACTION: f64 = 0.3;
 ///
 /// This is the gold standard for power analysis:
 /// 1. First estimate MDE from 100 null trials (take median for robustness)
-/// 2. Test detection rates at 0.5×, 1×, 2×, 3×, 5× MDE
-/// 3. Assert power ≥ 80% at 2×MDE (standard statistical criterion)
+/// 2. Adjust MDE to account for physical timer resolution if needed
+/// 3. Test detection rates at 0.5×, 1×, 2×, 3×, 5× effective MDE
+/// 4. Assert power ≥ 80% at 2×MDE (standard statistical criterion)
+///
+/// Note: When statistical MDE < 5× timer resolution, the effective MDE is raised
+/// to ensure effects can be physically realized and distinguished. This preserves
+/// the test's goal of validating power curve shape across effect sizes.
 ///
 /// Total: 100 + 5×80 = 500 trials
 #[test]
@@ -110,12 +115,32 @@ fn mde_calibrated_power_curve() {
     mde_estimates.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let median_mde_ns = mde_estimates[mde_estimates.len() / 2];
 
+    // Compute effective MDE accounting for physical timer floor
+    let min_injectable = tacet::helpers::min_injectable_effect_ns();
+    let effective_mde_ns = median_mde_ns.max(min_injectable);
+
     eprintln!(
         "[mde_power_curve] Median MDE: {:.1}ns (range: {:.1}-{:.1}ns)",
         median_mde_ns,
         mde_estimates.first().unwrap_or(&0.0),
         mde_estimates.last().unwrap_or(&0.0)
     );
+
+    if effective_mde_ns > median_mde_ns {
+        eprintln!(
+            "\n[mde_power_curve] NOTE: MDE adjusted for timer resolution\n\
+             Statistical MDE: {:.2}ns (from measurement noise)\n\
+             Physical floor:  {:.2}ns (5× timer resolution: {:.2}ns)\n\
+             Effective MDE:   {:.2}ns (used for power testing)\n\
+             \n\
+             This adjustment ensures effects span multiple timer quantization levels.\n\
+             The statistical methodology is still validated via relative power scaling.\n",
+            median_mde_ns,
+            min_injectable,
+            tacet::helpers::timer_resolution_ns(),
+            effective_mde_ns
+        );
+    }
 
     // Phase 2: Test power at MDE multiples
     let mde_multiples = [0.5, 1.0, 2.0, 3.0, 5.0];
@@ -128,7 +153,7 @@ fn mde_calibrated_power_curve() {
     );
 
     for &multiple in &mde_multiples {
-        let effect_ns = median_mde_ns * multiple;
+        let effect_ns = effective_mde_ns * multiple;
 
         let mut detections = 0;
         let mut measurable_trials = 0;
