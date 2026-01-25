@@ -10,8 +10,8 @@ import { PackageManagers } from 'starlight-package-managers';
 
 tacet is available for multiple languages. Choose your platform:
 
-<Tabs>
-<TabItem label="Rust">
+<Tabs syncKey="language">
+<TabItem label="Rust" icon="seti:rust">
 
 Add tacet as a dev dependency:
 
@@ -45,7 +45,7 @@ tacet = { version = "0.1", default-features = false }
 ```
 
 </TabItem>
-<TabItem label="JavaScript">
+<TabItem label="JavaScript" icon="seti:javascript">
 
 <PackageManagers pkg="@tacet/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
 
@@ -66,62 +66,214 @@ const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
 ```
 
 </TabItem>
-<TabItem label="C/C++">
+<TabItem label="C" icon="seti:c">
 
-Build the C bindings from source:
+### Quick Install (Recommended)
+
+**Install Script (Linux/macOS):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+```
+
+Installs to `/usr/local` by default. For a custom location:
+```bash
+PREFIX=$HOME/.local bash -c "$(curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh)"
+```
+
+**Homebrew (macOS):**
+```bash
+brew install agucova/tacet/tacet-c
+```
+
+**Verify Installation:**
+```bash
+pkg-config --modversion tacet
+pkg-config --cflags --libs tacet
+```
+
+### Usage in Your Project
+
+**With pkg-config (recommended):**
+```bash
+cc myfile.c $(pkg-config --cflags --libs tacet) -o myapp
+```
+
+**CMake:**
+```cmake
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TACET REQUIRED tacet)
+
+add_executable(my_test test.c)
+target_include_directories(my_test PRIVATE ${TACET_INCLUDE_DIRS})
+target_link_libraries(my_test PRIVATE ${TACET_LIBRARIES})
+```
+
+**Example usage:**
+```c
+#include <tacet/tacet.h>
+
+ToConfig cfg = to_config_adjacent_network();
+// ... use configuration
+to_config_free(cfg);
+```
+
+See [C API](/api/c) for full documentation.
+
+### Build from Source (Advanced)
+
+If you need to build from source:
 
 ```bash
 git clone https://github.com/agucova/tacet
 cd tacet
 cargo build --release -p tacet-c
 
-# Headers:
-#   C:   crates/tacet-c/include/tacet.h
-#   C++: bindings/cpp/tacet.hpp
-# Library:
-#   target/release/libtacet_c.{a,so,dylib}
+# Artifacts generated:
+# - Header: crates/tacet-c/include/tacet.h
+# - Library: target/release/libtacet_c.a
+# - pkg-config: target/release/tacet.pc
 ```
-
-**C usage:**
-```c
-#include <tacet.h>
-
-tacet_t* oracle = tacet_for_attacker(ATTACKER_ADJACENT_NETWORK);
-tacet_outcome_t outcome;
-tacet_test(oracle, &inputs, measure_fn, &outcome);
-```
-
-**C++ usage:**
-```cpp
-#include <tacet.hpp>
-using namespace tacet;
-
-auto outcome = TimingOracle::forAttacker(AttackerModel::AdjacentNetwork)
-    .test(inputs, [](auto& data) { myFunction(data); });
-```
-
-See [C API](/api/c) and [C++ API](/api/cpp) for full documentation.
 
 </TabItem>
-<TabItem label="Go">
+<TabItem label="C++" icon="seti:cpp">
+
+### Quick Install (Recommended)
+
+**Install Script (Linux/macOS):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+```
+
+Installs to `/usr/local` by default. For a custom location:
+```bash
+PREFIX=$HOME/.local bash -c "$(curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh)"
+```
+
+**Homebrew (macOS):**
+```bash
+brew install agucova/tacet/tacet-c
+```
+
+**Verify Installation:**
+```bash
+pkg-config --modversion tacet
+pkg-config --cflags --libs tacet
+```
+
+### Usage in Your Project
+
+**With pkg-config (recommended):**
+```bash
+c++ -std=c++20 myfile.cpp $(pkg-config --cflags --libs tacet) -o myapp
+```
+
+**CMake (C++20 required):**
+```cmake
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(TACET REQUIRED tacet)
+
+# C++20 required
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+add_executable(my_test test.cpp)
+target_include_directories(my_test PRIVATE ${TACET_INCLUDE_DIRS})
+target_link_libraries(my_test PRIVATE ${TACET_LIBRARIES})
+```
+
+**Example usage:**
+```cpp
+#include <tacet/tacet.hpp>
+
+auto oracle = tacet::Oracle()
+    .attacker_model(tacet::AttackerModel::AdjacentNetwork)
+    .build();
+```
+
+See [C++ API](/api/cpp) for full documentation.
+
+### Build from Source (Advanced)
+
+If you need to build from source:
 
 ```bash
-go get github.com/agucova/tacet/bindings/go
+git clone https://github.com/agucova/tacet
+cd tacet
+cargo build --release -p tacet-c
+
+# Artifacts generated:
+# - Header: bindings/cpp/tacet.hpp
+# - Library: target/release/libtacet_c.a
+# - pkg-config: target/release/tacet.pc
 ```
+
+</TabItem>
+<TabItem label="Go" icon="seti:go">
+
+### Installation
+
+```bash
+go get github.com/agucova/tacet/crates/tacet-go
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
+```
+
+The install command downloads the pre-built native library (~12MB) for your platform and places it in the module cache where CGo can find it. This only needs to be run once.
+
+**Requirements:** Go 1.22+ with CGo enabled
+
+**Supported platforms:**
+- macOS (ARM64 Apple Silicon, AMD64 Intel)
+- Linux (ARM64, AMD64)
+
+### Quick Start
 
 ```go
-import tacet "github.com/agucova/tacet/bindings/go"
+package main
 
-inputs := tacet.NewInputPair(
-    func() []byte { return make([]byte, 32) },
-    func() []byte { b := make([]byte, 32); rand.Read(b); return b },
+import (
+    "fmt"
+    "log"
+    "time"
+
+    tacet "github.com/agucova/tacet/crates/tacet-go"
 )
 
-outcome := tacet.ForAttacker(tacet.AdjacentNetwork).
-    Test(inputs, func(data []byte) { myFunction(data) })
+func main() {
+    result, err := tacet.Test(
+        tacet.NewZeroGenerator(0),
+        tacet.FuncOperation(func(input []byte) {
+            myCryptoFunction(input)
+        }),
+        32, // input size in bytes
+        tacet.WithAttacker(tacet.AdjacentNetwork),
+        tacet.WithTimeBudget(30*time.Second),
+    )
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    switch result.Outcome {
+    case tacet.Pass:
+        fmt.Printf("No leak (P=%.1f%%)\n", result.LeakProbability*100)
+    case tacet.Fail:
+        fmt.Printf("Leak detected: %s\n", result.Exploitability)
+    }
+}
 ```
 
-The Go bindings use cgo to link against the C library.
+### Troubleshooting
+
+If you see linker errors about missing `tacet` symbols, run the install command:
+```bash
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
+```
+
+To install a specific version:
+```bash
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest -version=v0.3.0
+```
+
+See [Go API documentation](/api/go) for complete reference.
 
 </TabItem>
 </Tabs>

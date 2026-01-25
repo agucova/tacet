@@ -25,21 +25,42 @@ import { Tabs, TabItem, Code, LinkCard, CardGrid } from '@astrojs/starlight/comp
 <TabItem label="Rust">
 ```bash
 cargo add tacet --dev
+cargo add rand --dev  # For random input generation
 ```
+Default features include parallel processing and cycle-accurate timer support (kperf/perf). See [installation](/getting-started/installation) for feature flags.
 </TabItem>
 <TabItem label="JavaScript">
 ```bash
+# npm
+npm install @tacet/js
+
+# bun
 bun add @tacet/js
+
+# pnpm/yarn
+pnpm add @tacet/js
 ```
+Native bindings (NAPI-RS) for Node.js and Bun on Linux, macOS, and Windows. See [installation](/getting-started/installation) for platform details.
 </TabItem>
 <TabItem label="C/C++">
-See [build instructions](/getting-started/installation).
+**Install script (Linux/macOS):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
+```
+
+**Homebrew (macOS):**
+```bash
+brew install agucova/tacet/tacet-c
+```
+
+See [installation](/getting-started/installation) for pkg-config setup and CMake integration.
 </TabItem>
 <TabItem label="Go">
 ```bash
 go get github.com/agucova/tacet/crates/tacet-go
 go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
 ```
+Downloads pre-built native library (~12MB) for your platform. Requires Go 1.22+ with CGo. See [installation](/getting-started/installation) for details.
 </TabItem>
 </Tabs>
 
