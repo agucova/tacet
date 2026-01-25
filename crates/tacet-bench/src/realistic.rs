@@ -100,10 +100,10 @@ pub struct RealisticBlockedData {
 pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
     let wall_start = Instant::now();
 
-    // Initialize cycle-accurate timer - panics if unavailable (requires sudo on ARM64)
-    // This ensures we get cycle-accurate measurements (~0.3ns resolution)
-    // instead of the coarse cntvct_el0 timer (~42ns on Apple Silicon)
-    let (mut timer, _fallback_reason) = TimerSpec::RequireCycleAccurate.create_timer();
+    // Initialize timer with automatic fallback - prefers cycle-accurate when available
+    // On ARM64 macOS: uses kperf if sudo available, otherwise falls back to cntvct_el0 (~42ns)
+    // On x86_64: uses rdtsc (~1ns resolution)
+    let (mut timer, _fallback_reason) = TimerSpec::Auto.create_timer();
     let cycles_per_ns = timer.cycles_per_ns();
     let resolution_ns = timer.resolution_ns();
 

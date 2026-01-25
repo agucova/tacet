@@ -1279,13 +1279,22 @@ impl SweepRunner {
     /// Generate a batch of datasets from their configs.
     ///
     /// Returns a `DatasetBatch` with Arc-wrapped datasets ready for parallel tool runs.
-    /// Uses limited parallelism (4 threads) for realistic mode to avoid PMU contention.
+    /// Uses limited parallelism for realistic mode to avoid PMU contention.
+    /// On macOS, kperf only allows single-threaded access, so we use 1 thread.
+    /// On Linux, perf_event allows multi-threaded access, so we use 4 threads.
     #[cfg(feature = "parallel")]
     fn generate_batch(&self, sweep_config: &SweepConfig, configs: &[DatasetConfig]) -> DatasetBatch {
         let datasets: Vec<(DatasetConfig, Arc<GeneratedDataset>)> = if sweep_config.use_realistic {
-            // Limited parallelism for realistic mode (4 threads max)
+            // Limited parallelism for realistic mode to avoid PMU contention
+            // macOS kperf: single-threaded only (exclusive PMU access)
+            // Linux perf: multi-threaded OK (per-thread counters)
+            #[cfg(target_os = "macos")]
+            let num_threads = 1;
+            #[cfg(not(target_os = "macos"))]
+            let num_threads = 4;
+
             let pool = ThreadPoolBuilder::new()
-                .num_threads(4)
+                .num_threads(num_threads)
                 .build()
                 .expect("Failed to create thread pool");
             pool.install(|| {

@@ -2080,7 +2080,7 @@ pub struct SilentNativeAdapter {
     /// Practical significance threshold Δ in nanoseconds (default: 0.5 of σ).
     /// If None, uses 0.5 * pooled_std as in the paper.
     pub delta: Option<f64>,
-    /// Number of bootstrap iterations (default: 10000).
+    /// Number of bootstrap iterations (default: 1000, as in the SILENT paper).
     pub bootstrap_iterations: usize,
 }
 
@@ -2089,7 +2089,7 @@ impl Default for SilentNativeAdapter {
         Self {
             alpha: 0.05,
             delta: None, // Will compute as 0.5 * pooled_std
-            bootstrap_iterations: 10_000,
+            bootstrap_iterations: 1_000, // SILENT paper uses B=1000
         }
     }
 }

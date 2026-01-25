@@ -2,7 +2,7 @@
 name = "tacet"
 version = "0.2.0"
 edition = "2021"
-rust-version = "1.80"
+rust-version = "1.90"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Detect timing side channels in cryptographic code"
