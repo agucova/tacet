@@ -411,6 +411,22 @@ site-search button[data-open-modal] {
     padding: 0.5rem 1rem;
 }
 
+/* On splash page, center and widen the search bar container */
+[data-has-hero] .header > .header > .sl-flex:has(site-search) {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    justify-content: center !important;
+    padding: 0 2rem !important;
+}
+
+/* On splash page, ensure search button is wide and centered */
+[data-has-hero] site-search button[data-open-modal] {
+    width: 100% !important;
+    max-width: 600px !important;
+    min-width: 40vw !important;
+    margin: 0 auto !important;
+}
+
 .search-input {
     background: var(--tacet-bg-elevated);
     border: 1px solid var(--tacet-border);
