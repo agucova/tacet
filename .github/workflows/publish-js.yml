@@ -102,8 +102,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
-          # Note: registry-url is intentionally omitted for trusted publishing (OIDC)
-          # Adding it causes setup-node to expect NODE_AUTH_TOKEN which breaks OIDC
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Verify artifacts
         run: |
@@ -114,11 +113,14 @@ jobs:
         if: inputs.dry_run == true
         run: npm publish --dry-run --access public
 
-      # Uses npm trusted publishing (OIDC) - no token needed
+      # Uses npm trusted publishing (OIDC) with provenance
       # Configure at: https://www.npmjs.com/package/@tacet/js/access
+      # Falls back to NPM_TOKEN if trusted publishing fails
       - name: Publish to npm
         if: inputs.dry_run != true
         run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-jsr:
     needs: build
