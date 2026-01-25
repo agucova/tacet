@@ -815,115 +815,80 @@ impl SweepRunner {
     /// # Parallelization Strategy
     /// Uses (dataset × tool × attacker_model) level parallelism for maximum CPU utilization.
     /// Each work item is a single (dataset, tool, attacker_model) triple.
+    ///
+    /// # Memory Model
+    /// Uses batched processing where only `DEFAULT_BATCH_SIZE` datasets are held in memory
+    /// at once. This enables thorough benchmarks (100K+ datasets) to run on machines with
+    /// limited RAM (~160-320 MB per batch instead of ~33 GB for all datasets).
     pub fn run<F>(&self, config: &SweepConfig, mut progress: F) -> SweepResults
     where
         F: FnMut(f64, &str),
     {
-        use std::sync::Arc;
-
         let start = Instant::now();
         let mut results = SweepResults::new(config.clone());
 
-        // Step 1: Collect dataset configs
-        let dataset_configs: Vec<(EffectPattern, f64, NoiseModel, usize)> = config
+        // Step 1: Build lightweight dataset configs (no memory cost)
+        let all_configs: Vec<DatasetConfig> = config
             .iter_configs()
             .flat_map(|(pattern, mult, noise)| {
-                (0..config.datasets_per_point)
-                    .map(move |dataset_id| (pattern, mult, noise, dataset_id))
-            })
-            .collect();
-
-        // Step 2: Generate all datasets first (parallel for synthetic, sequential for realistic)
-        progress(0.0, "Generating datasets...");
-
-        #[cfg(feature = "parallel")]
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> = if config
-            .use_realistic
-        {
-            // Limited parallelism for realistic mode (4 threads max)
-            // This provides realistic noise/contention while avoiding excessive PMU contention.
-            // On macOS with kperf, this also helps avoid the single-process PMU limitation.
-            let pool = ThreadPoolBuilder::new()
-                .num_threads(4)
-                .build()
-                .expect("Failed to create thread pool");
-            pool.install(|| {
-                dataset_configs
-                    .par_iter()
-                    .map(|&(pattern, mult, noise, dataset_id)| {
-                        let dataset =
-                            self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                        (pattern, mult, noise, dataset_id, dataset)
-                    })
-                    .collect()
-            })
-        } else {
-            // Full parallel dataset generation for synthetic mode
-            dataset_configs
-                .par_iter()
-                .map(|&(pattern, mult, noise, dataset_id)| {
-                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                    (pattern, mult, noise, dataset_id, dataset)
-                })
-                .collect()
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> =
-            dataset_configs
-                .iter()
-                .map(|&(pattern, mult, noise, dataset_id)| {
-                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                    (pattern, mult, noise, dataset_id, dataset)
-                })
-                .collect();
-
-        // Wrap datasets in Arc for sharing across threads
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, Arc<GeneratedDataset>)> =
-            datasets
-                .into_iter()
-                .map(|(p, m, n, id, d)| (p, m, n, id, Arc::new(d)))
-                .collect();
-
-        // Step 3: Create (dataset × tool × attacker_model) work items
-        // For tools that don't support attacker_model, only include one work item with None
-        let work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
-            .flat_map(|dataset_idx| {
-                (0..self.tools.len()).flat_map(move |tool_idx| {
-                    if self.tools[tool_idx].supports_attacker_model() {
-                        // Tool supports attacker model: iterate over all configured models
-                        config
-                            .attacker_models
-                            .iter()
-                            .map(move |&model| (dataset_idx, tool_idx, model))
-                            .collect::<Vec<_>>()
-                    } else {
-                        // Tool doesn't support attacker model: only run once with None
-                        vec![(dataset_idx, tool_idx, None)]
-                    }
+                (0..config.datasets_per_point).map(move |instance_id| DatasetConfig {
+                    pattern,
+                    effect_mult: mult,
+                    noise,
+                    instance_id,
                 })
             })
             .collect();
 
-        let total_work = work_items.len();
+        // Calculate total work for progress tracking
+        let work_items_per_dataset: usize = self
+            .tools
+            .iter()
+            .map(|t| {
+                if t.supports_attacker_model() {
+                    config.attacker_models.len()
+                } else {
+                    1
+                }
+            })
+            .sum();
+        let total_work = all_configs.len() * work_items_per_dataset;
+
+        let total_datasets = all_configs.len();
+        let batch_size = DEFAULT_BATCH_SIZE.max(MIN_BATCH_SIZE);
+        let num_batches = total_datasets.div_ceil(batch_size);
+
+        // Progress: Scale from 0% to 100% as work completes
+        let scale_progress = |done: usize| -> f64 { done as f64 / total_work.max(1) as f64 };
+
         let completed = AtomicUsize::new(0);
 
-        // Step 4: Process all (dataset × tool × attacker_model) triples in parallel
-        // Note: Dataset generation (Step 2) stays sequential for realistic mode to avoid
-        // measurement interference, but tool runs can parallelize since they just analyze
-        // pre-collected data without PMU access.
-        #[cfg(feature = "parallel")]
-        let all_results: Vec<BenchmarkResult> = {
-            work_items
+        // Step 2: Process in batches to limit memory usage
+        for (batch_num, batch_configs) in all_configs.chunks(batch_size).enumerate() {
+            let batch_idx = batch_num + 1;
+
+            // 2a: Generate this batch of datasets
+            progress(
+                scale_progress(completed.load(Ordering::Relaxed)),
+                &format!("Generating batch {}/{}...", batch_idx, num_batches),
+            );
+            let batch = self.generate_batch(config, batch_configs);
+
+            // 2b: Create work items for this batch (no checkpoint filtering)
+            let work_items = self.create_work_items_for_batch(&batch, config, None);
+
+            // 2c: Process all work items in this batch in parallel
+            #[cfg(feature = "parallel")]
+            let batch_results: Vec<BenchmarkResult> = work_items
                 .par_iter()
-                .map(|&(dataset_idx, tool_idx, attacker_model)| {
-                    let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                .map(|&(batch_idx, tool_idx, attacker_model)| {
+                    let (cfg, dataset) = &batch.datasets[batch_idx];
                     let result = self.run_tool(
                         config,
-                        *pattern,
-                        *mult,
-                        *noise,
-                        *dataset_id,
+                        cfg.pattern,
+                        cfg.effect_mult,
+                        cfg.noise,
+                        cfg.instance_id,
                         dataset,
                         tool_idx,
                         attacker_model,
@@ -931,42 +896,33 @@ impl SweepRunner {
                     completed.fetch_add(1, Ordering::Relaxed);
                     result
                 })
-                .collect()
-        };
+                .collect();
 
-        #[cfg(not(feature = "parallel"))]
-        let all_results: Vec<BenchmarkResult> = {
-            // Progress: 0-5% for dataset generation (done above), 5-100% for tool runs
-            // Scale tool progress from 5% to 100% as work completes
-            let scale_progress =
-                |done: usize| -> f64 { 0.05 + 0.95 * (done as f64 / total_work as f64) };
-            work_items
+            #[cfg(not(feature = "parallel"))]
+            let batch_results: Vec<BenchmarkResult> = work_items
                 .iter()
-                .map(|&(dataset_idx, tool_idx, attacker_model)| {
-                    let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                .map(|&(batch_idx, tool_idx, attacker_model)| {
+                    let (cfg, dataset) = &batch.datasets[batch_idx];
                     let result = self.run_tool(
                         config,
-                        *pattern,
-                        *mult,
-                        *noise,
-                        *dataset_id,
+                        cfg.pattern,
+                        cfg.effect_mult,
+                        cfg.noise,
+                        cfg.instance_id,
                         dataset,
                         tool_idx,
                         attacker_model,
                     );
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                    progress(
-                        scale_progress(done),
-                        &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
-                    );
+                    progress(scale_progress(done), &cfg.display_key());
                     result
                 })
-                .collect()
-        };
+                .collect();
 
-        // Collect results
-        for result in all_results {
-            results.results.push(result);
+            // Collect batch results
+            results.results.extend(batch_results);
+
+            // batch dropped here, memory freed
         }
 
         // Report final progress
@@ -981,6 +937,7 @@ impl SweepRunner {
     /// This method enables resumability by:
     /// 1. Writing results to CSV as they complete (via IncrementalCsvWriter)
     /// 2. Skipping work items that are already in the checkpoint file
+    /// 3. Using batched processing to reduce memory from O(total_datasets) to O(batch_size)
     ///
     /// # Arguments
     /// * `config` - Sweep configuration
@@ -989,6 +946,11 @@ impl SweepRunner {
     ///
     /// # Returns
     /// Aggregated results from all tools and configurations (including resumed results)
+    ///
+    /// # Memory Model
+    /// Uses batched processing where only `DEFAULT_BATCH_SIZE` datasets are held in memory
+    /// at once. This enables thorough benchmarks (100K+ datasets) to run on machines with
+    /// limited RAM (~160-320 MB per batch instead of ~33 GB for all datasets).
     pub fn run_with_checkpoint<F>(
         &self,
         config: &SweepConfig,
@@ -1001,118 +963,52 @@ impl SweepRunner {
         let start = Instant::now();
         let mut results = SweepResults::new(config.clone());
 
-        // Step 1: Collect dataset configs
-        let dataset_configs: Vec<(EffectPattern, f64, NoiseModel, usize)> = config
+        // Step 1: Build lightweight dataset configs (no memory cost)
+        let all_configs: Vec<DatasetConfig> = config
             .iter_configs()
             .flat_map(|(pattern, mult, noise)| {
-                (0..config.datasets_per_point)
-                    .map(move |dataset_id| (pattern, mult, noise, dataset_id))
-            })
-            .collect();
-
-        // Step 2: Generate all datasets first (parallel for synthetic, sequential for realistic)
-        progress(0.0, "Generating datasets...");
-
-        #[cfg(feature = "parallel")]
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> = if config
-            .use_realistic
-        {
-            // Limited parallelism for realistic mode (4 threads max)
-            let pool = ThreadPoolBuilder::new()
-                .num_threads(4)
-                .build()
-                .expect("Failed to create thread pool");
-            pool.install(|| {
-                dataset_configs
-                    .par_iter()
-                    .map(|&(pattern, mult, noise, dataset_id)| {
-                        let dataset =
-                            self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                        (pattern, mult, noise, dataset_id, dataset)
-                    })
-                    .collect()
-            })
-        } else {
-            dataset_configs
-                .par_iter()
-                .map(|&(pattern, mult, noise, dataset_id)| {
-                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                    (pattern, mult, noise, dataset_id, dataset)
-                })
-                .collect()
-        };
-
-        #[cfg(not(feature = "parallel"))]
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, GeneratedDataset)> =
-            dataset_configs
-                .iter()
-                .map(|&(pattern, mult, noise, dataset_id)| {
-                    let dataset = self.generate_dataset(config, pattern, mult, noise, dataset_id);
-                    (pattern, mult, noise, dataset_id, dataset)
-                })
-                .collect();
-
-        // Wrap datasets in Arc for sharing across threads
-        let datasets: Vec<(EffectPattern, f64, NoiseModel, usize, Arc<GeneratedDataset>)> =
-            datasets
-                .into_iter()
-                .map(|(p, m, n, id, d)| (p, m, n, id, Arc::new(d)))
-                .collect();
-
-        // Step 3: Create (dataset × tool × attacker_model) work items
-        // For tools that don't support attacker_model, only include one work item with None
-        let all_work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
-            .flat_map(|dataset_idx| {
-                (0..self.tools.len()).flat_map(move |tool_idx| {
-                    if self.tools[tool_idx].supports_attacker_model() {
-                        config
-                            .attacker_models
-                            .iter()
-                            .map(move |&model| (dataset_idx, tool_idx, model))
-                            .collect::<Vec<_>>()
-                    } else {
-                        vec![(dataset_idx, tool_idx, None)]
-                    }
+                (0..config.datasets_per_point).map(move |instance_id| DatasetConfig {
+                    pattern,
+                    effect_mult: mult,
+                    noise,
+                    instance_id,
                 })
             })
             .collect();
 
-        let total_work = all_work_items.len();
+        // Calculate total work for progress tracking
+        // For each dataset: tools × attacker_models (or 1 for tools that don't support attacker)
+        let work_items_per_dataset: usize = self
+            .tools
+            .iter()
+            .map(|t| {
+                if t.supports_attacker_model() {
+                    config.attacker_models.len()
+                } else {
+                    1
+                }
+            })
+            .sum();
+        let total_work = all_configs.len() * work_items_per_dataset;
         let resumed_count = checkpoint.as_ref().map(|c| c.resumed_count).unwrap_or(0);
 
-        // Filter out completed work items if resuming
-        let work_items: Vec<(usize, usize, Option<AttackerModel>)> =
-            if let Some(ref writer) = checkpoint {
-                all_work_items
-                    .into_iter()
-                    .filter(|&(dataset_idx, tool_idx, attacker_model)| {
-                        let (pattern, mult, noise, dataset_id, _) = &datasets[dataset_idx];
-                        let noise_name = if config.use_realistic {
-                            format!("{}-realistic", noise.name())
-                        } else {
-                            noise.name()
-                        };
-                        let key = WorkItemKey::new_with_attacker(
-                            self.tools[tool_idx].name(),
-                            pattern.name(),
-                            *mult,
-                            &noise_name,
-                            *dataset_id,
-                            attacker_threshold_ns(attacker_model),
-                        );
-                        !writer.is_completed(&key)
-                    })
-                    .collect()
-            } else {
-                all_work_items
-            };
+        // Step 2: Filter out fully-completed datasets (resume optimization)
+        let pending_configs: Vec<DatasetConfig> = if let Some(ref writer) = checkpoint {
+            all_configs
+                .into_iter()
+                .filter(|cfg| !self.all_work_completed(cfg, config, writer))
+                .collect()
+        } else {
+            all_configs
+        };
 
-        let remaining_work = work_items.len();
+        let total_pending_datasets = pending_configs.len();
+        let batch_size = DEFAULT_BATCH_SIZE.max(MIN_BATCH_SIZE);
+        let num_batches = total_pending_datasets.div_ceil(batch_size);
 
-        // Progress: 0-5% for dataset generation (done above), 5-100% for tool runs
-        // Scale tool progress from 5% to 100% as work completes
+        // Progress: Scale from 0% to 100% as work completes
         let scale_progress =
-            |done: usize| -> f64 { 0.05 + 0.95 * (done as f64 / total_work as f64) };
+            |done: usize| -> f64 { done as f64 / total_work.max(1) as f64 };
 
         if resumed_count > 0 {
             progress(
@@ -1121,24 +1017,45 @@ impl SweepRunner {
             );
         }
 
+        if total_pending_datasets == 0 {
+            progress(1.0, "All work already complete (nothing to do)");
+            results.total_time = start.elapsed();
+            return results;
+        }
+
         let completed = AtomicUsize::new(resumed_count);
 
-        // Step 4: Process all (dataset × tool × attacker_model) triples in parallel
-        // Note: Dataset generation (Step 2) stays sequential for realistic mode to avoid
-        // measurement interference, but tool runs can parallelize since they just analyze
-        // pre-collected data without PMU access.
-        #[cfg(feature = "parallel")]
-        let all_results: Vec<BenchmarkResult> = {
-            work_items
+        // Step 3: Process in batches to limit memory usage
+        for (batch_num, batch_configs) in pending_configs.chunks(batch_size).enumerate() {
+            let batch_idx = batch_num + 1;
+
+            // 3a: Generate this batch of datasets
+            progress(
+                scale_progress(completed.load(Ordering::Relaxed)),
+                &format!("Generating batch {}/{}...", batch_idx, num_batches),
+            );
+            let batch = self.generate_batch(config, batch_configs);
+
+            // 3b: Create and filter work items for this batch
+            let work_items = self.create_work_items_for_batch(&batch, config, checkpoint.as_ref());
+
+            if work_items.is_empty() {
+                // All work in this batch already completed (shouldn't happen often with resume optimization)
+                continue;
+            }
+
+            // 3c: Process all work items in this batch in parallel
+            #[cfg(feature = "parallel")]
+            let batch_results: Vec<BenchmarkResult> = work_items
                 .par_iter()
-                .map(|&(dataset_idx, tool_idx, attacker_model)| {
-                    let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
+                .map(|&(batch_idx, tool_idx, attacker_model)| {
+                    let (cfg, dataset) = &batch.datasets[batch_idx];
                     let result = self.run_tool(
                         config,
-                        *pattern,
-                        *mult,
-                        *noise,
-                        *dataset_id,
+                        cfg.pattern,
+                        cfg.effect_mult,
+                        cfg.noise,
+                        cfg.instance_id,
                         dataset,
                         tool_idx,
                         attacker_model,
@@ -1154,53 +1071,44 @@ impl SweepRunner {
                     completed.fetch_add(1, Ordering::Relaxed);
                     result
                 })
-                .collect()
-        };
+                .collect();
 
-        #[cfg(not(feature = "parallel"))]
-        let all_results: Vec<BenchmarkResult> = work_items
-            .iter()
-            .map(|&(dataset_idx, tool_idx, attacker_model)| {
-                let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
-                let result = self.run_tool(
-                    config,
-                    *pattern,
-                    *mult,
-                    *noise,
-                    *dataset_id,
-                    dataset,
-                    tool_idx,
-                    attacker_model,
-                );
+            #[cfg(not(feature = "parallel"))]
+            let batch_results: Vec<BenchmarkResult> = work_items
+                .iter()
+                .map(|&(batch_idx, tool_idx, attacker_model)| {
+                    let (cfg, dataset) = &batch.datasets[batch_idx];
+                    let result = self.run_tool(
+                        config,
+                        cfg.pattern,
+                        cfg.effect_mult,
+                        cfg.noise,
+                        cfg.instance_id,
+                        dataset,
+                        tool_idx,
+                        attacker_model,
+                    );
 
-                // Write incrementally if checkpoint enabled
-                if let Some(ref writer) = checkpoint {
-                    if let Err(e) = writer.write_result(&result) {
-                        eprintln!("Warning: Failed to write checkpoint: {}", e);
+                    // Write incrementally if checkpoint enabled
+                    if let Some(ref writer) = checkpoint {
+                        if let Err(e) = writer.write_result(&result) {
+                            eprintln!("Warning: Failed to write checkpoint: {}", e);
+                        }
                     }
-                }
 
-                let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                progress(
-                    scale_progress(done),
-                    &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
-                );
-                result
-            })
-            .collect();
+                    let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
+                    progress(scale_progress(done), &cfg.display_key());
+                    result
+                })
+                .collect();
 
-        // Collect results
-        for result in all_results {
-            results.results.push(result);
+            // Collect batch results
+            results.results.extend(batch_results);
+
+            // batch dropped here, memory freed
         }
 
-        // Report final progress
-        if remaining_work > 0 {
-            progress(1.0, "Complete");
-        } else {
-            progress(1.0, "All work already complete (nothing to do)");
-        }
-
+        progress(1.0, "Complete");
         results.total_time = start.elapsed();
         results
     }

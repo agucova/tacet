@@ -1,6 +1,7 @@
 {
   "name": "@tacet/js",
   "version": "0.2.0",
+  "license": "MIT",
   "exports": "./dist/index.js",
   "publish": {
     "include": [
@@ -17,7 +18,9 @@
       "ts/",
       "src/",
       "node_modules/",
-      "target/"
+      "target/",
+      "!dist/",
+      "!pkg/"
     ]
   }
 }

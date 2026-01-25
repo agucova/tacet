@@ -392,31 +392,21 @@ td:first-child {
    SEARCH
    ============================================ */
 
-/* Make the inner header a proper flex container */
-.header > .header {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    width: 100%;
-}
-
-/* Make the search wrapper grow to fill available space */
+/* Make the search wrapper grow to fill ALL available space */
 .header > .header > .sl-flex:has(site-search) {
-    flex: 1;
-    justify-content: center;
+    flex: 1 1 auto !important;
 }
 
-/* Override Starlight's display:contents so width applies */
+/* Override Starlight's display:contents and fill container */
 site-search {
     display: block !important;
-    width: 100%;
-    max-width: 48rem;
+    width: 100% !important;
 }
 
-/* Make the search button wider and more prominent */
+/* Make the search button fill its container */
 site-search button[data-open-modal] {
-    width: 100%;
-    min-width: 20rem;
+    width: 100% !important;
+    min-width: 40vw;
     justify-content: flex-start;
     padding: 0.5rem 1rem;
 }

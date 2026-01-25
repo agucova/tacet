@@ -285,6 +285,17 @@ fn main() {
     println!("  Total points: {}", config.total_points());
     println!("  Total datasets: {}", config.total_datasets());
     println!("  Total tool runs: {}", config.total_datasets() * num_tools);
+
+    // Show batch info for memory-constrained users
+    let batch_size = 500; // DEFAULT_BATCH_SIZE from sweep.rs
+    let num_batches = config.total_datasets().div_ceil(batch_size);
+    if num_batches > 1 {
+        let estimated_mem_mb = (batch_size * config.samples_per_class * 16) / (1024 * 1024);
+        println!(
+            "  Batched: {} batches of {} datasets (~{}MB peak memory)",
+            num_batches, batch_size, estimated_mem_mb.max(160)
+        );
+    }
     println!();
 
     // Create runner
