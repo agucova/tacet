@@ -4,7 +4,7 @@
  * Provides a builder-pattern interface for timing side-channel detection.
  */
 
-import type { Config, AnalysisResult } from "./types.js";
+import type { Config, AnalysisResult, AdaptiveStepResult } from "./types.js";
 import { AttackerModel } from "./types.js";
 
 import {
@@ -80,41 +80,71 @@ export interface TestResult extends AnalysisResult {
   timerInfo: TimerInfo;
 }
 
-// Re-export WASM classes with wrappers
+/**
+ * Calibration data from the initial phase.
+ *
+ * Contains prior distribution parameters and covariance estimates
+ * needed for the adaptive sampling phase.
+ */
 export class Calibration {
+  /** @internal */
   constructor(readonly inner: WasmCalibration) {}
 }
 
+/**
+ * Mutable state for the adaptive sampling loop.
+ *
+ * Tracks accumulated samples, current posterior probability,
+ * and batch count for the adaptive phase.
+ */
 export class AdaptiveState {
+  /** @internal */
   readonly inner: WasmAdaptiveState;
 
+  /** Create a new adaptive state (requires WASM initialization). */
   constructor() {
     ensureWasmSync();
     this.inner = new WasmAdaptiveState();
   }
 
+  /** Total number of baseline samples collected. */
   get totalBaseline(): number {
     return this.inner.totalBaseline;
   }
 
+  /** Total number of sample class samples collected. */
   get totalSample(): number {
     return this.inner.totalSample;
   }
 
+  /** Current posterior probability P(leak > theta | data). */
   get currentProbability(): number {
     return this.inner.currentProbability;
   }
 
+  /** Number of batches processed. */
   get batchCount(): number {
     return this.inner.batchCount;
   }
 
+  /** Free the WASM memory. Call when done with this state. */
   free(): void {
     this.inner.free();
   }
 }
 
-// Wrapped functions that ensure WASM is initialized
+/**
+ * Analyze timing samples directly (low-level API).
+ *
+ * Runs the full Bayesian analysis on collected timing data.
+ * For most use cases, prefer {@link TimingOracle.test} instead.
+ *
+ * @param baseline - Baseline timing samples (raw ticks)
+ * @param sample - Sample timing samples (raw ticks)
+ * @param config - Analysis configuration
+ * @param timerFrequencyHz - Timer frequency in Hz (e.g., 1e9 for nanoseconds)
+ * @returns Analysis result with outcome, effect size, and diagnostics
+ */
 export function analyze(
   baseline: BigInt64Array,
   sample: BigInt64Array,
@@ -125,6 +155,18 @@ export function analyze(
   return wasmAnalyze(baseline, sample, config, timerFrequencyHz);
 }
 
+/**
+ * Run the calibration phase on initial samples (low-level API).
+ *
+ * Computes prior distribution parameters and covariance estimates
+ * for use in the adaptive sampling phase.
+ *
+ * @param baseline - Baseline timing samples (raw ticks)
+ * @param sample - Sample timing samples (raw ticks)
+ * @param config - Analysis configuration
+ * @param timerFrequencyHz - Timer frequency in Hz
+ * @returns Calibration data for the adaptive phase
+ */
 export function calibrateSamples(
   baseline: BigInt64Array,
   sample: BigInt64Array,
@@ -135,6 +177,20 @@ export function calibrateSamples(
   return new Calibration(wasmCalibrateSamples(baseline, sample, config, timerFrequencyHz));
 }
 
+/**
+ * Run one adaptive step with a batch of samples.
+ *
+ * Updates the adaptive state and returns the step result, which indicates
+ * whether a decision has been reached.
+ *
+ * @param calibration - Calibration from the initial phase
+ * @param state - Adaptive state to update
+ * @param baseline - Baseline timing samples (raw ticks)
+ * @param sample - Sample timing samples (raw ticks)
+ * @param config - Analysis configuration
+ * @param elapsedSecs - Elapsed time in seconds since test start
+ * @returns Step result with current probability and decision status
+ */
 export function adaptiveStepBatch(
   calibration: Calibration,
   state: AdaptiveState,
@@ -142,7 +198,7 @@ export function adaptiveStepBatch(
   sample: BigInt64Array,
   config: Config,
   elapsedSecs: number
-) {
+): AdaptiveStepResult {
   ensureWasmSync();
   return wasmAdaptiveStepBatch(
     calibration.inner,
@@ -154,26 +210,58 @@ export function adaptiveStepBatch(
   );
 }
 
+/**
+ * Get the default configuration for an attacker model.
+ *
+ * @param attackerModel - The attacker model to configure for
+ * @returns Default configuration with appropriate threshold
+ */
 export function defaultConfig(attackerModel: AttackerModel): Config {
   ensureWasmSync();
   return wasmDefaultConfig(attackerModel);
 }
 
+/**
+ * Get the tacet library version.
+ *
+ * @returns Version string (e.g., "0.2.0")
+ */
 export function version(): string {
   ensureWasmSync();
   return wasmVersion();
 }
 
+/**
+ * Get configuration preset for adjacent network attacker model.
+ *
+ * Threshold: 100 ns (LAN, HTTP/2 with Timeless Timing Attacks)
+ *
+ * @returns Configuration with AdjacentNetwork defaults
+ */
 export function configAdjacentNetwork(): Config {
   ensureWasmSync();
   return wasmConfigAdjacentNetwork();
 }
 
+/**
+ * Get configuration preset for shared hardware attacker model.
+ *
+ * Threshold: 0.6 ns (~2 cycles @ 3GHz). Use for SGX, cross-VM, containers.
+ *
+ * @returns Configuration with SharedHardware defaults
+ */
 export function configSharedHardware(): Config {
   ensureWasmSync();
   return wasmConfigSharedHardware();
 }
 
+/**
+ * Get configuration preset for remote network attacker model.
+ *
+ * Threshold: 50 us (general internet exposure)
+ *
+ * @returns Configuration with RemoteNetwork defaults
+ */
 export function configRemoteNetwork(): Config {
   ensureWasmSync();
   return wasmConfigRemoteNetwork();
@@ -472,6 +560,7 @@ export type {
   AnalysisResult,
   EffectEstimate,
   Diagnostics,
+  AdaptiveStepResult,
 } from "./types.js";
 
 export {

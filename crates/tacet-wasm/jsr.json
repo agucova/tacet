@@ -1,6 +1,7 @@
 {
   "name": "@tacet/js",
   "version": "0.2.0",
+  "description": "Timing side-channel detection for JavaScript/TypeScript. Detect timing leaks in cryptographic code using statistical analysis.",
   "license": "MPL-2.0",
   "exports": "./dist/index.js",
   "publish": {

@@ -219,7 +219,13 @@ pub fn calibrate_samples(
     // TypeScript can update this value if needed via the calibration handle.
     let samples_per_second = 100_000.0; // Conservative estimate
 
-    match calibrate(&baseline, &sample, ns_per_tick, &cal_config, samples_per_second) {
+    match calibrate(
+        &baseline,
+        &sample,
+        ns_per_tick,
+        &cal_config,
+        samples_per_second,
+    ) {
         Ok(core_cal) => {
             // Store calibration and get handle
             let mut id_counter = NEXT_CALIBRATION_ID.lock().unwrap();

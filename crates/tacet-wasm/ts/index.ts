@@ -93,4 +93,5 @@ export type {
   EffectEstimate,
   Diagnostics,
   TimerInfo,
+  AdaptiveStepResult,
 } from "./oracle.js";
