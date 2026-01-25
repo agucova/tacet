@@ -72,12 +72,14 @@ fn estimate_block_length(data: &[f64]) -> usize {
     let mut first_negative = max_lag;
 
     for lag in 1..max_lag {
-        let cov: f64 = data.windows(2)
+        let cov: f64 = data
+            .windows(2)
             .take(n - lag)
             .enumerate()
             .filter(|(i, _)| *i + lag < n)
             .map(|(i, _)| (data[i] - mean) * (data[i + lag] - mean))
-            .sum::<f64>() / (n - lag) as f64;
+            .sum::<f64>()
+            / (n - lag) as f64;
 
         let acf = cov / var;
         if acf < 0.0 {
@@ -99,7 +101,10 @@ fn compute_decile_diffs(baseline: &[f64], test: &[f64]) -> [f64; 9] {
     t.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let mut diffs = [0.0; 9];
-    for (i, p) in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].iter().enumerate() {
+    for (i, p) in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        .iter()
+        .enumerate()
+    {
         let idx_b = ((b.len() as f64 * p) as usize).min(b.len() - 1);
         let idx_t = ((t.len() as f64 * p) as usize).min(t.len() - 1);
         diffs[i] = b[idx_b] - t[idx_t];
@@ -123,7 +128,8 @@ fn main() {
 
     analyze_with_interleaving(
         &silent_path.join("paper-kyberslash/timing_measurements_1_comparison_-72_72.csv"),
-        "X", "Y",
+        "X",
+        "Y",
         TimeUnit::Cycles,
         Some(3.0),
         3.3,
@@ -138,7 +144,8 @@ fn main() {
 
     analyze_with_interleaving(
         &silent_path.join("paper-web-application/web-diff-lan-10k.csv"),
-        "X", "Y",
+        "X",
+        "Y",
         TimeUnit::Nanoseconds,
         None,
         100.0,
@@ -213,8 +220,10 @@ fn analyze_with_interleaving(
     println!("\n--- ORIGINAL (blocked acquisition) ---");
 
     let decile_diffs = compute_decile_diffs(&baseline_ns, &test_ns);
-    println!("Raw quantile diffs: [{:+.1}, {:+.1}, {:+.1}, ..., {:+.1}]",
-        decile_diffs[0], decile_diffs[1], decile_diffs[2], decile_diffs[8]);
+    println!(
+        "Raw quantile diffs: [{:+.1}, {:+.1}, {:+.1}, ..., {:+.1}]",
+        decile_diffs[0], decile_diffs[1], decile_diffs[2], decile_diffs[8]
+    );
 
     let config = SinglePassConfig {
         theta_ns,
@@ -228,37 +237,56 @@ fn analyze_with_interleaving(
 
     let result_original = analyze_single_pass(&baseline_ns, &test_ns, &config);
 
-    println!("P(leak > {:.1}ns): {:.1}%", theta_ns, result_original.leak_probability * 100.0);
+    println!(
+        "P(leak > {:.1}ns): {:.1}%",
+        theta_ns,
+        result_original.leak_probability * 100.0
+    );
     println!("Quality: {:?}", result_original.quality);
     print_outcome(&result_original.outcome, theta_ns);
 
     // ===== SIMULATED INTERLEAVING =====
-    println!("\n--- SIMULATED INTERLEAVING (block size = {}) ---", block_size);
+    println!(
+        "\n--- SIMULATED INTERLEAVING (block size = {}) ---",
+        block_size
+    );
 
     let (interleaved_baseline, interleaved_test) =
         simulate_interleaving(&baseline_ns, &test_ns, block_size);
 
-    println!("Interleaved samples: {} per class", interleaved_baseline.len());
+    println!(
+        "Interleaved samples: {} per class",
+        interleaved_baseline.len()
+    );
 
     let decile_diffs_int = compute_decile_diffs(&interleaved_baseline, &interleaved_test);
-    println!("Raw quantile diffs: [{:+.1}, {:+.1}, {:+.1}, ..., {:+.1}]",
-        decile_diffs_int[0], decile_diffs_int[1], decile_diffs_int[2], decile_diffs_int[8]);
+    println!(
+        "Raw quantile diffs: [{:+.1}, {:+.1}, {:+.1}, ..., {:+.1}]",
+        decile_diffs_int[0], decile_diffs_int[1], decile_diffs_int[2], decile_diffs_int[8]
+    );
 
     let result_interleaved = analyze_single_pass(&interleaved_baseline, &interleaved_test, &config);
 
-    println!("P(leak > {:.1}ns): {:.1}%", theta_ns, result_interleaved.leak_probability * 100.0);
+    println!(
+        "P(leak > {:.1}ns): {:.1}%",
+        theta_ns,
+        result_interleaved.leak_probability * 100.0
+    );
     println!("Quality: {:?}", result_interleaved.quality);
     print_outcome(&result_interleaved.outcome, theta_ns);
 
     // ===== COMPARISON =====
     println!("\n--- COMPARISON ---");
     println!("                    Original    Interleaved");
-    println!("  P(leak):          {:>6.1}%     {:>6.1}%",
+    println!(
+        "  P(leak):          {:>6.1}%     {:>6.1}%",
         result_original.leak_probability * 100.0,
-        result_interleaved.leak_probability * 100.0);
-    println!("  Shift estimate:   {:>6.1}ns    {:>6.1}ns",
-        result_original.effect_estimate.shift_ns,
-        result_interleaved.effect_estimate.shift_ns);
+        result_interleaved.leak_probability * 100.0
+    );
+    println!(
+        "  Shift estimate:   {:>6.1}ns    {:>6.1}ns",
+        result_original.effect_estimate.shift_ns, result_interleaved.effect_estimate.shift_ns
+    );
 }
 
 fn print_outcome(outcome: &Outcome, theta_ns: f64) {

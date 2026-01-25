@@ -1,0 +1,155 @@
+name: Publish JS Package
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip actual publish)'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/tacet-wasm
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build WASM
+        run: wasm-pack build --target web --out-dir pkg --release
+
+      - name: Build TypeScript
+        run: bun run build:ts
+
+      - name: Run tests
+        run: bun test
+        timeout-minutes: 5
+
+      - name: Get version
+        id: version
+        run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+
+      - name: Verify build artifacts
+        run: |
+          echo "=== WASM artifacts ==="
+          ls -la pkg/
+          echo ""
+          echo "=== TypeScript artifacts ==="
+          ls -la dist/
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: js-package
+          path: |
+            crates/tacet-wasm/pkg/
+            crates/tacet-wasm/dist/
+            crates/tacet-wasm/package.json
+            crates/tacet-wasm/jsr.json
+            crates/tacet-wasm/README.md
+            crates/tacet-wasm/LICENSE
+          retention-days: 1
+
+  publish-npm:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: crates/tacet-wasm
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: js-package
+          path: crates/tacet-wasm/
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify artifacts
+        run: |
+          ls -la pkg/
+          ls -la dist/
+
+      - name: Dry run
+        if: inputs.dry_run == true
+        run: npm publish --dry-run --access public
+
+      - name: Publish to npm
+        if: inputs.dry_run != true
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-jsr:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: crates/tacet-wasm
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: js-package
+          path: crates/tacet-wasm/
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Verify artifacts
+        run: |
+          ls -la pkg/
+          ls -la dist/
+
+      - name: Dry run
+        if: inputs.dry_run == true
+        run: bunx jsr publish --dry-run --allow-dirty
+
+      - name: Publish to JSR
+        if: inputs.dry_run != true
+        run: bunx jsr publish --allow-dirty

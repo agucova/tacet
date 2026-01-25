@@ -33,8 +33,8 @@ use tacet_core::constants::{
     DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_FAIL_THRESHOLD, DEFAULT_PASS_THRESHOLD,
 };
 use tacet_core::result::{
-    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
-    MeasurementQuality, Outcome, IssueCode, QualityIssue,
+    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason, IssueCode,
+    MeasurementQuality, Outcome, QualityIssue,
 };
 use tacet_core::statistics::{
     bootstrap_difference_covariance, bootstrap_difference_covariance_discrete,
@@ -203,10 +203,9 @@ pub fn analyze_single_pass(
     // Step 2: Detect discrete mode (spec §3.3.2)
     let unique_baseline: std::collections::HashSet<i64> =
         baseline.iter().map(|&v| v as i64).collect();
-    let unique_test: std::collections::HashSet<i64> =
-        test.iter().map(|&v| v as i64).collect();
-    let min_uniqueness = (unique_baseline.len() as f64 / n as f64)
-        .min(unique_test.len() as f64 / n as f64);
+    let unique_test: std::collections::HashSet<i64> = test.iter().map(|&v| v as i64).collect();
+    let min_uniqueness =
+        (unique_baseline.len() as f64 / n as f64).min(unique_test.len() as f64 / n as f64);
     let discrete_mode = min_uniqueness < 0.10;
 
     // Step 3: Bootstrap covariance estimation (spec §3.3.1)
@@ -292,11 +291,16 @@ pub fn analyze_single_pass(
     };
 
     // Step 5: Student's t prior calibration (spec §3.3.5)
-    let (sigma_t, l_r) = calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
+    let (sigma_t, l_r) =
+        calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
 
     // Compute marginal prior covariance for variance ratio check (spec §3.5.2)
     // For t_4: Var(δ) = (ν/(ν-2)) σ² R = 2σ² R
-    let prior_cov_marginal = compute_prior_cov_9d(&sigma_rate, sigma_t * std::f64::consts::SQRT_2, discrete_mode);
+    let prior_cov_marginal = compute_prior_cov_9d(
+        &sigma_rate,
+        sigma_t * std::f64::consts::SQRT_2,
+        discrete_mode,
+    );
 
     // Step 6: Compute MDE for quality assessment (spec §3.4.6)
     let mde = estimate_mde(&sigma, 0.05); // α = 0.05
@@ -304,11 +308,17 @@ pub fn analyze_single_pass(
 
     // Debug output for investigation
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] n = {}, discrete_mode = {}, block_length = {}", n, discrete_mode, cov_estimate.block_size);
+        eprintln!(
+            "[DEBUG] n = {}, discrete_mode = {}, block_length = {}",
+            n, discrete_mode, cov_estimate.block_size
+        );
         eprintln!("[DEBUG] theta_user = {:.2} ns, theta_floor_stat = {:.2} ns, theta_tick = {:.2} ns, theta_floor = {:.2} ns, theta_eff = {:.2} ns",
             config.theta_ns, theta_floor_stat, theta_tick, theta_floor, theta_eff);
         eprintln!("[DEBUG] c_floor = {:.2} ns·√n", c_floor);
-        eprintln!("[DEBUG] MDE: shift = {:.2} ns, tail = {:.2} ns", mde.shift_ns, mde.tail_ns);
+        eprintln!(
+            "[DEBUG] MDE: shift = {:.2} ns, tail = {:.2} ns",
+            mde.shift_ns, mde.tail_ns
+        );
         eprintln!("[DEBUG] delta_hat = {:?}", delta_hat.as_slice());
         eprintln!(
             "[DEBUG] sigma diagonal = [{:.2e}, {:.2e}, {:.2e}, ..., {:.2e}]",
@@ -332,7 +342,10 @@ pub fn analyze_single_pass(
     let leak_probability = bayes_result.leak_probability;
 
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] bayes_result.leak_probability = {}", leak_probability);
+        eprintln!(
+            "[DEBUG] bayes_result.leak_probability = {}",
+            leak_probability
+        );
         eprintln!(
             "[DEBUG] lambda: mean={:.3}, sd={:.3}, cv={:.3}, ess={:.1}, mixing_ok={}",
             bayes_result.lambda_mean,
@@ -370,8 +383,10 @@ pub fn analyze_single_pass(
     let data_too_noisy = variance_ratio > config.max_variance_ratio;
 
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] variance_ratio = {:.3}, max = {:.3}, data_too_noisy = {}",
-            variance_ratio, config.max_variance_ratio, data_too_noisy);
+        eprintln!(
+            "[DEBUG] variance_ratio = {:.3}, max = {:.3}, data_too_noisy = {}",
+            variance_ratio, config.max_variance_ratio, data_too_noisy
+        );
     }
 
     // Build quality issues
@@ -383,7 +398,8 @@ pub fn analyze_single_pass(
                 "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
                 config.theta_ns, theta_eff
             ),
-            guidance: "For better resolution, use more samples or a higher-resolution timer.".to_string(),
+            guidance: "For better resolution, use more samples or a higher-resolution timer."
+                .to_string(),
         });
     }
 
@@ -407,7 +423,8 @@ pub fn analyze_single_pass(
                 "Likelihood covariance inflated ~{:.1}x due to data/model mismatch",
                 1.0 / bayes_result.kappa_mean
             ),
-            guidance: "Uncertainty was increased for robustness. Effect estimates remain valid.".to_string(),
+            guidance: "Uncertainty was increased for robustness. Effect estimates remain valid."
+                .to_string(),
         });
     }
 
@@ -467,7 +484,8 @@ pub fn analyze_single_pass(
                     "Posterior variance is {:.0}% of prior; data not informative",
                     variance_ratio * 100.0
                 ),
-                guidance: "Try: more samples, higher-resolution timer, reduce system load".to_string(),
+                guidance: "Try: more samples, higher-resolution timer, reduce system load"
+                    .to_string(),
             },
             leak_probability,
             effect: effect_estimate.clone(),
@@ -501,7 +519,7 @@ pub fn analyze_single_pass(
                 c_floor,
                 theta_tick,
                 config.theta_ns,
-                n, // Single-pass has fixed samples
+                n,            // Single-pass has fixed samples
                 block_length, // v5.6: block_length for n_eff computation
             );
 
@@ -569,7 +587,10 @@ pub fn analyze_single_pass(
 }
 
 /// Compute variance ratio (average diagonal posterior/prior ratio).
-fn compute_variance_ratio(posterior_cov: &tacet_core::Matrix9, prior_cov: &tacet_core::Matrix9) -> f64 {
+fn compute_variance_ratio(
+    posterior_cov: &tacet_core::Matrix9,
+    prior_cov: &tacet_core::Matrix9,
+) -> f64 {
     let mut sum = 0.0;
     for i in 0..9 {
         let prior_var = prior_cov[(i, i)];
@@ -728,10 +749,13 @@ mod tests {
 
         // Check that diagnostics are populated
         match &result.outcome {
-            Outcome::Pass { diagnostics, .. } |
-            Outcome::Fail { diagnostics, .. } |
-            Outcome::Inconclusive { diagnostics, .. } => {
-                assert!(diagnostics.dependence_length > 0, "Block length should be > 0");
+            Outcome::Pass { diagnostics, .. }
+            | Outcome::Fail { diagnostics, .. }
+            | Outcome::Inconclusive { diagnostics, .. } => {
+                assert!(
+                    diagnostics.dependence_length > 0,
+                    "Block length should be > 0"
+                );
                 assert!(diagnostics.effective_sample_size > 0, "ESS should be > 0");
             }
             _ => {}

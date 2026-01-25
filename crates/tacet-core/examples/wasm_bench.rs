@@ -29,13 +29,13 @@ fn main() {
 
     // Generate baseline: ~1000ns with noise
     for _ in 0..n_samples {
-        let noise = (next_u64() % 100) as u64;
+        let noise = next_u64() % 100;
         baseline.push(1000 + noise);
     }
 
     // Generate sample: ~1000ns with noise (no leak scenario)
     for _ in 0..n_samples {
-        let noise = (next_u64() % 100) as u64;
+        let noise = next_u64() % 100;
         sample.push(1000 + noise);
     }
 
@@ -54,21 +54,27 @@ fn main() {
     println!("   Elapsed: {:?}", elapsed);
 
     // Benchmark 2: Bootstrap-like resampling
-    println!("\n2. Bootstrap resampling (200 iterations, {} samples):", n_samples);
+    println!(
+        "\n2. Bootstrap resampling (200 iterations, {} samples):",
+        n_samples
+    );
     let start = Instant::now();
     let mut bootstrap_means: Vec<f64> = Vec::with_capacity(200);
     for i in 0..200 {
         // Resample with replacement using simple modular indexing
         let mut sum: u64 = 0;
         for j in 0..n_samples {
-            let idx = ((i * 7 + j * 13) % n_samples) as usize;
+            let idx = (i * 7 + j * 13) % n_samples;
             sum += baseline[idx];
         }
         bootstrap_means.push(sum as f64 / n_samples as f64);
     }
     let elapsed = start.elapsed();
     println!("   Elapsed: {:?}", elapsed);
-    println!("   Mean of bootstrap means: {:.2}", bootstrap_means.iter().sum::<f64>() / 200.0);
+    println!(
+        "   Mean of bootstrap means: {:.2}",
+        bootstrap_means.iter().sum::<f64>() / 200.0
+    );
 
     // Benchmark 3: Difference computation and statistics
     println!("\n3. Difference statistics:");
@@ -82,7 +88,8 @@ fn main() {
     let mean: f64 = diffs.iter().sum::<f64>() / n_samples as f64;
 
     // Variance
-    let variance: f64 = diffs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_samples - 1) as f64;
+    let variance: f64 =
+        diffs.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_samples - 1) as f64;
     let std_dev = variance.sqrt();
 
     let elapsed = start.elapsed();
@@ -105,7 +112,8 @@ fn main() {
 
         // Compute quadratic form (simplified posterior calculation)
         let x = [mean, std_dev];
-        let _quad = x[0] * _inv[0][0] * x[0] + 2.0 * x[0] * _inv[0][1] * x[1] + x[1] * _inv[1][1] * x[1];
+        let _quad =
+            x[0] * _inv[0][0] * x[0] + 2.0 * x[0] * _inv[0][1] * x[1] + x[1] * _inv[1][1] * x[1];
     }
     let elapsed = start.elapsed();
     println!("   Elapsed: {:?}", elapsed);
@@ -126,7 +134,7 @@ fn main() {
         let mut b_sum: u64 = 0;
         let mut s_sum: u64 = 0;
         for j in 0..n_samples {
-            let idx = ((i * 7 + j * 13) % n_samples) as usize;
+            let idx = (i * 7 + j * 13) % n_samples;
             b_sum += baseline[idx];
             s_sum += sample[idx];
         }
@@ -143,7 +151,10 @@ fn main() {
 
     let elapsed = start.elapsed();
     println!("   Elapsed: {:?}", elapsed);
-    println!("   Shift estimate: {:.2} ns (95% CI: [{:.2}, {:.2}])", shift_median, shift_ci_low, shift_ci_high);
+    println!(
+        "   Shift estimate: {:.2} ns (95% CI: [{:.2}, {:.2}])",
+        shift_median, shift_ci_low, shift_ci_high
+    );
 
     println!("\n=================================");
     println!("Benchmark complete.");

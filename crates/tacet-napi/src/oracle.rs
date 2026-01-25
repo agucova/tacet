@@ -115,9 +115,10 @@ pub fn calibrate_samples(
 
     let theta_ns = config.theta_ns();
     let ns_per_tick = 1_000_000_000.0 / timer_frequency_hz;
-    let seed = config.seed.unwrap_or_else(|| {
-        (baseline.iter().take(10).sum::<u64>() ^ 0x12345678) as u32
-    }) as u64;
+    let seed = config
+        .seed
+        .unwrap_or_else(|| (baseline.iter().take(10).sum::<u64>() ^ 0x12345678) as u32)
+        as u64;
 
     let cal_config = CalibrationConfig {
         calibration_samples: baseline.len().min(sample.len()),
@@ -175,9 +176,10 @@ pub fn adaptive_step_batch(
     let baseline: Vec<u64> = baseline.iter().map(|x| *x as u64).collect();
     let sample: Vec<u64> = sample.iter().map(|x| *x as u64).collect();
 
-    let mut inner_state = state.inner.write().map_err(|_| {
-        Error::from_reason("Failed to acquire state lock")
-    })?;
+    let mut inner_state = state
+        .inner
+        .write()
+        .map_err(|_| Error::from_reason("Failed to acquire state lock"))?;
 
     // Add batch to state
     inner_state.add_batch(baseline, sample);
@@ -203,14 +205,15 @@ pub fn adaptive_step_batch(
     );
 
     match step {
-        StepResult::Continue { posterior, samples_per_class } => {
-            Ok(AdaptiveStepResult {
-                is_decision: false,
-                current_probability: posterior.leak_probability,
-                samples_per_class: samples_per_class as u32,
-                result: None,
-            })
-        }
+        StepResult::Continue {
+            posterior,
+            samples_per_class,
+        } => Ok(AdaptiveStepResult {
+            is_decision: false,
+            current_probability: posterior.leak_probability,
+            samples_per_class: samples_per_class as u32,
+            result: None,
+        }),
         StepResult::Decision(outcome) => {
             let result = build_result_from_outcome(&outcome, &config, Some(&calibration.inner));
             Ok(AdaptiveStepResult {
@@ -244,9 +247,10 @@ pub fn analyze(
 
     let theta_ns = config.theta_ns();
     let ns_per_tick = 1_000_000_000.0 / timer_frequency_hz;
-    let seed = config.seed.unwrap_or_else(|| {
-        (baseline.iter().take(10).sum::<u64>() ^ 0x12345678) as u32
-    }) as u64;
+    let seed = config
+        .seed
+        .unwrap_or_else(|| (baseline.iter().take(10).sum::<u64>() ^ 0x12345678) as u32)
+        as u64;
 
     // Split into calibration and adaptive samples
     let cal_samples = 5000.min(baseline.len() / 2);
@@ -263,7 +267,12 @@ pub fn analyze(
     };
 
     // Run calibration
-    let cal = match calibrate(&baseline[..cal_samples], &sample[..cal_samples], ns_per_tick, &cal_config) {
+    let cal = match calibrate(
+        &baseline[..cal_samples],
+        &sample[..cal_samples],
+        ns_per_tick,
+        &cal_config,
+    ) {
         Ok(c) => c,
         Err(e) => {
             return Err(Error::from_reason(format!("Calibration failed: {:?}", e)));
@@ -313,7 +322,13 @@ pub fn analyze(
         state.add_batch(b_chunk.to_vec(), s_chunk.to_vec());
         elapsed_secs += time_per_batch;
 
-        let step = adaptive_step(&core_cal, &mut state, ns_per_tick, elapsed_secs, &step_config);
+        let step = adaptive_step(
+            &core_cal,
+            &mut state,
+            ns_per_tick,
+            elapsed_secs,
+            &step_config,
+        );
 
         if let StepResult::Decision(outcome) = step {
             let mut result = build_result_from_outcome(&outcome, &config, Some(&core_cal));

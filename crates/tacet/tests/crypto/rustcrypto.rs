@@ -9,11 +9,11 @@
 
 #[path = "rustcrypto/aes.rs"]
 mod aes;
-#[path = "rustcrypto/sha3.rs"]
-mod sha3;
 #[path = "rustcrypto/blake2.rs"]
 mod blake2;
-#[path = "rustcrypto/rsa.rs"]
-mod rsa;
 #[path = "rustcrypto/chacha20poly1305.rs"]
 mod chacha20poly1305;
+#[path = "rustcrypto/rsa.rs"]
+mod rsa;
+#[path = "rustcrypto/sha3.rs"]
+mod sha3;

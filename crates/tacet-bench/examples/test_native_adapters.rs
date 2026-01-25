@@ -84,8 +84,14 @@ fn main() {
         let null_result = adapter.analyze(&null_data);
         let shift_result = adapter.analyze(&shift_data);
         println!("{:12}:", adapter.name());
-        println!("  Null:  detected={}, {}", null_result.detected_leak, null_result.status);
-        println!("  Shift: detected={}, {}", shift_result.detected_leak, shift_result.status);
+        println!(
+            "  Null:  detected={}, {}",
+            null_result.detected_leak, null_result.status
+        );
+        println!(
+            "  Shift: detected={}, {}",
+            shift_result.detected_leak, shift_result.status
+        );
     }
 
     if all_correct {

@@ -40,7 +40,9 @@ pub fn write_csv(results: &SweepResults, path: &Path) -> io::Result<()> {
             r.effect_pattern,
             r.effect_sigma_mult,
             r.noise_model,
-            r.attacker_threshold_ns.map(|t| format!("{}", t)).unwrap_or_default(),
+            r.attacker_threshold_ns
+                .map(|t| format!("{}", t))
+                .unwrap_or_default(),
             r.dataset_id,
             r.samples_per_class,
             r.detected,
@@ -76,7 +78,9 @@ pub fn write_summary_csv(results: &SweepResults, path: &Path) -> io::Result<()> 
             s.effect_pattern,
             s.effect_sigma_mult,
             s.noise_model,
-            s.attacker_threshold_ns.map(|t| format!("{}", t)).unwrap_or_default(),
+            s.attacker_threshold_ns
+                .map(|t| format!("{}", t))
+                .unwrap_or_default(),
             s.n_datasets,
             s.detection_rate,
             s.ci_low,
@@ -101,10 +105,7 @@ pub fn to_markdown(results: &SweepResults) -> String {
 
     // Summary
     md.push_str("## Configuration\n\n");
-    md.push_str(&format!(
-        "- **Preset**: {}\n",
-        results.config.preset.name()
-    ));
+    md.push_str(&format!("- **Preset**: {}\n", results.config.preset.name()));
     md.push_str(&format!(
         "- **Samples per class**: {}\n",
         results.config.samples_per_class
@@ -286,7 +287,11 @@ fn tool_table(results: &SweepResults, tool: &str) -> String {
     sorted.sort_by(|a, b| {
         a.effect_pattern
             .cmp(&b.effect_pattern)
-            .then(a.effect_sigma_mult.partial_cmp(&b.effect_sigma_mult).unwrap())
+            .then(
+                a.effect_sigma_mult
+                    .partial_cmp(&b.effect_sigma_mult)
+                    .unwrap(),
+            )
             .then(a.noise_model.cmp(&b.noise_model))
     });
 

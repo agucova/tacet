@@ -6,6 +6,7 @@ members = [
     "crates/tacet-macros",
     "crates/tacet-c",
     "crates/tacet-napi",
+    "crates/tacet-wasm",
     "crates/tacet-bench",
 ]
 exclude = [

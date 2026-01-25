@@ -114,9 +114,9 @@ impl ResolutionWarning {
                  (3) enabling cycle-accurate timing for ~0.3ns resolution."
                     .into(),
             ),
-            ResolutionWarning::HighQuantization { .. } => Some(
-                "Timer resolution may be limiting measurement quality.".into(),
-            ),
+            ResolutionWarning::HighQuantization { .. } => {
+                Some("Timer resolution may be limiting measurement quality.".into())
+            }
         }
     }
 

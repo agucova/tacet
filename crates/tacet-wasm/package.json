@@ -1,0 +1,58 @@
+{
+  "name": "@tacet/js",
+  "version": "0.2.0",
+  "description": "Timing side-channel detection for JavaScript/TypeScript (WASM)",
+  "sideEffects": false,
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./wasm": {
+      "import": "./pkg/tacet_wasm.js",
+      "types": "./pkg/tacet_wasm.d.ts"
+    }
+  },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts",
+    "dist/**/*.map",
+    "pkg/*.js",
+    "pkg/*.d.ts",
+    "pkg/*.wasm"
+  ],
+  "scripts": {
+    "build:wasm": "wasm-pack build --target web --out-dir pkg",
+    "build:wasm:release": "wasm-pack build --target web --out-dir pkg --release",
+    "build:ts": "tsc",
+    "build": "bun run build:wasm:release && bun run build:ts",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "clean": "rm -rf dist pkg"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">= 18"
+  },
+  "license": "MPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/agucova/tacet"
+  },
+  "keywords": [
+    "security",
+    "cryptography",
+    "timing",
+    "side-channel",
+    "constant-time",
+    "wasm"
+  ]
+}

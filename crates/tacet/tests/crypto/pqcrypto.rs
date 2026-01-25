@@ -6,11 +6,11 @@
 //! - falcon: Falcon (Digital Signatures, NTRU-based)
 //! - sphincs: SPHINCS+ (Hash-based Signatures)
 
-#[path = "pqcrypto/kyber.rs"]
-mod kyber;
 #[path = "pqcrypto/dilithium.rs"]
 mod dilithium;
 #[path = "pqcrypto/falcon.rs"]
 mod falcon;
+#[path = "pqcrypto/kyber.rs"]
+mod kyber;
 #[path = "pqcrypto/sphincs.rs"]
 mod sphincs;

@@ -304,16 +304,6 @@ TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
 
 This is a more meaningful question than "is there any statistical difference?"
 
-## What's different about the two-class pattern
-
-Both DudeCT and tacet use the two-class pattern (fixed vs random inputs). The key insight is the same: if code is constant-time, both classes take the same time.
-
-However, tacet's documentation emphasizes:
-- **For comparison functions**, baseline must match the secret
-- **For most crypto**, zeros vs random is the right pattern
-
-See [The Two-Class Pattern](/core-concepts/two-class-pattern) for details.
-
 ## Migrating from dudect-bencher
 
 If you're using the [dudect-bencher](https://crates.io/crates/dudect-bencher) Rust crate, the migration is similar but with different type names:

@@ -319,8 +319,7 @@ pub unsafe extern "C" fn to_calibrate(
     // Check for discrete mode (< 10% unique values)
     let unique_baseline: std::collections::HashSet<u64> = baseline_slice.iter().copied().collect();
     let unique_sample: std::collections::HashSet<u64> = sample_slice.iter().copied().collect();
-    let unique_fraction =
-        (unique_baseline.len() + unique_sample.len()) as f64 / (2 * count) as f64;
+    let unique_fraction = (unique_baseline.len() + unique_sample.len()) as f64 / (2 * count) as f64;
     let discrete_mode = unique_fraction < 0.1;
 
     // Compute block length using Politis-White algorithm (use circular bootstrap length)
@@ -616,7 +615,7 @@ fn convert_adaptive_outcome(
             discrete_mode: summary.diagnostics.discrete_mode,
             timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
             lambda_mean: summary.diagnostics.lambda_mean,
-            lambda_sd: 0.0, // Not in DiagnosticsSummary yet
+            lambda_sd: 0.0,  // Not in DiagnosticsSummary yet
             lambda_ess: 0.0, // Not in DiagnosticsSummary yet
             lambda_mixing_ok: summary.diagnostics.lambda_mixing_ok,
             kappa_mean: summary.diagnostics.kappa_mean,
@@ -778,7 +777,10 @@ pub unsafe extern "C" fn to_test(
             // Time budget exceeded - return inconclusive result
             *result_out = ToResult {
                 outcome: ToOutcome::Inconclusive,
-                leak_probability: state.current_posterior().map(|p| p.leak_probability).unwrap_or(0.5),
+                leak_probability: state
+                    .current_posterior()
+                    .map(|p| p.leak_probability)
+                    .unwrap_or(0.5),
                 inconclusive_reason: ToInconclusiveReason::TimeBudgetExceeded,
                 elapsed_secs: elapsed.as_secs_f64(),
                 samples_used: state.n_total() as u64 / 2,

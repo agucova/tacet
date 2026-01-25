@@ -62,10 +62,16 @@ fn rustcrypto_chacha20poly1305_encrypt_ct() {
     let outcome = skip_if_unreliable!(outcome, "rustcrypto_chacha20poly1305_encrypt_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 encryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -82,7 +88,10 @@ fn rustcrypto_chacha20poly1305_encrypt_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
         );
@@ -134,10 +143,16 @@ fn rustcrypto_chacha20poly1305_decrypt_ct() {
     let outcome = skip_if_unreliable!(outcome, "rustcrypto_chacha20poly1305_decrypt_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 decryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -154,7 +169,10 @@ fn rustcrypto_chacha20poly1305_decrypt_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "ChaCha20-Poly1305 decryption should have low exploitability (got {:?})",
             exp
         );
@@ -186,10 +204,17 @@ fn rustcrypto_chacha20poly1305_nonce_ct() {
     let outcome = skip_if_unreliable!(outcome, "rustcrypto_chacha20poly1305_nonce_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, effect, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            effect,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 nonce should not affect timing (got leak_probability={:.1}%, {:?}, effect={:?})",
                 leak_probability * 100.0, exploitability, effect
@@ -206,7 +231,10 @@ fn rustcrypto_chacha20poly1305_nonce_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "ChaCha20-Poly1305 nonce independence should have low exploitability (got {:?})",
             exp
         );
@@ -242,10 +270,16 @@ fn rustcrypto_chacha20poly1305_hamming() {
     let outcome = skip_if_unreliable!(outcome, "rustcrypto_chacha20poly1305_hamming");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ChaCha20-Poly1305 Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -262,7 +296,10 @@ fn rustcrypto_chacha20poly1305_hamming() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "ChaCha20-Poly1305 Hamming weight should not affect timing (got {:?})",
             exp
         );

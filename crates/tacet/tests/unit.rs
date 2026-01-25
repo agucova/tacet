@@ -5,13 +5,13 @@
 
 #[path = "unit/config_validation.rs"]
 mod config_validation;
-#[path = "unit/types.rs"]
-mod types;
-#[path = "unit/reliability.rs"]
-mod reliability;
+#[path = "unit/discrete_mode.rs"]
+mod discrete_mode;
 #[path = "unit/helpers.rs"]
 mod helpers;
 #[path = "unit/integration.rs"]
 mod integration;
-#[path = "unit/discrete_mode.rs"]
-mod discrete_mode;
+#[path = "unit/reliability.rs"]
+mod reliability;
+#[path = "unit/types.rs"]
+mod types;

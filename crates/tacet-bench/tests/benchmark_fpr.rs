@@ -8,7 +8,8 @@
 use std::time::Duration;
 use tacet::AttackerModel;
 use tacet_bench::{
-    BenchmarkRunner, DudectAdapter, EffectType, StubAdapter, SyntheticConfig, TimingOracleAdapter, ToolAdapter,
+    BenchmarkRunner, DudectAdapter, EffectType, StubAdapter, SyntheticConfig, TimingOracleAdapter,
+    ToolAdapter,
 };
 
 /// Create a tacet adapter configured for fair comparison with dudect/RTLF.
@@ -43,8 +44,13 @@ fn fpr_sanity_check() {
 
     println!("\nFPR Sanity Check Results:");
     for (tool, fpr) in results.all_fprs() {
-        println!("  {}: {:.1}% ({}/{})", tool, fpr * 100.0,
-                 results.false_positives.get(tool).unwrap_or(&0), results.total);
+        println!(
+            "  {}: {:.1}% ({}/{})",
+            tool,
+            fpr * 100.0,
+            results.false_positives.get(tool).unwrap_or(&0),
+            results.total
+        );
     }
 
     // Sanity check: FPR should be reasonable (not 100%)
@@ -62,9 +68,8 @@ fn fpr_sanity_check() {
 #[test]
 #[ignore] // Long-running
 fn fpr_15k_samples() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(fair_comparison_adapter(Duration::from_secs(30))),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -104,9 +109,8 @@ fn fpr_15k_samples() {
 #[test]
 #[ignore] // Long-running
 fn fpr_30k_samples() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(fair_comparison_adapter(Duration::from_secs(30))),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -146,9 +150,8 @@ fn fpr_30k_samples() {
 #[test]
 #[ignore] // Very long-running
 fn fpr_500k_samples() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(fair_comparison_adapter(Duration::from_secs(60))),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(60)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(50) // Fewer datasets due to size
@@ -211,7 +214,10 @@ fn fpr_multi_tool_comparison() {
 
     let results = runner.run_fpr_benchmark("30k-same-xy-multi", &config);
 
-    println!("\nMulti-Tool FPR Comparison (n=30k, {} datasets):", results.total);
+    println!(
+        "\nMulti-Tool FPR Comparison (n=30k, {} datasets):",
+        results.total
+    );
     println!("| Tool | FPR | False Positives |");
     println!("|------|-----|-----------------|");
     for (tool, fpr) in results.all_fprs() {

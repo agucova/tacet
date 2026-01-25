@@ -74,19 +74,31 @@ pub mod synthetic;
 pub use adapters::{
     load_blocked_csv, load_interleaved_csv, split_interleaved, AndersonDarlingAdapter,
     DudectAdapter, KsTestAdapter, MonaAdapter, RtlfAdapter, RtlfDockerAdapter, RtlfNativeAdapter,
-    SilentAdapter, SilentNativeAdapter, StubAdapter, TimingOracleAdapter,
-    TimingTvlaAdapter, TlsfuzzerAdapter, ToolAdapter, ToolResult,
+    SilentAdapter, SilentNativeAdapter, StubAdapter, TimingOracleAdapter, TimingTvlaAdapter,
+    TlsfuzzerAdapter, ToolAdapter, ToolResult,
 };
-pub use runner::{BenchmarkReport, BenchmarkRunner, FprResults, PowerResults};
-pub use synthetic::{
-    generate_benchmark_suite, generate_dataset, standard_configs, write_blocked_csv,
-    write_interleaved_csv, BlockedData, EffectType, GeneratedDataset, SyntheticConfig,
-    // New benchmark suite types
-    generate_benchmark_dataset, BenchmarkConfig, EffectPattern, NoiseModel,
-};
+pub use checkpoint::{IncrementalCsvWriter, WorkItemKey};
 pub use realistic::{
     collect_realistic_dataset, realistic_to_generated, standard_realistic_configs,
     RealisticBlockedData, RealisticConfig, RealisticDataset,
 };
-pub use sweep::{BenchmarkPreset, BenchmarkResult, PointSummary, SweepConfig, SweepResults, SweepRunner};
-pub use checkpoint::{IncrementalCsvWriter, WorkItemKey};
+pub use runner::{BenchmarkReport, BenchmarkRunner, FprResults, PowerResults};
+pub use sweep::{
+    BenchmarkPreset, BenchmarkResult, PointSummary, SweepConfig, SweepResults, SweepRunner,
+};
+pub use synthetic::{
+    // New benchmark suite types
+    generate_benchmark_dataset,
+    generate_benchmark_suite,
+    generate_dataset,
+    standard_configs,
+    write_blocked_csv,
+    write_interleaved_csv,
+    BenchmarkConfig,
+    BlockedData,
+    EffectPattern,
+    EffectType,
+    GeneratedDataset,
+    NoiseModel,
+    SyntheticConfig,
+};

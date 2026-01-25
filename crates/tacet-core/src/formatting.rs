@@ -11,9 +11,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt::Write;
 
-use crate::colors::{
-    bold, bold_cyan, bold_green, bold_red, bold_yellow, dim, green, red, yellow,
-};
+use crate::colors::{bold, bold_cyan, bold_green, bold_red, bold_yellow, dim, green, red, yellow};
 use crate::result::{
     Diagnostics, EffectEstimate, Exploitability, MeasurementQuality, Outcome, PreflightCategory,
     PreflightSeverity, ResearchOutcome, ResearchStatus,
@@ -104,7 +102,12 @@ pub fn format_outcome_plain(outcome: &Outcome) -> String {
             platform,
             recommendation,
         } => {
-            writeln!(out, "  {}", bold_yellow("\u{26A0} Operation too fast to measure reliably")).unwrap();
+            writeln!(
+                out,
+                "  {}",
+                bold_yellow("\u{26A0} Operation too fast to measure reliably")
+            )
+            .unwrap();
             writeln!(out).unwrap();
             writeln!(out, "    Estimated duration: ~{:.1} ns", operation_ns).unwrap();
             writeln!(out, "    Minimum measurable: ~{:.1} ns", threshold_ns).unwrap();
@@ -144,7 +147,12 @@ pub fn format_outcome_plain(outcome: &Outcome) -> String {
 pub fn format_debug_summary_plain(outcome: &Outcome) -> String {
     let mut out = String::new();
 
-    writeln!(out, "\u{250C}\u{2500} Debug Summary {}", "\u{2500}".repeat(40)).unwrap();
+    writeln!(
+        out,
+        "\u{250C}\u{2500} Debug Summary {}",
+        "\u{2500}".repeat(40)
+    )
+    .unwrap();
 
     match outcome {
         Outcome::Pass {
@@ -178,7 +186,14 @@ pub fn format_debug_summary_plain(outcome: &Outcome) -> String {
                 _ => unreachable!(),
             };
             writeln!(out, "\u{2502} Outcome = {}", outcome_type).unwrap();
-            format_debug_core_metrics(&mut out, *leak_probability, effect, *quality, *samples_used, diagnostics);
+            format_debug_core_metrics(
+                &mut out,
+                *leak_probability,
+                effect,
+                *quality,
+                *samples_used,
+                diagnostics,
+            );
             format_debug_warnings(&mut out, diagnostics);
             format_debug_diagnostics(&mut out, diagnostics);
         }
@@ -227,7 +242,12 @@ fn format_quality_colored(quality: MeasurementQuality) -> String {
 }
 
 fn format_pass_body(out: &mut String, leak_probability: f64, effect: &EffectEstimate) {
-    writeln!(out, "    Probability of leak: {:.1}%", leak_probability * 100.0).unwrap();
+    writeln!(
+        out,
+        "    Probability of leak: {:.1}%",
+        leak_probability * 100.0
+    )
+    .unwrap();
     writeln!(
         out,
         "    95% CI: {:.1}\u{2013}{:.1} ns",
@@ -242,7 +262,12 @@ fn format_fail_body(
     effect: &EffectEstimate,
     exploitability: Exploitability,
 ) {
-    writeln!(out, "    Probability of leak: {:.1}%", leak_probability * 100.0).unwrap();
+    writeln!(
+        out,
+        "    Probability of leak: {:.1}%",
+        leak_probability * 100.0
+    )
+    .unwrap();
 
     let magnitude = effect.total_effect_ns();
     writeln!(out, "    Effect: {:.1} ns ({})", magnitude, effect.pattern).unwrap();
@@ -271,12 +296,22 @@ fn format_inconclusive_body(out: &mut String, leak_probability: f64, effect: &Ef
     .unwrap();
 
     let magnitude = effect.total_effect_ns();
-    writeln!(out, "    Effect estimate: {:.1} ns ({})", magnitude, effect.pattern).unwrap();
+    writeln!(
+        out,
+        "    Effect estimate: {:.1} ns ({})",
+        magnitude, effect.pattern
+    )
+    .unwrap();
 }
 
 fn format_research_outcome(out: &mut String, research: &ResearchOutcome) {
     writeln!(out, "  Samples: {} per class", research.samples_used).unwrap();
-    writeln!(out, "  Quality: {}", format_quality_colored(research.quality)).unwrap();
+    writeln!(
+        out,
+        "  Quality: {}",
+        format_quality_colored(research.quality)
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     let status_line = match &research.status {
@@ -400,8 +435,19 @@ pub fn format_diagnostics_section(out: &mut String, diagnostics: &Diagnostics) {
         writeln!(out).unwrap();
         writeln!(out, "  {} Quality Issues", yellow("\u{26A0}")).unwrap();
         for issue in &diagnostics.quality_issues {
-            let wrapped_msg = wrap_text(&issue.message, DEFAULT_WRAP_WIDTH, 20, "                    ");
-            writeln!(out, "    \u{2022} {}: {}", bold(&format!("{:?}", issue.code)), wrapped_msg).unwrap();
+            let wrapped_msg = wrap_text(
+                &issue.message,
+                DEFAULT_WRAP_WIDTH,
+                20,
+                "                    ",
+            );
+            writeln!(
+                out,
+                "    \u{2022} {}: {}",
+                bold(&format!("{:?}", issue.code)),
+                wrapped_msg
+            )
+            .unwrap();
             let wrapped_guidance = wrap_text(&issue.guidance, DEFAULT_WRAP_WIDTH, 8, "        ");
             writeln!(out, "      \u{2192} {}", dim(&wrapped_guidance)).unwrap();
         }
@@ -460,7 +506,12 @@ pub fn format_debug_environment(out: &mut String, diagnostics: &Diagnostics) {
     if let Some(ref model) = diagnostics.attacker_model {
         writeln!(out, "      Attacker model: {}", model).unwrap();
     }
-    writeln!(out, "      Threshold (\u{03B8}):  {:.1} ns", diagnostics.threshold_ns).unwrap();
+    writeln!(
+        out,
+        "      Threshold (\u{03B8}):  {:.1} ns",
+        diagnostics.threshold_ns
+    )
+    .unwrap();
     if !diagnostics.timer_name.is_empty() {
         // Format timer line with fallback reason if present
         let timer_display = match &diagnostics.timer_fallback_reason {
@@ -469,7 +520,12 @@ pub fn format_debug_environment(out: &mut String, diagnostics: &Diagnostics) {
         };
         writeln!(out, "      Timer:          {}", timer_display).unwrap();
     }
-    writeln!(out, "      Resolution:     {:.1} ns", diagnostics.timer_resolution_ns).unwrap();
+    writeln!(
+        out,
+        "      Resolution:     {:.1} ns",
+        diagnostics.timer_resolution_ns
+    )
+    .unwrap();
     if diagnostics.discrete_mode {
         writeln!(out, "      Discrete mode:  enabled").unwrap();
     }
@@ -483,20 +539,38 @@ pub fn format_debug_environment(out: &mut String, diagnostics: &Diagnostics) {
         diagnostics.calibration_samples
     )
     .unwrap();
-    writeln!(out, "      Block length:   {}", diagnostics.dependence_length).unwrap();
-    writeln!(out, "      ESS:            {}", diagnostics.effective_sample_size).unwrap();
+    writeln!(
+        out,
+        "      Block length:   {}",
+        diagnostics.dependence_length
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "      ESS:            {}",
+        diagnostics.effective_sample_size
+    )
+    .unwrap();
     writeln!(
         out,
         "      Stationarity:   {:.2}x {}",
         diagnostics.stationarity_ratio,
-        if diagnostics.stationarity_ok { "OK" } else { "Suspect" }
+        if diagnostics.stationarity_ok {
+            "OK"
+        } else {
+            "Suspect"
+        }
     )
     .unwrap();
     writeln!(
         out,
         "      Projection:     Q={:.1} {}",
         diagnostics.projection_mismatch_q,
-        if diagnostics.projection_mismatch_ok { "OK" } else { "Mismatch" }
+        if diagnostics.projection_mismatch_ok {
+            "OK"
+        } else {
+            "Mismatch"
+        }
     )
     .unwrap();
 
@@ -686,10 +760,9 @@ fn resolution_guidance_for_fallback(fallback_reason: Option<&str>) -> Option<Str
              If using cargo test, run with --test-threads=1."
                 .into(),
         ),
-        Some("no sudo") => Some(
-            "Run with sudo to enable cycle-accurate timing (~0.3ns resolution)."
-                .into(),
-        ),
+        Some("no sudo") => {
+            Some("Run with sudo to enable cycle-accurate timing (~0.3ns resolution).".into())
+        }
         Some("unavailable") => Some(
             "Cycle-accurate timing unavailable. Consider increasing max_samples \
              or testing at a higher abstraction level."
@@ -707,9 +780,7 @@ fn resolution_guidance_for_fallback(fallback_reason: Option<&str>) -> Option<Str
                 .into(),
         ),
         // Unknown fallback reason
-        Some(_) => Some(
-            "Timer resolution may be limiting measurement quality.".into(),
-        ),
+        Some(_) => Some("Timer resolution may be limiting measurement quality.".into()),
     }
 }
 
@@ -782,7 +853,10 @@ fn format_debug_core_metrics(
     writeln!(
         out,
         "\u{2502} Quality = {} (ESS: {} / {} raw, {}%)",
-        format_quality_colored(quality), ess, samples_used, efficiency
+        format_quality_colored(quality),
+        ess,
+        samples_used,
+        efficiency
     )
     .unwrap();
 }
@@ -799,7 +873,12 @@ fn format_debug_warnings(out: &mut String, diagnostics: &Diagnostics) {
         writeln!(out, "\u{2502}   \u{2022} {}", warning).unwrap();
     }
     for issue in &diagnostics.quality_issues {
-        writeln!(out, "\u{2502}   \u{2022} {:?}: {}", issue.code, issue.message).unwrap();
+        writeln!(
+            out,
+            "\u{2502}   \u{2022} {:?}: {}",
+            issue.code, issue.message
+        )
+        .unwrap();
     }
 }
 
@@ -810,13 +889,18 @@ fn format_debug_diagnostics(out: &mut String, diagnostics: &Diagnostics) {
     // Format timer line with fallback reason if present
     let timer_suffix = match &diagnostics.timer_fallback_reason {
         Some(reason) => format!(" (fallback: {})", reason),
-        None => if diagnostics.discrete_mode { " (discrete)".to_string() } else { String::new() },
+        None => {
+            if diagnostics.discrete_mode {
+                " (discrete)".to_string()
+            } else {
+                String::new()
+            }
+        }
     };
     writeln!(
         out,
         "\u{2502}   Timer: {}{}",
-        diagnostics.timer_name,
-        timer_suffix
+        diagnostics.timer_name, timer_suffix
     )
     .unwrap();
 
@@ -853,7 +937,12 @@ fn format_debug_diagnostics(out: &mut String, diagnostics: &Diagnostics) {
     )
     .unwrap();
 
-    writeln!(out, "\u{2502}   Runtime: {:.1}s", diagnostics.total_time_secs).unwrap();
+    writeln!(
+        out,
+        "\u{2502}   Runtime: {:.1}s",
+        diagnostics.total_time_secs
+    )
+    .unwrap();
 }
 
 fn format_debug_research(out: &mut String, research: &ResearchOutcome) {
@@ -896,13 +985,21 @@ fn format_debug_research(out: &mut String, research: &ResearchOutcome) {
     writeln!(
         out,
         "\u{2502} Quality = {} (ESS: {} / {} raw, {}%)",
-        format_quality_colored(research.quality), ess, raw, efficiency
+        format_quality_colored(research.quality),
+        ess,
+        raw,
+        efficiency
     )
     .unwrap();
 
     if research.model_mismatch {
         writeln!(out, "\u{2502}").unwrap();
-        writeln!(out, "\u{2502} {} Model mismatch detected", yellow("\u{26A0}")).unwrap();
+        writeln!(
+            out,
+            "\u{2502} {} Model mismatch detected",
+            yellow("\u{26A0}")
+        )
+        .unwrap();
     }
 
     format_debug_warnings(out, &research.diagnostics);
@@ -930,7 +1027,9 @@ fn format_debug_research(out: &mut String, research: &ResearchOutcome) {
 /// Get exploitability info as plain text.
 pub fn exploitability_info(exploit: Exploitability) -> (&'static str, &'static str) {
     match exploit {
-        Exploitability::SharedHardwareOnly => ("Shared hardware (SGX, containers)", "~1k on same core"),
+        Exploitability::SharedHardwareOnly => {
+            ("Shared hardware (SGX, containers)", "~1k on same core")
+        }
         Exploitability::Http2Multiplexing => ("HTTP/2 multiplexing", "~100k concurrent"),
         Exploitability::StandardRemote => ("Standard remote timing", "~1k-10k"),
         Exploitability::ObviousLeak => ("Any (trivially observable)", "<100"),
@@ -944,18 +1043,11 @@ fn exploitability_info_colored(exploit: Exploitability) -> (String, String) {
             green("Shared hardware (SGX, containers)"),
             green("~1k on same core"),
         ),
-        Exploitability::Http2Multiplexing => (
-            yellow("HTTP/2 multiplexing"),
-            yellow("~100k concurrent"),
-        ),
-        Exploitability::StandardRemote => (
-            red("Standard remote timing"),
-            red("~1k-10k"),
-        ),
-        Exploitability::ObviousLeak => (
-            bold_red("Any (trivially observable)"),
-            bold_red("<100"),
-        ),
+        Exploitability::Http2Multiplexing => {
+            (yellow("HTTP/2 multiplexing"), yellow("~100k concurrent"))
+        }
+        Exploitability::StandardRemote => (red("Standard remote timing"), red("~1k-10k")),
+        Exploitability::ObviousLeak => (bold_red("Any (trivially observable)"), bold_red("<100")),
     }
 }
 

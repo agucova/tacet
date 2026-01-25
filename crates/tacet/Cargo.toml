@@ -26,7 +26,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.148"
 tracing = "0.1"
 indicatif = { version = "0.17", optional = true }
-thread-priority = "1.2.0"
+thread-priority = { version = "1.2.0", optional = true }
 
 # Platform-specific cycle counters and affinity support
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -76,12 +76,13 @@ name = "comparison"
 harness = false
 
 [features]
-# By default, enable parallel bootstrap, platform-specific cycle counters, and macros
+# By default, enable parallel bootstrap, platform-specific cycle counters, macros, and thread priority
 default = [
     "parallel",
     "kperf-default",
     "perf-default",
     "macros",
+    "thread-priority",
 ]
 
 # Rayon-based parallel bootstrap (4-8x speedup on multi-core systems)
@@ -97,6 +98,9 @@ macros = ["dep:tacet-macros"]
 
 # Progress bars for benchmarks
 progress-bars = ["dep:indicatif"]
+
+# Thread priority control for measurement (not available on WASM)
+thread-priority = ["dep:thread-priority"]
 
 # Internal features - use default features instead
 kperf = ["dep:kperf-rs"]  # libc is always available for CPU affinity

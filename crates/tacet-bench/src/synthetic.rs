@@ -61,8 +61,7 @@ impl EffectType {
 /// Unlike `EffectType` which uses fixed percentage shifts, `EffectPattern`
 /// defines effects relative to the baseline standard deviation σ, making
 /// results comparable across different noise levels.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum EffectPattern {
     /// No effect - both classes from identical distribution (FPR test)
     #[default]
@@ -116,13 +115,11 @@ impl EffectPattern {
     }
 }
 
-
 /// Noise model for generated samples.
 ///
 /// Real timing measurements exhibit autocorrelation due to CPU state,
 /// cache warming, and OS scheduler effects. AR(1) noise models this.
-#[derive(Debug, Clone, Copy, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum NoiseModel {
     /// Independent and identically distributed samples (traditional assumption)
     #[default]
@@ -160,7 +157,6 @@ impl NoiseModel {
         }
     }
 }
-
 
 /// Configuration for benchmark dataset generation.
 ///
@@ -226,7 +222,11 @@ impl BenchmarkConfig {
         let effect_name = if self.effect_sigma_mult == 0.0 {
             "null".to_string()
         } else {
-            format!("{}-{:.1}sigma", self.effect_pattern.name(), self.effect_sigma_mult)
+            format!(
+                "{}-{:.1}sigma",
+                self.effect_pattern.name(),
+                self.effect_sigma_mult
+            )
         };
         format!(
             "{}k-{}-{}",
@@ -295,8 +295,8 @@ pub fn generate_dataset(config: &SyntheticConfig) -> GeneratedDataset {
     let mut rng = StdRng::seed_from_u64(config.seed);
 
     // Create baseline distribution (always log-normal)
-    let baseline_dist = LogNormal::new(config.base_mu, config.base_sigma)
-        .expect("Invalid log-normal parameters");
+    let baseline_dist =
+        LogNormal::new(config.base_mu, config.base_sigma).expect("Invalid log-normal parameters");
 
     // Create test distribution based on effect type
     let (baseline, test) = match config.effect {
@@ -456,8 +456,8 @@ pub fn generate_benchmark_dataset(config: &BenchmarkConfig) -> GeneratedDataset 
     let mut rng = StdRng::seed_from_u64(config.seed);
 
     // Create baseline distribution
-    let baseline_dist = LogNormal::new(config.base_mu, config.base_sigma)
-        .expect("Invalid log-normal parameters");
+    let baseline_dist =
+        LogNormal::new(config.base_mu, config.base_sigma).expect("Invalid log-normal parameters");
 
     // Calculate real-space standard deviation for effect sizing
     // For log-normal: Var = exp(2μ + σ²) * (exp(σ²) - 1)
@@ -525,7 +525,10 @@ pub fn generate_benchmark_dataset(config: &BenchmarkConfig) -> GeneratedDataset 
                 &mut rng,
             )
         }
-        EffectPattern::Bimodal { slow_prob, slow_mult } => {
+        EffectPattern::Bimodal {
+            slow_prob,
+            slow_mult,
+        } => {
             // Mixture model: most samples from baseline, some from slow distribution
             let slow_dist = LogNormal::new(config.base_mu + slow_mult.ln(), config.base_sigma)
                 .expect("Invalid log-normal parameters");
@@ -774,7 +777,10 @@ pub fn generate_benchmark_suite(
             let dataset = generate_dataset(&config);
 
             // Write interleaved CSV
-            write_interleaved_csv(&dir.join(format!("{}_interleaved.csv", i)), &dataset.interleaved)?;
+            write_interleaved_csv(
+                &dir.join(format!("{}_interleaved.csv", i)),
+                &dataset.interleaved,
+            )?;
 
             // Write blocked CSV (RTLF format)
             write_blocked_csv(&dir.join(format!("{}_blocked.csv", i)), &dataset.blocked)?;
@@ -832,10 +838,14 @@ mod tests {
         let dataset = generate_dataset(&config);
 
         // With 5% shift, test mean should be noticeably higher
-        let baseline_mean: f64 =
-            dataset.blocked.baseline.iter().map(|&x| x as f64).sum::<f64>() / 1000.0;
-        let test_mean: f64 =
-            dataset.blocked.test.iter().map(|&x| x as f64).sum::<f64>() / 1000.0;
+        let baseline_mean: f64 = dataset
+            .blocked
+            .baseline
+            .iter()
+            .map(|&x| x as f64)
+            .sum::<f64>()
+            / 1000.0;
+        let test_mean: f64 = dataset.blocked.test.iter().map(|&x| x as f64).sum::<f64>() / 1000.0;
 
         // Test mean should be higher (shift is positive)
         assert!(

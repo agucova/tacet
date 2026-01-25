@@ -170,7 +170,9 @@ fn format_issue_code(code: IssueCode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::{Diagnostics, EffectEstimate, EffectPattern, Exploitability, MeasurementQuality};
+    use crate::result::{
+        Diagnostics, EffectEstimate, EffectPattern, Exploitability, MeasurementQuality,
+    };
 
     fn make_pass_outcome() -> Outcome {
         Outcome::Pass {

@@ -252,9 +252,7 @@ pub fn measure_sample_efficiency_stats(
                 );
 
                 // Prepare the test case before calling detect()
-                if let Some(tacet) =
-                    detector.as_any().downcast_ref::<TimingOracleDetector>()
-                {
+                if let Some(tacet) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
                     tacet.prepare_test_case(test_case);
                 }
 
@@ -370,9 +368,7 @@ pub fn generate_roc_curve(
                 if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
                     dudect.prepare_test_case(*test_case);
                 }
-                if let Some(tacet) =
-                    detector.as_any().downcast_ref::<TimingOracleDetector>()
-                {
+                if let Some(tacet) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
                     tacet.prepare_test_case(*test_case);
                 }
 
@@ -411,9 +407,7 @@ pub fn generate_roc_curve(
                 if let Some(dudect) = detector.as_any().downcast_ref::<DudectDetector>() {
                     dudect.prepare_test_case(*test_case);
                 }
-                if let Some(tacet) =
-                    detector.as_any().downcast_ref::<TimingOracleDetector>()
-                {
+                if let Some(tacet) = detector.as_any().downcast_ref::<TimingOracleDetector>() {
                     tacet.prepare_test_case(*test_case);
                 }
 

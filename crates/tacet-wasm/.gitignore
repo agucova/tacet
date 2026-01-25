@@ -1,0 +1,11 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+pkg/
+target/
+
+# Lockfiles (using bun.lock which is already tracked)
+package-lock.json
+yarn.lock

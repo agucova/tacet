@@ -26,7 +26,7 @@
 mod csv;
 mod units;
 
-pub use csv::{load_silent_csv, load_two_column_csv, load_separate_files};
+pub use csv::{load_separate_files, load_silent_csv, load_two_column_csv};
 pub use units::{to_nanoseconds, TimeUnit};
 
 use std::fmt;

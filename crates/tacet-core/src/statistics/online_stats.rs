@@ -260,8 +260,7 @@ mod tests {
         // Batch computation
         let n = data.len() as f64;
         let batch_mean: f64 = data.iter().sum::<f64>() / n;
-        let batch_variance: f64 =
-            data.iter().map(|x| sq(x - batch_mean)).sum::<f64>() / (n - 1.0);
+        let batch_variance: f64 = data.iter().map(|x| sq(x - batch_mean)).sum::<f64>() / (n - 1.0);
 
         assert!(
             (online.mean - batch_mean).abs() < 1e-10,

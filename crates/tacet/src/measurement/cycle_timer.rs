@@ -258,7 +258,6 @@ pub enum TimerSpec {
     // ─────────────────────────────────────────────────────────────────────────
     // Platform-specific variants (power users)
     // ─────────────────────────────────────────────────────────────────────────
-
     /// Force x86_64 Time Stamp Counter (rdtsc).
     ///
     /// Resolution: ~0.3ns (cycle-accurate on modern CPUs)
@@ -448,13 +447,19 @@ impl TimerSpec {
             #[cfg(target_arch = "x86_64")]
             TimerSpec::Rdtsc => {
                 // x86_64 rdtsc is always available
-                (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                (
+                    BoxedTimer::Standard(Timer::new()),
+                    TimerFallbackReason::None,
+                )
             }
 
             #[cfg(target_arch = "aarch64")]
             TimerSpec::VirtualTimer => {
                 // ARM64 cntvct_el0 is always available
-                (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                (
+                    BoxedTimer::Standard(Timer::new()),
+                    TimerFallbackReason::None,
+                )
             }
 
             #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
@@ -491,8 +496,8 @@ impl TimerSpec {
                 #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
                 {
                     use super::kperf::PmuError;
-                    match PmuTimer::new() {
-                        Ok(pmu) => return (BoxedTimer::Kperf(pmu), TimerFallbackReason::None),
+                    let timer = match PmuTimer::new() {
+                        Ok(pmu) => (BoxedTimer::Kperf(pmu), TimerFallbackReason::None),
                         Err(PmuError::ConcurrentAccess) => {
                             tracing::warn!(
                                 "Cycle counter (kperf) locked by another process. \
@@ -503,10 +508,10 @@ impl TimerSpec {
                                  \u{2014} using coarse timer (~42ns).\n  \
                                  If using cargo test, run with --test-threads=1."
                             );
-                            return (
+                            (
                                 BoxedTimer::Standard(Timer::new()),
                                 TimerFallbackReason::ConcurrentAccess,
-                            );
+                            )
                         }
                         Err(_) if has_elevated => {
                             tracing::warn!(
@@ -518,25 +523,26 @@ impl TimerSpec {
                                  privileges \u{2014} using coarse timer (~42ns).\n  \
                                  Check system configuration."
                             );
-                            return (
+                            (
                                 BoxedTimer::Standard(Timer::new()),
                                 TimerFallbackReason::CycleCounterUnavailable,
-                            );
+                            )
                         }
                         Err(_) => {
                             // Normal fallback without elevated privileges
-                            return (
+                            (
                                 BoxedTimer::Standard(Timer::new()),
                                 TimerFallbackReason::NoPrivileges,
-                            );
+                            )
                         }
-                    }
+                    };
+                    timer
                 }
 
                 #[cfg(all(target_os = "linux", feature = "perf"))]
                 {
-                    match LinuxPerfTimer::new() {
-                        Ok(perf) => return (BoxedTimer::Perf(perf), TimerFallbackReason::None),
+                    let timer = match LinuxPerfTimer::new() {
+                        Ok(perf) => (BoxedTimer::Perf(perf), TimerFallbackReason::None),
                         Err(_) if has_elevated => {
                             tracing::warn!(
                                 "Running with elevated privileges but cycle counter (perf_event) \
@@ -548,19 +554,20 @@ impl TimerSpec {
                                  Check kernel perf_event support (CONFIG_PERF_EVENTS) or \
                                  perf_event_paranoid setting."
                             );
-                            return (
+                            (
                                 BoxedTimer::Standard(Timer::new()),
                                 TimerFallbackReason::CycleCounterUnavailable,
-                            );
+                            )
                         }
                         Err(_) => {
                             // Normal fallback without elevated privileges
-                            return (
+                            (
                                 BoxedTimer::Standard(Timer::new()),
                                 TimerFallbackReason::NoPrivileges,
-                            );
+                            )
                         }
-                    }
+                    };
+                    timer
                 }
 
                 // Fall back to system timer (non-ARM or no cycle counter feature)
@@ -569,7 +576,10 @@ impl TimerSpec {
                     all(target_os = "linux", feature = "perf")
                 )))]
                 {
-                    (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                    (
+                        BoxedTimer::Standard(Timer::new()),
+                        TimerFallbackReason::None,
+                    )
                 }
             }
 
@@ -588,10 +598,7 @@ impl TimerSpec {
                             );
                         }
                         Err(e) => {
-                            panic!(
-                                "RequireCycleAccurate: kperf initialization failed: {:?}",
-                                e
-                            );
+                            panic!("RequireCycleAccurate: kperf initialization failed: {:?}", e);
                         }
                     }
                 }
@@ -618,7 +625,10 @@ impl TimerSpec {
                     ))
                 ))]
                 {
-                    (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                    (
+                        BoxedTimer::Standard(Timer::new()),
+                        TimerFallbackReason::None,
+                    )
                 }
 
                 // Cycle-accurate timing not available on this platform
@@ -672,15 +682,11 @@ impl TimerSpec {
         }
 
         // Other platforms (no cycle-accurate timing available)
-        #[cfg(not(any(
-            target_arch = "x86_64",
-            target_arch = "aarch64"
-        )))]
+        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
         {
             false
         }
     }
-
 }
 
 impl std::fmt::Display for TimerSpec {
@@ -736,7 +742,10 @@ mod tests {
     fn test_by_name_case_insensitive() {
         assert_eq!(TimerSpec::by_name("AUTO").unwrap(), TimerSpec::Auto);
         assert_eq!(TimerSpec::by_name("Auto").unwrap(), TimerSpec::Auto);
-        assert_eq!(TimerSpec::by_name("SYSTEM").unwrap(), TimerSpec::SystemTimer);
+        assert_eq!(
+            TimerSpec::by_name("SYSTEM").unwrap(),
+            TimerSpec::SystemTimer
+        );
     }
 
     #[test]

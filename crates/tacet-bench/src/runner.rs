@@ -10,7 +10,9 @@
 //! - **Power**: Measure detection rate on known-effect data
 
 use crate::adapters::{ToolAdapter, ToolResult};
-use crate::{generate_dataset, load_interleaved_csv, EffectType, GeneratedDataset, SyntheticConfig};
+use crate::{
+    generate_dataset, load_interleaved_csv, EffectType, GeneratedDataset, SyntheticConfig,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -326,7 +328,10 @@ impl BenchmarkRunner {
             if interleaved_path.exists() {
                 if let Ok(interleaved) = load_interleaved_csv(&interleaved_path) {
                     let blocked = crate::split_interleaved(&interleaved);
-                    return GeneratedDataset { interleaved, blocked };
+                    return GeneratedDataset {
+                        interleaved,
+                        blocked,
+                    };
                 }
             }
         }

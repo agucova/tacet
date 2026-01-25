@@ -35,7 +35,3 @@ thiserror = "2"
 
 [build-dependencies]
 napi-build = "2.1"
-
-[profile.release]
-lto = true
-opt-level = 3

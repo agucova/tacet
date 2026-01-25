@@ -3,14 +3,14 @@
   <rect width="180" height="180" fill="#0C0C0C"/>
 
   <!-- Right CI (higher) -->
-  <rect x="115" y="25" width="9" height="130" fill="#F5F5F5"/>
-  <rect x="102" y="155" width="9" height="35" transform="rotate(-90 102 155)" fill="#F5F5F5"/>
+  <rect x="115" y="25" width="9" height="110" fill="#F5F5F5"/>
+  <rect x="102" y="135" width="9" height="35" transform="rotate(-90 102 135)" fill="#F5F5F5"/>
   <rect x="102" y="30" width="9" height="35" transform="rotate(-90 102 30)" fill="#F5F5F5"/>
-  <circle cx="119" cy="88" r="10" fill="#FF6060"/>
+  <circle cx="119" cy="80" r="10" fill="#FF6060"/>
 
   <!-- Left CI (lower) -->
-  <rect x="56" y="65" width="9" height="130" fill="#F5F5F5"/>
-  <rect x="43" y="195" width="9" height="35" transform="rotate(-90 43 195)" fill="#F5F5F5"/>
-  <rect x="43" y="70" width="9" height="35" transform="rotate(-90 43 70)" fill="#F5F5F5"/>
-  <circle cx="60" cy="128" r="10" fill="#FF6060"/>
+  <rect x="56" y="50" width="9" height="110" fill="#F5F5F5"/>
+  <rect x="43" y="160" width="9" height="35" transform="rotate(-90 43 160)" fill="#F5F5F5"/>
+  <rect x="43" y="55" width="9" height="35" transform="rotate(-90 43 55)" fill="#F5F5F5"/>
+  <circle cx="60" cy="105" r="10" fill="#FF6060"/>
 </svg>

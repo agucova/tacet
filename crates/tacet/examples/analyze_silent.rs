@@ -18,7 +18,10 @@ fn compute_decile_diffs(baseline: &[f64], test: &[f64]) -> [f64; 9] {
     t.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     let mut diffs = [0.0; 9];
-    for (i, p) in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].iter().enumerate() {
+    for (i, p) in [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
+        .iter()
+        .enumerate()
+    {
         let idx_b = ((b.len() as f64 * p) as usize).min(b.len() - 1);
         let idx_t = ((t.len() as f64 * p) as usize).min(t.len() - 1);
         diffs[i] = b[idx_b] - t[idx_t];
@@ -133,7 +136,10 @@ fn analyze_dataset_subset(
     theta_ns: f64,
     max_samples: usize,
 ) {
-    println!("   Loading: {}", path.file_name().unwrap().to_string_lossy());
+    println!(
+        "   Loading: {}",
+        path.file_name().unwrap().to_string_lossy()
+    );
 
     // Load the data
     let data = match dataset_type {
@@ -188,8 +194,15 @@ fn analyze_dataset_subset(
     );
     println!(
         "     All: [{:+.1}, {:+.1}, {:+.1}, {:+.1}, {:+.1}, {:+.1}, {:+.1}, {:+.1}, {:+.1}]",
-        decile_diffs[0], decile_diffs[1], decile_diffs[2], decile_diffs[3], decile_diffs[4],
-        decile_diffs[5], decile_diffs[6], decile_diffs[7], decile_diffs[8]
+        decile_diffs[0],
+        decile_diffs[1],
+        decile_diffs[2],
+        decile_diffs[3],
+        decile_diffs[4],
+        decile_diffs[5],
+        decile_diffs[6],
+        decile_diffs[7],
+        decile_diffs[8]
     );
 
     // Run single-pass analysis
@@ -208,12 +221,19 @@ fn analyze_dataset_subset(
     println!("   Analysis time: {:?}", result.analysis_time);
     println!(
         "   Leak probability P(effect > {}ns): {:.1}%",
-        theta_ns, result.leak_probability * 100.0
+        theta_ns,
+        result.leak_probability * 100.0
     );
     println!("   ---");
     println!("   Effect decomposition:");
-    println!("     Shift (uniform):  {:.2} ns", result.effect_estimate.shift_ns);
-    println!("     Tail (asymmetric): {:.2} ns", result.effect_estimate.tail_ns);
+    println!(
+        "     Shift (uniform):  {:.2} ns",
+        result.effect_estimate.shift_ns
+    );
+    println!(
+        "     Tail (asymmetric): {:.2} ns",
+        result.effect_estimate.tail_ns
+    );
     println!(
         "     95% CI: [{:.2}, {:.2}] ns",
         result.effect_estimate.credible_interval_ns.0,
@@ -224,11 +244,12 @@ fn analyze_dataset_subset(
 
     match &result.outcome {
         Outcome::Pass { .. } => {
-            println!("   RESULT: PASS (no timing leak detected above {}ns)", theta_ns);
+            println!(
+                "   RESULT: PASS (no timing leak detected above {}ns)",
+                theta_ns
+            );
         }
-        Outcome::Fail {
-            exploitability, ..
-        } => {
+        Outcome::Fail { exploitability, .. } => {
             println!(
                 "   RESULT: FAIL - Timing leak detected! Exploitability: {:?}",
                 exploitability

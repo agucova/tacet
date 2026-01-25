@@ -69,10 +69,11 @@
 //! ```
 
 pub mod affinity;
-pub mod priority;
 mod collector;
 mod cycle_timer;
 mod outlier;
+#[cfg(feature = "thread-priority")]
+pub mod priority;
 mod timer;
 
 #[cfg(all(feature = "kperf", target_os = "macos"))]

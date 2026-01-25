@@ -450,5 +450,11 @@ impl Default for ToStepResult {
 ///     }
 /// }
 /// ```
-pub type ToCollectFn =
-    Option<unsafe extern "C" fn(baseline_out: *mut u64, sample_out: *mut u64, count: usize, user_ctx: *mut std::ffi::c_void)>;
+pub type ToCollectFn = Option<
+    unsafe extern "C" fn(
+        baseline_out: *mut u64,
+        sample_out: *mut u64,
+        count: usize,
+        user_ctx: *mut std::ffi::c_void,
+    ),
+>;

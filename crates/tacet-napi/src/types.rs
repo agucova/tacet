@@ -4,8 +4,7 @@
 
 use napi_derive::napi;
 use tacet_core::constants::{
-    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD,
-    DEFAULT_TIME_BUDGET_SECS,
+    DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD, DEFAULT_TIME_BUDGET_SECS,
 };
 use tacet_core::result::{
     EffectPattern as CoreEffectPattern, Exploitability as CoreExploitability,
@@ -15,13 +14,14 @@ use tacet_core::types::AttackerModel as CoreAttackerModel;
 
 /// Attacker model determines the minimum effect threshold (theta) for leak detection.
 #[napi]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub enum AttackerModel {
     /// theta = 0.6 ns (~2 cycles @ 3GHz) - SGX, cross-VM, containers
     SharedHardware,
     /// theta = 3.3 ns (~10 cycles) - Post-quantum crypto
     PostQuantum,
     /// theta = 100 ns - LAN, HTTP/2 (Timeless Timing Attacks)
+    #[default]
     AdjacentNetwork,
     /// theta = 50 us - General internet
     RemoteNetwork,
@@ -44,12 +44,6 @@ impl AttackerModel {
     /// Convert to threshold in nanoseconds.
     pub fn to_threshold_ns(&self) -> f64 {
         self.to_core().to_threshold_ns()
-    }
-}
-
-impl Default for AttackerModel {
-    fn default() -> Self {
-        AttackerModel::AdjacentNetwork
     }
 }
 

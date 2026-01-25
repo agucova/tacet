@@ -114,10 +114,7 @@ impl AffinityGuard {
             let current_cpu = libc::sched_getcpu();
             if current_cpu < 0 {
                 return AffinityResult::NotPinned {
-                    reason: format!(
-                        "sched_getcpu failed: {}",
-                        std::io::Error::last_os_error()
-                    ),
+                    reason: format!("sched_getcpu failed: {}", std::io::Error::last_os_error()),
                 };
             }
 

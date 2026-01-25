@@ -29,7 +29,7 @@ fn main() {
             "stddef.h".to_string(),
             "stdbool.h".to_string(),
         ],
-        header: Some(format!(
+        header: Some(
             "/**\n\
              * @file tacet.h\n\
              * @brief C API for tacet: Statistical timing side-channel detection\n\
@@ -50,7 +50,8 @@ fn main() {
              * 4. In a loop: collect batches, call to_step(), check for decision\n\
              * 5. Free resources with to_state_free() and to_calibration_free()\n\
              */\n"
-        )),
+                .to_string(),
+        ),
         after_includes: None,
         trailer: None,
         ..Default::default()
@@ -65,8 +66,5 @@ fn main() {
 
     println!("cargo:rerun-if-changed=src/lib.rs");
     println!("cargo:rerun-if-changed=src/types.rs");
-    println!(
-        "cargo:rustc-env=GENERATED_HEADER={}",
-        output_file.display()
-    );
+    println!("cargo:rustc-env=GENERATED_HEADER={}", output_file.display());
 }

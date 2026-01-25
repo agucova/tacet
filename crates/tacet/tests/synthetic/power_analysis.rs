@@ -15,6 +15,7 @@
 //! the test will be skipped entirely.
 
 use std::time::Duration;
+use tacet::helpers::effect::busy_wait_ns;
 use tacet::helpers::InputPair;
 use tacet::{AttackerModel, Outcome, TimingOracle};
 
@@ -127,7 +128,6 @@ fn mde_calibrated_power_curve() {
 
     for &multiple in &mde_multiples {
         let effect_ns = median_mde_ns * multiple;
-        let effect_us = effect_ns / 1000.0;
 
         let mut detections = 0;
         let mut measurable_trials = 0;
@@ -140,7 +140,7 @@ fn mde_calibrated_power_curve() {
                 .max_samples(SAMPLES)
                 .test(inputs, |should_delay| {
                     if *should_delay && effect_ns > 0.0 {
-                        spin_delay_us(effect_us);
+                        busy_wait_ns(effect_ns as u64);
                     }
                     std::hint::black_box(should_delay);
                 });
@@ -356,7 +356,9 @@ fn mde_scaling_validation() {
                 samples,
                 unmeasurable_fraction * 100.0
             );
-            eprintln!("  Try running with sudo for high-precision timing, or on a less noisy system");
+            eprintln!(
+                "  Try running with sudo for high-precision timing, or on a less noisy system"
+            );
             return;
         }
 
@@ -367,7 +369,11 @@ fn mde_scaling_validation() {
 
         eprintln!(
             "[mde_scaling] n={}: median MDE={:.1}ns [IQR: {:.1}-{:.1}ns] ({} trials)",
-            samples, median, q25, q75, mdes.len()
+            samples,
+            median,
+            q25,
+            q75,
+            mdes.len()
         );
 
         mde_medians.push((samples, median));
@@ -418,11 +424,11 @@ fn mde_scaling_validation() {
 fn large_effect_detection() {
     const TRIALS: usize = 50;
     const SAMPLES: usize = 10_000;
-    const EFFECT_US: f64 = 10.0; // 10 microseconds
+    const EFFECT_NS: u64 = 10_000; // 10 microseconds in nanoseconds
 
     eprintln!(
         "\n[large_effect] Testing {:.0}μs effect over {} trials",
-        EFFECT_US, TRIALS
+        EFFECT_NS as f64 / 1000.0, TRIALS
     );
 
     let mut detections = 0;
@@ -437,7 +443,7 @@ fn large_effect_detection() {
             .max_samples(SAMPLES)
             .test(inputs, |should_delay| {
                 if *should_delay {
-                    spin_delay_us(EFFECT_US);
+                    busy_wait_ns(EFFECT_NS);
                 }
                 std::hint::black_box(should_delay);
             });
@@ -519,7 +525,7 @@ fn large_effect_detection() {
     assert!(
         power >= 0.90,
         "Large effect ({:.0}μs) detected only {:.0}% of the time (expected ≥90%)",
-        EFFECT_US,
+        EFFECT_NS as f64 / 1000.0,
         power * 100.0
     );
 
@@ -563,7 +569,7 @@ fn negligible_effect_fpr() {
             .max_samples(SAMPLES)
             .test(inputs, |should_delay| {
                 if *should_delay {
-                    spin_delay_ns(EFFECT_NS);
+                    busy_wait_ns(EFFECT_NS);
                 }
                 std::hint::black_box(should_delay);
             });
@@ -648,26 +654,6 @@ fn negligible_effect_fpr() {
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-/// Spin-wait for approximately the given number of nanoseconds.
-#[inline(never)]
-fn spin_delay_ns(ns: u64) {
-    let start = std::time::Instant::now();
-    let target = Duration::from_nanos(ns);
-    while start.elapsed() < target {
-        std::hint::spin_loop();
-    }
-}
-
-/// Spin-wait for approximately the given number of microseconds.
-#[inline(never)]
-fn spin_delay_us(us: f64) {
-    let start = std::time::Instant::now();
-    let target = Duration::from_nanos((us * 1000.0) as u64);
-    while start.elapsed() < target {
-        std::hint::spin_loop();
-    }
-}
 
 /// Compute Clopper-Pearson exact 95% confidence interval for binomial proportion.
 ///

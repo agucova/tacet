@@ -95,7 +95,6 @@ pub struct BayesResult {
     pub sigma_n: Matrix9,
 
     // ==================== v5.4 Gibbs sampler diagnostics ====================
-
     /// Posterior mean of latent scale λ (v5.4 Gibbs).
     /// Only populated when using `compute_bayes_gibbs()`.
     pub lambda_mean: f64,
@@ -113,7 +112,6 @@ pub struct BayesResult {
     pub lambda_mixing_ok: bool,
 
     // ==================== v5.6 Gibbs sampler kappa diagnostics ====================
-
     /// v5.6: Posterior mean of likelihood precision κ.
     pub kappa_mean: f64,
 

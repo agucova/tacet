@@ -16,13 +16,15 @@
 //! Most preflight checks are no_std compatible and live in `tacet-core`.
 //! This module re-exports them and adds platform-specific checks:
 //!
-//! - **From core (no_std)**: sanity_check, autocorrelation_check, resolution_check
+//! - **From core (no_std)**: sanity_check, autocorrelation_check, resolution_check,
+//!   PreflightResult, PreflightWarnings, run_core_checks
 //! - **Platform-specific (std)**: system_check, timer_sanity_check
 
-// Re-export core preflight checks (no_std compatible)
+// Re-export core preflight checks and types (no_std compatible)
 pub use tacet_core::preflight::{
-    autocorrelation_check, compute_acf, resolution_check, sanity_check, AutocorrWarning,
-    ResolutionWarning, SanityWarning,
+    autocorrelation_check, compute_acf, resolution_check, run_core_checks, sanity_check,
+    AutocorrWarning, PreflightResult as CorePreflightResult,
+    PreflightWarnings as CorePreflightWarnings, ResolutionWarning, SanityWarning,
 };
 
 // Platform-specific checks that require std
@@ -34,7 +36,10 @@ pub use system::{system_check, SystemWarning};
 
 use serde::{Deserialize, Serialize};
 
-/// Result of running all preflight checks.
+/// Result of running all preflight checks (including platform-specific).
+///
+/// This extends `tacet_core::preflight::PreflightResult` with platform-specific
+/// system warnings that require std (e.g., reading /sys/devices on Linux).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PreflightResult {
     /// All warnings collected from preflight checks.
@@ -54,6 +59,15 @@ impl PreflightResult {
             warnings: PreflightWarnings::default(),
             has_critical: false,
             is_valid: true,
+        }
+    }
+
+    /// Create from a core preflight result.
+    pub fn from_core(core: CorePreflightResult) -> Self {
+        Self {
+            warnings: PreflightWarnings::from_core(core.warnings),
+            has_critical: core.has_critical,
+            is_valid: core.is_valid,
         }
     }
 
@@ -94,7 +108,10 @@ impl PreflightResult {
     }
 }
 
-/// Collection of all warnings from preflight checks.
+/// Collection of all warnings from preflight checks (including platform-specific).
+///
+/// This extends `tacet_core::preflight::PreflightWarnings` with platform-specific
+/// system warnings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PreflightWarnings {
     /// Warnings from sanity check (Fixed-vs-Fixed).
@@ -103,7 +120,7 @@ pub struct PreflightWarnings {
     /// Warnings from autocorrelation check.
     pub autocorr: Vec<AutocorrWarning>,
 
-    /// Warnings from system checks.
+    /// Warnings from system checks (platform-specific).
     pub system: Vec<SystemWarning>,
 
     /// Warnings from timer resolution check.
@@ -114,6 +131,16 @@ impl PreflightWarnings {
     /// Create an empty warnings collection.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Create from core warnings.
+    pub fn from_core(core: CorePreflightWarnings) -> Self {
+        Self {
+            sanity: core.sanity,
+            autocorr: core.autocorr,
+            system: Vec::new(),
+            resolution: core.resolution,
+        }
     }
 
     /// Get total number of warnings.
@@ -128,6 +155,9 @@ impl PreflightWarnings {
 }
 
 /// Run all preflight checks and collect warnings.
+///
+/// This runs both the core no_std-compatible checks and platform-specific
+/// system checks.
 ///
 /// # Arguments
 ///
@@ -145,24 +175,11 @@ pub fn run_all_checks(
     timer_resolution_ns: f64,
     seed: u64,
 ) -> PreflightResult {
-    let mut result = PreflightResult::new();
+    // Run core checks
+    let core_result = run_core_checks(fixed_samples, random_samples, timer_resolution_ns, seed);
+    let mut result = PreflightResult::from_core(core_result);
 
-    // Run resolution check (quantization)
-    if let Some(warning) = resolution_check(fixed_samples, timer_resolution_ns) {
-        result.add_resolution_warning(warning);
-    }
-
-    // Run sanity check (Fixed-vs-Fixed) with randomization
-    if let Some(warning) = sanity_check(fixed_samples, timer_resolution_ns, seed) {
-        result.add_sanity_warning(warning);
-    }
-
-    // Run autocorrelation check
-    if let Some(warning) = autocorrelation_check(fixed_samples, random_samples) {
-        result.add_autocorr_warning(warning);
-    }
-
-    // Run system checks
+    // Run platform-specific system checks
     for warning in system_check() {
         result.add_system_warning(warning);
     }
@@ -215,5 +232,16 @@ mod tests {
         });
         assert_eq!(warnings.count(), 1);
         assert!(!warnings.is_empty());
+    }
+
+    #[test]
+    fn test_from_core() {
+        let mut core = CorePreflightResult::new();
+        core.has_critical = true;
+        core.is_valid = false;
+
+        let result = PreflightResult::from_core(core);
+        assert!(result.has_critical);
+        assert!(!result.is_valid);
     }
 }

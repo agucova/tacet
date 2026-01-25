@@ -6,9 +6,7 @@
 //! - Only the input data differs
 
 use std::time::Duration;
-use tacet::{
-    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
-};
+use tacet::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
 fn main() {
     println!("tacet simple example\n");

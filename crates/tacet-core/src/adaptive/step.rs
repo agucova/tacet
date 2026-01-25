@@ -252,7 +252,9 @@ impl AdaptiveOutcome {
         &self,
         calibration: &super::Calibration,
     ) -> crate::ffi_summary::OutcomeSummary {
-        use crate::ffi_summary::{EffectSummary, InconclusiveReasonKind, OutcomeSummary, OutcomeType};
+        use crate::ffi_summary::{
+            EffectSummary, InconclusiveReasonKind, OutcomeSummary, OutcomeType,
+        };
         use crate::result::{Exploitability, MeasurementQuality};
 
         let cal_summary = calibration.to_summary();
@@ -478,8 +480,8 @@ fn build_diagnostics_from_calibration(
 fn convert_inconclusive_reason(
     reason: &super::InconclusiveReason,
 ) -> (crate::ffi_summary::InconclusiveReasonKind, String) {
-    use crate::ffi_summary::InconclusiveReasonKind;
     use super::InconclusiveReason;
+    use crate::ffi_summary::InconclusiveReasonKind;
 
     match reason {
         InconclusiveReason::DataTooNoisy { guidance, .. } => {

@@ -25,9 +25,7 @@ use crate::constants::{
 };
 use crate::measurement::winsorize_f64;
 use crate::statistics::{compute_deciles_inplace, compute_midquantile_deciles};
-use tacet_core::adaptive::{
-    check_quality_gates, compute_achievable_at_max, is_threshold_elevated,
-};
+use tacet_core::adaptive::{check_quality_gates, compute_achievable_at_max, is_threshold_elevated};
 
 /// Configuration for the adaptive sampling loop.
 #[derive(Debug, Clone)]
@@ -607,9 +605,9 @@ mod tests {
         Calibration {
             sigma_rate: Matrix9::identity() * 1000.0,
             block_length: 10,
-            sigma_t: 100.0,      // t-prior scale
-            l_r,                 // Cholesky of R
-            prior_cov_marginal,  // marginal prior cov
+            sigma_t: 100.0,     // t-prior scale
+            l_r,                // Cholesky of R
+            prior_cov_marginal, // marginal prior cov
             timer_resolution_ns: 1.0,
             samples_per_second: 100_000.0,
             discrete_mode: false,
@@ -617,7 +615,7 @@ mod tests {
             calibration_samples: 5000,
             mde_shift_ns: 5.0,
             mde_tail_ns: 10.0,
-            preflight_result: crate::preflight::PreflightResult::new(),
+            preflight_result: tacet_core::preflight::PreflightResult::new(),
             calibration_snapshot,
             c_floor: 3535.5, // ~50 * sqrt(5000) - conservative floor-rate constant
             projection_mismatch_thresh: 18.48, // chi-squared(7, 0.99) fallback

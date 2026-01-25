@@ -6,9 +6,7 @@
 //! - Only the input data differs between fixed and random classes
 
 use std::time::Duration;
-use tacet::{
-    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
-};
+use tacet::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
 #[allow(clippy::redundant_closure)]
 fn main() {

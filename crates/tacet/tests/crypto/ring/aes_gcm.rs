@@ -62,10 +62,16 @@ fn ring_aes256gcm_encrypt_ct() {
     let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_encrypt_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-256-GCM encryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -82,7 +88,10 @@ fn ring_aes256gcm_encrypt_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "AES-256-GCM encryption should have low exploitability (got {:?})",
             exp
         );
@@ -146,10 +155,16 @@ fn ring_aes256gcm_decrypt_ct() {
     let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_decrypt_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-256-GCM decryption should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -166,7 +181,10 @@ fn ring_aes256gcm_decrypt_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "AES-256-GCM decryption should have low exploitability (got {:?})",
             exp
         );
@@ -206,10 +224,16 @@ fn ring_aes256gcm_hamming() {
     let outcome = skip_if_unreliable!(outcome, "ring_aes256gcm_hamming");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "AES-GCM Hamming weight should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -226,7 +250,10 @@ fn ring_aes256gcm_hamming() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "AES-GCM Hamming weight should not affect timing (got {:?})",
             exp
         );

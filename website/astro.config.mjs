@@ -91,6 +91,7 @@ export default defineConfig({
         },
       },
       head: [
+        // Fonts
         {
           tag: "link",
           attrs: {
@@ -113,6 +114,7 @@ export default defineConfig({
             href: "https://fonts.googleapis.com/css2?family=Recursive:CASL,CRSV,MONO@0,0,0&display=swap",
           },
         },
+        // Favicon
         {
           tag: "link",
           attrs: {
@@ -121,6 +123,7 @@ export default defineConfig({
             href: "/favicon.svg",
           },
         },
+        // Basic meta
         {
           tag: "meta",
           attrs: {
@@ -134,6 +137,71 @@ export default defineConfig({
           attrs: {
             name: "theme-color",
             content: "#0C0C0C",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "author",
+            content: "Agustín Covarrubias",
+          },
+        },
+        // Open Graph
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:type",
+            content: "website",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:site_name",
+            content: "Tacet",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://tacet.sh/og-image.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image:width",
+            content: "1200",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image:height",
+            content: "630",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:locale",
+            content: "en_US",
+          },
+        },
+        // Twitter Card
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:card",
+            content: "summary_large_image",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:image",
+            content: "https://tacet.sh/og-image.png",
           },
         },
       ],

@@ -1136,7 +1136,9 @@ mod proptests {
     #[test]
     fn test_multiselect_two_values() {
         // Worst case for quickselect: two distinct values
-        let data: Vec<f64> = (0..1000).map(|i| if i % 2 == 0 { 0.0 } else { 1.0 }).collect();
+        let data: Vec<f64> = (0..1000)
+            .map(|i| if i % 2 == 0 { 0.0 } else { 1.0 })
+            .collect();
         let reference = compute_deciles(&data);
         let mut test_data = data.clone();
         let result = compute_deciles_inplace(&mut test_data);

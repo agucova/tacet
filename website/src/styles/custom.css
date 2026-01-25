@@ -385,12 +385,41 @@ td:first-child {
 
 /* Code blocks inside tabs - remove extra margin */
 .tablist-wrapper ~ [role="tabpanel"] .expressive-code {
-    margin: 0;
+    margin-top: 0;
 }
 
 /* ============================================
    SEARCH
    ============================================ */
+
+/* Make the inner header a proper flex container */
+.header > .header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+}
+
+/* Make the search wrapper grow to fill available space */
+.header > .header > .sl-flex:has(site-search) {
+    flex: 1;
+    justify-content: center;
+}
+
+/* Override Starlight's display:contents so width applies */
+site-search {
+    display: block !important;
+    width: 100%;
+    max-width: 48rem;
+}
+
+/* Make the search button wider and more prominent */
+site-search button[data-open-modal] {
+    width: 100%;
+    min-width: 20rem;
+    justify-content: flex-start;
+    padding: 0.5rem 1rem;
+}
 
 .search-input {
     background: var(--tacet-bg-elevated);

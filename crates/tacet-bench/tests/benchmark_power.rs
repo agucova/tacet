@@ -9,7 +9,8 @@
 use std::time::Duration;
 use tacet::AttackerModel;
 use tacet_bench::{
-    BenchmarkRunner, DudectAdapter, EffectType, StubAdapter, SyntheticConfig, TimingOracleAdapter, ToolAdapter,
+    BenchmarkRunner, DudectAdapter, EffectType, StubAdapter, SyntheticConfig, TimingOracleAdapter,
+    ToolAdapter,
 };
 
 /// Create a tacet adapter configured for fair comparison with dudect/RTLF.
@@ -25,9 +26,7 @@ fn fair_comparison_adapter(time_budget: Duration) -> TimingOracleAdapter {
 #[test]
 fn power_sanity_check() {
     let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(10)),
-        ),
+        Box::new(fair_comparison_adapter(Duration::from_secs(10))),
         Box::new(DudectAdapter::default()),
     ];
 
@@ -68,11 +67,8 @@ fn power_sanity_check() {
 #[test]
 #[ignore] // Long-running
 fn power_30k_shift_1pct() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(30)),
-        ),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -87,7 +83,10 @@ fn power_30k_shift_1pct() {
 
     let results = runner.run_power_benchmark("30k-shift-1pct", &config);
 
-    println!("\nPower Results (n=30k, 1% shift, {} datasets):", results.total);
+    println!(
+        "\nPower Results (n=30k, 1% shift, {} datasets):",
+        results.total
+    );
     for (tool, power) in results.all_powers() {
         println!(
             "  {}: {:.1}% ({}/{})",
@@ -109,11 +108,8 @@ fn power_30k_shift_1pct() {
 #[test]
 #[ignore] // Long-running
 fn power_30k_shift_5pct() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(30)),
-        ),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -128,7 +124,10 @@ fn power_30k_shift_5pct() {
 
     let results = runner.run_power_benchmark("30k-shift-5pct", &config);
 
-    println!("\nPower Results (n=30k, 5% shift, {} datasets):", results.total);
+    println!(
+        "\nPower Results (n=30k, 5% shift, {} datasets):",
+        results.total
+    );
     for (tool, power) in results.all_powers() {
         println!(
             "  {}: {:.1}% ({}/{})",
@@ -151,11 +150,8 @@ fn power_30k_shift_5pct() {
 #[test]
 #[ignore] // Long-running
 fn power_30k_tail() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(30)),
-        ),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -170,7 +166,10 @@ fn power_30k_tail() {
 
     let results = runner.run_power_benchmark("30k-tail", &config);
 
-    println!("\nPower Results (n=30k, tail effect, {} datasets):", results.total);
+    println!(
+        "\nPower Results (n=30k, tail effect, {} datasets):",
+        results.total
+    );
     for (tool, power) in results.all_powers() {
         println!(
             "  {}: {:.1}% ({}/{})",
@@ -182,18 +181,18 @@ fn power_30k_tail() {
     }
 
     let to_power = results.power("tacet");
-    println!("\ntacet detects tail effects at {:.1}% rate", to_power * 100.0);
+    println!(
+        "\ntacet detects tail effects at {:.1}% rate",
+        to_power * 100.0
+    );
 }
 
 /// Power benchmark with same-mean effect (different variance).
 #[test]
 #[ignore] // Long-running
 fn power_30k_same_mean() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(30)),
-        ),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(30)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(100)
@@ -208,7 +207,10 @@ fn power_30k_same_mean() {
 
     let results = runner.run_power_benchmark("30k-same-mean", &config);
 
-    println!("\nPower Results (n=30k, same-mean effect, {} datasets):", results.total);
+    println!(
+        "\nPower Results (n=30k, same-mean effect, {} datasets):",
+        results.total
+    );
     for (tool, power) in results.all_powers() {
         println!(
             "  {}: {:.1}% ({}/{})",
@@ -220,18 +222,18 @@ fn power_30k_same_mean() {
     }
 
     let to_power = results.power("tacet");
-    println!("\ntacet detects same-mean effects at {:.1}% rate", to_power * 100.0);
+    println!(
+        "\ntacet detects same-mean effects at {:.1}% rate",
+        to_power * 100.0
+    );
 }
 
 /// High-sample power test with 1% shift.
 #[test]
 #[ignore] // Very long-running
 fn power_500k_shift_1pct() {
-    let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(60)),
-        ),
-    ];
+    let tools: Vec<Box<dyn ToolAdapter>> =
+        vec![Box::new(fair_comparison_adapter(Duration::from_secs(60)))];
 
     let runner = BenchmarkRunner::new(tools)
         .datasets_per_config(50)
@@ -246,7 +248,10 @@ fn power_500k_shift_1pct() {
 
     let results = runner.run_power_benchmark("500k-shift-1pct", &config);
 
-    println!("\nPower Results (n=500k, 1% shift, {} datasets):", results.total);
+    println!(
+        "\nPower Results (n=500k, 1% shift, {} datasets):",
+        results.total
+    );
     for (tool, power) in results.all_powers() {
         println!(
             "  {}: {:.1}% ({}/{})",
@@ -258,7 +263,10 @@ fn power_500k_shift_1pct() {
     }
 
     let to_power = results.power("tacet");
-    println!("\ntacet detects 1% shifts with 500k samples at {:.1}% rate", to_power * 100.0);
+    println!(
+        "\ntacet detects 1% shifts with 500k samples at {:.1}% rate",
+        to_power * 100.0
+    );
 }
 
 /// Multi-tool power comparison.
@@ -266,9 +274,7 @@ fn power_500k_shift_1pct() {
 #[ignore] // Requires external tools
 fn power_multi_tool_comparison() {
     let tools: Vec<Box<dyn ToolAdapter>> = vec![
-        Box::new(
-            fair_comparison_adapter(Duration::from_secs(30)),
-        ),
+        Box::new(fair_comparison_adapter(Duration::from_secs(30))),
         Box::new(StubAdapter::new("dudect")),
         Box::new(StubAdapter::new("rtlf")),
     ];

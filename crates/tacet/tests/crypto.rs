@@ -7,11 +7,11 @@
 //! - `dalek`: dalek ecosystem (x25519-dalek)
 //! - `pqcrypto`: Post-quantum crypto (Kyber, Dilithium, Falcon, SPHINCS+)
 
-#[path = "crypto/rustcrypto.rs"]
-mod rustcrypto;
-#[path = "crypto/ring.rs"]
-mod ring;
 #[path = "crypto/dalek.rs"]
 mod dalek;
 #[path = "crypto/pqcrypto.rs"]
 mod pqcrypto;
+#[path = "crypto/ring.rs"]
+mod ring;
+#[path = "crypto/rustcrypto.rs"]
+mod rustcrypto;

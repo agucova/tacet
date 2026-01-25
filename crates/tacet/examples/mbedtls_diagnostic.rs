@@ -6,11 +6,10 @@
 
 use std::collections::HashSet;
 use std::path::Path;
-use tacet::data::load_two_column_csv;
 use tacet::adaptive::single_pass::{analyze_single_pass, SinglePassConfig};
+use tacet::data::load_two_column_csv;
 use tacet_core::statistics::{
-    bootstrap_difference_covariance_discrete, compute_deciles_inplace,
-    paired_optimal_block_length,
+    bootstrap_difference_covariance_discrete, compute_deciles_inplace, paired_optimal_block_length,
 };
 
 fn main() {
@@ -22,13 +21,15 @@ fn main() {
 
     println!("## 1. Dataset Information\n");
     println!("- **Source**: SILENT paper (Dunsche et al.)");
-    println!("- **File**: `{}`", path.file_name().unwrap().to_string_lossy());
+    println!(
+        "- **File**: `{}`",
+        path.file_name().unwrap().to_string_lossy()
+    );
     println!("- **Context**: mbedTLS Bleichenbacher timing attack (PKCS#1 padding oracle)");
     println!("- **Ground Truth**: SILENT reports 'Failed to reject' → NO timing leak");
     println!("- **Issue**: Our tool incorrectly reports FAIL (false positive)\n");
 
-    let data = load_two_column_csv(path, true, "BASELINE", "MODIFIED")
-        .expect("Failed to load CSV");
+    let data = load_two_column_csv(path, true, "BASELINE", "MODIFIED").expect("Failed to load CSV");
 
     let full_n = data.baseline_samples.len();
     println!("### Raw Data Statistics\n");
@@ -45,15 +46,47 @@ fn main() {
     // Full dataset statistics
     let baseline_mean: f64 = full_baseline_ns.iter().sum::<f64>() / full_n as f64;
     let test_mean: f64 = full_test_ns.iter().sum::<f64>() / full_n as f64;
-    let baseline_std: f64 = (full_baseline_ns.iter().map(|x| (x - baseline_mean).powi(2)).sum::<f64>() / full_n as f64).sqrt();
-    let test_std: f64 = (full_test_ns.iter().map(|x| (x - test_mean).powi(2)).sum::<f64>() / full_n as f64).sqrt();
+    let baseline_std: f64 = (full_baseline_ns
+        .iter()
+        .map(|x| (x - baseline_mean).powi(2))
+        .sum::<f64>()
+        / full_n as f64)
+        .sqrt();
+    let test_std: f64 = (full_test_ns
+        .iter()
+        .map(|x| (x - test_mean).powi(2))
+        .sum::<f64>()
+        / full_n as f64)
+        .sqrt();
 
-    println!("| Baseline mean | {:.2} ns ({:.2} ms) |", baseline_mean, baseline_mean / 1e6);
-    println!("| Test mean | {:.2} ns ({:.2} ms) |", test_mean, test_mean / 1e6);
-    println!("| Raw mean difference | {:.2} ns |", test_mean - baseline_mean);
-    println!("| Baseline std | {:.2} ns ({:.2} ms) |", baseline_std, baseline_std / 1e6);
-    println!("| Test std | {:.2} ns ({:.2} ms) |", test_std, test_std / 1e6);
-    println!("| Coefficient of variation | {:.1}% |", (baseline_std / baseline_mean) * 100.0);
+    println!(
+        "| Baseline mean | {:.2} ns ({:.2} ms) |",
+        baseline_mean,
+        baseline_mean / 1e6
+    );
+    println!(
+        "| Test mean | {:.2} ns ({:.2} ms) |",
+        test_mean,
+        test_mean / 1e6
+    );
+    println!(
+        "| Raw mean difference | {:.2} ns |",
+        test_mean - baseline_mean
+    );
+    println!(
+        "| Baseline std | {:.2} ns ({:.2} ms) |",
+        baseline_std,
+        baseline_std / 1e6
+    );
+    println!(
+        "| Test std | {:.2} ns ({:.2} ms) |",
+        test_std,
+        test_std / 1e6
+    );
+    println!(
+        "| Coefficient of variation | {:.1}% |",
+        (baseline_std / baseline_mean) * 100.0
+    );
 
     // Work with truncated dataset for detailed analysis
     let n = 50_000usize;
@@ -61,7 +94,10 @@ fn main() {
     let test_ns: Vec<f64> = full_test_ns.iter().take(n).copied().collect();
 
     println!("\n### Analysis Subset\n");
-    println!("Using first {} samples per class for detailed analysis.\n", n);
+    println!(
+        "Using first {} samples per class for detailed analysis.\n",
+        n
+    );
 
     // =========================================================================
     // Section 2: SILENT's Parameters
@@ -82,9 +118,20 @@ fn main() {
 
     println!("**Key observations**:");
     println!("- SILENT uses `block_size=2122` for 500,000 samples");
-    println!("- Block ratio: {:.4} ({:.2}% of data)", 2122.0 / 500000.0, 2122.0 / 500000.0 * 100.0);
-    println!("- Equivalent for {} samples: {}", n, (2122.0 / 500000.0 * n as f64) as usize);
-    println!("- Threshold in nanoseconds: {:.2} ns (5 cycles @ 3GHz)\n", 5.0 * ns_per_cycle);
+    println!(
+        "- Block ratio: {:.4} ({:.2}% of data)",
+        2122.0 / 500000.0,
+        2122.0 / 500000.0 * 100.0
+    );
+    println!(
+        "- Equivalent for {} samples: {}",
+        n,
+        (2122.0 / 500000.0 * n as f64) as usize
+    );
+    println!(
+        "- Threshold in nanoseconds: {:.2} ns (5 cycles @ 3GHz)\n",
+        5.0 * ns_per_cycle
+    );
 
     // =========================================================================
     // Section 3: Autocorrelation Analysis
@@ -114,19 +161,30 @@ fn main() {
     let acf_threshold = 0.05;
     let mut decorr_lag_baseline = 1;
     let mut decorr_lag_test = 1;
-    for lag in 1..5000.min(n/4) {
+    for lag in 1..5000.min(n / 4) {
         let acf_b = compute_lagk_acf(&baseline_ns, lag);
         let acf_t = compute_lagk_acf(&test_ns, lag);
-        if acf_b.abs() > acf_threshold { decorr_lag_baseline = lag; }
-        if acf_t.abs() > acf_threshold { decorr_lag_test = lag; }
+        if acf_b.abs() > acf_threshold {
+            decorr_lag_baseline = lag;
+        }
+        if acf_t.abs() > acf_threshold {
+            decorr_lag_test = lag;
+        }
     }
 
     println!("### Decorrelation Length Estimates\n");
     println!("| Metric | Baseline | Test |");
     println!("|--------|----------|------|");
     println!("| Lag-1 ACF | {:.4} | {:.4} |", acf1_baseline, acf1_test);
-    println!("| Last lag with |ACF| > 0.05 | {} | {} |", decorr_lag_baseline, decorr_lag_test);
-    println!("| Suggested block size | {} | {} |", decorr_lag_baseline * 2, decorr_lag_test * 2);
+    println!(
+        "| Last lag with |ACF| > 0.05 | {} | {} |",
+        decorr_lag_baseline, decorr_lag_test
+    );
+    println!(
+        "| Suggested block size | {} | {} |",
+        decorr_lag_baseline * 2,
+        decorr_lag_test * 2
+    );
 
     // =========================================================================
     // Section 4: Block Size Estimation Comparison
@@ -147,13 +205,31 @@ fn main() {
 
     println!("| Method | Block Size | Ratio to SILENT |");
     println!("|--------|------------|-----------------|");
-    println!("| SILENT (scaled to {}k) | {} | 1.00x |", n/1000, silent_equiv);
-    println!("| Our Politis-White | {} | {:.2}x |", pw_block, pw_block as f64 / silent_equiv as f64);
-    println!("| Simple (1.3×n^⅓) | {} | {:.2}x |", simple_block, simple_block as f64 / silent_equiv as f64);
-    println!("| Max P-W (3×√n) | {} | {:.2}x |", max_block, max_block as f64 / silent_equiv as f64);
+    println!(
+        "| SILENT (scaled to {}k) | {} | 1.00x |",
+        n / 1000,
+        silent_equiv
+    );
+    println!(
+        "| Our Politis-White | {} | {:.2}x |",
+        pw_block,
+        pw_block as f64 / silent_equiv as f64
+    );
+    println!(
+        "| Simple (1.3×n^⅓) | {} | {:.2}x |",
+        simple_block,
+        simple_block as f64 / silent_equiv as f64
+    );
+    println!(
+        "| Max P-W (3×√n) | {} | {:.2}x |",
+        max_block,
+        max_block as f64 / silent_equiv as f64
+    );
 
-    println!("\n**Critical Issue**: Our block size is {:.1}x smaller than SILENT's!",
-             silent_equiv as f64 / pw_block as f64);
+    println!(
+        "\n**Critical Issue**: Our block size is {:.1}x smaller than SILENT's!",
+        silent_equiv as f64 / pw_block as f64
+    );
     println!("This underestimates variance by approximately the same factor.\n");
 
     // =========================================================================
@@ -162,10 +238,14 @@ fn main() {
     println!("## 5. Bootstrap Covariance Analysis\n");
 
     // Run our bootstrap
-    let cov_estimate = bootstrap_difference_covariance_discrete(&baseline_ns, &test_ns, 2000, 0xDEADBEEF);
+    let cov_estimate =
+        bootstrap_difference_covariance_discrete(&baseline_ns, &test_ns, 2000, 0xDEADBEEF);
     let sigma = cov_estimate.matrix;
 
-    println!("### Our Bootstrap Results (block_size={})\n", cov_estimate.block_size);
+    println!(
+        "### Our Bootstrap Results (block_size={})\n",
+        cov_estimate.block_size
+    );
 
     // Diagonal variances
     println!("#### Variance Estimates (diagonal of Σ)\n");
@@ -175,7 +255,10 @@ fn main() {
         let var = sigma[(i, i)];
         let se = var.sqrt();
         let ci_width = 1.96 * 2.0 * se;
-        println!("| {}% | {:.2e} | {:.1} ns | {:.1} ns |", q, var, se, ci_width);
+        println!(
+            "| {}% | {:.2e} | {:.1} ns | {:.1} ns |",
+            q, var, se, ci_width
+        );
     }
 
     // Correlation matrix
@@ -208,13 +291,22 @@ fn main() {
     for (i, q) in [10, 20, 30, 40, 50, 60, 70, 80, 90].iter().enumerate() {
         let se = sigma[(i, i)].sqrt();
         let z = delta_hat[i] / se;
-        println!("| {}% | {:.0} | {:.0} | {:+.1} | {:.1} | {:.2} |",
-                 q, q_baseline[i], q_test[i], delta_hat[i], se, z);
+        println!(
+            "| {}% | {:.0} | {:.0} | {:+.1} | {:.1} | {:.2} |",
+            q, q_baseline[i], q_test[i], delta_hat[i], se, z
+        );
     }
 
     println!("\n**Interpretation**:");
-    println!("- The 10% quantile shows a large difference ({:+.0} ns)", delta_hat[0]);
-    println!("- But with SE={:.0} ns, Z-score={:.2}", sigma[(0,0)].sqrt(), delta_hat[0] / sigma[(0,0)].sqrt());
+    println!(
+        "- The 10% quantile shows a large difference ({:+.0} ns)",
+        delta_hat[0]
+    );
+    println!(
+        "- But with SE={:.0} ns, Z-score={:.2}",
+        sigma[(0, 0)].sqrt(),
+        delta_hat[0] / sigma[(0, 0)].sqrt()
+    );
     println!("- Most quantiles have |Z| < 2, suggesting no significant effect\n");
 
     // =========================================================================
@@ -239,18 +331,32 @@ fn main() {
 
         println!("| Metric | Value |");
         println!("|--------|-------|");
-        println!("| Leak probability | {:.1}% |", result.leak_probability * 100.0);
-        println!("| Decision | {} |", match result.leak_probability {
-            p if p < 0.05 => "PASS",
-            p if p > 0.95 => "FAIL",
-            _ => "INCONCLUSIVE"
-        });
+        println!(
+            "| Leak probability | {:.1}% |",
+            result.leak_probability * 100.0
+        );
+        println!(
+            "| Decision | {} |",
+            match result.leak_probability {
+                p if p < 0.05 => "PASS",
+                p if p > 0.95 => "FAIL",
+                _ => "INCONCLUSIVE",
+            }
+        );
         println!("| Expected (SILENT) | PASS |");
-        println!("| Shift estimate | {:.2} ns |", result.effect_estimate.shift_ns);
-        println!("| Tail estimate | {:.2} ns |", result.effect_estimate.tail_ns);
-        println!("| 95% CI | [{:.1}, {:.1}] ns |",
-                 result.effect_estimate.credible_interval_ns.0,
-                 result.effect_estimate.credible_interval_ns.1);
+        println!(
+            "| Shift estimate | {:.2} ns |",
+            result.effect_estimate.shift_ns
+        );
+        println!(
+            "| Tail estimate | {:.2} ns |",
+            result.effect_estimate.tail_ns
+        );
+        println!(
+            "| 95% CI | [{:.1}, {:.1}] ns |",
+            result.effect_estimate.credible_interval_ns.0,
+            result.effect_estimate.credible_interval_ns.1
+        );
         println!("| Quality | {:?} |", result.quality);
         println!();
     }
@@ -276,10 +382,15 @@ fn main() {
         println!("| {} | {} | {} | {:.1}x |", block, source, eff_n, var_mult);
     }
 
-    println!("\n**Key insight**: Using block_size={} instead of {} means our variance", pw_block, silent_equiv);
-    println!("estimates are ~{:.1}x too small, making signals appear {:.1}x more significant.\n",
-             silent_equiv as f64 / pw_block as f64,
-             (silent_equiv as f64 / pw_block as f64).sqrt());
+    println!(
+        "\n**Key insight**: Using block_size={} instead of {} means our variance",
+        pw_block, silent_equiv
+    );
+    println!(
+        "estimates are ~{:.1}x too small, making signals appear {:.1}x more significant.\n",
+        silent_equiv as f64 / pw_block as f64,
+        (silent_equiv as f64 / pw_block as f64).sqrt()
+    );
 
     // =========================================================================
     // Section 9: Recommendations
@@ -308,17 +419,36 @@ fn main() {
 
     println!("| Indicator | Baseline | Test | Concern? |");
     println!("|-----------|----------|------|----------|");
-    println!("| Unique values | {}% | {}% | {} |",
-             (unique_baseline.len() as f64 / n as f64 * 100.0) as usize,
-             (unique_test.len() as f64 / n as f64 * 100.0) as usize,
-             if unique_baseline.len() > n / 10 { "No" } else { "Yes (discrete)" });
-    println!("| Lag-1 ACF | {:.3} | {:.3} | {} |",
-             acf1_baseline, acf1_test,
-             if acf1_baseline.abs() > 0.1 || acf1_test.abs() > 0.1 { "Yes (correlated)" } else { "No" });
-    println!("| CV | {:.1}% | {:.1}% | {} |",
-             baseline_std / baseline_mean * 100.0,
-             test_std / test_mean * 100.0,
-             if baseline_std / baseline_mean > 0.5 { "Yes (high variance)" } else { "No" });
+    println!(
+        "| Unique values | {}% | {}% | {} |",
+        (unique_baseline.len() as f64 / n as f64 * 100.0) as usize,
+        (unique_test.len() as f64 / n as f64 * 100.0) as usize,
+        if unique_baseline.len() > n / 10 {
+            "No"
+        } else {
+            "Yes (discrete)"
+        }
+    );
+    println!(
+        "| Lag-1 ACF | {:.3} | {:.3} | {} |",
+        acf1_baseline,
+        acf1_test,
+        if acf1_baseline.abs() > 0.1 || acf1_test.abs() > 0.1 {
+            "Yes (correlated)"
+        } else {
+            "No"
+        }
+    );
+    println!(
+        "| CV | {:.1}% | {:.1}% | {} |",
+        baseline_std / baseline_mean * 100.0,
+        test_std / test_mean * 100.0,
+        if baseline_std / baseline_mean > 0.5 {
+            "Yes (high variance)"
+        } else {
+            "No"
+        }
+    );
 
     println!("\n---\n");
     println!("*Report generated by tacet mbedTLS diagnostic*");
@@ -330,24 +460,34 @@ fn compute_lag1_acf(x: &[f64]) -> f64 {
 
 fn compute_lagk_acf(x: &[f64], k: usize) -> f64 {
     let n = x.len();
-    if k >= n { return 0.0; }
+    if k >= n {
+        return 0.0;
+    }
 
     let mean: f64 = x.iter().sum::<f64>() / n as f64;
     let var: f64 = x.iter().map(|&xi| (xi - mean).powi(2)).sum::<f64>() / n as f64;
 
-    if var < 1e-12 { return 0.0; }
+    if var < 1e-12 {
+        return 0.0;
+    }
 
-    let cov: f64 = x.iter().take(n - k)
+    let cov: f64 = x
+        .iter()
+        .take(n - k)
         .zip(x.iter().skip(k))
         .map(|(&xi, &xk)| (xi - mean) * (xk - mean))
-        .sum::<f64>() / (n - k) as f64;
+        .sum::<f64>()
+        / (n - k) as f64;
 
     cov / var
 }
 
 fn chrono_lite() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     // Simple date formatting
     let days = secs / 86400;
     let years = 1970 + days / 365;

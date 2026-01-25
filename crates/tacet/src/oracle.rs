@@ -582,6 +582,7 @@ impl TimingOracle {
         };
 
         // Elevate thread priority to reduce preemption (RAII - auto-restores on drop)
+        #[cfg(feature = "thread-priority")]
         let _priority_guard = if self.config.thread_priority {
             match crate::measurement::priority::PriorityGuard::try_elevate() {
                 crate::measurement::priority::PriorityResult::Elevated(guard) => Some(guard),
@@ -593,6 +594,8 @@ impl TimingOracle {
         } else {
             None
         };
+        #[cfg(not(feature = "thread-priority"))]
+        let _priority_guard: Option<()> = None;
 
         // Frequency stabilization: spin-wait to let CPU ramp up to stable frequency
         if self.config.frequency_stabilization_ms > 0 {
@@ -1692,6 +1695,7 @@ fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64, batch_k: u32) ->
 }
 
 /// Build diagnostics from calibration, timer, and config info.
+#[allow(clippy::too_many_arguments)]
 fn build_diagnostics(
     calibration: &Calibration,
     timer: &BoxedTimer,
@@ -1712,9 +1716,8 @@ fn build_diagnostics(
     for warning in &preflight.warnings.autocorr {
         preflight_warnings.push(warning.to_warning_info());
     }
-    for warning in &preflight.warnings.system {
-        preflight_warnings.push(warning.to_warning_info());
-    }
+    // Note: System warnings are not included in core PreflightResult
+    // They require std and are run separately by tacet if needed
     for warning in &preflight.warnings.resolution {
         preflight_warnings.push(warning.to_warning_info());
     }
@@ -1858,7 +1861,8 @@ fn generate_threshold_elevated_guidance(fallback_reason: TimerFallbackReason) ->
     {
         // x86_64 with rdtsc is already ~0.3ns - no PMU recommendations needed
         let _ = fallback_reason;
-        "Increase max_samples to improve measurement floor, or test at a higher abstraction level.".to_string()
+        "Increase max_samples to improve measurement floor, or test at a higher abstraction level."
+            .to_string()
     }
 
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -1922,19 +1926,20 @@ fn generate_unmeasurable_recommendation(fallback_reason: TimerFallbackReason) ->
         match fallback_reason {
             TimerFallbackReason::ConcurrentAccess => {
                 "High-precision timing is locked by another process. \
-                 If using cargo test, run with --test-threads=1.".to_string()
+                 If using cargo test, run with --test-threads=1."
+                    .to_string()
             }
             TimerFallbackReason::NoPrivileges => {
                 "Run with sudo to enable high-precision timing (~0.3ns resolution).".to_string()
             }
             TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
                 "High-precision timing unavailable. Consider testing at a higher abstraction level \
-                 (e.g., full API calls rather than individual primitives).".to_string()
+                 (e.g., full API calls rather than individual primitives)."
+                    .to_string()
             }
-            TimerFallbackReason::None => {
-                "Consider testing at a higher abstraction level \
-                 (e.g., full API calls rather than individual primitives).".to_string()
-            }
+            TimerFallbackReason::None => "Consider testing at a higher abstraction level \
+                 (e.g., full API calls rather than individual primitives)."
+                .to_string(),
         }
     }
 
@@ -1943,15 +1948,18 @@ fn generate_unmeasurable_recommendation(fallback_reason: TimerFallbackReason) ->
         match fallback_reason {
             TimerFallbackReason::NoPrivileges => {
                 "Run with sudo to enable high-precision timing (~0.3ns resolution). \
-                 Alternatively, set kernel.perf_event_paranoid=1 or grant CAP_PERFMON.".to_string()
+                 Alternatively, set kernel.perf_event_paranoid=1 or grant CAP_PERFMON."
+                    .to_string()
             }
             TimerFallbackReason::CycleCounterUnavailable | TimerFallbackReason::Requested => {
                 "High-precision timing unavailable. Check kernel perf_event support, \
-                 or test at a higher abstraction level.".to_string()
+                 or test at a higher abstraction level."
+                    .to_string()
             }
             TimerFallbackReason::ConcurrentAccess | TimerFallbackReason::None => {
                 "Consider testing at a higher abstraction level \
-                 (e.g., full API calls rather than individual primitives).".to_string()
+                 (e.g., full API calls rather than individual primitives)."
+                    .to_string()
             }
         }
     }
@@ -1964,7 +1972,8 @@ fn generate_unmeasurable_recommendation(fallback_reason: TimerFallbackReason) ->
     {
         let _ = fallback_reason;
         "Consider testing at a higher abstraction level \
-         (e.g., full API calls rather than individual primitives).".to_string()
+         (e.g., full API calls rather than individual primitives)."
+            .to_string()
     }
 }
 

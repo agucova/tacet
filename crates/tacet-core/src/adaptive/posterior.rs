@@ -58,7 +58,6 @@ pub struct Posterior {
     pub n: usize,
 
     // ==================== Gibbs sampler fields ====================
-
     /// Posterior mean of latent scale λ.
     /// `None` if using simple posterior (no Gibbs sampler).
     pub lambda_mean: Option<f64>,
@@ -107,12 +106,12 @@ impl Posterior {
             leak_probability,
             projection_mismatch_q,
             n,
-            lambda_mean: None,        // v5.4: no Gibbs sampler
-            lambda_mixing_ok: None,   // v5.4: no Gibbs sampler
-            kappa_mean: None,         // v5.6: no Gibbs sampler
-            kappa_cv: None,           // v5.6: no Gibbs sampler
-            kappa_ess: None,          // v5.6: no Gibbs sampler
-            kappa_mixing_ok: None,    // v5.6: no Gibbs sampler
+            lambda_mean: None,      // v5.4: no Gibbs sampler
+            lambda_mixing_ok: None, // v5.4: no Gibbs sampler
+            kappa_mean: None,       // v5.6: no Gibbs sampler
+            kappa_cv: None,         // v5.6: no Gibbs sampler
+            kappa_ess: None,        // v5.6: no Gibbs sampler
+            kappa_mixing_ok: None,  // v5.6: no Gibbs sampler
         }
     }
 

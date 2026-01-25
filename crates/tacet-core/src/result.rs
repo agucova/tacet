@@ -813,7 +813,6 @@ pub struct Diagnostics {
     // =========================================================================
     // v5.4 Gibbs sampler diagnostics
     // =========================================================================
-
     /// v5.4: Total number of Gibbs iterations.
     pub gibbs_iters_total: usize,
 
@@ -841,7 +840,6 @@ pub struct Diagnostics {
     // =========================================================================
     // v5.6 Gibbs sampler κ (kappa) diagnostics - robust t-likelihood
     // =========================================================================
-
     /// v5.6: Posterior mean of likelihood precision κ.
     pub kappa_mean: f64,
 

@@ -153,8 +153,8 @@ fn test_memcmp_constant_time() {
     let secret = [0x42u8; 512];
 
     let inputs = InputPair::new(
-        || [0u8; 512],      // Baseline: all zeros
-        || rand::random(),  // Sample: random data
+        || [0u8; 512],     // Baseline: all zeros
+        || rand::random(), // Sample: random data
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -179,8 +179,8 @@ fn test_aes128_constant_time() {
     let key = [0u8; 16]; // Fixed key for timing test
 
     let inputs = InputPair::new(
-        || [0u8; 16],       // Baseline: all zeros plaintext
-        || rand::random(),  // Sample: random plaintext
+        || [0u8; 16],      // Baseline: all zeros plaintext
+        || rand::random(), // Sample: random plaintext
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -201,8 +201,8 @@ fn test_aes128_constant_time() {
 #[test]
 fn test_x25519_constant_time() {
     let inputs = InputPair::new(
-        || [0u8; 32],       // Baseline: all zeros scalar
-        || rand::random(),  // Sample: random scalar
+        || [0u8; 32],      // Baseline: all zeros scalar
+        || rand::random(), // Sample: random scalar
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -229,8 +229,8 @@ fn test_memcmp_leaky() {
     let secret = [0x42u8; 512];
 
     let inputs = InputPair::new(
-        || [0u8; 512],      // Baseline: all zeros (no early match)
-        || rand::random(),  // Sample: random (possible early exits)
+        || [0u8; 512],     // Baseline: all zeros (no early match)
+        || rand::random(), // Sample: random (possible early exits)
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -259,8 +259,8 @@ fn test_explicit_early_exit_leaky() {
     let secret = [0u8; 512];
 
     let inputs = InputPair::new(
-        || [0u8; 512],      // Baseline: matches secret entirely (slow - checks all 512 bytes)
-        || rand::random(),  // Sample: random, exits on first mismatch (fast)
+        || [0u8; 512],     // Baseline: matches secret entirely (slow - checks all 512 bytes)
+        || rand::random(), // Sample: random, exits on first mismatch (fast)
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -286,8 +286,8 @@ fn test_explicit_early_exit_leaky() {
 #[test]
 fn test_table_lookup_leaky() {
     let inputs = InputPair::new(
-        || [0u8; 16],       // Baseline: all zeros (same cache line)
-        || rand::random(),  // Sample: random (different cache lines)
+        || [0u8; 16],      // Baseline: all zeros (same cache line)
+        || rand::random(), // Sample: random (different cache lines)
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -339,8 +339,8 @@ fn test_large_table_lookup_leaky() {
         .unwrap();
 
     let inputs = InputPair::new(
-        || [0u8; 16],       // Baseline: all zeros → always hits same cache line
-        || rand::random(),  // Sample: random → accesses spread across 64KB
+        || [0u8; 16],      // Baseline: all zeros → always hits same cache line
+        || rand::random(), // Sample: random → accesses spread across 64KB
     );
 
     // Custom 5ns threshold: realistic for shared-hardware scenarios,
@@ -365,8 +365,8 @@ fn test_large_table_lookup_leaky() {
 #[test]
 fn test_naive_scalar_mult_leaky() {
     let inputs = InputPair::new(
-        || [0u8; 32],       // Baseline: all zeros (no additions)
-        || rand::random(),  // Sample: random (many additions)
+        || [0u8; 32],      // Baseline: all zeros (no additions)
+        || rand::random(), // Sample: random (many additions)
     );
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)

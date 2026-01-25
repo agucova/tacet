@@ -1,16 +1,22 @@
-//! Calibration data for adaptive sampling (no_std compatible).
+//! Calibration data and computation for adaptive sampling (no_std compatible).
 //!
-//! This module defines the calibration results needed for the adaptive sampling loop.
-//! The actual calibration computation lives in the `tacet` crate; this module
-//! provides the data structures that can be used in no_std environments.
+//! This module defines the calibration results needed for the adaptive sampling loop,
+//! as well as the core calibration computation that can run in no_std environments.
 //!
 //! For no_std compatibility:
 //! - No `std::time::Instant` (throughput measured by caller)
-//! - No preflight checks (those require std features)
+//! - Core preflight checks are no_std compatible
 //! - Uses only `alloc` for heap allocation
+//!
+//! # Usage
+//!
+//! The `calibrate()` function runs the calibration phase using pre-collected samples.
+//! Unlike the `tacet` crate version, it takes `samples_per_second` as a parameter
+//! instead of measuring it internally (to avoid `std::time::Instant`).
 
 extern crate alloc;
 
+use alloc::string::String;
 use alloc::vec::Vec;
 use core::f64::consts::PI;
 
@@ -19,8 +25,14 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
+use crate::analysis::mde::estimate_mde;
 use crate::constants::DEFAULT_SEED;
 use crate::math;
+use crate::preflight::{run_core_checks, PreflightResult};
+use crate::statistics::{
+    bootstrap_difference_covariance, bootstrap_difference_covariance_discrete, AcquisitionStream,
+    OnlineStats,
+};
 use crate::types::{Matrix9, Vector9};
 
 use super::CalibrationSnapshot;
@@ -60,7 +72,6 @@ const DIAGONAL_FLOOR: f64 = 1e-12;
 
 /// Degrees of freedom for Student's t prior (v5.4).
 pub const NU: f64 = 4.0;
-
 
 /// Calibration results from the initial measurement phase (no_std compatible).
 ///
@@ -152,6 +163,11 @@ pub struct Calibration {
     /// When K > 1, samples contain K iterations worth of timing.
     /// Effect estimates must be divided by K to report per-call differences.
     pub batch_k: u32,
+
+    /// Results of core preflight checks run during calibration (no_std compatible).
+    /// Platform-specific checks (like system configuration) are handled by the
+    /// `tacet` crate's wrapper.
+    pub preflight_result: PreflightResult,
 }
 
 impl Calibration {
@@ -180,7 +196,7 @@ impl Calibration {
     ) -> Self {
         // Compute marginal prior covariance: 2σ²R (for ν=4)
         // The marginal variance of t_ν(0, σ²R) is (ν/(ν-2)) σ²R = 2σ²R for ν=4
-        let r = &l_r * l_r.transpose();
+        let r = l_r * l_r.transpose();
         let prior_cov_marginal = r * (2.0 * sigma_t * sigma_t);
 
         Self {
@@ -204,6 +220,61 @@ impl Calibration {
             theta_floor_initial,
             rng_seed,
             batch_k,
+            preflight_result: PreflightResult::new(),
+        }
+    }
+
+    /// Create a new Calibration with all fields including preflight results.
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_preflight(
+        sigma_rate: Matrix9,
+        block_length: usize,
+        sigma_t: f64,
+        l_r: Matrix9,
+        theta_ns: f64,
+        calibration_samples: usize,
+        discrete_mode: bool,
+        mde_shift_ns: f64,
+        mde_tail_ns: f64,
+        calibration_snapshot: CalibrationSnapshot,
+        timer_resolution_ns: f64,
+        samples_per_second: f64,
+        c_floor: f64,
+        projection_mismatch_thresh: f64,
+        theta_tick: f64,
+        theta_eff: f64,
+        theta_floor_initial: f64,
+        rng_seed: u64,
+        batch_k: u32,
+        preflight_result: PreflightResult,
+    ) -> Self {
+        // Compute marginal prior covariance: 2σ²R (for ν=4)
+        // The marginal variance of t_ν(0, σ²R) is (ν/(ν-2)) σ²R = 2σ²R for ν=4
+        let r = l_r * l_r.transpose();
+        let prior_cov_marginal = r * (2.0 * sigma_t * sigma_t);
+
+        Self {
+            sigma_rate,
+            block_length,
+            sigma_t,
+            l_r,
+            prior_cov_marginal,
+            theta_ns,
+            calibration_samples,
+            discrete_mode,
+            mde_shift_ns,
+            mde_tail_ns,
+            calibration_snapshot,
+            timer_resolution_ns,
+            samples_per_second,
+            c_floor,
+            projection_mismatch_thresh,
+            theta_tick,
+            theta_eff,
+            theta_floor_initial,
+            rng_seed,
+            batch_k,
+            preflight_result,
         }
     }
 
@@ -280,7 +351,6 @@ impl Calibration {
 /// Configuration for calibration phase (no_std compatible).
 ///
 /// This contains parameters for calibration that don't require std features.
-/// For full configuration with preflight options, see `tacet::CalibrationConfig`.
 #[derive(Debug, Clone)]
 pub struct CalibrationConfig {
     /// Number of samples to collect per class during calibration.
@@ -288,6 +358,9 @@ pub struct CalibrationConfig {
 
     /// Number of bootstrap iterations for covariance estimation.
     pub bootstrap_iterations: usize,
+
+    /// Timer resolution in nanoseconds.
+    pub timer_resolution_ns: f64,
 
     /// Theta threshold in nanoseconds.
     pub theta_ns: f64,
@@ -297,18 +370,261 @@ pub struct CalibrationConfig {
 
     /// Random seed for bootstrap.
     pub seed: u64,
+
+    /// Whether to skip preflight checks.
+    pub skip_preflight: bool,
+
+    /// Force discrete mode regardless of uniqueness ratio.
+    pub force_discrete_mode: bool,
 }
 
 impl Default for CalibrationConfig {
     fn default() -> Self {
         Self {
             calibration_samples: 5000,
-            bootstrap_iterations: 2000, // Full bootstrap for accurate covariance
+            bootstrap_iterations: 200, // Fewer iterations for calibration phase
+            timer_resolution_ns: 1.0,
             theta_ns: 100.0,
             alpha: 0.01,
             seed: DEFAULT_SEED,
+            skip_preflight: false,
+            force_discrete_mode: false,
         }
     }
+}
+
+/// Errors that can occur during calibration.
+#[derive(Debug, Clone)]
+pub enum CalibrationError {
+    /// Too few samples collected for reliable calibration.
+    TooFewSamples {
+        /// Number of samples actually collected.
+        collected: usize,
+        /// Minimum required samples.
+        minimum: usize,
+    },
+
+    /// Covariance estimation failed (e.g., singular matrix).
+    CovarianceEstimationFailed {
+        /// Reason for failure.
+        reason: String,
+    },
+
+    /// A preflight check failed before calibration.
+    PreflightCheckFailed {
+        /// Which check failed.
+        check: String,
+        /// Error message.
+        message: String,
+    },
+
+    /// Timer is too coarse to measure this operation.
+    TimerTooCoarse {
+        /// Timer resolution in nanoseconds.
+        resolution_ns: f64,
+        /// Measured operation time in nanoseconds.
+        operation_ns: f64,
+    },
+}
+
+impl core::fmt::Display for CalibrationError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            CalibrationError::TooFewSamples { collected, minimum } => {
+                write!(
+                    f,
+                    "Too few samples: collected {}, need at least {}",
+                    collected, minimum
+                )
+            }
+            CalibrationError::CovarianceEstimationFailed { reason } => {
+                write!(f, "Covariance estimation failed: {}", reason)
+            }
+            CalibrationError::PreflightCheckFailed { check, message } => {
+                write!(f, "Preflight check '{}' failed: {}", check, message)
+            }
+            CalibrationError::TimerTooCoarse {
+                resolution_ns,
+                operation_ns,
+            } => {
+                write!(
+                    f,
+                    "Timer resolution ({:.1}ns) too coarse for operation ({:.1}ns)",
+                    resolution_ns, operation_ns
+                )
+            }
+        }
+    }
+}
+
+/// Run calibration phase to estimate covariance and set priors (no_std compatible).
+///
+/// This is the core calibration function that can run in no_std environments.
+/// Unlike the `tacet` crate version, throughput (`samples_per_second`) must be
+/// provided by the caller since `std::time::Instant` is not available.
+///
+/// # Arguments
+///
+/// * `baseline_samples` - Pre-collected baseline timing samples (in native units)
+/// * `sample_samples` - Pre-collected sample timing samples (in native units)
+/// * `ns_per_tick` - Conversion factor from native units to nanoseconds
+/// * `config` - Calibration configuration
+/// * `samples_per_second` - Throughput measured by caller (e.g., via performance.now())
+///
+/// # Returns
+///
+/// A `Calibration` struct with all computed quantities, or a `CalibrationError`.
+pub fn calibrate(
+    baseline_samples: &[u64],
+    sample_samples: &[u64],
+    ns_per_tick: f64,
+    config: &CalibrationConfig,
+    samples_per_second: f64,
+) -> Result<Calibration, CalibrationError> {
+    let n = baseline_samples.len().min(sample_samples.len());
+
+    // Check minimum sample requirement
+    const MIN_CALIBRATION_SAMPLES: usize = 100;
+    if n < MIN_CALIBRATION_SAMPLES {
+        return Err(CalibrationError::TooFewSamples {
+            collected: n,
+            minimum: MIN_CALIBRATION_SAMPLES,
+        });
+    }
+
+    // Convert to nanoseconds for analysis
+    let baseline_ns: Vec<f64> = baseline_samples[..n]
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
+    let sample_ns: Vec<f64> = sample_samples[..n]
+        .iter()
+        .map(|&t| t as f64 * ns_per_tick)
+        .collect();
+
+    // Check discrete mode (spec Section 2.4): < 10% unique values
+    let unique_baseline = count_unique(&baseline_ns);
+    let unique_sample = count_unique(&sample_ns);
+    let min_uniqueness = (unique_baseline as f64 / n as f64).min(unique_sample as f64 / n as f64);
+    let discrete_mode = config.force_discrete_mode || min_uniqueness < 0.10;
+
+    // Create acquisition stream for joint bootstrap (spec Section 2.3.1)
+    let mut acquisition_stream = AcquisitionStream::with_capacity(2 * n);
+    acquisition_stream.push_batch_interleaved(&baseline_ns, &sample_ns);
+    let interleaved = acquisition_stream.to_timing_samples();
+
+    // Bootstrap covariance estimation
+    let cov_estimate = if discrete_mode {
+        bootstrap_difference_covariance_discrete(
+            &baseline_ns,
+            &sample_ns,
+            config.bootstrap_iterations,
+            config.seed,
+        )
+    } else {
+        bootstrap_difference_covariance(
+            &interleaved,
+            config.bootstrap_iterations,
+            config.seed,
+            false,
+        )
+    };
+
+    // Check covariance validity
+    if !cov_estimate.is_stable() {
+        return Err(CalibrationError::CovarianceEstimationFailed {
+            reason: String::from("Covariance matrix is not positive definite"),
+        });
+    }
+
+    // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
+    let sigma_rate = cov_estimate.matrix * (n as f64);
+
+    // Compute MDE for prior setting (spec Section 2.7)
+    let mde = estimate_mde(&cov_estimate.matrix, config.alpha);
+
+    // Run preflight checks (unless skipped)
+    let preflight_result = if config.skip_preflight {
+        PreflightResult::new()
+    } else {
+        run_core_checks(
+            &baseline_ns,
+            &sample_ns,
+            config.timer_resolution_ns,
+            config.seed,
+        )
+    };
+
+    // Compute calibration statistics snapshot for drift detection
+    let calibration_snapshot = compute_calibration_snapshot(&baseline_ns, &sample_ns);
+
+    // Compute floor-rate constant: c_floor = q_95(max_k |Z_k|) where Z ~ N(0, Σ_rate)
+    let c_floor = compute_c_floor_9d(&sigma_rate, config.seed);
+
+    // Timer tick floor
+    let theta_tick = config.timer_resolution_ns;
+
+    // Initial measurement floor at calibration sample count
+    let theta_floor_initial = (c_floor / (n as f64).sqrt()).max(theta_tick);
+
+    // Effective threshold: max(user threshold, measurement floor)
+    let theta_eff = if config.theta_ns > 0.0 {
+        config.theta_ns.max(theta_floor_initial)
+    } else {
+        theta_floor_initial
+    };
+
+    // Student's t prior (ν=4) calibration
+    let (sigma_t, l_r) =
+        calibrate_t_prior_scale(&sigma_rate, theta_eff, n, discrete_mode, config.seed);
+
+    Ok(Calibration::with_preflight(
+        sigma_rate,
+        cov_estimate.block_size,
+        sigma_t,
+        l_r,
+        config.theta_ns,
+        n,
+        discrete_mode,
+        mde.shift_ns,
+        mde.tail_ns,
+        calibration_snapshot,
+        config.timer_resolution_ns,
+        samples_per_second,
+        c_floor,
+        cov_estimate.q_thresh,
+        theta_tick,
+        theta_eff,
+        theta_floor_initial,
+        config.seed,
+        1, // batch_k = 1 (no batching), updated by collector
+        preflight_result,
+    ))
+}
+
+/// Count unique values in a slice (for discrete mode detection).
+fn count_unique(values: &[f64]) -> usize {
+    use alloc::collections::BTreeSet;
+
+    // Discretize to avoid floating point comparison issues
+    // Use 0.001ns buckets (well below any meaningful timing difference)
+    let buckets: BTreeSet<i64> = values.iter().map(|&v| (v * 1000.0) as i64).collect();
+    buckets.len()
+}
+
+/// Compute calibration statistics snapshot for drift detection.
+fn compute_calibration_snapshot(baseline_ns: &[f64], sample_ns: &[f64]) -> CalibrationSnapshot {
+    let mut baseline_stats = OnlineStats::new();
+    let mut sample_stats = OnlineStats::new();
+
+    for &t in baseline_ns {
+        baseline_stats.update(t);
+    }
+    for &t in sample_ns {
+        sample_stats.update(t);
+    }
+
+    CalibrationSnapshot::new(baseline_stats.finalize(), sample_stats.finalize())
 }
 
 /// Compute correlation-shaped 9D prior covariance (spec v5.1).
@@ -514,7 +830,10 @@ pub fn calibrate_t_prior_scale(
 
         // Compute exceedance using precomputed samples: count(m_i > θ/σ)
         let threshold = theta_eff / mid;
-        let count = normalized_effects.iter().filter(|&&m| m > threshold).count();
+        let count = normalized_effects
+            .iter()
+            .filter(|&&m| m > threshold)
+            .count();
         let exceedance = count as f64 / normalized_effects.len() as f64;
 
         if (exceedance - TARGET_EXCEEDANCE).abs() < 0.01 {
@@ -547,7 +866,7 @@ fn precompute_t_prior_effects(l_r: &Matrix9, seed: u64) -> Vec<f64> {
 
     #[cfg(feature = "parallel")]
     {
-        let l_r = l_r.clone();
+        let l_r = *l_r;
         (0..PRIOR_CALIBRATION_SAMPLES)
             .into_par_iter()
             .map(|i| {
@@ -565,7 +884,7 @@ fn precompute_t_prior_effects(l_r: &Matrix9, seed: u64) -> Vec<f64> {
                 }
 
                 // Compute m = max|L_R z| / √λ
-                let w = &l_r * z;
+                let w = l_r * z;
                 let max_w = w.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
                 max_w * inv_sqrt_lambda
             })
@@ -621,7 +940,7 @@ pub fn compute_c_floor_9d(sigma_rate: &Matrix9, seed: u64) -> f64 {
             for j in 0..9 {
                 z[j] = sample_standard_normal(&mut rng);
             }
-            let sample = &l * z;
+            let sample = l * z;
             sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max)
         })
         .collect();
@@ -635,7 +954,7 @@ pub fn compute_c_floor_9d(sigma_rate: &Matrix9, seed: u64) -> f64 {
             for i in 0..9 {
                 z[i] = sample_standard_normal(&mut rng);
             }
-            let sample = &l * z;
+            let sample = l * z;
             let max_effect = sample.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
             effects.push(max_effect);
         }
@@ -643,7 +962,8 @@ pub fn compute_c_floor_9d(sigma_rate: &Matrix9, seed: u64) -> f64 {
     };
 
     // 95th percentile using O(n) selection instead of O(n log n) sort
-    let idx = ((PRIOR_CALIBRATION_SAMPLES as f64 * 0.95) as usize).min(PRIOR_CALIBRATION_SAMPLES - 1);
+    let idx =
+        ((PRIOR_CALIBRATION_SAMPLES as f64 * 0.95) as usize).min(PRIOR_CALIBRATION_SAMPLES - 1);
     let (_, &mut percentile_95, _) = max_effects.select_nth_unstable_by(idx, |a, b| a.total_cmp(b));
     percentile_95
 }
@@ -793,8 +1113,11 @@ mod tests {
     fn test_calibration_config_default() {
         let config = CalibrationConfig::default();
         assert_eq!(config.calibration_samples, 5000);
-        assert_eq!(config.bootstrap_iterations, 2000);
+        assert_eq!(config.bootstrap_iterations, 200);
         assert!((config.theta_ns - 100.0).abs() < 1e-10);
+        assert!((config.timer_resolution_ns - 1.0).abs() < 1e-10);
+        assert!(!config.skip_preflight);
+        assert!(!config.force_discrete_mode);
     }
 
     // =========================================================================
@@ -832,7 +1155,10 @@ mod tests {
     /// Helper: compute exceedance using precomputed t-prior effects
     fn optimized_t_prior_exceedance(normalized_effects: &[f64], sigma: f64, theta: f64) -> f64 {
         let threshold = theta / sigma;
-        let count = normalized_effects.iter().filter(|&&m| m > threshold).count();
+        let count = normalized_effects
+            .iter()
+            .filter(|&&m| m > threshold)
+            .count();
         count as f64 / normalized_effects.len() as f64
     }
 
@@ -859,13 +1185,13 @@ mod tests {
             // Allow some tolerance due to different RNG sequences
             // The key property is that exceedance should be monotonically increasing with sigma
             assert!(
-                optimized >= 0.0 && optimized <= 1.0,
+                (0.0..=1.0).contains(&optimized),
                 "Optimized exceedance {} out of range for sigma={}",
                 optimized,
                 sigma
             );
             assert!(
-                reference >= 0.0 && reference <= 1.0,
+                (0.0..=1.0).contains(&reference),
                 "Reference exceedance {} out of range for sigma={}",
                 reference,
                 sigma
@@ -991,8 +1317,8 @@ mod tests {
         );
 
         // Check variance is non-zero (samples are diverse)
-        let variance: f64 = effects.iter().map(|&m| (m - mean).powi(2)).sum::<f64>()
-            / (effects.len() - 1) as f64;
+        let variance: f64 =
+            effects.iter().map(|&m| (m - mean).powi(2)).sum::<f64>() / (effects.len() - 1) as f64;
         assert!(variance > 0.1, "Effects should have non-trivial variance");
     }
 

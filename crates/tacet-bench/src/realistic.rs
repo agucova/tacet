@@ -112,14 +112,22 @@ pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
     // Create execution plan: random interleaving of baseline/test
     let total_samples = config.samples_per_class * 2;
     let mut plan: Vec<Class> = Vec::with_capacity(total_samples);
-    plan.extend(std::iter::repeat_n(Class::Baseline, config.samples_per_class));
+    plan.extend(std::iter::repeat_n(
+        Class::Baseline,
+        config.samples_per_class,
+    ));
     plan.extend(std::iter::repeat_n(Class::Sample, config.samples_per_class));
     plan.shuffle(&mut rng);
 
     // Warmup phase - run both baseline and sample operations
     for i in 0..config.warmup_iterations {
         let is_sample = i % 2 == 1;
-        black_box(measure_operation(&mut timer, config.base_operation_ns, is_sample, &config.effect));
+        black_box(measure_operation(
+            &mut timer,
+            config.base_operation_ns,
+            is_sample,
+            &config.effect,
+        ));
     }
 
     // Collect samples in interleaved order using precise timer
@@ -129,7 +137,12 @@ pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
 
     for class in &plan {
         let is_sample = matches!(class, Class::Sample);
-        let timing_ns = measure_operation(&mut timer, config.base_operation_ns, is_sample, &config.effect);
+        let timing_ns = measure_operation(
+            &mut timer,
+            config.base_operation_ns,
+            is_sample,
+            &config.effect,
+        );
 
         interleaved.push((*class, timing_ns));
         match class {
@@ -177,12 +190,16 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
     let delay = match effect {
         BenchmarkEffect::Null => 0,
         BenchmarkEffect::FixedDelay { delay_ns } => *delay_ns,
-        BenchmarkEffect::ThetaMultiple { theta_ns, multiplier } => {
-            (*theta_ns * *multiplier) as u64
-        }
+        BenchmarkEffect::ThetaMultiple {
+            theta_ns,
+            multiplier,
+        } => (*theta_ns * *multiplier) as u64,
         BenchmarkEffect::EarlyExit { .. } => 0,
         BenchmarkEffect::HammingWeight { .. } => 0,
-        BenchmarkEffect::Bimodal { slow_prob, slow_delay_ns } => {
+        BenchmarkEffect::Bimodal {
+            slow_prob,
+            slow_delay_ns,
+        } => {
             if *slow_delay_ns == 0 {
                 0
             } else {
@@ -207,7 +224,11 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
                 })
             }
         }
-        BenchmarkEffect::TailEffect { base_delay_ns, tail_prob, tail_mult } => {
+        BenchmarkEffect::TailEffect {
+            base_delay_ns,
+            tail_prob,
+            tail_mult,
+        } => {
             if *base_delay_ns == 0 {
                 0
             } else {
@@ -234,7 +255,12 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
 /// baseline and test by bypassing compute_effect_delay entirely. This ensures
 /// FPR measurements are not contaminated by harness-induced timing differences.
 #[inline(never)]
-fn measure_operation(timer: &mut BoxedTimer, base_ns: u64, apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
+fn measure_operation(
+    timer: &mut BoxedTimer,
+    base_ns: u64,
+    apply_effect: bool,
+    effect: &BenchmarkEffect,
+) -> u64 {
     // For Null effects, use a dedicated constant-time path that's identical
     // for both baseline and test. This avoids any code path differences from
     // the complex compute_effect_delay function.
@@ -354,7 +380,9 @@ mod tests {
     /// Skip test if cycle-accurate timing is not available (requires sudo on ARM64)
     fn skip_if_no_cycle_accurate() -> bool {
         if !TimerSpec::cycle_accurate_available() {
-            eprintln!("Skipping test: cycle-accurate timing not available (requires sudo on ARM64)");
+            eprintln!(
+                "Skipping test: cycle-accurate timing not available (requires sudo on ARM64)"
+            );
             return true;
         }
         false
@@ -397,7 +425,7 @@ mod tests {
         let config = RealisticConfig {
             samples_per_class: 100,
             effect: BenchmarkEffect::FixedDelay { delay_ns: 10_000 }, // 10μs delay
-            base_operation_ns: 1000,                                   // 1μs base
+            base_operation_ns: 1000,                                  // 1μs base
             warmup_iterations: 10,
             ..Default::default()
         };
@@ -405,10 +433,14 @@ mod tests {
         let dataset = collect_realistic_dataset(&config);
 
         // Test samples should be noticeably slower on average
-        let baseline_mean: f64 =
-            dataset.blocked.baseline.iter().map(|&x| x as f64).sum::<f64>() / 100.0;
-        let test_mean: f64 =
-            dataset.blocked.test.iter().map(|&x| x as f64).sum::<f64>() / 100.0;
+        let baseline_mean: f64 = dataset
+            .blocked
+            .baseline
+            .iter()
+            .map(|&x| x as f64)
+            .sum::<f64>()
+            / 100.0;
+        let test_mean: f64 = dataset.blocked.test.iter().map(|&x| x as f64).sum::<f64>() / 100.0;
 
         // Test should be at least 5μs slower on average (we injected 10μs)
         assert!(
@@ -435,7 +467,12 @@ mod tests {
         let dataset = collect_realistic_dataset(&config);
 
         // Interleaved should have mixed classes (not all baseline first)
-        let first_10: Vec<_> = dataset.interleaved.iter().take(10).map(|(c, _)| c).collect();
+        let first_10: Vec<_> = dataset
+            .interleaved
+            .iter()
+            .take(10)
+            .map(|(c, _)| c)
+            .collect();
         let has_baseline = first_10.iter().any(|c| matches!(c, Class::Baseline));
         let has_test = first_10.iter().any(|c| matches!(c, Class::Sample));
 
@@ -632,10 +669,23 @@ mod tests {
         let effects: Vec<BenchmarkEffect> = vec![
             BenchmarkEffect::Null,
             BenchmarkEffect::FixedDelay { delay_ns: 999 },
-            BenchmarkEffect::ThetaMultiple { theta_ns: 100.0, multiplier: 5.0 },
-            BenchmarkEffect::Bimodal { slow_prob: 1.0, slow_delay_ns: 888 },
-            BenchmarkEffect::VariableDelay { mean_ns: 777, std_ns: 0 },
-            BenchmarkEffect::TailEffect { base_delay_ns: 666, tail_prob: 1.0, tail_mult: 2.0 },
+            BenchmarkEffect::ThetaMultiple {
+                theta_ns: 100.0,
+                multiplier: 5.0,
+            },
+            BenchmarkEffect::Bimodal {
+                slow_prob: 1.0,
+                slow_delay_ns: 888,
+            },
+            BenchmarkEffect::VariableDelay {
+                mean_ns: 777,
+                std_ns: 0,
+            },
+            BenchmarkEffect::TailEffect {
+                base_delay_ns: 666,
+                tail_prob: 1.0,
+                tail_mult: 2.0,
+            },
         ];
 
         for effect in &effects {

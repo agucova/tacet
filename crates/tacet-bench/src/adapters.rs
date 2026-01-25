@@ -14,11 +14,11 @@
 
 use crate::{BlockedData, GeneratedDataset};
 use rand::prelude::*;
-use tacet::{AttackerModel, Class, Outcome, TimingOracle};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use tacet::{AttackerModel, Class, Outcome, TimingOracle};
 
 /// Standardized outcome category for cross-tool comparison.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,16 +358,14 @@ impl ToolAdapter for TimingOracleAdapter {
                 samples_used,
                 reason,
                 ..
-            } => {
-                ToolResult {
-                    detected_leak: false,
-                    samples_used,
-                    decision_time_ms: elapsed_ms,
-                    leak_probability: Some(leak_probability),
-                    status: format!("Inconclusive: {:?}", reason),
-                    outcome: OutcomeCategory::Inconclusive,
-                }
-            }
+            } => ToolResult {
+                detected_leak: false,
+                samples_used,
+                decision_time_ms: elapsed_ms,
+                leak_probability: Some(leak_probability),
+                status: format!("Inconclusive: {:?}", reason),
+                outcome: OutcomeCategory::Inconclusive,
+            },
             Outcome::Unmeasurable { recommendation, .. } => ToolResult {
                 detected_leak: false,
                 samples_used: 0,
@@ -481,7 +479,11 @@ impl ToolAdapter for DudectAdapter {
                 summary.max_tau,
                 self.t_threshold
             ),
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -585,7 +587,11 @@ impl ToolAdapter for RtlfAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value),
                     status: format!("p={:.4}, alpha={:.2}", p_value, self.alpha),
-                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+                    outcome: if detected {
+                        OutcomeCategory::Fail
+                    } else {
+                        OutcomeCategory::Pass
+                    },
                 }
             }
             Err(e) => ToolResult {
@@ -642,8 +648,8 @@ fn run_rtlf(
 
     // Exit codes 10 and 11 are success - try to parse JSON output
     if output_file.exists() {
-        let json_content =
-            std::fs::read_to_string(output_file).map_err(|e| format!("Failed to read output: {}", e))?;
+        let json_content = std::fs::read_to_string(output_file)
+            .map_err(|e| format!("Failed to read output: {}", e))?;
         parse_rtlf_json(&json_content, alpha)
     } else {
         // Fallback: interpret exit code directly
@@ -669,7 +675,10 @@ fn parse_rtlf_json(json_content: &str, _alpha: f64) -> Result<(bool, f64), Strin
     if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_content) {
         // Check metadata.difference_detected first (most reliable)
         if let Some(metadata) = parsed.get("metadata") {
-            if let Some(detected) = metadata.get("difference_detected").and_then(|v| v.as_bool()) {
+            if let Some(detected) = metadata
+                .get("difference_detected")
+                .and_then(|v| v.as_bool())
+            {
                 // RTLF doesn't output p-values, just the decision
                 let p_value = if detected { 0.0 } else { 1.0 };
                 return Ok((detected, p_value));
@@ -816,7 +825,11 @@ impl ToolAdapter for SilentAdapter {
                         "stat={:.3}, alpha={:.2}, delta={:.0}",
                         stat, self.alpha, self.delta
                     ),
-                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+                    outcome: if detected {
+                        OutcomeCategory::Fail
+                    } else {
+                        OutcomeCategory::Pass
+                    },
                 }
             }
             Err(e) => ToolResult {
@@ -854,7 +867,12 @@ fn run_silent(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .output()
-        .map_err(|e| format!("Failed to run SILENT ({}): {}. Is silent in PATH?", command, e))?;
+        .map_err(|e| {
+            format!(
+                "Failed to run SILENT ({}): {}. Is silent in PATH?",
+                command, e
+            )
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -869,8 +887,8 @@ fn run_silent(
     let json_file = output_dir.join(format!("{}_summary_results.json", base_name));
 
     if json_file.exists() {
-        let json_content =
-            std::fs::read_to_string(&json_file).map_err(|e| format!("Failed to read output: {}", e))?;
+        let json_content = std::fs::read_to_string(&json_file)
+            .map_err(|e| format!("Failed to read output: {}", e))?;
         parse_silent_json(&json_content)
     } else {
         // Fallback: parse stdout for decision
@@ -997,7 +1015,11 @@ impl ToolAdapter for RtlfDockerAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value), // Convert p-value to "leak probability"
                     status: format!("p={:.4}, alpha={:.2}", p_value, self.alpha),
-                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+                    outcome: if detected {
+                        OutcomeCategory::Fail
+                    } else {
+                        OutcomeCategory::Pass
+                    },
                 }
             }
             Err(e) => ToolResult {
@@ -1070,7 +1092,10 @@ fn parse_rtlf_output(output: &str, alpha: f64) -> Result<(bool, f64), String> {
         if line_lower.contains("p-value") || line_lower.contains("pvalue") {
             // Extract p-value from line
             for word in line.split_whitespace() {
-                if let Ok(p) = word.trim_matches(|c: char| !c.is_numeric() && c != '.').parse::<f64>() {
+                if let Ok(p) = word
+                    .trim_matches(|c: char| !c.is_numeric() && c != '.')
+                    .parse::<f64>()
+                {
                     if (0.0..=1.0).contains(&p) {
                         return Ok((p < alpha, p));
                     }
@@ -1159,7 +1184,11 @@ impl ToolAdapter for TimingTvlaAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: None, // TVLA doesn't give probabilities
             status: format!("|t|={:.2}, threshold={:.1}", t_stat.abs(), self.t_threshold),
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -1178,8 +1207,16 @@ fn welch_t_test(sample1: &[u64], sample2: &[u64]) -> f64 {
     let mean2: f64 = sample2.iter().map(|&x| x as f64).sum::<f64>() / n2;
 
     // Compute variances
-    let var1: f64 = sample1.iter().map(|&x| (x as f64 - mean1).powi(2)).sum::<f64>() / (n1 - 1.0);
-    let var2: f64 = sample2.iter().map(|&x| (x as f64 - mean2).powi(2)).sum::<f64>() / (n2 - 1.0);
+    let var1: f64 = sample1
+        .iter()
+        .map(|&x| (x as f64 - mean1).powi(2))
+        .sum::<f64>()
+        / (n1 - 1.0);
+    let var2: f64 = sample2
+        .iter()
+        .map(|&x| (x as f64 - mean2).powi(2))
+        .sum::<f64>()
+        / (n2 - 1.0);
 
     // Welch's t-statistic
     let num = mean1 - mean2;
@@ -1260,7 +1297,11 @@ impl ToolAdapter for KsTestAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: Some(1.0 - p_value),
             status: format!("D={:.4}, p={:.4}, alpha={:.2}", d_stat, p_value, self.alpha),
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -1405,8 +1446,15 @@ impl ToolAdapter for AndersonDarlingAdapter {
             samples_used: n1 + n2,
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: Some(1.0 - p_value),
-            status: format!("A²={:.4}, p={:.4}, alpha={:.2}", a2_stat, p_value, self.alpha),
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            status: format!(
+                "A²={:.4}, p={:.4}, alpha={:.2}",
+                a2_stat, p_value, self.alpha
+            ),
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -1434,7 +1482,10 @@ fn ad_two_sample(sample1: &[u64], sample2: &[u64]) -> (f64, f64) {
     // Shuffle tied elements to avoid bias from stable sort grouping sample1 before sample2.
     // Without this, heavily quantized data causes systematic deviation in cumulative counts.
     // Use deterministic seed based on data for reproducibility.
-    let seed = sample1.iter().take(10).fold(0u64, |acc, &x| acc.wrapping_add(x));
+    let seed = sample1
+        .iter()
+        .take(10)
+        .fold(0u64, |acc, &x| acc.wrapping_add(x));
     let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
     let mut i = 0;
     while i < n {
@@ -1459,8 +1510,8 @@ fn ad_two_sample(sample1: &[u64], sample2: &[u64]) -> (f64, f64) {
         }
         // Midrank for tied values
         let midrank = (i + j + 1) as f64 / 2.0;
-        for k in i..j {
-            ranks.push((midrank, combined[k].1));
+        for &(_, idx) in combined[i..j].iter() {
+            ranks.push((midrank, idx));
         }
         i = j;
     }
@@ -1477,8 +1528,8 @@ fn ad_two_sample(sample1: &[u64], sample2: &[u64]) -> (f64, f64) {
     let mut m1 = 0.0; // cumulative count from sample 1
     let mut sum = 0.0;
 
-    for j in 0..(n - 1) {
-        if ranks[j].1 == 0 {
+    for (j, rank) in ranks.iter().take(n - 1).enumerate() {
+        if rank.1 == 0 {
             m1 += 1.0;
         }
         let m2 = (j + 1) as f64 - m1;
@@ -1643,11 +1694,18 @@ impl ToolAdapter for MonaAdapter {
             decision_time_ms: start.elapsed().as_millis() as u64,
             leak_probability: None, // Box test doesn't give probabilities
             status: if detected {
-                format!("non-overlapping box found at [{}-{}%]", best_box.0, best_box.1)
+                format!(
+                    "non-overlapping box found at [{}-{}%]",
+                    best_box.0, best_box.1
+                )
             } else {
                 "no non-overlapping box found".to_string()
             },
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -1669,7 +1727,11 @@ impl ToolAdapter for MonaAdapter {
 ///
 /// Returns (detected, (lower_percentile, upper_percentile)) where the box is the
 /// first non-overlapping range found, or (false, (0, 0)) if none found.
-fn crosby_box_test(baseline: &[u64], sample: &[u64], min_box_size: usize) -> (bool, (usize, usize)) {
+fn crosby_box_test(
+    baseline: &[u64],
+    sample: &[u64],
+    min_box_size: usize,
+) -> (bool, (usize, usize)) {
     let mut a: Vec<u64> = baseline.to_vec();
     let mut b: Vec<u64> = sample.to_vec();
     a.sort_unstable();
@@ -1756,7 +1818,10 @@ impl Default for RtlfNativeAdapter {
 impl RtlfNativeAdapter {
     /// Create with custom alpha.
     pub fn with_alpha(alpha: f64) -> Self {
-        Self { alpha, ..Default::default() }
+        Self {
+            alpha,
+            ..Default::default()
+        }
     }
 
     /// Set number of bootstrap iterations.
@@ -1799,7 +1864,11 @@ impl ToolAdapter for RtlfNativeAdapter {
             detected_leak: detected,
             samples_used: n1 + n2,
             decision_time_ms: start.elapsed().as_millis() as u64,
-            leak_probability: if detected { Some(1.0 - self.alpha) } else { Some(self.alpha) },
+            leak_probability: if detected {
+                Some(1.0 - self.alpha)
+            } else {
+                Some(self.alpha)
+            },
             status: if detected {
                 format!(
                     "significant at deciles {:?}, max_excess={:.2}",
@@ -1808,7 +1877,11 @@ impl ToolAdapter for RtlfNativeAdapter {
             } else {
                 format!("no significant deciles, max_excess={:.2}", max_excess)
             },
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -1857,10 +1930,12 @@ fn rtlf_bootstrap_test(
 
     // RTLF within-group bootstrap (rtlf.R:432-452, bootstrap1 function)
     // Pre-allocate all buffers for reuse across iterations
-    let mut bootstrap_diffs_baseline: Vec<Vec<f64>> =
-        (0..9).map(|_| Vec::with_capacity(bootstrap_iters)).collect();
-    let mut bootstrap_diffs_test: Vec<Vec<f64>> =
-        (0..9).map(|_| Vec::with_capacity(bootstrap_iters)).collect();
+    let mut bootstrap_diffs_baseline: Vec<Vec<f64>> = (0..9)
+        .map(|_| Vec::with_capacity(bootstrap_iters))
+        .collect();
+    let mut bootstrap_diffs_test: Vec<Vec<f64>> = (0..9)
+        .map(|_| Vec::with_capacity(bootstrap_iters))
+        .collect();
 
     let mut rng = SmallRng::seed_from_u64(0x5deece66d);
     let mut b1: Vec<u64> = vec![0; n];
@@ -1901,8 +1976,8 @@ fn rtlf_bootstrap_test(
     // This implements the Bonferroni-style correction across 9 deciles
     let alpha_per_decile = alpha / 9.0;
     let threshold_percentile = 1.0 - alpha_per_decile;
-    let threshold_idx = ((bootstrap_iters as f64 * threshold_percentile) as usize)
-        .min(bootstrap_iters - 1);
+    let threshold_idx =
+        ((bootstrap_iters as f64 * threshold_percentile) as usize).min(bootstrap_iters - 1);
 
     let mut significant_deciles = Vec::new();
     let mut max_excess = 0.0f64;
@@ -2022,7 +2097,10 @@ impl Default for SilentNativeAdapter {
 impl SilentNativeAdapter {
     /// Create with custom alpha.
     pub fn with_alpha(alpha: f64) -> Self {
-        Self { alpha, ..Default::default() }
+        Self {
+            alpha,
+            ..Default::default()
+        }
     }
 
     /// Set practical significance threshold Δ.
@@ -2072,12 +2150,20 @@ impl ToolAdapter for SilentNativeAdapter {
             detected_leak: detected,
             samples_used: n1 + n2,
             decision_time_ms: start.elapsed().as_millis() as u64,
-            leak_probability: if detected { Some(1.0 - self.alpha) } else { Some(self.alpha) },
+            leak_probability: if detected {
+                Some(1.0 - self.alpha)
+            } else {
+                Some(self.alpha)
+            },
             status: format!(
                 "diff={:.1}ns, CI_lower={:.1}ns, Δ={:.1}ns",
                 observed_diff, ci_lower, delta_used
             ),
-            outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+            outcome: if detected {
+                OutcomeCategory::Fail
+            } else {
+                OutcomeCategory::Pass
+            },
         }
     }
 
@@ -2134,8 +2220,16 @@ fn silent_bootstrap_test(
         let diff_boot = (mean_x_boot - mean_y_boot).abs();
 
         // Compute SE of the bootstrap difference
-        let var_x_boot: f64 = x_boot.iter().map(|v| (v - mean_x_boot).powi(2)).sum::<f64>() / (n_x - 1) as f64;
-        let var_y_boot: f64 = y_boot.iter().map(|v| (v - mean_y_boot).powi(2)).sum::<f64>() / (n_y - 1) as f64;
+        let var_x_boot: f64 = x_boot
+            .iter()
+            .map(|v| (v - mean_x_boot).powi(2))
+            .sum::<f64>()
+            / (n_x - 1) as f64;
+        let var_y_boot: f64 = y_boot
+            .iter()
+            .map(|v| (v - mean_y_boot).powi(2))
+            .sum::<f64>()
+            / (n_y - 1) as f64;
         let se_boot = (var_x_boot / n_x as f64 + var_y_boot / n_y as f64).sqrt();
 
         if se_boot > 1e-10 {
@@ -2278,7 +2372,11 @@ impl ToolAdapter for TlsfuzzerAdapter {
                     decision_time_ms: start.elapsed().as_millis() as u64,
                     leak_probability: Some(1.0 - p_value),
                     status: format!("{}(p={:.4}), alpha={:.2}", test_name, p_value, self.alpha),
-                    outcome: if detected { OutcomeCategory::Fail } else { OutcomeCategory::Pass },
+                    outcome: if detected {
+                        OutcomeCategory::Fail
+                    } else {
+                        OutcomeCategory::Pass
+                    },
                 }
             }
             Err(e) => ToolResult {
@@ -2307,7 +2405,11 @@ fn write_tlsfuzzer_csv(path: &Path, data: &BlockedData) -> std::io::Result<()> {
 
     let max_len = data.baseline.len().max(data.test.len());
     for i in 0..max_len {
-        let v1 = data.baseline.get(i).map(|&v| v.to_string()).unwrap_or_default();
+        let v1 = data
+            .baseline
+            .get(i)
+            .map(|&v| v.to_string())
+            .unwrap_or_default();
         let v2 = data.test.get(i).map(|&v| v.to_string()).unwrap_or_default();
         writeln!(file, "{},{}", v1, v2)?;
     }
@@ -2444,7 +2546,8 @@ fn parse_tlsfuzzer_output(
     let explicit_fail = output_lower.contains("fail") && !output_lower.contains("failed to");
 
     // Detect leak if: exit code says so, p-value below alpha, or explicit vulnerable keyword
-    let detected = exit_code_detected || min_p_value < alpha || explicit_vulnerable || explicit_fail;
+    let detected =
+        exit_code_detected || min_p_value < alpha || explicit_vulnerable || explicit_fail;
 
     if min_p_value < 1.0 || exit_code_detected || explicit_vulnerable {
         Ok((detected, min_p_value, test_name))
@@ -2713,7 +2816,10 @@ mod tests {
         // Null effect should (usually) not detect leak
         assert!(result.samples_used > 0);
         assert!(result.status.contains("|t|="));
-        println!("Timing-TVLA null: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "Timing-TVLA null: detected={}, status={}",
+            result.detected_leak, result.status
+        );
     }
 
     #[test]
@@ -2731,7 +2837,10 @@ mod tests {
 
         // Strong shift should detect leak
         assert!(result.samples_used > 0);
-        println!("Timing-TVLA shift 20%: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "Timing-TVLA shift 20%: detected={}, status={}",
+            result.detected_leak, result.status
+        );
         assert!(result.detected_leak, "20% shift should be detected");
     }
 
@@ -2753,8 +2862,16 @@ mod tests {
         let sample1: Vec<u64> = (0..1000).map(|i| 1000 + i).collect();
         let sample2: Vec<u64> = (0..1000).map(|i| 2000 + i).collect();
         let (d, p) = ks_two_sample(&sample1, &sample2);
-        assert!(d > 0.9, "Non-overlapping samples should have D ≈ 1, got {}", d);
-        assert!(p < 0.001, "Non-overlapping samples should have tiny p-value, got {}", p);
+        assert!(
+            d > 0.9,
+            "Non-overlapping samples should have D ≈ 1, got {}",
+            d
+        );
+        assert!(
+            p < 0.001,
+            "Non-overlapping samples should have tiny p-value, got {}",
+            p
+        );
     }
 
     #[test]
@@ -2772,7 +2889,10 @@ mod tests {
 
         assert!(result.samples_used > 0);
         assert!(result.status.contains("D="));
-        println!("KS test null: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "KS test null: detected={}, status={}",
+            result.detected_leak, result.status
+        );
     }
 
     #[test]
@@ -2789,7 +2909,10 @@ mod tests {
         let result = adapter.analyze(&dataset);
 
         assert!(result.samples_used > 0);
-        println!("KS test shift 20%: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "KS test shift 20%: detected={}, status={}",
+            result.detected_leak, result.status
+        );
         assert!(result.detected_leak, "20% shift should be detected");
     }
 
@@ -2802,7 +2925,11 @@ mod tests {
         // Two samples from the same distribution should have small A²
         let sample: Vec<u64> = (0..1000).map(|i| 1000 + i).collect();
         let (a2, _) = ad_two_sample(&sample, &sample);
-        assert!(a2 < 1.0, "Identical samples should have small A², got {}", a2);
+        assert!(
+            a2 < 1.0,
+            "Identical samples should have small A², got {}",
+            a2
+        );
     }
 
     #[test]
@@ -2811,8 +2938,16 @@ mod tests {
         let sample1: Vec<u64> = (0..1000).map(|i| 1000 + i).collect();
         let sample2: Vec<u64> = (0..1000).map(|i| 2000 + i).collect();
         let (a2, p) = ad_two_sample(&sample1, &sample2);
-        assert!(a2 > 10.0, "Non-overlapping samples should have large A², got {}", a2);
-        assert!(p < 0.001, "Non-overlapping samples should have tiny p-value, got {}", p);
+        assert!(
+            a2 > 10.0,
+            "Non-overlapping samples should have large A², got {}",
+            a2
+        );
+        assert!(
+            p < 0.001,
+            "Non-overlapping samples should have tiny p-value, got {}",
+            p
+        );
     }
 
     #[test]
@@ -2850,7 +2985,10 @@ mod tests {
 
         assert!(result.samples_used > 0);
         assert!(result.status.contains("A²="));
-        println!("AD test null: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "AD test null: detected={}, status={}",
+            result.detected_leak, result.status
+        );
     }
 
     #[test]
@@ -2867,7 +3005,10 @@ mod tests {
         let result = adapter.analyze(&dataset);
 
         assert!(result.samples_used > 0);
-        println!("AD test shift 20%: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "AD test shift 20%: detected={}, status={}",
+            result.detected_leak, result.status
+        );
         assert!(result.detected_leak, "20% shift should be detected");
     }
 
@@ -2879,12 +3020,18 @@ mod tests {
     fn test_crosby_box_test_non_overlapping() {
         // Two completely separated distributions - should detect
         let baseline: Vec<u64> = (100..200).collect(); // 100-199
-        let sample: Vec<u64> = (300..400).collect();   // 300-399
+        let sample: Vec<u64> = (300..400).collect(); // 300-399
 
         let (detected, box_range) = crosby_box_test(&baseline, &sample, 1);
 
-        assert!(detected, "Completely separated distributions should be detected");
-        println!("Non-overlapping: detected at box [{}-{}%]", box_range.0, box_range.1);
+        assert!(
+            detected,
+            "Completely separated distributions should be detected"
+        );
+        println!(
+            "Non-overlapping: detected at box [{}-{}%]",
+            box_range.0, box_range.1
+        );
     }
 
     #[test]
@@ -2909,8 +3056,14 @@ mod tests {
 
         // The lower percentiles of baseline (100-149) don't overlap with
         // lower percentiles of sample (150-199), so should detect
-        assert!(detected, "Partially separated distributions should be detected in tails");
-        println!("Partial separation: detected at box [{}-{}%]", box_range.0, box_range.1);
+        assert!(
+            detected,
+            "Partially separated distributions should be detected in tails"
+        );
+        println!(
+            "Partial separation: detected at box [{}-{}%]",
+            box_range.0, box_range.1
+        );
     }
 
     #[test]
@@ -2943,11 +3096,20 @@ mod tests {
         }
 
         let fpr = false_positives as f64 / trials as f64;
-        println!("Mona box test FPR: {}/{} = {:.1}%", false_positives, trials, fpr * 100.0);
+        println!(
+            "Mona box test FPR: {}/{} = {:.1}%",
+            false_positives,
+            trials,
+            fpr * 100.0
+        );
 
         // Box test should have reasonable FPR (< 50% on null data)
         // Higher FPR than other tests is expected for this non-parametric method
-        assert!(fpr < 0.5, "Box test FPR should be < 50%, got {:.1}%", fpr * 100.0);
+        assert!(
+            fpr < 0.5,
+            "Box test FPR should be < 50%, got {:.1}%",
+            fpr * 100.0
+        );
     }
 
     #[test]
@@ -2968,7 +3130,10 @@ mod tests {
         let result = adapter.analyze(&dataset);
 
         assert!(result.samples_used > 0);
-        println!("Mona shift 200%: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "Mona shift 200%: detected={}, status={}",
+            result.detected_leak, result.status
+        );
         // With a 200% shift, there should be some non-overlapping percentile range
     }
 
@@ -2990,7 +3155,10 @@ mod tests {
         let adapter = TlsfuzzerAdapter::default();
         let result = adapter.analyze(&dataset);
 
-        println!("tlsfuzzer: detected={}, status={}", result.detected_leak, result.status);
+        println!(
+            "tlsfuzzer: detected={}, status={}",
+            result.detected_leak, result.status
+        );
         // Just check it runs without crashing when tlsfuzzer is available
     }
 }

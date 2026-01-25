@@ -55,10 +55,16 @@ fn ring_chacha20poly1305_encrypt_ct() {
     let outcome = skip_if_unreliable!(outcome, "ring_chacha20poly1305_encrypt_ct");
 
     match &outcome {
-        Outcome::Pass { leak_probability, .. } => {
+        Outcome::Pass {
+            leak_probability, ..
+        } => {
             eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
         }
-        Outcome::Fail { leak_probability, exploitability, .. } => {
+        Outcome::Fail {
+            leak_probability,
+            exploitability,
+            ..
+        } => {
             panic!(
                 "ring ChaCha20-Poly1305 should be constant-time (got leak_probability={:.1}%, {:?})",
                 leak_probability * 100.0, exploitability
@@ -75,7 +81,10 @@ fn ring_chacha20poly1305_encrypt_ct() {
 
     if let Some(exp) = get_exploitability(&outcome) {
         assert!(
-            matches!(exp, Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing),
+            matches!(
+                exp,
+                Exploitability::SharedHardwareOnly | Exploitability::Http2Multiplexing
+            ),
             "ring ChaCha20-Poly1305 should have low exploitability (got {:?})",
             exp
         );

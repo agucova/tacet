@@ -162,7 +162,7 @@ pub fn timer_resolution_ns() -> f64 {
 /// - **macOS (Apple Silicon)**: Reads from CNTFRQ_EL0 register.
 ///   - M1/M2 chips: 24 MHz (24,000,000 Hz)
 ///   - M3/M4+ chips (macOS 15+): 1 GHz (1,000,000,000 Hz)
-///   See: https://developer.apple.com/documentation/macos-release-notes/macos-15-release-notes
+///     See: https://developer.apple.com/documentation/macos-release-notes/macos-15-release-notes
 ///
 /// - **Linux**: Reads from CNTFRQ_EL0 register. This can be unreliable on some
 ///   platforms due to firmware bugs (e.g., some older Raspberry Pi firmware,
@@ -210,7 +210,7 @@ fn get_aarch64_counter_freq_hz() -> u64 {
         // Fallback for older macOS or unusual configurations
         // Try 1GHz first (M3+), then 24MHz (M1/M2)
         eprintln!("[tacet::effect] INFO: Using macOS fallback frequency: 1 GHz");
-        return 1_000_000_000;
+        1_000_000_000
     }
 
     // Ultimate fallback: calibrate against Instant::now()
@@ -230,7 +230,7 @@ fn get_aarch64_counter_freq_hz() -> u64 {
 /// Check if an ARM64 counter frequency is reasonable (1 MHz to 10 GHz).
 #[cfg(target_arch = "aarch64")]
 fn is_reasonable_aarch64_freq(freq: u64) -> bool {
-    freq >= 1_000_000 && freq <= 10_000_000_000
+    (1_000_000..=10_000_000_000).contains(&freq)
 }
 
 /// Try to detect ARM64 platform from /proc/cpuinfo and return known frequency.
@@ -301,9 +301,7 @@ fn calibrate_aarch64_frequency() -> u64 {
     }
 
     if frequencies.is_empty() {
-        eprintln!(
-            "[tacet::effect] WARNING: ARM64 calibration failed. Using 24MHz estimate."
-        );
+        eprintln!("[tacet::effect] WARNING: ARM64 calibration failed. Using 24MHz estimate.");
         return 24_000_000;
     }
 
@@ -345,11 +343,11 @@ fn ns_to_ticks_aarch64(ns: u64) -> u64 {
         ns
     } else if freq == 24_000_000 {
         // 24MHz fast path (M1/M2 Apple Silicon): ticks = ns * 24 / 1000
-        (ns * 24 + 999) / 1000
+        (ns * 24).div_ceil(1000)
     } else {
         // General case: ticks = ns * freq / 1e9
         // Use u128 to avoid overflow for large ns values
-        ((ns as u128 * freq as u128 + 999_999_999) / 1_000_000_000) as u64
+        ((ns as u128 * freq as u128).div_ceil(1_000_000_000)) as u64
     }
 }
 
@@ -445,11 +443,7 @@ fn get_tsc_freq_macos() -> Option<u64> {
 fn sysctl_read_u64(name: &str) -> Option<u64> {
     use std::process::Command;
 
-    let output = Command::new("sysctl")
-        .arg("-n")
-        .arg(name)
-        .output()
-        .ok()?;
+    let output = Command::new("sysctl").arg("-n").arg(name).output().ok()?;
 
     if !output.status.success() {
         return None;
@@ -468,9 +462,7 @@ fn is_reasonable_tsc_freq(freq: u64) -> bool {
 /// Fallback: Calibrate TSC frequency by measuring against Instant.
 #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
 fn calibrate_tsc_frequency() -> u64 {
-    eprintln!(
-        "[tacet::effect] INFO: Calibrating TSC frequency (no sysfs/sysctl available)..."
-    );
+    eprintln!("[tacet::effect] INFO: Calibrating TSC frequency (no sysfs/sysctl available)...");
 
     // Use multiple samples for better accuracy
     const SAMPLES: usize = 5;
@@ -496,9 +488,7 @@ fn calibrate_tsc_frequency() -> u64 {
     }
 
     if frequencies.is_empty() {
-        eprintln!(
-            "[tacet::effect] WARNING: TSC calibration failed. Using 3GHz estimate."
-        );
+        eprintln!("[tacet::effect] WARNING: TSC calibration failed. Using 3GHz estimate.");
         return 3_000_000_000;
     }
 
@@ -591,7 +581,7 @@ fn validate_busy_wait_once() {
         // Allow wide tolerance: 0.3x to 10x
         // - Below 0.3x suggests frequency is way too high (e.g., using 24MHz when it's 1GHz)
         // - Above 10x suggests frequency is way too low or severe system interference
-        if ratio < 0.3 || ratio > 10.0 {
+        if !(0.3..=10.0).contains(&ratio) {
             eprintln!(
                 "[tacet::effect] WARNING: busy_wait_ns accuracy issue detected!\n\
                  Requested: {}ns, Actual: {}ns, Ratio: {:.2}x\n\
@@ -938,11 +928,16 @@ impl BenchmarkEffect {
             BenchmarkEffect::EarlyExit { max_delay_ns } => Some(-(*max_delay_ns as f64)), // Baseline slower
             BenchmarkEffect::HammingWeight { .. } => None, // Data-dependent
             // Stochastic effects return expected value
-            BenchmarkEffect::Bimodal { slow_prob, slow_delay_ns } => {
-                Some(slow_prob * (*slow_delay_ns as f64))
-            }
+            BenchmarkEffect::Bimodal {
+                slow_prob,
+                slow_delay_ns,
+            } => Some(slow_prob * (*slow_delay_ns as f64)),
             BenchmarkEffect::VariableDelay { mean_ns, .. } => Some(*mean_ns as f64),
-            BenchmarkEffect::TailEffect { base_delay_ns, tail_prob, tail_mult } => {
+            BenchmarkEffect::TailEffect {
+                base_delay_ns,
+                tail_prob,
+                tail_mult,
+            } => {
                 // Expected value: base + prob * (mult - 1) * base
                 let base = *base_delay_ns as f64;
                 Some(base * (1.0 + tail_prob * (tail_mult - 1.0)))
@@ -952,7 +947,10 @@ impl BenchmarkEffect {
 
     /// Create a bimodal effect (occasional slow operations).
     pub fn bimodal(slow_prob: f64, slow_delay_ns: u64) -> Self {
-        BenchmarkEffect::Bimodal { slow_prob, slow_delay_ns }
+        BenchmarkEffect::Bimodal {
+            slow_prob,
+            slow_delay_ns,
+        }
     }
 
     /// Standard bimodal pattern: 5% probability of 10μs delay.
@@ -967,7 +965,11 @@ impl BenchmarkEffect {
 
     /// Create a tail effect (occasional large delays).
     pub fn tail_effect(base_delay_ns: u64, tail_prob: f64, tail_mult: f64) -> Self {
-        BenchmarkEffect::TailEffect { base_delay_ns, tail_prob, tail_mult }
+        BenchmarkEffect::TailEffect {
+            base_delay_ns,
+            tail_prob,
+            tail_mult,
+        }
     }
 
     /// Standard tail effect: 100ns base, 5% probability of 10x multiplier.
@@ -1057,7 +1059,10 @@ pub fn apply_effect(effect: BenchmarkEffect) -> impl Fn(&bool) {
                 // Use apply_effect_bytes for data-dependent effects
                 std::hint::black_box(());
             }
-            BenchmarkEffect::Bimodal { slow_prob, slow_delay_ns } => {
+            BenchmarkEffect::Bimodal {
+                slow_prob,
+                slow_delay_ns,
+            } => {
                 if is_sample {
                     RNG.with(|rng| {
                         if rng.borrow_mut().random::<f64>() < slow_prob {
@@ -1078,7 +1083,11 @@ pub fn apply_effect(effect: BenchmarkEffect) -> impl Fn(&bool) {
                     });
                 }
             }
-            BenchmarkEffect::TailEffect { base_delay_ns, tail_prob, tail_mult } => {
+            BenchmarkEffect::TailEffect {
+                base_delay_ns,
+                tail_prob,
+                tail_mult,
+            } => {
                 if is_sample {
                     RNG.with(|rng| {
                         let is_tail = rng.borrow_mut().random::<f64>() < tail_prob;
@@ -1791,8 +1800,7 @@ mod tests {
         const TARGET_DELAY_NS: u64 = TARGET_DELAY_MS * 1_000_000;
 
         // Expected ticks for this delay
-        let expected_ticks =
-            ((TARGET_DELAY_NS as u128 * freq as u128) / 1_000_000_000) as u64;
+        let expected_ticks = ((TARGET_DELAY_NS as u128 * freq as u128) / 1_000_000_000) as u64;
 
         // Measure actual ticks during a real delay
         let (start_ticks, end_ticks) = measure_ticks_during_sleep(TARGET_DELAY_MS);

@@ -25,15 +25,15 @@ fn main() {
     println!("\n=== KyberSlash (5k samples, real timing leak) ===");
     analyze_dataset(
         &silent_path.join("paper-kyberslash/timing_measurements_1_comparison_-72_72.csv"),
-        "X", "Y",
+        "X",
+        "Y",
         1.0 / 3.0,
         None,
     );
 }
 
 fn analyze_dataset(path: &Path, label1: &str, label2: &str, ns_factor: f64, max_n: Option<usize>) {
-    let data = load_two_column_csv(path, true, label1, label2)
-        .expect("Failed to load data");
+    let data = load_two_column_csv(path, true, label1, label2).expect("Failed to load data");
     let (mut baseline_ns, mut test_ns) = data.to_nanoseconds(ns_factor);
 
     if let Some(max) = max_n {
@@ -63,14 +63,21 @@ fn analyze_dataset(path: &Path, label1: &str, label2: &str, ns_factor: f64, max_
     println!("m-out-of-n: m={}, max_block={}", m, max_block);
 
     println!();
-    println!("  {:>5}  {:>12}  {:>12}  {:>12}  {:>10}", "block", "Σ_rate[0,0]", "Σ_rate[4,4]", "θ_floor", "ratio");
+    println!(
+        "  {:>5}  {:>12}  {:>12}  {:>12}  {:>10}",
+        "block", "Σ_rate[0,0]", "Σ_rate[4,4]", "θ_floor", "ratio"
+    );
 
     // Test the actual max_block and a few smaller values
     let test_blocks: Vec<usize> = vec![10, 20, 50, max_block.min(100), max_block]
         .into_iter()
         .filter(|&b| b <= n / 2)
         .collect();
-    let test_blocks: Vec<usize> = test_blocks.into_iter().collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+    let test_blocks: Vec<usize> = test_blocks
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
 
     for block_size in test_blocks {
         let cov = bootstrap_with_block_size(&baseline_ns, &test_ns, block_size, 500, 42);
@@ -79,11 +86,20 @@ fn analyze_dataset(path: &Path, label1: &str, label2: &str, ns_factor: f64, max_
         let theta_floor = c_floor / (n as f64).sqrt();
 
         let ratio = theta_floor / max_diff;
-        let marker = if block_size == max_block { " <-- actual max" } else { "" };
+        let marker = if block_size == max_block {
+            " <-- actual max"
+        } else {
+            ""
+        };
 
         println!(
             "  {:5}  {:12.2e}  {:12.2e}  {:12.1}  {:10.2}x{}",
-            block_size, sigma_rate[(0, 0)], sigma_rate[(4, 4)], theta_floor, ratio, marker
+            block_size,
+            sigma_rate[(0, 0)],
+            sigma_rate[(4, 4)],
+            theta_floor,
+            ratio,
+            marker
         );
     }
 }
@@ -98,9 +114,11 @@ fn compute_lag1_acf(data: &[f64]) -> f64 {
     if var < 1e-10 {
         return 0.0;
     }
-    let cov: f64 = data.windows(2)
+    let cov: f64 = data
+        .windows(2)
         .map(|w| (w[0] - mean) * (w[1] - mean))
-        .sum::<f64>() / (n - 1) as f64;
+        .sum::<f64>()
+        / (n - 1) as f64;
     cov / var
 }
 

@@ -98,12 +98,12 @@ impl PriorityGuard {
                 // Priority elevation failed - this is expected without elevated privileges
                 // on many systems. Return success with priority_changed = false so we
                 // still restore on drop (no-op).
-                tracing::debug!("Thread priority elevation failed (expected without privileges): {:?}", e);
+                tracing::debug!(
+                    "Thread priority elevation failed (expected without privileges): {:?}",
+                    e
+                );
                 PriorityResult::NotElevated {
-                    reason: format!(
-                        "Priority elevation requires elevated privileges: {:?}",
-                        e
-                    ),
+                    reason: format!("Priority elevation requires elevated privileges: {:?}", e),
                 }
             }
         }
@@ -114,7 +114,7 @@ impl Drop for PriorityGuard {
     fn drop(&mut self) {
         if self.priority_changed {
             if let Err(e) =
-                thread_priority::set_current_thread_priority(self.original_priority.clone())
+                thread_priority::set_current_thread_priority(self.original_priority)
             {
                 tracing::warn!("Failed to restore thread priority: {:?}", e);
             } else {

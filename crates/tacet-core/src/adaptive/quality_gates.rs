@@ -225,7 +225,6 @@ pub struct QualityGateCheckInputs<'a> {
     pub projection_mismatch_thresh: f64,
 
     // ==================== v5.4 Gibbs sampler fields ====================
-
     /// Whether the Gibbs sampler's lambda chain mixed well (v5.4).
     /// `None` if not using Gibbs sampler (mixture mode).
     /// When `Some(false)`, indicates potential posterior unreliability.
@@ -322,10 +321,7 @@ pub fn compute_achievable_at_max(
     };
 
     // Compute theta_floor at max_samples using n_eff
-    let theta_floor_at_max = libm::fmax(
-        c_floor / libm::sqrt(n_eff_max as f64),
-        theta_tick,
-    );
+    let theta_floor_at_max = libm::fmax(c_floor / libm::sqrt(n_eff_max as f64), theta_tick);
 
     // Compute epsilon: max(theta_tick, 1e-6 * theta_user)
     let epsilon = libm::fmax(theta_tick, 1e-6 * theta_user);
@@ -409,7 +405,8 @@ fn check_kl_divergence(
         return Some(InconclusiveReason::DataTooNoisy {
             message: alloc::format!(
                 "KL divergence {:.2} nats < {:.1} threshold; posterior ≈ prior",
-                kl, KL_MIN
+                kl,
+                KL_MIN
             ),
             guidance: String::from("Try: cycle counter, reduce system load, increase batch size"),
             variance_ratio: kl / KL_MIN, // Report KL ratio for diagnostics
@@ -436,10 +433,12 @@ fn compute_kl_divergence(
     // Log determinants from Cholesky: log|A| = 2 * sum(log(L_ii))
     let prior_log_det: f64 = (0..9)
         .map(|i| libm::log(prior_chol.l()[(i, i)]))
-        .sum::<f64>() * 2.0;
+        .sum::<f64>()
+        * 2.0;
     let post_log_det: f64 = (0..9)
         .map(|i| libm::log(post_chol.l()[(i, i)]))
-        .sum::<f64>() * 2.0;
+        .sum::<f64>()
+        * 2.0;
 
     if !prior_log_det.is_finite() || !post_log_det.is_finite() {
         return None;
@@ -711,7 +710,10 @@ mod tests {
         let config = QualityGateConfig::default();
 
         let result = check_kl_divergence(&inputs, &config);
-        assert!(result.is_none(), "Low posterior variance should give high KL (pass)");
+        assert!(
+            result.is_none(),
+            "Low posterior variance should give high KL (pass)"
+        );
     }
 
     #[test]
@@ -724,10 +726,10 @@ mod tests {
         let config = QualityGateConfig::default();
 
         let result = check_kl_divergence(&inputs, &config);
-        assert!(matches!(
-            result,
-            Some(InconclusiveReason::DataTooNoisy { .. })
-        ), "Posterior ≈ prior should give low KL (fail)");
+        assert!(
+            matches!(result, Some(InconclusiveReason::DataTooNoisy { .. })),
+            "Posterior ≈ prior should give low KL (fail)"
+        );
     }
 
     #[test]

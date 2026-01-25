@@ -104,7 +104,6 @@ pub struct GibbsResult {
     // =========================================================================
     // v5.6 Kappa diagnostics - robust t-likelihood precision
     // =========================================================================
-
     /// v5.6: Posterior mean of likelihood precision κ.
     pub kappa_mean: f64,
 
@@ -228,7 +227,13 @@ impl GibbsSampler {
         }
 
         // Compute posterior summaries
-        self.compute_summaries(&retained_deltas, &retained_lambdas, &retained_kappas, sigma_n, theta)
+        self.compute_summaries(
+            &retained_deltas,
+            &retained_lambdas,
+            &retained_kappas,
+            sigma_n,
+            theta,
+        )
     }
 
     /// Sample δ | λ, κ, Δ from the conditional Gaussian (spec §3.4.4 v5.6).
@@ -293,10 +298,7 @@ impl GibbsSampler {
         // Compute q = δᵀ R⁻¹ δ via Cholesky solve
         // R = L_R L_Rᵀ, so R⁻¹ δ = L_R⁻ᵀ L_R⁻¹ δ
         // q = δᵀ R⁻¹ δ = ||L_R⁻¹ δ||²
-        let y = self
-            .l_r
-            .solve_lower_triangular(delta)
-            .unwrap_or(*delta);
+        let y = self.l_r.solve_lower_triangular(delta).unwrap_or(*delta);
         let q = y.dot(&y);
 
         // Gamma parameters (shape-rate parameterization)
@@ -373,7 +375,7 @@ impl GibbsSampler {
         let lambda_post = {
             let mut cov = Matrix9::zeros();
             for delta in retained_deltas {
-                let diff = delta - &delta_post;
+                let diff = delta - delta_post;
                 cov += diff * diff.transpose();
             }
             cov / (n - 1.0) // Unbiased estimator
@@ -478,8 +480,8 @@ impl GibbsSampler {
 
         // GLS projection matrix: A = (X'Σ⁻¹X)⁻¹ X'Σ⁻¹
         // Use regularized sigma_n as the weighting matrix
-        let sigma_n_chol = Cholesky::new(sigma_n_reg)
-            .expect("regularize_sigma_n should ensure SPD");
+        let sigma_n_chol =
+            Cholesky::new(sigma_n_reg).expect("regularize_sigma_n should ensure SPD");
 
         // Compute Σ⁻¹X
         let sigma_inv_x = {
@@ -495,7 +497,7 @@ impl GibbsSampler {
         };
 
         // Compute X'Σ⁻¹X
-        let xtsx = x.transpose() * &sigma_inv_x;
+        let xtsx = x.transpose() * sigma_inv_x;
 
         // Invert 2x2 matrix
         let det = xtsx[(0, 0)] * xtsx[(1, 1)] - xtsx[(0, 1)] * xtsx[(1, 0)];
@@ -528,14 +530,14 @@ impl GibbsSampler {
         // Compute empirical covariance: Cov(β) = sample_cov(β^(s))
         let mut beta_cov = Matrix2::zeros();
         for beta in &beta_draws {
-            let diff = beta - &beta_proj;
+            let diff = beta - beta_proj;
             beta_cov += diff * diff.transpose();
         }
         let beta_proj_cov = beta_cov / (n - 1.0); // Unbiased estimator
 
         // Projection mismatch Q = ||δ_post - Xβ_post||²_Σ⁻¹
         // Computed from posterior mean for diagnostic purposes
-        let residual = delta_post - &x * &beta_proj;
+        let residual = delta_post - x * beta_proj;
         let sigma_inv_residual = sigma_n_chol.solve(&residual);
         let projection_mismatch_q = residual.dot(&sigma_inv_residual);
 
@@ -589,7 +591,7 @@ impl GibbsSampler {
             let y = self
                 .l_r
                 .solve_lower_triangular(&e)
-                .unwrap_or_else(|| e.clone());
+                .unwrap_or(e);
             let x = self.l_r.transpose().solve_upper_triangular(&y).unwrap_or(y);
             for i in 0..9 {
                 r_inv[(i, j)] = x[i];

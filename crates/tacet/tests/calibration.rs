@@ -10,19 +10,19 @@
 #[path = "calibration/utils.rs"]
 pub mod calibration_utils;
 
-#[path = "calibration/fpr.rs"]
-mod fpr;
-#[path = "calibration/power.rs"]
-mod power;
-#[path = "calibration/power_curve.rs"]
-mod power_curve;
+#[path = "calibration/autocorrelation.rs"]
+mod autocorrelation;
 #[path = "calibration/bayesian.rs"]
 mod bayesian;
 #[path = "calibration/coverage.rs"]
 mod coverage;
 #[path = "calibration/estimation.rs"]
 mod estimation;
-#[path = "calibration/autocorrelation.rs"]
-mod autocorrelation;
+#[path = "calibration/fpr.rs"]
+mod fpr;
+#[path = "calibration/power.rs"]
+mod power;
+#[path = "calibration/power_curve.rs"]
+mod power_curve;
 #[path = "calibration/stress.rs"]
 mod stress;

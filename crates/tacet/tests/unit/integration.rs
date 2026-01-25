@@ -1,9 +1,7 @@
 //! End-to-end integration tests.
 
 use std::time::Duration;
-use tacet::{
-    helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle,
-};
+use tacet::{helpers::InputPair, timing_test_checked, AttackerModel, Outcome, TimingOracle};
 
 /// Basic smoke test that the API works.
 #[test]

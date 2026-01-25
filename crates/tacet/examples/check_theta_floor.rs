@@ -15,7 +15,7 @@ fn main() {
         "KyberSlash",
         &silent_path.join("paper-kyberslash/timing_measurements_1_comparison_-72_72.csv"),
         1.0 / 3.0, // cycles to ns at 3GHz
-        3.3, // theta_user
+        3.3,       // theta_user
     );
 
     // 2. Web App (uses SILENT format with X/Y columns)
@@ -83,7 +83,12 @@ fn analyze_theta_floor(
     compute_and_print_theta_floor(name, &baseline_ns, &test_ns, theta_user);
 }
 
-fn compute_and_print_theta_floor(_name: &str, baseline_ns: &[f64], test_ns: &[f64], theta_user: f64) {
+fn compute_and_print_theta_floor(
+    _name: &str,
+    baseline_ns: &[f64],
+    test_ns: &[f64],
+    theta_user: f64,
+) {
     let n = baseline_ns.len().min(test_ns.len());
     let baseline_ns = &baseline_ns[..n];
     let test_ns = &test_ns[..n];
@@ -120,7 +125,10 @@ fn compute_and_print_theta_floor(_name: &str, baseline_ns: &[f64], test_ns: &[f6
 
     let ratio = theta_floor / max_diff;
     if theta_floor > max_diff {
-        println!("  PROBLEM: floor/effect = {:.1}x - floor would mask the effect!", ratio);
+        println!(
+            "  PROBLEM: floor/effect = {:.1}x - floor would mask the effect!",
+            ratio
+        );
     } else {
         println!("  OK: floor/effect = {:.2}x - effect is detectable", ratio);
     }

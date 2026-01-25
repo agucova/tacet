@@ -33,9 +33,9 @@ use tacet_bench::checkpoint::IncrementalCsvWriter;
 use tacet_bench::output::{to_markdown, write_csv, write_summary_csv};
 use tacet_bench::sweep::{SweepConfig, SweepRunner};
 use tacet_bench::{
-    AndersonDarlingAdapter, DudectAdapter, EffectPattern, KsTestAdapter, MonaAdapter,
-    NoiseModel, RtlfAdapter, RtlfNativeAdapter, SilentAdapter, SilentNativeAdapter,
-    TimingOracleAdapter, TimingTvlaAdapter, TlsfuzzerAdapter,
+    AndersonDarlingAdapter, DudectAdapter, EffectPattern, KsTestAdapter, MonaAdapter, NoiseModel,
+    RtlfAdapter, RtlfNativeAdapter, SilentAdapter, SilentNativeAdapter, TimingOracleAdapter,
+    TimingTvlaAdapter, TlsfuzzerAdapter,
 };
 
 /// Timing side-channel detection tool benchmark suite
@@ -230,7 +230,9 @@ fn main() {
     };
 
     if tools.is_empty() {
-        eprintln!("No valid tools selected. Available: dudect, timing-tvla, ks-test, ad-test, mona");
+        eprintln!(
+            "No valid tools selected. Available: dudect, timing-tvla, ks-test, ad-test, mona"
+        );
         std::process::exit(1);
     }
 
@@ -251,11 +253,19 @@ fn main() {
     println!("  Effect multipliers: {:?}", config.effect_multipliers);
     println!(
         "  Effect patterns: {:?}",
-        config.effect_patterns.iter().map(|p| p.name()).collect::<Vec<_>>()
+        config
+            .effect_patterns
+            .iter()
+            .map(|p| p.name())
+            .collect::<Vec<_>>()
     );
     println!(
         "  Noise models: {:?}",
-        config.noise_models.iter().map(|n| n.name()).collect::<Vec<_>>()
+        config
+            .noise_models
+            .iter()
+            .map(|n| n.name())
+            .collect::<Vec<_>>()
     );
     if config.use_realistic {
         println!("  Mode: REALISTIC (actual timed operations)");
@@ -274,10 +284,7 @@ fn main() {
     println!("  Tools: {:?}", tool_names);
     println!("  Total points: {}", config.total_points());
     println!("  Total datasets: {}", config.total_datasets());
-    println!(
-        "  Total tool runs: {}",
-        config.total_datasets() * num_tools
-    );
+    println!("  Total tool runs: {}", config.total_datasets() * num_tools);
     println!();
 
     // Create runner
@@ -325,7 +332,10 @@ fn main() {
     }
 
     let last_update = Arc::new(AtomicU64::new(
-        checkpoint.as_ref().map(|c| c.resumed_count as u64).unwrap_or(0),
+        checkpoint
+            .as_ref()
+            .map(|c| c.resumed_count as u64)
+            .unwrap_or(0),
     ));
     let start = Instant::now();
 
@@ -398,7 +408,10 @@ fn main() {
                 println!("Wrote raw results to: {}", csv_path.display());
             }
         } else {
-            println!("Raw results already written to: {}", checkpoint_path.display());
+            println!(
+                "Raw results already written to: {}",
+                checkpoint_path.display()
+            );
         }
 
         // Summary is always written at the end (needs all results for aggregation)

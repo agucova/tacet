@@ -1,0 +1,23 @@
+{
+  "name": "@tacet/js",
+  "version": "0.2.0",
+  "exports": "./dist/index.js",
+  "publish": {
+    "include": [
+      "dist/**/*.js",
+      "dist/**/*.d.ts",
+      "dist/**/*.map",
+      "pkg/*.js",
+      "pkg/*.d.ts",
+      "pkg/*.wasm",
+      "README.md",
+      "LICENSE"
+    ],
+    "exclude": [
+      "ts/",
+      "src/",
+      "node_modules/",
+      "target/"
+    ]
+  }
+}
