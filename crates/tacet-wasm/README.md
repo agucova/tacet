@@ -2,7 +2,9 @@
 
 Timing side-channel detection for JavaScript/TypeScript. Detect timing leaks in cryptographic code using statistical analysis.
 
-This is a universal WASM-based implementation that works in **Node.js**, **Bun**, **Deno**, and **browsers**.
+This is a WASM-based implementation that works in **Node.js**, **Bun**, and **Deno**.
+
+> **Note:** Browsers are not supported because they lack high-precision timers (due to Spectre mitigations).
 
 ## Installation
 
@@ -20,16 +22,8 @@ deno add jsr:@tacet/js
 ## Quick Start
 
 ```typescript
-import {
-  TimingOracle,
-  AttackerModelValues,
-  OutcomeValues,
-  initializeWasm,
-} from "@tacet/js";
+import { TimingOracle, AttackerModelValues, OutcomeValues } from "@tacet/js";
 import crypto from "crypto";
-
-// Initialize WASM (required once before first use)
-await initializeWasm();
 
 // Test your cryptographic function
 const result = TimingOracle.forAttacker(AttackerModelValues.AdjacentNetwork)

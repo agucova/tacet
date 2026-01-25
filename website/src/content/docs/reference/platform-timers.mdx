@@ -11,10 +11,10 @@ This reference describes the timer implementations used by tacet on different pl
 
 ## Timer selection
 
-tacet automatically selects the best available timer:
+By default (`TimerSpec::Auto`), tacet uses register-based timers:
 
-| Platform | Standard Timer | Resolution | Cycle-Accurate Timer | Resolution |
-|----------|----------------|------------|---------------------|------------|
+| Platform | Default Timer | Resolution | PMU Timer | Resolution |
+|----------|---------------|------------|-----------|------------|
 | x86_64 Linux | `rdtsc` | ~0.3ns | `perf_event` | ~0.3ns |
 | x86_64 macOS | `rdtsc` | ~0.3ns | N/A | N/A |
 | ARM64 Linux | `cntvct_el0` | 1-40ns | `perf_event` | ~0.3ns |
@@ -24,9 +24,40 @@ tacet automatically selects the best available timer:
 ARM64 Linux resolution varies by SoC: AWS Graviton4 ~1ns, Ampere Altra ~40ns, Raspberry Pi 4 ~18ns.
 </Aside>
 
-## Enabling cycle-accurate timers
+## Why register-based timers?
 
-Use `TimerSpec::RequireCycleAccurate` to request cycle-accurate measurements. This uses kperf on macOS ARM64 and perf\_event on Linux:
+tacet defaults to register-based timers (`rdtsc`, `cntvct_el0`) because **attackers measure wall-clock time**. When a remote attacker times your API, they observe wall-clock duration—not CPU cycles. `rdtsc` (invariant TSC) and `cntvct_el0` directly measure wall-clock time, matching what attackers can observe.
+
+PMU-based timers (`kperf`, `perf_event`) measure CPU cycles, which can differ from wall-clock time due to frequency scaling. They're available via `TimerSpec::Kperf` or `TimerSpec::PerfEvent` for microarchitectural research or when you need true cycle counts.
+
+## Requiring high-precision timing
+
+For CI or when you need guaranteed precision, use `TimerSpec::RequireHighPrecision`:
+
+```rust
+use tacet::{TimingOracle, TimerSpec};
+
+let result = TimingOracle::new()
+    .timer_spec(TimerSpec::RequireHighPrecision)
+    .test(inputs, |data| my_function(data));
+```
+
+This performs **runtime detection**:
+1. Checks if the system timer has ≤2ns resolution
+2. If yes, uses it (x86_64 `rdtsc`, ARMv8.6+ `cntvct_el0`)
+3. If no, falls back to PMU timers (`kperf`, `perf_event`)
+4. Panics if no high-precision timer is available
+
+| Platform | Behavior |
+|----------|----------|
+| x86_64 | Always succeeds (`rdtsc` ~0.3ns) |
+| ARM64 Linux ARMv8.6+ (Graviton4) | Succeeds without sudo (`cntvct_el0` ~1ns) |
+| ARM64 Linux pre-ARMv8.6 | Requires sudo for `perf_event` |
+| ARM64 macOS | Requires sudo for `kperf` |
+
+## Enabling PMU timers
+
+Use `TimerSpec::RequireCycleAccurate` to request PMU-based cycle counting. This uses kperf on macOS ARM64 and perf\_event on Linux:
 
 <Tabs>
 <TabItem label="macOS ARM64">
@@ -159,11 +190,11 @@ Operations completing faster than ~10ns on Apple Silicon (or proportionally fast
 Operation too fast to measure
   Operation: ~5ns
   Timer resolution: ~42ns
-  Recommendation: Use TimerSpec::RequireCycleAccurate with sudo (~1ns resolution)
+  Recommendation: Use TimerSpec::RequireHighPrecision with sudo (~1ns resolution)
 ```
 
 Options:
-1. Use `TimerSpec::RequireCycleAccurate` for higher resolution
+1. Use `TimerSpec::RequireHighPrecision` for higher resolution (requires sudo on Apple Silicon)
 2. Test a larger workload (more iterations, larger input)
 3. Accept that ultra-fast operations may not be measurable
 

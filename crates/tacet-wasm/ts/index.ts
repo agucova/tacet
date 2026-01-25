@@ -2,15 +2,12 @@
  * @tacet/js - Timing side-channel detection for JavaScript/TypeScript
  *
  * Detect timing leaks in cryptographic code using statistical analysis.
- * This is a universal WASM-based implementation that works in Node.js, Bun, and browsers.
+ * Works in Node.js, Bun, and Deno (not browsers - they lack high-precision timers).
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModelValues, OutcomeValues, initializeWasm } from '@tacet/js';
+ * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/js';
  * import crypto from 'crypto';
- *
- * // Initialize WASM (required once before first use)
- * await initializeWasm();
  *
  * const result = TimingOracle
  *   .forAttacker(AttackerModelValues.AdjacentNetwork)
@@ -39,6 +36,10 @@
  *
  * @packageDocumentation
  */
+
+// Auto-initialize WASM on module load (requires top-level await support)
+import { initializeWasm } from "./oracle.js";
+await initializeWasm();
 
 // Re-export everything from oracle (which includes collector and all types)
 export {

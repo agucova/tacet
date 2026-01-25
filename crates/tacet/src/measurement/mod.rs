@@ -43,7 +43,13 @@
 //!     .timer_spec(TimerSpec::Auto)
 //!     .test(...);
 //!
-//! // Require PMU cycle counter (panics if unavailable)
+//! // Require high-precision timing (≤2ns), recommended for CI
+//! // Uses runtime detection: system timer if sufficient, else PMU timer
+//! let result = TimingOracle::new()
+//!     .timer_spec(TimerSpec::RequireHighPrecision)
+//!     .test(...);
+//!
+//! // Require PMU cycle counter (for microarchitectural research)
 //! let result = TimingOracle::new()
 //!     .timer_spec(TimerSpec::RequireCycleAccurate)
 //!     .test(...);

@@ -168,6 +168,15 @@ impl TimingOracle {
         self.timer_spec(TimerSpec::SystemTimer)
     }
 
+    /// Require high-precision timing (≤2ns resolution).
+    ///
+    /// Shorthand for `.timer_spec(TimerSpec::RequireHighPrecision)`.
+    /// Uses runtime detection: system timer if sufficient, else PMU timer.
+    /// Panics if no high-precision timer is available.
+    pub fn require_high_precision(self) -> Self {
+        self.timer_spec(TimerSpec::RequireHighPrecision)
+    }
+
     /// Require cycle-accurate timing.
     ///
     /// Shorthand for `.timer_spec(TimerSpec::RequireCycleAccurate)`.

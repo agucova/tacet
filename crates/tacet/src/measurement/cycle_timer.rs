@@ -230,9 +230,10 @@ impl std::fmt::Debug for BoxedTimer {
 /// # User-Friendly Variants
 ///
 /// Most users should use one of these:
-/// - [`Auto`](TimerSpec::Auto) - Best available timer (recommended)
+/// - [`Auto`](TimerSpec::Auto) - System timer, works everywhere (recommended)
 /// - [`SystemTimer`](TimerSpec::SystemTimer) - Platform default, no privileges needed
-/// - [`RequireCycleAccurate`](TimerSpec::RequireCycleAccurate) - Require high-precision or panic
+/// - [`RequireHighPrecision`](TimerSpec::RequireHighPrecision) - Require ≤1ns resolution, panic if unavailable
+/// - [`RequireCycleAccurate`](TimerSpec::RequireCycleAccurate) - Require PMU cycle counter, panic if unavailable
 ///
 /// # Platform-Specific Variants (Power Users)
 ///
@@ -264,15 +265,29 @@ pub enum TimerSpec {
     /// adaptive batching compensates for resolution.
     SystemTimer,
 
-    /// Require cycle-accurate timing, panic if unavailable.
+    /// Require high-precision timing (≤2ns resolution), panic if unavailable.
     ///
-    /// Explicitly requests cycle-accurate timing:
+    /// Performs runtime detection: first checks if the system timer has sufficient
+    /// resolution, then falls back to PMU timers if needed.
+    ///
+    /// - x86_64: `rdtsc` (~0.3ns) — always succeeds
+    /// - ARM64 Linux ARMv8.6+ (Graviton4): `cntvct_el0` (~1ns) — succeeds without sudo
+    /// - ARM64 Linux pre-ARMv8.6: falls back to `perf_event` (requires sudo/CAP_PERFMON)
+    /// - ARM64 macOS: falls back to `kperf` (requires sudo)
+    ///
+    /// Panics if no high-precision timer is available. Use this for CI when you
+    /// need robust timing measurements.
+    RequireHighPrecision,
+
+    /// Require PMU cycle counter, panic if unavailable.
+    ///
+    /// Explicitly requests PMU-based cycle counting:
     /// - macOS ARM64: kperf (PMCCNTR_EL0, requires sudo)
     /// - Linux: perf_event (requires sudo or CAP_PERFMON)
     /// - x86_64: rdtsc (always available, no special privileges)
     ///
-    /// Panics if initialization fails. Use this when you need to ensure
-    /// high-precision timing is actually being used.
+    /// Panics if initialization fails. Use this for microarchitectural research
+    /// when you need true CPU cycle counts rather than wall-clock time.
     RequireCycleAccurate,
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -327,6 +342,7 @@ impl TimerSpec {
     /// |---------------------------------|-------------------------|
     /// | `"auto"`                        | `Auto`                  |
     /// | `"system"`, `"systemtimer"`     | `SystemTimer`           |
+    /// | `"highprecision"`, `"high_precision"` | `RequireHighPrecision` |
     /// | `"cycle"`, `"cycleaccurate"`    | `RequireCycleAccurate`  |
     /// | `"instant"`, `"std"`            | `StdInstant`            |
     /// | `"rdtsc"`, `"tsc"` (x86_64)     | `Rdtsc`                 |
@@ -344,6 +360,9 @@ impl TimerSpec {
             // User-friendly names (always available)
             "auto" => Ok(TimerSpec::Auto),
             "system" | "systemtimer" | "system_timer" => Ok(TimerSpec::SystemTimer),
+            "highprecision" | "high_precision" | "requirehighprecision" => {
+                Ok(TimerSpec::RequireHighPrecision)
+            }
             "cycle" | "cycleaccurate" | "cycle_accurate" => Ok(TimerSpec::RequireCycleAccurate),
             "instant" | "std" | "stdinstant" | "std_instant" => Ok(TimerSpec::StdInstant),
 
@@ -394,6 +413,7 @@ impl TimerSpec {
         &[
             "auto",
             "system",
+            "highprecision",
             "cycle",
             "instant",
             #[cfg(target_arch = "x86_64")]
@@ -415,7 +435,8 @@ impl TimerSpec {
     /// # Timer Selection
     ///
     /// - `Auto` and `SystemTimer`: Use register-based timers (rdtsc/cntvct_el0)
-    /// - `RequireCycleAccurate`: Try PMU timers (kperf/perf_event), panic if unavailable
+    /// - `RequireHighPrecision`: Use high-precision timer (rdtsc/kperf/perf_event), panic if unavailable
+    /// - `RequireCycleAccurate`: Use PMU cycle counter (kperf/perf_event), panic if unavailable
     /// - Platform-specific variants: Use the specified timer directly
     pub fn create_timer(&self) -> (BoxedTimer, TimerFallbackReason) {
         match self {
@@ -481,6 +502,76 @@ impl TimerSpec {
                 // observe) and require no special privileges.
                 // Use TimerSpec::Kperf or TimerSpec::PerfEvent explicitly for PMU access.
                 (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+            }
+
+            #[allow(clippy::needless_return)] // Returns needed in cfg blocks for early exit
+            TimerSpec::RequireHighPrecision => {
+                // Require ≤2ns resolution timer. Check system timer first (runtime detection),
+                // then fall back to PMU timers if needed.
+                const HIGH_PRECISION_THRESHOLD_NS: f64 = 2.0;
+
+                // First, check if the system timer has sufficient resolution
+                let system_timer = Timer::new();
+                if system_timer.resolution_ns() <= HIGH_PRECISION_THRESHOLD_NS {
+                    // System timer is high precision (x86_64 rdtsc, ARMv8.6+ cntvct_el0)
+                    return (BoxedTimer::Standard(system_timer), TimerFallbackReason::None);
+                }
+
+                // System timer is too coarse, try PMU timers
+                #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
+                {
+                    use super::kperf::PmuError;
+                    match PmuTimer::new() {
+                        Ok(pmu) => return (BoxedTimer::Kperf(pmu), TimerFallbackReason::None),
+                        Err(PmuError::ConcurrentAccess) => {
+                            panic!(
+                                "RequireHighPrecision: System timer resolution ({:.1}ns) exceeds \
+                                 {HIGH_PRECISION_THRESHOLD_NS}ns threshold, and kperf is locked by \
+                                 another process. Run with --test-threads=1 for exclusive kperf access.",
+                                system_timer.resolution_ns()
+                            );
+                        }
+                        Err(e) => {
+                            panic!(
+                                "RequireHighPrecision: System timer resolution ({:.1}ns) exceeds \
+                                 {HIGH_PRECISION_THRESHOLD_NS}ns threshold, and kperf initialization \
+                                 failed: {:?}. Run with sudo for kperf access.",
+                                system_timer.resolution_ns(),
+                                e
+                            );
+                        }
+                    }
+                }
+
+                #[cfg(all(target_os = "linux", feature = "perf"))]
+                {
+                    match LinuxPerfTimer::new() {
+                        Ok(perf) => return (BoxedTimer::Perf(perf), TimerFallbackReason::None),
+                        Err(e) => {
+                            panic!(
+                                "RequireHighPrecision: System timer resolution ({:.1}ns) exceeds \
+                                 {HIGH_PRECISION_THRESHOLD_NS}ns threshold, and perf_event \
+                                 initialization failed: {:?}. Run with sudo or CAP_PERFMON.",
+                                system_timer.resolution_ns(),
+                                e
+                            );
+                        }
+                    }
+                }
+
+                // No PMU timer available, and system timer is too coarse
+                #[cfg(not(any(
+                    all(target_os = "macos", target_arch = "aarch64", feature = "kperf"),
+                    all(target_os = "linux", feature = "perf")
+                )))]
+                {
+                    panic!(
+                        "RequireHighPrecision: System timer resolution ({:.1}ns) exceeds \
+                         {HIGH_PRECISION_THRESHOLD_NS}ns threshold, and no PMU timer is available. \
+                         On ARM64, build with --features kperf (macOS) or --features perf (Linux).",
+                        system_timer.resolution_ns()
+                    );
+                }
             }
 
             TimerSpec::RequireCycleAccurate => {
@@ -562,7 +653,7 @@ impl TimerSpec {
         // ARM64 macOS: check if kperf can be initialized
         #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
         {
-            return PmuTimer::new().is_ok();
+            PmuTimer::new().is_ok()
         }
 
         // Linux with perf feature: check if perf_event can be initialized
@@ -594,6 +685,7 @@ impl std::fmt::Display for TimerSpec {
         match self {
             TimerSpec::Auto => write!(f, "Auto"),
             TimerSpec::SystemTimer => write!(f, "SystemTimer"),
+            TimerSpec::RequireHighPrecision => write!(f, "RequireHighPrecision"),
             TimerSpec::RequireCycleAccurate => write!(f, "RequireCycleAccurate"),
             TimerSpec::StdInstant => write!(f, "StdInstant"),
             #[cfg(target_arch = "x86_64")]
@@ -630,6 +722,14 @@ mod tests {
         assert_eq!(
             TimerSpec::by_name("cycleaccurate").unwrap(),
             TimerSpec::RequireCycleAccurate
+        );
+        assert_eq!(
+            TimerSpec::by_name("highprecision").unwrap(),
+            TimerSpec::RequireHighPrecision
+        );
+        assert_eq!(
+            TimerSpec::by_name("high_precision").unwrap(),
+            TimerSpec::RequireHighPrecision
         );
         assert_eq!(
             TimerSpec::by_name("instant").unwrap(),
@@ -681,6 +781,7 @@ mod tests {
         let names = TimerSpec::available_names();
         assert!(names.contains(&"auto"));
         assert!(names.contains(&"system"));
+        assert!(names.contains(&"highprecision"));
         assert!(names.contains(&"cycle"));
         assert!(names.contains(&"instant"));
     }

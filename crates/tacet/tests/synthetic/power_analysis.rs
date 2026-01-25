@@ -53,6 +53,7 @@ fn mde_calibrated_power_curve() {
         let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
 
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .require_high_precision()
             .time_budget(Duration::from_secs(10))
             .max_samples(SAMPLES)
             .test(inputs, |data| {
@@ -136,6 +137,7 @@ fn mde_calibrated_power_curve() {
             let inputs = InputPair::new(|| false, || true);
 
             let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .require_high_precision()
                 .time_budget(Duration::from_secs(10))
                 .max_samples(SAMPLES)
                 .test(inputs, |should_delay| {
@@ -309,6 +311,7 @@ fn mde_scaling_validation() {
             let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
 
             let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .require_high_precision()
                 .time_budget(Duration::from_secs(10))
                 .max_samples(samples)
                 .test(inputs, |data| {
@@ -439,6 +442,7 @@ fn large_effect_detection() {
         let inputs = InputPair::new(|| false, || true);
 
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .require_high_precision()
             .time_budget(Duration::from_secs(10))
             .max_samples(SAMPLES)
             .test(inputs, |should_delay| {
@@ -565,6 +569,7 @@ fn negligible_effect_fpr() {
         let inputs = InputPair::new(|| false, || true);
 
         let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+            .require_high_precision()
             .time_budget(Duration::from_secs(10))
             .max_samples(SAMPLES)
             .test(inputs, |should_delay| {

@@ -80,6 +80,10 @@ pub mod output;
 pub mod preflight;
 pub mod statistics;
 
+// Power analysis module (feature-gated)
+#[cfg(feature = "power")]
+pub mod power;
+
 // Re-exports for public API
 pub use config::{Config, IterationsPerSample};
 pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};

@@ -1,5 +1,5 @@
 ---
-title: Specification (v5.6)
+title: Specification (v5.7)
 description: Authoritative specification for tacet's statistical methodology and requirements
 sidebar:
   order: 1
@@ -276,8 +276,8 @@ ResearchStatus =
 
 ```
 Diagnostics = {
-  dependence_length: Int,
-  effective_sample_size: Int,
+  dependence_length: Int,           // b̂ from Politis-White (bootstrap only)
+  effective_sample_size: Int,       // n / τ̂
   stationarity_ratio: Float,
   stationarity_ok: Bool,
   outlier_rate_baseline: Float,
@@ -298,7 +298,19 @@ Diagnostics = {
   threshold_ns: Float,
   timer_name: String,
   platform: String,
-  
+
+  // IACT diagnostics (v5.7+)
+  iact_fixed: Float,                // τ̂ for Fixed class
+  iact_random: Float,               // τ̂ for Random class
+  iact_combined: Float,             // max(τ̂_F, τ̂_R)
+  iact_cal: Float,                  // τ̂ at calibration time
+  conservatism_ratio: Float,        // b̂ / τ̂ (diagnostic)
+
+  // Dimension diagnostics (v5.7+)
+  d: Int,                           // Feature dimension
+  r: Float,                         // d / n_eff (dimension ratio)
+  regime: Regime,                   // WellConditioned | Stressed | Overstressed
+
   // Gibbs sampler diagnostics
   gibbs_iters_total: Int,           // N_gibbs used
   gibbs_burnin: Int,                // N_burn used
@@ -317,6 +329,8 @@ Diagnostics = {
   kappa_mixing_ok: Bool             // See §3.4.4
 }
 
+Regime = WellConditioned | Stressed | Overstressed
+
 QualityIssue = {
   code: IssueCode,
   message: String,
@@ -329,6 +343,8 @@ IssueCode =
   | LowUniqueInputs | QuantilesFiltered | ThresholdElevated
   | ThresholdClamped | HighWinsorRate | ProjectionMismatch
   | LambdaMixingPoor | KappaMixingPoor | LikelihoodInflated
+  | InsufficientSamplesForIACT | ZeroVarianceStream
+  | OverstressedRegime | StressedRegime | HighDimensionForGibbs
 ```
 
 ***
@@ -343,13 +359,31 @@ We collect timing samples from two classes:
 - **Fixed class (F)**: A specific input (e.g., all zeros)
 - **Random class (R)**: Randomly sampled inputs
 
-Rather than comparing means, we compare the distributions via their deciles. For each class, compute the 10th, 20th, ..., 90th percentiles, yielding two vectors in $\mathbb{R}^9$. The test statistic is their difference:
+Rather than comparing means, we compare the distributions via their deciles. For each class, compute the 10th, 20th, ..., 90th percentiles, yielding two vectors in $\mathbb{R}^d$. The test statistic is their difference:
 
 $$
-\Delta = \hat{q}(\text{Fixed}) - \hat{q}(\text{Random}) \in \mathbb{R}^9
+\Delta = \hat{q}(\text{Fixed}) - \hat{q}(\text{Random}) \in \mathbb{R}^d
 $$
 
 where $\hat{q}_p$ denotes the empirical $p$-th quantile.
+
+#### 3.1.1 Dimension Parameterization
+
+The statistical engine generalizes to arbitrary dimension $d$. For **timing analysis**, $d = 9$ (decile differences). For **power analysis** (see §7), $d$ varies by configuration (stages × partitions × features).
+
+| Current | Generalized |
+|---------|-------------|
+| δ ∈ ℝ⁹ | δ ∈ ℝᵈ |
+| Δ ∈ ℝ⁹ | Δ ∈ ℝᵈ |
+| I₉ | I_d |
+| "9-vector" | "d-vector" |
+| R ∈ ℝ⁹ˣ⁹ | R ∈ ℝᵈˣᵈ |
+
+The decision functional remains:
+
+$$
+m(\delta) = \max_k |\delta_k|
+$$
 
 **Why quantiles instead of means?**
 
@@ -561,7 +595,7 @@ The block bootstrap is only valid when blocks correspond to contiguous time segm
 - Cross-class correlation induced by interleaving
 - The true dependence structure of the acquisition process
 
-**Covariance rate:**
+**Covariance rate and long-run variance proxy:**
 
 The covariance of quantile estimators scales as 1/n. We compute the "rate":
 
@@ -569,27 +603,121 @@ $$
 \Sigma_{\text{rate}} = \hat{\Sigma}_{\text{cal}} \cdot n_{\text{cal}}
 $$
 
-**Effective sample size (n_eff) (normative):**
-
-Under strong temporal dependence, n samples do not provide n independent observations. Implementations MUST define the effective sample size using the selected block length (dependence length estimate):
+Define the **calibration long-run variance proxy**:
 
 $$
-n_{\text{eff}} := \max\left(1,\ \left\lfloor \frac{n}{\hat{b}} \right\rfloor\right)
+V_{\text{cal}} := \Sigma_{\text{cal}} \cdot n_{\text{cal}}
 $$
 
-where $\hat{b}$ is the block length from the Politis-White selector (or platform-specific floor). This approximates the number of effectively independent blocks and prevents anti-conservative 1/n variance scaling when dependence is high.
+This is the "n=1 equivalent variance"—what the covariance would be with a single observation, under the dependence structure observed at calibration.
+
+**Effective sample size via IACT (normative):**
+
+Under strong temporal dependence, n samples do not provide n independent observations. The previous formulation used block length ($\hat{b}$) as a proxy for dependence, but this conflates two different quantities:
+
+- **Block length ($\hat{b}$)**: Optimal block size for bootstrap variance estimation (Politis-White tunes this for bootstrap validity, not information content)
+- **Integrated autocorrelation time (τ)**: The factor by which autocorrelation inflates variance (determines actual information content)
+
+Implementations MUST define effective sample size using IACT:
+
+$$
+n_{\text{eff}} := \frac{n}{\hat{\tau}}
+$$
+
+where $\hat{\tau}$ is estimated via the Geyer Initial Monotone Sequence (IMS) method on an appropriate scalarization of the data stream (see §3.3.2.1).
 
 Implementations MUST report:
-- `Diagnostics.dependence_length` = $\hat{b}$
+- `Diagnostics.dependence_length` = $\hat{b}$ (for bootstrap)
+- `Diagnostics.iact_combined` = $\hat{\tau}$
 - `Diagnostics.effective_sample_size` = $n_{\text{eff}}$
+- `Diagnostics.conservatism_ratio` = $\hat{b} / \hat{\tau}$ (diagnostic)
 
-**Covariance scaling during adaptive loop:**
+#### 3.3.2.1 Geyer IMS Algorithm (Normative)
 
-During the adaptive loop, with $n$ total samples per class and $n_{\text{eff}}$ as defined above:
+This algorithm follows Stan's implementation.
+
+**Input:** Scalar series $\{u_t\}$ of length $n$ (scalarization defined per-modality below).
+
+**Step 1: Compute sample autocorrelations**
 
 $$
-\Sigma_n = \Sigma_{\text{rate}} / n_{\text{eff}}
+\hat{\rho}_k = \frac{\sum_{t=1}^{n-k}(u_t - \bar{u})(u_{t+k} - \bar{u})}{\sum_{t=1}^{n}(u_t - \bar{u})^2}
 $$
+
+for $k = 0, 1, \ldots, K$ where $K = \min(\lfloor n/4 \rfloor, 1000)$.
+
+Note: $\hat{\rho}_0 = 1$ by construction.
+
+**Step 2: Form consecutive pairs**
+
+$$
+\hat{\Gamma}_m = \hat{\rho}_{2m} + \hat{\rho}_{2m+1}
+$$
+
+for $m = 0, 1, 2, \ldots$ while $2m+1 \le K$.
+
+**Step 3: Monotone enforcement**
+
+Process sequentially for $m \ge 1$:
+
+$$
+\hat{\Gamma}_m \leftarrow \min(\hat{\Gamma}_m, \hat{\Gamma}_{m-1})
+$$
+
+**Step 4: Truncation**
+
+Find the largest $m$ such that $\hat{\Gamma}_j > 0$ for all $j \in \{1, \ldots, m\}$ (after monotone enforcement). If no positive pairs exist beyond $\hat{\Gamma}_0$, set $m = 0$.
+
+**Step 5: IACT computation**
+
+$$
+\hat{\tau} = -1 + 2\sum_{j=0}^{m} \hat{\Gamma}_j
+$$
+
+**Step 6: Clamping**
+
+$$
+\hat{\tau} \leftarrow \max(\hat{\tau}, 1.0)
+$$
+
+**Edge cases:**
+- If $n < 20$: Skip IACT, set $\hat{\tau} = 1$, emit warning `InsufficientSamplesForIACT`
+- If variance is zero: Set $\hat{\tau} = 1$, emit warning `ZeroVarianceStream`
+
+#### 3.3.2.2 Scalarization for Timing (Per-Quantile Indicators)
+
+For timing, the statistic is quantile differences. IACT computed on raw $y_t$ measures dependence for the *mean*, not for *quantiles*. Quantile variance is driven by the indicator process $\mathbf{1}\{y \le q_p\}$, which can have different autocorrelation.
+
+**Scalarization procedure (normative):**
+
+For each class $C \in \{F, R\}$:
+1. Pool all samples from class $C$ to compute empirical quantiles $\hat{q}_p$ for $p \in \{0.1, 0.2, \ldots, 0.9\}$
+2. For each decile $p$:
+   - Form indicator series: $z_t(p) = \mathbf{1}\{y_t \le \hat{q}_p\}$ for $t$ in class $C$ (acquisition order)
+   - Compute $\hat{\tau}_C(p)$ via Geyer IMS on $\{z_t(p)\}$
+3. Set $\hat{\tau}_C = \max_p \hat{\tau}_C(p)$
+
+Combine across classes:
+
+$$
+\hat{\tau} = \max(\hat{\tau}_F, \hat{\tau}_R)
+$$
+
+**Rationale:** This aligns $\hat{\tau}$ with what actually drives quantile variance. Taking max over quantiles and classes is conservative.
+
+**Covariance scaling during adaptive loop (corrected):**
+
+During inference with $n$ samples and IACT estimates $\hat{\tau}$ (current) and $\hat{\tau}_{\text{cal}}$ (at calibration):
+
+$$
+\Sigma_n = V_{\text{cal}} \cdot \frac{\hat{\tau}}{\hat{\tau}_{\text{cal}}} \cdot \frac{1}{n}
+$$
+
+**Interpretation:**
+- $V_{\text{cal}} / n$: Standard 1/n scaling
+- $\hat{\tau} / \hat{\tau}_{\text{cal}}$: Adjustment for changes in dependence since calibration
+
+**Sanity check:** At calibration ($n = n_{\text{cal}}$, $\hat{\tau} = \hat{\tau}_{\text{cal}}$), this gives $\Sigma_n = \Sigma_{\text{cal}}$. ✓
 
 This allows cheap posterior updates without re-bootstrapping, while correctly accounting for reduced information under dependence.
 
@@ -601,7 +729,51 @@ $$
 \sigma^2_i \leftarrow \max(\sigma^2_i, 0.01 \cdot \bar{\sigma}^2) + \varepsilon
 $$
 
-where $\bar{\sigma}^2 = \text{tr}(\Sigma)/9$ and $\varepsilon = 10^{-10} + \bar{\sigma}^2 \cdot 10^{-8}$.
+where $\bar{\sigma}^2 = \text{tr}(\Sigma)/d$ and $\varepsilon = 10^{-10} + \bar{\sigma}^2 \cdot 10^{-8}$.
+
+#### 3.3.2.3 Dimension-Aware Regularization
+
+**Definition:**
+
+$$
+r := \frac{d}{n_{\text{eff}}}
+$$
+
+**Regime classification:**
+
+| Regime | Condition | Required Action |
+|--------|-----------|-----------------|
+| Well-conditioned | $r \le 0.05$ | Standard regularization (diagonal floor + SPD jitter) |
+| Stressed | $0.05 < r \le 0.15$ | MUST apply correlation shrinkage with $\lambda_{\text{shrink}} \ge 0.1$ |
+| Overstressed | $r > 0.15$ | MUST reduce dimension or use stage-wise inference |
+
+**Normative requirements:**
+
+1. Implementations MUST compute and report $r$ in diagnostics.
+
+2. In the stressed regime, apply correlation shrinkage:
+
+$$
+R \leftarrow (1-\lambda)R + \lambda I, \quad \lambda \ge 0.1
+$$
+
+3. In the overstressed regime, implementations MUST either reduce dimension deterministically or apply stage-wise inference where each stage satisfies $r_s \le 0.15$.
+
+4. Implementations MUST emit a quality issue in any non-well-conditioned regime (`StressedRegime` or `OverstressedRegime`).
+
+#### 3.3.2.4 Dimension vs Gibbs Sample Count Invariant
+
+**Invariant (normative):**
+
+$$
+d \le N_{\text{keep}} - 2
+$$
+
+where $N_{\text{keep}} = 192$ by default. Thus $d \le 190$.
+
+If $d > N_{\text{keep}} - 10$ (i.e., $d > 182$), emit warning `HighDimensionForGibbs`.
+
+**Rationale:** Gate 1 computes KL divergence using posterior covariance estimated from $N_{\text{keep}}$ samples. Estimating a $d \times d$ covariance from fewer than $d+2$ samples is degenerate.
 
 #### 3.3.3 Projection Mismatch Threshold Calibration
 
@@ -1737,21 +1909,343 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 
 ***
 
+## 7. Power Module (Feature-Gated)
+
+This section specifies the power/EM side-channel analysis module. This module is feature-gated (`power` feature) and shares the generalized statistical engine with timing analysis.
+
+### 7.1 Scope and Non-Goals
+
+The power module supports **exploratory leakage analysis** for hardware security research. It is designed for offline analysis of pre-collected trace datasets.
+
+**In scope:**
+- TVLA-style stage segmentation, resizing, and partitioning
+- Bayesian effect estimation with localization
+- Measurement resolution reporting (θ_floor)
+- First-order and second-order leakage detection
+
+**Not in scope:**
+- CI gating (no Pass/Fail verdicts)
+- Attacker model thresholds
+- Online trace capture
+- Combined timing+power orchestration
+
+**Design principle:** Power analysis returns a `Report`, not an `Outcome`. There are no Pass/Fail/Inconclusive verdicts—researchers interpret results themselves.
+
+### 7.2 Data Model
+
+```
+Class = Fixed | Random
+
+Trace = {
+    class: Class,
+    samples: Vec<f32>,
+    markers: Option<Vec<Marker>>,
+    id: u64
+}
+
+Dataset = {
+    traces: Vec<Trace>,             // Acquisition order
+    units: PowerUnits,
+    sample_rate_hz: Option<f64>,
+    meta: Meta
+}
+
+PowerUnits = ADC | Volts | Millivolts | Arbitrary(String)
+
+Marker = {
+    stage: StageId,
+    start: usize,
+    end: usize
+}
+
+StageId(String)
+```
+
+**Two regimes:**
+
+1. **Fixed-window traces**: No markers; same-length, trigger-aligned.
+2. **Stage-marked traces**: Markers identify stage boundaries; analyzed independently by default.
+
+**Blocked acquisition:** Datasets where all Fixed traces precede all Random (or vice versa) are supported. Emit warning `BlockedAcquisitionDetected` if classes are fully separated and timestamps span >1 hour.
+
+### 7.3 Feature Pipeline
+
+#### 7.3.1 Preprocessing
+
+**Winsorization (required):**
+- Cap at 99.99th / 0.01th percentiles from calibration
+- Report winsorization rate
+
+**Normalization (optional, off by default):**
+- DC removal: subtract per-trace mean
+- Scale normalization: divide by per-trace std
+
+If scale normalization is enabled, emit warning `ScaleNormalizationEnabled`: "May mask amplitude-based leakage."
+
+#### 7.3.2 Alignment (Optional)
+
+| Aligner | Description |
+|---------|-------------|
+| None | Default if markers present |
+| TemplateXCorr { max_shift } | Cross-correlation to template |
+| EdgeAlign { region } | Align to edge/peak |
+
+**Class-blind requirement:** Template MUST be computed from pooled calibration subset (both classes). Computing from single class leaks class information into preprocessing.
+
+#### 7.3.3 Stage Segmentation and Resizing
+
+If markers present, for each stage $s$:
+1. Extract segment [start, end)
+2. Resample to canonical length $L_s$ (linear interpolation)
+
+Canonical lengths: explicit config or median length rounded to power of 2.
+
+#### 7.3.4 Partitioning
+
+Partition each stage into $C_s$ equal-width bins. Default: $C = 32$.
+
+#### 7.3.5 Feature Families
+
+**Mean (default):**
+
+$$
+x_{s,p} = \frac{1}{|B_{s,p}|} \sum_{i \in B_{s,p}} \text{samples}[i]
+$$
+
+Dimension: $d = \sum_s C_s$
+
+**Robust3:**
+
+Per partition: median, 10th percentile, 90th percentile.
+
+Dimension: $d = 3 \cdot \sum_s C_s$
+
+Requirements:
+- $n_{\text{eff}} < 300$: emit warning `LowTailResolution`
+- $n_{\text{eff}} < 150$: fall back to Mean unless `force_robust3: true`
+
+**CenteredSquare:**
+
+$$
+x_{s,p} = \frac{1}{|B_{s,p}|} \sum_{i \in B_{s,p}} (\text{samples}[i] - \mu_{s,p})^2
+$$
+
+Dimension: $d = \sum_s C_s$
+
+For second-order / variance leakage.
+
+#### 7.3.6 Dimension Limits
+
+Default $d_{\max} = 32$. If $d > d_{\max}$, merge adjacent partitions pairwise until $d \le d_{\max}$.
+
+### 7.4 Statistic Definition
+
+$$
+\Delta = \bar{x}_F - \bar{x}_R
+$$
+
+### 7.5 Threshold Semantics
+
+#### 7.5.1 Measurement Floor
+
+$$
+c_{\text{floor}} := q_{0.95}\left(\max_k |Z_{0,k}|\right), \quad Z_0 \sim \mathcal{N}(0, V_{\text{cal}})
+$$
+
+$$
+\theta_{\text{floor}} = \frac{c_{\text{floor}}}{\sqrt{n_{\text{eff}}}}
+$$
+
+#### 7.5.2 Floor Multiplier
+
+**Note:** The power module uses `floor_multiplier` (not κ) to avoid collision with the robust likelihood κ in the main spec.
+
+$$
+\theta_{\text{eff}} := \text{floor\_multiplier} \cdot \theta_{\text{floor}}
+$$
+
+| floor_multiplier | Interpretation |
+|------------------|----------------|
+| 1 (default) | Detect anything above resolution |
+| 2–3 | More conservative |
+
+#### 7.5.3 Prior Calibration
+
+Calibrate σ per stage (in stage-wise inference) using that stage's θ_floor:
+
+$$
+P\left(\max_k |\delta_k| > \theta_{\text{eff}} \mid \delta \sim t_4(0, \sigma^2 R)\right) = 0.62
+$$
+
+### 7.6 Scalarization for Power (Per-Coordinate Top-K)
+
+For power, the statistic is feature means. Computing τ̂ on an aggregate (like L2 norm) can dilute strong dependence in individual coordinates.
+
+**Scalarization procedure (normative):**
+
+1. During calibration, compute per-coordinate variance for each of the $d$ features
+2. Select the top $\min(8, d)$ coordinates by variance (descending)
+3. For each selected coordinate $k$ and each class $C$:
+   - Compute $\hat{\tau}_C(k)$ via Geyer IMS on $\{x_{t,k}\}$ for $t$ in class $C$
+4. Set $\hat{\tau} = \max$ over selected coordinates and over classes
+
+**Rationale:** Selecting by variance identifies coordinates most likely to drive inference. Taking max ensures the most autocorrelated coordinate determines $n_{\text{eff}}$.
+
+### 7.7 Stage-Wise Inference
+
+If markers exist with multiple stages, analyze each stage independently by default:
+
+1. Extract features for that stage ($d_s$ dimensions)
+2. Compute stage-specific $V_{\text{cal},s}$, $\hat{\tau}_s$, $n_{\text{eff},s}$, $\theta_{\text{floor},s}$
+3. Calibrate $\sigma_s$
+4. Run Bayesian engine
+5. Report per-stage results
+
+**Cross-stage correlation is not modeled.** Stages are independent analyses.
+
+**Aggregation:** Report per-stage probabilities. Summary = max probability across stages.
+
+### 7.8 Output: Report
+
+```
+Report = {
+    // Effect estimates
+    max_effect: Float,
+    max_effect_ci95: (Float, Float),
+    leak_probability: Float,
+
+    // Threshold info (prominent)
+    theta_floor: Float,
+    floor_multiplier: Float,
+    theta_eff: Float,
+    units: PowerUnits,
+
+    // Dimension info (prominent)
+    dimension: DimensionInfo,
+
+    // Localization
+    top_features: Vec<FeatureHotspot>,
+
+    // Per-stage (if applicable)
+    stages: Option<Vec<StageReport>>,
+
+    diagnostics: PowerDiagnostics
+}
+
+DimensionInfo = {
+    d: Int,
+    d_original: Int,
+    n_eff: Float,
+    r: Float,
+    regime: Regime
+}
+
+FeatureHotspot = {
+    stage: Option<StageId>,
+    partition: Int,
+    feature_type: FeatureType,
+    effect_mean: Float,
+    effect_ci95: (Float, Float),
+    exceed_prob: Float
+}
+
+FeatureType = Mean | Median | LowerTail | UpperTail | CenteredSquare
+
+StageReport = {
+    stage: StageId,
+    leak_probability: Float,
+    max_effect: Float,
+    max_effect_ci95: (Float, Float),
+    theta_floor: Float,
+    theta_eff: Float,
+    dimension: DimensionInfo,
+    top_features: Vec<FeatureHotspot>
+}
+```
+
+#### 7.8.1 Prominence Requirements
+
+Display MUST prominently show:
+1. θ_floor with units
+2. floor_multiplier and θ_eff
+3. d, n_eff, r, regime
+4. Top features with stage/partition and exceed_prob
+
+#### 7.8.2 Localization
+
+Report top 5 features by exceed_prob = P(|δ_k| > θ_eff | Δ).
+
+### 7.9 Public API
+
+```rust
+power::analyze(config: &Config, dataset: &Dataset) -> Report
+
+Config = {
+    features: FeatureFamily,            // Default: Mean
+    partitions: PartitionConfig,        // Default: Global { count: 32 }
+    d_max: Int,                         // Default: 32
+    alignment: Alignment,               // Default: None
+    preprocessing: Preprocessing,
+    floor_multiplier: Float,            // Default: 1.0
+    calibration_traces: Int,            // Default: 500
+    bootstrap_iterations: Int,          // Default: 2000
+    force_robust3: Bool,                // Default: false
+    seed: Option<Int>
+}
+
+FeatureFamily = Mean | Robust3 | CenteredSquare
+
+PartitionConfig = Global { count } | PerStage(HashMap<StageId, Int>)
+
+Alignment = None | TemplateXCorr { max_shift } | EdgeAlign { region }
+
+Preprocessing = {
+    dc_removal: Bool,                   // Default: false
+    scale_normalization: Bool,          // Default: false
+    winsor_percentile: Float            // Default: 0.9999
+}
+```
+
+### 7.10 Power-Specific Quality Issues
+
+| Code | Condition |
+|------|-----------|
+| `OverstressedRegime` | r > 0.15 |
+| `StressedRegime` | 0.05 < r ≤ 0.15 |
+| `LowTailResolution` | Robust3, n_eff < 300 |
+| `Robust3Fallback` | Robust3, n_eff < 150, auto-fallback |
+| `DimensionReduced` | d reduced |
+| `HighDimensionForGibbs` | d > N_keep − 10 |
+| `HighAlignmentVariance` | shift std > 10% trace length |
+| `HighAlignmentClipping` | >5% traces clipped |
+| `StageLengthVariance` | stage length CV > 0.5 |
+| `HighWinsorRate` | >1% winsorized |
+| `LowEffectiveSamples` | n_eff < 100 |
+| `ScaleNormalizationEnabled` | user enabled |
+| `BlockedAcquisitionDetected` | classes fully separated |
+
+***
+
 ## Appendix A: Mathematical Notation
 
 | Symbol | Meaning |
 |--------|---------|
+| d | Feature dimension (9 for timing, varies for power) |
 | {(c_t, y_t)} | Acquisition stream: class labels and timing measurements |
 | T | Acquisition stream length (≈ 2n) |
 | F, R | Per-class sample sets (filtered from stream) |
-| $\Delta$ | 9-vector of observed quantile differences |
-| $\delta$ | 9-vector of true (latent) quantile differences |
+| $\Delta$ | d-vector of observed quantile/feature differences |
+| $\delta$ | d-vector of true (latent) quantile/feature differences |
 | q̂_F(k), q̂_R(k) | Empirical quantiles for Fixed and Random classes |
-| X | 9 × 2 projection basis [**1** ∣ **b**_tail] |
-| $\beta_{\text{proj}}$ | 2D projection: ($\mu$, $\tau$)ᵀ |
-| $\Sigma_n$ | Covariance matrix at sample size n: $\Sigma_n = \Sigma_{\text{rate}}/n_{\text{eff}}$ |
+| X | d × 2 projection basis [**1** ∣ **b**_tail] (timing only) |
+| $\beta_{\text{proj}}$ | 2D projection: ($\mu$, $\tau$)ᵀ (timing only) |
+| $\Sigma_n$ | Covariance matrix at sample size n |
 | $\Sigma_{\text{rate}}$ | Covariance rate |
-| n_eff | Effective sample size: n_eff = floor(n / b̂) |
+| $V_{\text{cal}}$ | Calibration long-run variance proxy: $\Sigma_{\text{cal}} \cdot n_{\text{cal}}$ |
+| $\hat{\tau}$ | Integrated autocorrelation time (via Geyer IMS) |
+| $\hat{\tau}_{\text{cal}}$ | IACT at calibration time |
+| n_eff | Effective sample size: $n_{\text{eff}} = n / \hat{\tau}$ |
+| r | Dimension ratio: $r = d / n_{\text{eff}}$ |
 | R | Prior correlation matrix: $\mathrm{Corr}(\Sigma_{\text{rate}})$ |
 | $\nu$ | Student's *t* degrees of freedom (fixed at 4) |
 | $\sigma$ | Student's *t* prior scale (calibrated via exceedance target) |
@@ -1836,6 +2330,37 @@ These constants define conformant implementations. Implementations MAY use diffe
 | $\kappa$ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
 | Likelihood inflation threshold | 0.3 | SHOULD | $\kappa_{\text{mean}}$ triggering LikelihoodInflated |
 
+**IACT (Integrated Autocorrelation Time):**
+
+| Constant | Default | Normative | Rationale |
+|----------|---------|-----------|-----------|
+| IACT clamp minimum | 1.0 | MUST | Floor for τ̂ (no "negative" autocorrelation) |
+| IACT max lag K | min(n/4, 1000) | SHOULD | Bound computation and variance |
+| IACT min samples | 20 | MUST | Below this, return τ̂ = 1.0 |
+| IACT n_eff upper bound | n·log₁₀(n) | SHOULD | Stan's safeguard for extreme cases |
+| IACT coordinates (power) | min(8, d) | SHOULD | Top coordinates by variance for scalarization |
+
+**Dimension-Aware Regularization:**
+
+| Constant | Default | Normative | Rationale |
+|----------|---------|-----------|-----------|
+| r well-conditioned threshold | 0.05 | SHOULD | r = d/n_eff ≤ 0.05 is well-conditioned |
+| r stressed threshold | 0.15 | SHOULD | 0.05 < r ≤ 0.15 is stressed |
+| λ_shrink minimum | 0.1 | MUST | Minimum shrinkage for stressed regime |
+| Dimension vs Gibbs invariant | d ≤ N_keep − 2 | MUST | Ensure Wishart well-defined |
+
+**Power Module Constants:**
+
+| Constant | Default | Normative | Rationale |
+|----------|---------|-----------|-----------|
+| d_max (power) | 32 | SHOULD | Maximum feature dimension |
+| Default partitions (power) | 32 | SHOULD | Per-stage partition count |
+| Default floor_multiplier | 1.0 | SHOULD | Detect at resolution |
+| Calibration traces (power) | 500 | SHOULD | Subset for V_cal estimation |
+| Winsorization percentile | 0.9999 | SHOULD | Outlier removal |
+| Robust3 n_eff warning | 300 | SHOULD | Emit LowTailResolution |
+| Robust3 fallback threshold | 150 | SHOULD | Auto-fallback to Mean |
+
 ***
 
 ## Appendix C: References
@@ -1876,6 +2401,74 @@ These constants define conformant implementations. Implementations MAY use diffe
 ***
 
 ## Appendix D: Changelog
+
+### v5.7 (from v5.6)
+
+**Dimension generalization (§3.1.1, throughout):**
+
+- **Changed:** Statistical engine generalized from ℝ⁹ (timing deciles) to ℝᵈ (arbitrary dimension)
+- **Added:** §3.1.1 Dimension Parameterization with modality-specific dimension selection
+- **Changed:** All formulas now use generic dimension d instead of hardcoded 9
+- **Rationale:** Enable reuse of core Bayesian engine for power/EM analysis.
+
+**IACT-based effective sample size (§3.3.2, §3.3.2.1, §3.3.2.2):**
+
+- **Changed:** n_eff formula from ⌊n/b̂⌋ (block-based) to n/τ̂ (IACT-based)
+- **Added:** §3.3.2.1 Geyer IMS Algorithm (normative 6-step algorithm)
+- **Added:** §3.3.2.2 Scalarization for Timing (per-quantile indicator series)
+- **Added:** Explicit edge cases for n < 20, zero variance, all negative pairs
+- **Added:** n_eff upper bound n·log₁₀(n) (Stan's safeguard)
+- **Clarified:** Block length (b̂) remains for bootstrap; IACT (τ̂) is for n_eff
+- **Rationale:** IACT more accurately estimates effective sample size under temporal dependence.
+
+**Covariance scaling correction (§3.3.2):**
+
+- **Changed:** Σ_n = V_cal · (τ̂/τ̂_cal) / n (was Σ_rate / n_eff)
+- **Added:** V_cal = Σ_cal · n_cal as long-run variance proxy
+- **Added:** τ̂_cal recorded at calibration time
+- **Rationale:** Fixes double-counting issue when n_eff was used in both Σ_n denominator and definition.
+
+**Dimension-aware regularization (§3.3.2.3):**
+
+- **Added:** Regime classification based on r = d/n_eff: WellConditioned (≤0.05), Stressed (≤0.15), Overstressed (>0.15)
+- **Added:** Automatic shrinkage requirements by regime
+- **Added:** Warning emission for Stressed and Overstressed regimes
+- **Rationale:** High-dimensional power analysis requires regularization for stable covariance estimation.
+
+**Gibbs dimension invariant (§3.3.2.4):**
+
+- **Added:** Invariant d ≤ N_keep − 2 (MUST)
+- **Added:** Guidance for handling violations (reduce d or increase N_keep)
+- **Rationale:** Ensures Wishart distributions remain well-defined.
+
+**Power module specification (§7):**
+
+- **Added:** §7 Power Module specification (feature-gated)
+- **Added:** §7.1 Scope and Non-Goals (exploratory analysis, no CI verdicts)
+- **Added:** §7.2 Data Model (Trace, Dataset, Marker, PowerUnits)
+- **Added:** §7.3 Feature Pipeline (preprocessing, alignment, segmentation, partitioning, feature families)
+- **Added:** §7.4 Statistic Definition (Δ = x̄_F − x̄_R)
+- **Added:** §7.5 Threshold Semantics (θ_floor, floor_multiplier, θ_eff)
+- **Added:** §7.6 Scalarization for Power (per-coordinate top-K)
+- **Added:** §7.7 Stage-Wise Inference
+- **Added:** §7.8 Output Report structure with prominence requirements
+- **Added:** §7.9 Public API
+- **Added:** §7.10 Power-Specific Quality Issues
+- **Rationale:** First-party power/EM side-channel analysis using shared statistical engine.
+
+**Diagnostics updates (§2.8):**
+
+- **Added:** IACT fields: iact_fixed, iact_random, iact_combined, iact_cal, conservatism_ratio
+- **Added:** Dimension fields: d, r, regime
+- **Added:** Issue codes: InsufficientSamplesForIACT, ZeroVarianceStream, OverstressedRegime, StressedRegime, HighDimensionForGibbs
+- **Rationale:** Expose IACT and dimension regime information for debugging.
+
+**Notation and constants (Appendix A, B):**
+
+- **Added:** d, V_cal, τ̂, τ̂_cal, r to notation table
+- **Added:** IACT constants to Appendix B
+- **Added:** Dimension-aware regularization constants to Appendix B
+- **Added:** Power module constants to Appendix B
 
 ### v5.6 (from v5.5)
 

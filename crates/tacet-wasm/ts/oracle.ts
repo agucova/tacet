@@ -272,14 +272,11 @@ export function configRemoteNetwork(): Config {
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModel, Outcome, initializeWasm } from '@tacet/js';
+ * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/js';
  * import crypto from 'crypto';
  *
- * // Initialize WASM (required before first use)
- * await initializeWasm();
- *
  * const result = TimingOracle
- *   .forAttacker(AttackerModel.AdjacentNetwork)
+ *   .forAttacker(AttackerModelValues.AdjacentNetwork)
  *   .timeBudget(30_000)  // 30 seconds
  *   .maxSamples(100_000)
  *   .test(
@@ -290,7 +287,7 @@ export function configRemoteNetwork(): Config {
  *     (input) => myCryptoFunction(input)
  *   );
  *
- * if (result.outcome === Outcome.Fail) {
+ * if (result.outcome === OutcomeValues.Fail) {
  *   console.log(`Timing leak detected: ${result.exploitability}`);
  * }
  * ```
