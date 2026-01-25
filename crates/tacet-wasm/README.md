@@ -1,6 +1,17 @@
-# @tacet/js
+<p align="center">
+  <img src="https://raw.githubusercontent.com/agucova/tacet/main/crates/tacet-wasm/logo.svg" alt="tacet" width="340">
+</p>
 
-Timing side-channel detection for JavaScript/TypeScript. Detect timing leaks in cryptographic code using statistical analysis.
+<p align="center">
+  <strong>Timing side-channel detection for JavaScript/TypeScript</strong><br>
+  Detect timing leaks in cryptographic code using statistical analysis.
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@tacet/js"><img src="https://img.shields.io/npm/v/@tacet/js" alt="npm"></a>
+  <a href="https://jsr.io/@tacet/js"><img src="https://jsr.io/badges/@tacet/js" alt="JSR"></a>
+  <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
+</p>
 
 This is a WASM-based implementation that works in **Node.js**, **Bun**, and **Deno**.
 
