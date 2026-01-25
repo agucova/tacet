@@ -1,7 +1,7 @@
 {
   "name": "@tacet/js",
   "version": "0.2.0",
-  "license": "MIT",
+  "license": "MPL-2.0",
   "exports": "./dist/index.js",
   "publish": {
     "include": [
