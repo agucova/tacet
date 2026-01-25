@@ -1,15 +1,25 @@
 // Package ffi provides CGo bindings to the tacet C library.
 //
-// Before building, run: go generate ./...
-// This downloads the pre-built static library for your platform.
+// # Installation
+//
+// Before using this package, install the native library:
+//
+//	go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
+//
+// This downloads the pre-built static library (~12MB) for your platform
+// and places it in the module cache where CGo can find it.
+//
+// # Build Errors
+//
+// If you see linker errors about missing tacet symbols, it means the
+// native library is not installed. Run the install command above.
 package ffi
-
-//go:generate sh -c "cd ../.. && ./scripts/download-lib.sh"
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../../tacet-c/include
 
-// Platform-specific static libraries (downloaded via go generate)
+// Platform-specific static libraries
+// The install command places these in the module cache at build time
 #cgo darwin,arm64 LDFLAGS: ${SRCDIR}/lib/darwin_arm64/libtacet_c.a -framework CoreFoundation -framework Security
 #cgo darwin,amd64 LDFLAGS: ${SRCDIR}/lib/darwin_amd64/libtacet_c.a -framework CoreFoundation -framework Security
 #cgo linux,arm64 LDFLAGS: ${SRCDIR}/lib/linux_arm64/libtacet_c.a -lm -lpthread

@@ -57,12 +57,14 @@ func main() {
 
 ```bash
 go get github.com/agucova/tacet/crates/tacet-go
-go generate github.com/agucova/tacet/crates/tacet-go/...
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
 ```
 
-The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
+The install command downloads the pre-built static library for your platform (~12MB) and places it in the module cache where CGo can find it. This only needs to be run once.
 
 **Requirements:** Go 1.22+ with CGo enabled.
+
+**Troubleshooting:** If you see linker errors about missing `tacet` symbols, run the install command above. The native library must be installed before building.
 
 ### Platform Support
 
@@ -113,10 +115,10 @@ go test -v -short -run TestTimerWorks
 
 ### Specifying a Version
 
-To download a specific version of the library:
+To install a specific version of the library:
 
 ```bash
-TIMING_ORACLE_VERSION=v0.1.0 go generate github.com/agucova/tacet/crates/tacet-go/...
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest -version=v0.2.3
 ```
 
 ---

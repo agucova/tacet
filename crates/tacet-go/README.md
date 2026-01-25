@@ -17,12 +17,12 @@
 
 ```bash
 go get github.com/agucova/tacet/crates/tacet-go
-go generate github.com/agucova/tacet/crates/tacet-go/...
+go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
 ```
 
-The `go generate` command downloads the pre-built static library for your platform (~12MB). This only needs to be run once.
+The install command downloads the pre-built static library for your platform (~12MB) and places it where CGo can find it. This only needs to be run once.
 
-**Requirements:** Go 1.21+ with CGo enabled.
+**Requirements:** Go 1.22+ with CGo enabled.
 
 ### Platform Support
 
