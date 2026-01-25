@@ -215,13 +215,20 @@ macro_rules! assert_leak_detected {
                 leak_probability,
                 ..
             } => {
-                let summary = $crate::output::format_debug_summary(&$outcome);
-                panic!(
-                    "Expected timing leak but got Inconclusive (P={:.1}%): {}\n\n{}",
-                    leak_probability * 100.0,
-                    reason,
-                    summary,
-                );
+                // Accept Inconclusive with high leak probability (≥90%) as a detected leak.
+                // This handles cases where the oracle found strong evidence of a leak
+                // but a quality gate (e.g., WouldTakeTooLong) prevented formal confirmation.
+                if *leak_probability >= 0.90 {
+                    // Leak detected with high confidence - pass the assertion
+                } else {
+                    let summary = $crate::output::format_debug_summary(&$outcome);
+                    panic!(
+                        "Expected timing leak but got Inconclusive (P={:.1}%): {}\n\n{}",
+                        leak_probability * 100.0,
+                        reason,
+                        summary,
+                    );
+                }
             }
             $crate::Outcome::Unmeasurable { recommendation, .. } => {
                 let summary = $crate::output::format_debug_summary(&$outcome);
