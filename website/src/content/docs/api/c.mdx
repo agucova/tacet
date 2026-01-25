@@ -5,50 +5,47 @@ sidebar:
   order: 2
 ---
 
-C bindings for timing-oracle.
+C bindings for timing-oracle, providing low-overhead timing side-channel detection.
 
 ## Quick Reference
 
 ```c
 #include <timing_oracle.h>
 
-// Generator: zeros for baseline, random for sample
-void generator(void *ctx, bool is_baseline, uint8_t *out, size_t size) {
-    if (is_baseline) {
-        memset(out, 0, size);
-    } else {
-        arc4random_buf(out, size);
+// Callback for sample collection
+void collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+    for (size_t i = 0; i < count; i++) {
+        baseline[i] = measure(generate_baseline());
+        sample[i] = measure(generate_sample());
     }
-}
-
-// Operation: the code being tested
-void operation(void *ctx, const uint8_t *input, size_t size) {
-    my_crypto_function(input, size);
 }
 
 int main(void) {
-    to_config_t config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
-    config.time_budget_secs = 30.0;
+    // Configure based on attacker model
+    ToConfig cfg = to_config_default(AdjacentNetwork);
+    cfg.time_budget_secs = 30.0;
+    cfg.max_samples = 100000;
+    cfg = to_config_from_env(cfg);  // CI can set TO_TIME_BUDGET_SECS, etc.
 
-    to_result_t result = to_test(&config, 32, generator, operation, NULL);
+    ToResult result;
+    to_test(&cfg, collect, NULL, &result);
 
     switch (result.outcome) {
-        case TO_OUTCOME_PASS:
+        case Pass:
             printf("No leak: P(leak)=%.1f%%\n", result.leak_probability * 100.0);
             break;
-        case TO_OUTCOME_FAIL:
-            printf("Leak: %.1f ns\n", result.effect.shift_ns);
+        case Fail:
+            printf("Leak: %.1f ns shift\n", result.effect.shift_ns);
             break;
-        case TO_OUTCOME_INCONCLUSIVE:
-            printf("Inconclusive: %s\n", to_inconclusive_reason_str(result.inconclusive_reason));
+        case Inconclusive:
+            printf("Inconclusive\n");
             break;
-        case TO_OUTCOME_UNMEASURABLE:
-            printf("Too fast: %s\n", result.recommendation);
+        case Unmeasurable:
+            printf("Too fast to measure\n");
             break;
     }
 
-    to_result_free(&result);
-    return result.outcome == TO_OUTCOME_FAIL ? 1 : 0;
+    return result.outcome == Fail ? 1 : 0;
 }
 ```
 
@@ -69,88 +66,183 @@ cargo build --release -p timing-oracle-c
 
 ## Configuration
 
-### Creating Configuration
+### Creating a Configuration
+
+Start by creating a configuration for your attacker model, then customize as needed:
 
 ```c
-// Create with default settings for an attacker model
-to_config_t config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
+// Create config for your attacker model
+ToConfig cfg = to_config_default(AdjacentNetwork);
 
-// Customize as needed
-config.time_budget_secs = 60.0;
-config.max_samples = 50000;
+// Or use convenience functions
+ToConfig cfg = to_config_adjacent_network();  // 100 ns threshold
+ToConfig cfg = to_config_shared_hardware();   // ~0.6 ns threshold
+ToConfig cfg = to_config_remote_network();    // 50 μs threshold
 ```
+
+### Customizing Configuration
+
+```c
+ToConfig cfg = to_config_default(AdjacentNetwork);
+cfg.time_budget_secs = 60.0;
+cfg.max_samples = 50000;
+cfg.pass_threshold = 0.01;   // More confident pass
+cfg.fail_threshold = 0.99;   // More confident fail
+cfg.seed = 12345;            // Reproducibility
+cfg.custom_threshold_ns = 500.0;  // Override threshold
+```
+
+### Environment Variable Override
+
+Allow CI systems to override configuration without recompiling:
+
+```c
+ToConfig cfg = to_config_default(AdjacentNetwork);
+cfg.time_budget_secs = 30.0;
+cfg.max_samples = 100000;
+cfg = to_config_from_env(cfg);  // Merges TO_* env vars
+```
+
+Supported environment variables:
+- `TO_TIME_BUDGET_SECS` - Time budget in seconds (float)
+- `TO_MAX_SAMPLES` - Maximum samples per class (integer)
+- `TO_PASS_THRESHOLD` - Pass threshold for P(leak) (float, e.g., 0.05)
+- `TO_FAIL_THRESHOLD` - Fail threshold for P(leak) (float, e.g., 0.95)
+- `TO_SEED` - Random seed for reproducibility (integer)
+- `TO_THRESHOLD_NS` - Custom threshold in nanoseconds (float)
 
 ### Attacker Models
 
 | Enum Value | Threshold | Use Case |
 |------------|-----------|----------|
-| `TO_ATTACKER_SHARED_HARDWARE` | ~0.6 ns | SGX, containers |
-| `TO_ATTACKER_POST_QUANTUM` | ~3.3 ns | Post-quantum crypto |
-| `TO_ATTACKER_ADJACENT_NETWORK` | 100 ns | LAN, HTTP/2 |
-| `TO_ATTACKER_REMOTE_NETWORK` | 50 μs | Public internet |
-| `TO_ATTACKER_RESEARCH` | ~0 | Detect any difference |
-| `TO_ATTACKER_CUSTOM` | User-defined | Custom threshold |
-
-### Configuration Fields
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `attacker_model` | `to_attacker_model_t` | Required | Threat model |
-| `threshold_ns` | `double` | Model-dependent | Threshold (for CUSTOM) |
-| `time_budget_secs` | `double` | 30.0 | Max test duration |
-| `max_samples` | `size_t` | 100000 | Max samples per class |
-| `pass_threshold` | `double` | 0.05 | P(leak) below this → Pass |
-| `fail_threshold` | `double` | 0.95 | P(leak) above this → Fail |
+| `SharedHardware` | ~0.6 ns | SGX, containers, hyperthreading |
+| `PostQuantum` | ~3.3 ns | Post-quantum crypto |
+| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 |
+| `RemoteNetwork` | 50 μs | Public internet |
+| `Research` | ~0 | Detect any difference |
 
 ---
 
-## Callbacks
+## Callback-Based API (Recommended)
 
-### Generator Callback
+The `to_test()` function handles the full adaptive sampling loop internally.
+
+### Collect Callback
 
 ```c
-typedef void (*to_generator_fn)(void *context, bool is_baseline, uint8_t *output, size_t size);
+typedef void (*ToCollectFn)(
+    uint64_t* baseline_out,  // Fill with baseline timing samples
+    uint64_t* sample_out,    // Fill with sample timing samples
+    size_t count,            // Number of samples to collect per class
+    void* user_ctx           // User context pointer
+);
 ```
 
-Called **outside** the timed region to generate test inputs.
+The callback is invoked multiple times. Each invocation should:
+1. Collect `count` baseline timing measurements into `baseline_out`
+2. Collect `count` sample timing measurements into `sample_out`
+3. Use interleaved sampling for best statistical properties
+
+### Running a Test
 
 ```c
-void generator(void *ctx, bool is_baseline, uint8_t *output, size_t size) {
-    if (is_baseline) {
-        memset(output, 0, size);  // All zeros for baseline
-    } else {
-        arc4random_buf(output, size);  // Random for sample
+ToError to_test(
+    const ToConfig* config,
+    ToCollectFn collect_fn,
+    void* user_ctx,
+    ToResult* result_out
+);
+```
+
+**Example:**
+
+```c
+void collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+    for (size_t i = 0; i < count; i++) {
+        // Baseline: all-zero input
+        uint8_t input[32] = {0};
+        uint64_t start = read_timer();
+        my_crypto_op(input, 32);
+        uint64_t end = read_timer();
+        baseline[i] = end - start;
+
+        // Sample: random input
+        arc4random_buf(input, 32);
+        start = read_timer();
+        my_crypto_op(input, 32);
+        end = read_timer();
+        sample[i] = end - start;
     }
 }
-```
 
-### Operation Callback
+int main(void) {
+    ToConfig cfg = to_config_default(AdjacentNetwork);
+    cfg.time_budget_secs = 30.0;
+    cfg.max_samples = 100000;
+    ToResult result;
 
-```c
-typedef void (*to_operation_fn)(void *context, const uint8_t *input, size_t size);
-```
+    ToError err = to_test(&cfg, collect, NULL, &result);
+    if (err != Ok) {
+        fprintf(stderr, "Test failed: %d\n", err);
+        return 1;
+    }
 
-Called **inside** the timed region. This is the code being tested.
-
-```c
-void operation(void *ctx, const uint8_t *input, size_t size) {
-    // Your cryptographic operation
-    crypto_verify(input, expected, size);
+    // Handle result...
+    return result.outcome == Fail ? 1 : 0;
 }
 ```
 
 ---
 
-## Running Tests
+## Low-Level Adaptive API
+
+For more control, use the calibrate/step API:
 
 ```c
-to_result_t to_test(
-    const to_config_t *config,
-    size_t input_size,
-    to_generator_fn generator,
-    to_operation_fn operation,
-    void *context
-);
+// 1. Collect calibration samples
+uint64_t baseline[5000], sample[5000];
+collect_samples(baseline, sample, 5000);
+
+// 2. Calibrate
+ToError err;
+ToCalibration* cal = to_calibrate(baseline, sample, 5000, &config, &err);
+
+// 3. Create state
+ToState* state = to_state_new();
+
+// 4. Adaptive loop
+double start_time = get_time();
+while (1) {
+    uint64_t batch_b[1000], batch_s[1000];
+    collect_samples(batch_b, batch_s, 1000);
+
+    ToStepResult step;
+    to_step(cal, state, batch_b, batch_s, 1000, &config,
+            get_time() - start_time, &step);
+
+    if (step.has_decision) {
+        // step.result contains the final ToResult
+        break;
+    }
+}
+
+// 5. Clean up
+to_state_free(state);
+to_calibration_free(cal);
+```
+
+---
+
+## One-Shot Analysis
+
+For pre-collected data:
+
+```c
+uint64_t baseline[10000], sample[10000];
+// ... collect all samples ...
+
+ToResult result;
+ToError err = to_analyze(baseline, sample, 10000, &config, &result);
 ```
 
 ---
@@ -161,45 +253,82 @@ to_result_t to_test(
 
 ```c
 typedef enum {
-    TO_OUTCOME_PASS,         // No leak detected
-    TO_OUTCOME_FAIL,         // Leak confirmed
-    TO_OUTCOME_INCONCLUSIVE, // Cannot decide
-    TO_OUTCOME_UNMEASURABLE  // Operation too fast
-} to_outcome_t;
+    Pass = 0,        // No leak detected
+    Fail = 1,        // Leak confirmed
+    Inconclusive = 2,// Cannot decide
+    Unmeasurable = 3 // Operation too fast
+} ToOutcome;
 ```
 
 ### Result Structure
 
 ```c
 typedef struct {
-    to_outcome_t outcome;
-    double leak_probability;
-    to_effect_t effect;
-    to_exploitability_t exploitability;
-    to_quality_t quality;
-    to_inconclusive_reason_t inconclusive_reason;
-    size_t samples_used;
-    const char *recommendation;  // For UNMEASURABLE
-} to_result_t;
+    ToOutcome outcome;
+    double leak_probability;      // P(effect > threshold | data)
+    ToEffect effect;              // Effect size estimate
+    ToMeasurementQuality quality; // Measurement precision
+    uint64_t samples_used;        // Samples per class
+    double elapsed_secs;          // Test duration
+    ToExploitability exploitability;  // Exploitability assessment
+    ToInconclusiveReason inconclusive_reason;
+    double mde_shift_ns;          // Minimum detectable shift
+    double mde_tail_ns;           // Minimum detectable tail
+    double theta_user_ns;         // User's requested threshold
+    double theta_eff_ns;          // Effective threshold used
+    double theta_floor_ns;        // Measurement floor
+    double timer_resolution_ns;   // Timer resolution
+    ToDiagnostics diagnostics;    // Detailed diagnostics
+} ToResult;
 ```
 
 ### Effect Structure
 
 ```c
 typedef struct {
-    double shift_ns;
-    double tail_ns;
-    double credible_interval_low;
-    double credible_interval_high;
-    to_effect_pattern_t pattern;
-} to_effect_t;
+    double shift_ns;     // Uniform shift component
+    double tail_ns;      // Tail effect component
+    double ci_low_ns;    // 95% credible interval lower
+    double ci_high_ns;   // 95% credible interval upper
+    ToEffectPattern pattern;  // UniformShift, TailEffect, Mixed, Indeterminate
+} ToEffect;
 ```
 
-### Memory Management
+### Exploitability
 
 ```c
-// Always free results when done
-void to_result_free(to_result_t *result);
+typedef enum {
+    SharedHardwareOnly = 0,  // < 10 ns
+    Http2Multiplexing = 1,   // 10-100 ns
+    StandardRemote = 2,      // 100 ns - 10 μs
+    ObviousLeak = 3          // > 10 μs
+} ToExploitability;
+```
+
+### Measurement Quality
+
+```c
+typedef enum {
+    Excellent = 0,  // MDE < 5 ns
+    Good = 1,       // MDE 5-20 ns
+    Poor = 2,       // MDE 20-100 ns
+    TooNoisy = 3    // MDE > 100 ns
+} ToMeasurementQuality;
+```
+
+---
+
+## Error Handling
+
+```c
+typedef enum {
+    Ok = 0,
+    NullPointer = 1,
+    InvalidConfig = 2,
+    CalibrationFailed = 3,
+    AnalysisFailed = 4,
+    NotEnoughSamples = 5
+} ToError;
 ```
 
 ---
@@ -211,53 +340,94 @@ void to_result_free(to_result_t *result);
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
+
+// Platform-specific timer
+#if defined(__x86_64__)
+static inline uint64_t read_timer(void) {
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+#elif defined(__aarch64__)
+static inline uint64_t read_timer(void) {
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
+    return val;
+}
+#endif
+
+#define DO_NOT_OPTIMIZE(x) __asm__ volatile("" : : "r,m"(x) : "memory")
 
 static uint8_t secret[32];
 
-void generator(void *ctx, bool is_baseline, uint8_t *output, size_t size) {
-    if (is_baseline) {
-        memcpy(output, secret, size);  // Match secret for baseline
-    } else {
-        arc4random_buf(output, size);  // Random for sample
+// Leaky comparison (for testing)
+static int leaky_compare(const uint8_t* a, const uint8_t* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (a[i] != b[i]) return 0;  // Early exit!
     }
+    return 1;
 }
 
-void operation(void *ctx, const uint8_t *input, size_t size) {
-    // Test constant-time comparison
-    volatile int result = 0;
-    for (size_t i = 0; i < size; i++) {
-        result |= (secret[i] ^ input[i]);
+void collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+    uint8_t input[32];
+
+    for (size_t i = 0; i < count; i++) {
+        // Baseline: all zeros
+        memset(input, 0, 32);
+        uint64_t start = read_timer();
+        int result = leaky_compare(input, secret, 32);
+        uint64_t end = read_timer();
+        DO_NOT_OPTIMIZE(result);
+        baseline[i] = end - start;
+
+        // Sample: random
+        arc4random_buf(input, 32);
+        start = read_timer();
+        result = leaky_compare(input, secret, 32);
+        end = read_timer();
+        DO_NOT_OPTIMIZE(result);
+        sample[i] = end - start;
     }
-    (void)result;
 }
 
 int main(void) {
-    // Initialize secret
-    memset(secret, 0x42, sizeof(secret));
+    arc4random_buf(secret, sizeof(secret));
 
-    to_config_t config = to_config_default(TO_ATTACKER_ADJACENT_NETWORK);
-    config.time_budget_secs = 30.0;
+    ToConfig cfg = to_config_default(AdjacentNetwork);
+    cfg.time_budget_secs = 30.0;
+    cfg.max_samples = 100000;
+    cfg = to_config_from_env(cfg);
 
-    to_result_t result = to_test(&config, 32, generator, operation, NULL);
+    printf("Running timing test...\n");
 
-    printf("Outcome: %d\n", result.outcome);
-    printf("Leak probability: %.1f%%\n", result.leak_probability * 100.0);
+    ToResult result;
+    ToError err = to_test(&cfg, collect, NULL, &result);
 
-    if (result.outcome == TO_OUTCOME_FAIL) {
-        printf("Effect: %.1f ns shift, %.1f ns tail\n",
-               result.effect.shift_ns, result.effect.tail_ns);
+    if (err != Ok) {
+        fprintf(stderr, "Test failed: %d\n", err);
+        return 1;
     }
 
-    to_result_free(&result);
-    return result.outcome == TO_OUTCOME_FAIL ? 1 : 0;
+    printf("Outcome: %s\n",
+           result.outcome == Pass ? "PASS" :
+           result.outcome == Fail ? "FAIL" :
+           result.outcome == Inconclusive ? "INCONCLUSIVE" : "UNMEASURABLE");
+    printf("Leak probability: %.1f%%\n", result.leak_probability * 100.0);
+    printf("Effect: %.2f ns (shift) + %.2f ns (tail)\n",
+           result.effect.shift_ns, result.effect.tail_ns);
+    printf("Samples: %llu, Time: %.2fs\n",
+           (unsigned long long)result.samples_used, result.elapsed_secs);
+
+    return result.outcome == Fail ? 1 : 0;
 }
 ```
 
 ### Compilation
 
 ```bash
-gcc -o timing_test timing_test.c \
+cc -O3 -Wall -std=c11 -o timing_test timing_test.c \
     -I/path/to/timing-oracle/crates/timing-oracle-c/include \
     -L/path/to/timing-oracle/target/release \
-    -ltiming_oracle_c
+    -ltiming_oracle_c -lpthread -lm
 ```

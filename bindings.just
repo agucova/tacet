@@ -79,9 +79,21 @@ c-example-adaptive: c
         -ltiming_oracle_c -lpthread -lm
     @echo "Built: {{c_examples_dir}}/adaptive"
 
+# Build C example: simple_callback (callback-based API)
+[group('bindings')]
+c-example-simple-callback: c
+    @echo "Building simple_callback.c example..."
+    cc -O3 -Wall -Wextra -std=c11 \
+        -I{{c_crate_dir}} \
+        -o {{c_examples_dir}}/simple_callback \
+        {{c_examples_dir}}/simple_callback.c \
+        -L{{justfile_directory()}}/target/release \
+        -ltiming_oracle_c -lpthread -lm
+    @echo "Built: {{c_examples_dir}}/simple_callback"
+
 # Build all C examples
 [group('bindings')]
-c-examples: c-example-simple c-example-adaptive
+c-examples: c-example-simple c-example-adaptive c-example-simple-callback
     @echo "All C examples built"
 
 # Run C simple example
@@ -95,6 +107,12 @@ c-run-simple: c-example-simple
 c-run-adaptive: c-example-adaptive
     @echo "Running adaptive example..."
     @cd {{c_examples_dir}} && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./adaptive
+
+# Run C simple_callback example
+[group('bindings')]
+c-run-simple-callback: c-example-simple-callback
+    @echo "Running simple_callback example..."
+    @cd {{c_examples_dir}} && DYLD_LIBRARY_PATH={{justfile_directory()}}/target/release LD_LIBRARY_PATH={{justfile_directory()}}/target/release ./simple_callback
 
 # Build and run C tests (CMocka)
 [group('bindings')]

@@ -1,6 +1,17 @@
 # timing-oracle
 
-**Detect timing side channels in Rust code with statistically rigorous methods.**
+**Detect timing side channels with statistically rigorous methods.**
+
+Available for Rust, JavaScript/TypeScript, C/C++, and Go.
+
+| Language | Package | Install |
+|----------|---------|---------|
+| Rust | `timing-oracle` | `cargo add timing-oracle --dev` |
+| JavaScript | `timing-oracle` | `bun add timing-oracle` |
+| C/C++ | source | [Build instructions](https://timingoracle.agus.sh/getting-started/installation) |
+| Go | `timing-oracle-go` | `go get github.com/agucova/timing-oracle/bindings/go` |
+
+**[Documentation →](https://timingoracle.agus.sh)**
 
 ```
 $ cargo test --test aes_timing -- --nocapture
@@ -20,29 +31,24 @@ timing-oracle
 ──────────────────────────────────────────────────────────────
 ```
 
-## Installation
-
-```sh
-cargo add timing-oracle --dev
-```
-
 ## Quick Start
 
 ```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
 
 #[test]
 fn constant_time_compare() {
     let secret = [0u8; 32];
 
-    let outcome = timing_test_checked! {
-        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
-        baseline: || [0u8; 32],
-        sample: || rand::random::<[u8; 32]>(),
-        measure: |input| {
+    let inputs = InputPair::new(
+        || [0u8; 32],
+        || rand::random::<[u8; 32]>(),
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |input| {
             constant_time_eq(&secret, &input);
-        },
-    };
+        });
 
     match outcome {
         Outcome::Pass { .. } => { /* No leak */ }
@@ -53,9 +59,7 @@ fn constant_time_compare() {
 }
 ```
 
-The macro handles measurement and statistical analysis, returning an `Outcome` with pass/fail/inconclusive plus detailed diagnostics.
-
-> **📖 Important:** The baseline input must be chosen to create timing asymmetry with the sample input. For comparison functions, baseline should **match** the secret so it runs the full comparison (slow) while random samples exit early (fast). See [Choosing Input Classes](docs/guide.md#choosing-your-input-classes) for details.
+> **Important:** The baseline input must be chosen to create timing asymmetry with the sample input. For comparison functions, baseline should **match** the secret so it runs the full comparison (slow) while random samples exit early (fast). See [Choosing Input Classes](https://timingoracle.agus.sh/core-concepts/two-class-pattern) for details.
 
 ---
 
@@ -73,15 +77,11 @@ fn ct_compare(a: &[u8], b: &[u8]) -> bool {
 }
 ```
 
-## Real-World Validation
-
-While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate — a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See [the full investigation](docs/investigation-rsa-timing-anomaly.md).
-
-## Why Another Tool?
+## Why timing-oracle?
 
 Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are hard to use and yield results that are difficult to interpret.
 
-`timing-oracle` gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
+timing-oracle gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
 
 | | DudeCT | timing-oracle |
 |---|--------|---------------|
@@ -91,30 +91,15 @@ Empirical timing tools like [DudeCT](https://github.com/oreparaz/dudect) are har
 | **Exploitability** | Manual interpretation | Automatic classification |
 | **CI-friendly** | Flaky without tuning | Works out of the box |
 
+## Real-World Validation
+
+While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](https://timingoracle.agus.sh/case-studies/rsa-timing-anomaly).
+
 ---
 
-## Macro API
+## Attacker Model Presets
 
-### Configuration
-
-Configure via the `oracle:` field with an **attacker model** that defines your threat scenario:
-
-```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-
-let outcome = timing_test_checked! {
-    // Choose your threat model:
-    // - RemoteNetwork (50μs): Public APIs, internet-facing
-    // - AdjacentNetwork (100ns): Internal services, HTTP/2 APIs
-    // - SharedHardware (~2 cycles): SGX, containers, shared hosting
-    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
-    baseline: || my_fixed_input,
-    sample: || generate_random(),
-    measure: |input| operation(&input),
-};
-```
-
-**Attacker Model Presets:**
+Choose based on your threat model:
 
 | Preset | Threshold | Use case |
 |--------|-----------|----------|
@@ -124,106 +109,16 @@ let outcome = timing_test_checked! {
 | `Research` | 0 | Detect any difference (not for CI) |
 | `Custom { threshold_ns }` | user-defined | Custom threshold |
 
-For stricter testing, adjust decision thresholds:
-
 ```rust
-timing_test_checked! {
-    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-        .pass_threshold(0.01)   // More confident pass (default 0.05)
-        .fail_threshold(0.99),  // More confident fail (default 0.95)
-    baseline: || [0u8; 32],
-    sample: || rand::random(),
-    measure: |input| operation(&input),
-}
+// Internet-facing API
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+
+// Internal microservice or HTTP/2 API
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+
+// SGX enclave or container
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
 ```
-
-### Shared State
-
-For expensive initialization, define variables before the macro and capture them:
-
-```rust
-// Expensive setup done before the macro
-let key = Aes128::new(&KEY);
-
-timing_test! {
-    baseline: || [0u8; 16],
-    sample: || rand::random(),
-    measure: |input| {
-        // `key` is captured from outer scope
-        key.encrypt(&input);
-    },
-}
-```
-
-### Multiple Inputs
-
-Use tuple destructuring:
-
-```rust
-timing_test! {
-    baseline: || ([0u8; 12], [0u8; 64]),
-    sample: || (rand::random(), rand::random()),
-    measure: |(nonce, plaintext)| {
-        cipher.encrypt(&nonce, &plaintext);
-    },
-}
-```
-
-### Handling All Outcomes
-
-`timing_test_checked!` returns an `Outcome` with four variants:
-
-```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-
-let outcome = timing_test_checked! {
-    oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
-    baseline: || [0u8; 32],
-    sample: || rand::random(),
-    measure: |input| very_fast_operation(&input),
-};
-
-match outcome {
-    Outcome::Pass { leak_probability, .. } => {
-        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
-    }
-    Outcome::Fail { exploitability, .. } => {
-        panic!("Timing leak detected: {:?}", exploitability);
-    }
-    Outcome::Inconclusive { reason, .. } => {
-        println!("Inconclusive: {:?}", reason);
-    }
-    Outcome::Unmeasurable { recommendation, .. } => {
-        println!("Skipped: {}", recommendation);
-    }
-}
-```
-
-## Builder API
-
-For programmatic access without macros:
-
-```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
-
-let inputs = InputPair::new(|| [0u8; 32], || rand::random());
-
-// Use attacker model to define threat scenario
-let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-    .test(inputs, |data| constant_time_eq(&secret, data));
-
-match outcome {
-    Outcome::Pass { leak_probability, .. } => {
-        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
-    }
-    Outcome::Fail { leak_probability, exploitability, .. } => {
-        println!("Leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
-    }
-    _ => {}
-}
-```
-
-See [API documentation](https://docs.rs/timing-oracle) for full details.
 
 ---
 
@@ -240,86 +135,55 @@ See [API documentation](https://docs.rs/timing-oracle) for full details.
 
 ### Exploitability Levels
 
-Based on [Crosby et al. (2009)](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf):
-
 | Level | Effect Size | Meaning |
 |-------|-------------|---------|
-| `Negligible` | < 100 ns | Requires ~10k+ queries to exploit over LAN |
-| `PossibleLAN` | 100–500 ns | Exploitable on LAN with statistical methods |
-| `LikelyLAN` | 500 ns – 20 µs | Readily exploitable on local network |
-| `PossibleRemote` | > 20 µs | Potentially exploitable over internet |
-
-### Effect Patterns
-
-When a leak is detected, the effect is decomposed:
-
-| Pattern | Meaning | Typical cause |
-|---------|---------|---------------|
-| `UniformShift` | All quantiles shifted equally | Different code path, branch |
-| `TailEffect` | Upper quantiles shifted more | Cache misses, memory patterns |
-| `Mixed` | Both components significant | Multiple interacting factors |
+| `SharedHardwareOnly` | < 10 ns | Requires shared physical core |
+| `Http2Multiplexing` | 10–100 ns | Exploitable via HTTP/2 |
+| `StandardRemote` | 100 ns – 10 μs | Exploitable with network timing |
+| `ObviousLeak` | > 10 μs | Trivially exploitable |
 
 ---
 
-## How It Works
+## Running Tests
 
-### Quantile-Based Statistics
+```bash
+# Run timing tests (single-threaded is recommended)
+cargo test --test timing_tests -- --test-threads=1 --nocapture
 
-Instead of comparing means (which miss distributional differences), we compare nine
-deciles between fixed and random inputs:
+# With higher-precision PMU timer (macOS ARM64)
+sudo -E cargo test --test timing_tests -- --test-threads=1
 
-```
-Fixed:   [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┐
-                                     ├─► Δ ∈ ℝ⁹
-Random:  [q₁₀, q₂₀, q₃₀, ... q₉₀]  ─┘
-```
-
-This captures both uniform shifts (branch timing) and tail effects (cache misses that only affect upper quantiles).
-
-### Practical Significance Testing
-
-The key question isn't "is there any timing difference?" but "is the difference exploitable under my threat model?" The attacker model (θ) defines your threshold:
-
-```
-H₀: max|Δ| ≤ θ  (effect within acceptable bounds)
-H₁: max|Δ| > θ  (exploitable timing leak)
+# With higher-precision PMU timer (Linux)
+sudo cargo test --test timing_tests -- --test-threads=1
 ```
 
-### Adaptive Bayesian Analysis
-
-The oracle adaptively collects samples until it can reach a conclusion:
-
-1. **Posterior Probability**: Computes P(leak > θ | data) using Bayesian inference
-2. **Effect Decomposition**: Separates uniform shift (branch timing) from tail effects (cache misses)
-3. **Early Stopping**: Stops when posterior probability crosses pass/fail thresholds (default 0.05/0.95)
-4. **Inconclusive Handling**: Reports when conclusion cannot be reached within budget
-
-### Adaptive Sampling
-
-The oracle uses a two-phase approach:
-1. **Calibration phase** (5,000 samples by default): Estimates covariance matrix and sets Bayesian priors
-2. **Adaptive phase**: Collects samples in batches until decision thresholds are reached
-
-This adaptive approach stops early when confident, saving time on clear pass/fail cases while gathering more evidence when needed.
-
-For full methodology: [docs/spec.md](docs/spec.md)
+See [CI Integration](https://timingoracle.agus.sh/guides/ci-integration) for more details.
 
 ## Platform Support
 
 | Platform | Timer | Resolution | Notes |
 |----------|-------|------------|-------|
-| x86_64 | rdtsc | ~0.3 ns | Works out of the box |
-| Apple Silicon | kperf | ~1 ns | Auto-enabled with `sudo` |
-| Apple Silicon | cntvct | ~41 ns | Fallback with adaptive batching |
-| Linux ARM | perf_event | ~1 ns | Requires `sudo` or `CAP_PERFMON` |
+| x86_64 | rdtsc | ~0.3 ns | Best precision |
+| Apple Silicon | kperf | ~1 ns | Requires `sudo` + `--test-threads=1` |
+| Apple Silicon | cntvct | ~42 ns | Default, uses adaptive batching |
+| Linux ARM64 | perf_event | ~1 ns | Requires `sudo` or `CAP_PERFMON` |
 
 ---
+
+## Documentation
+
+- [Installation](https://timingoracle.agus.sh/getting-started/installation)
+- [Quick Start](https://timingoracle.agus.sh/getting-started/quick-start)
+- [Two-Class Pattern](https://timingoracle.agus.sh/core-concepts/two-class-pattern) — Choosing input classes
+- [Attacker Models](https://timingoracle.agus.sh/core-concepts/attacker-models) — Choosing thresholds
+- [CI Integration](https://timingoracle.agus.sh/guides/ci-integration)
+- [API Reference (Rust)](https://docs.rs/timing-oracle)
 
 ## References
 
 - Van Goethem et al. (2020): [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) — HTTP/2 timing attacks over internet
-- Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123)
-- Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf)
+- Reparaz et al. (2016): [DudeCT](https://eprint.iacr.org/2016/1123) — Original two-class methodology
+- Crosby et al. (2009): [Timing attack feasibility](https://www.cs.rice.edu/~dwallach/pub/crosby-timing2009.pdf) — Effect size to exploitability
 
 ## License
 

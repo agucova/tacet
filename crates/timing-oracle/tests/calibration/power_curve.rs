@@ -10,7 +10,7 @@
 //!
 //! These curves allow direct comparison with other tools' power characteristics.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{
     busy_wait_ns, export_power_curve_csv, wilson_ci, CalibrationConfig, PowerCurvePoint,

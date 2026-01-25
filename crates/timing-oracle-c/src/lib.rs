@@ -117,6 +117,82 @@ pub extern "C" fn to_config_remote_network() -> ToConfig {
 }
 
 // ============================================================================
+// Environment Variable Configuration
+// ============================================================================
+
+/// Merge configuration from TO_* environment variables.
+///
+/// Allows CI systems to override configuration without recompiling.
+///
+/// Supported environment variables:
+/// - TO_TIME_BUDGET_SECS: Time budget in seconds (float)
+/// - TO_MAX_SAMPLES: Maximum samples per class (integer)
+/// - TO_PASS_THRESHOLD: Pass threshold for P(leak) (float, e.g., 0.05)
+/// - TO_FAIL_THRESHOLD: Fail threshold for P(leak) (float, e.g., 0.95)
+/// - TO_SEED: Random seed (integer, 0 = use default)
+/// - TO_THRESHOLD_NS: Custom threshold in nanoseconds (float)
+///
+/// # Example
+///
+/// ```c
+/// // In shell: export TO_TIME_BUDGET_SECS=60
+/// ToConfig cfg = to_config_adjacent_network();
+/// cfg.time_budget_secs = 30.0;
+/// cfg.max_samples = 100000;
+/// cfg = to_config_from_env(cfg);  // CI can override
+/// ```
+#[no_mangle]
+pub extern "C" fn to_config_from_env(mut base: ToConfig) -> ToConfig {
+    if let Ok(v) = std::env::var("TO_TIME_BUDGET_SECS") {
+        if let Ok(secs) = v.parse::<f64>() {
+            if secs > 0.0 {
+                base.time_budget_secs = secs;
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("TO_MAX_SAMPLES") {
+        if let Ok(samples) = v.parse::<u64>() {
+            if samples > 0 {
+                base.max_samples = samples;
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("TO_PASS_THRESHOLD") {
+        if let Ok(thresh) = v.parse::<f64>() {
+            if (0.0..=1.0).contains(&thresh) {
+                base.pass_threshold = thresh;
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("TO_FAIL_THRESHOLD") {
+        if let Ok(thresh) = v.parse::<f64>() {
+            if (0.0..=1.0).contains(&thresh) {
+                base.fail_threshold = thresh;
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("TO_SEED") {
+        if let Ok(seed) = v.parse::<u64>() {
+            base.seed = seed;
+        }
+    }
+
+    if let Ok(v) = std::env::var("TO_THRESHOLD_NS") {
+        if let Ok(thresh) = v.parse::<f64>() {
+            if thresh > 0.0 {
+                base.custom_threshold_ns = thresh;
+            }
+        }
+    }
+
+    base
+}
+
+// ============================================================================
 // Low-Level API: C Measurement Loop
 // ============================================================================
 
@@ -548,6 +624,202 @@ fn convert_adaptive_outcome(
             kappa_ess: summary.diagnostics.kappa_ess,
             kappa_mixing_ok: summary.diagnostics.kappa_mixing_ok,
         },
+    }
+}
+
+// ============================================================================
+// High-Level API: Callback-Based Test
+// ============================================================================
+
+/// Default calibration samples per class for to_test().
+const TO_TEST_CALIBRATION_SAMPLES: usize = 5000;
+
+/// Default batch size for to_test() adaptive loop.
+const TO_TEST_BATCH_SIZE: usize = 1000;
+
+/// Run a complete timing test using a callback for sample collection.
+///
+/// This is the recommended API for testing timing side channels. It handles
+/// the full adaptive sampling loop internally:
+///
+/// 1. Collects calibration samples via the callback
+/// 2. Runs calibration phase
+/// 3. Loops: collects batches via callback, runs adaptive step
+/// 4. Stops when a decision is reached or budget is exceeded
+///
+/// The callback function is called multiple times to collect samples. Each
+/// invocation should fill the provided arrays with fresh timing measurements.
+///
+/// # Parameters
+/// - `config`: Configuration (use presets like `to_config_balanced()`)
+/// - `collect_fn`: Callback function to collect timing samples
+/// - `user_ctx`: User context pointer passed to the callback (can be NULL)
+/// - `result_out`: Pointer to receive the final result
+///
+/// # Returns
+/// Error code.
+///
+/// # Example
+///
+/// ```c
+/// void my_collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+///     for (size_t i = 0; i < count; i++) {
+///         baseline[i] = measure(baseline_input());
+///         sample[i] = measure(sample_input());
+///     }
+/// }
+///
+/// int main(void) {
+///     ToConfig cfg = to_config_balanced();
+///     cfg = to_config_from_env(cfg);  // CI can override via TO_TIME_BUDGET_SECS
+///
+///     ToResult result;
+///     to_test(&cfg, my_collect, NULL, &result);
+///
+///     if (result.outcome == Fail) {
+///         printf("Leak: P=%.1f%%, effect=%.1fns\\n",
+///                result.leak_probability * 100, result.effect.shift_ns);
+///         return 1;
+///     }
+///     return 0;
+/// }
+/// ```
+///
+/// # Safety
+/// - `config` must be a valid pointer
+/// - `collect_fn` must be a valid function pointer
+/// - `result_out` must be a valid pointer
+/// - The callback must fill exactly `count` samples in each array
+#[no_mangle]
+pub unsafe extern "C" fn to_test(
+    config: *const ToConfig,
+    collect_fn: ToCollectFn,
+    user_ctx: *mut std::ffi::c_void,
+    result_out: *mut ToResult,
+) -> ToError {
+    // Validate inputs
+    if config.is_null() || result_out.is_null() {
+        return ToError::NullPointer;
+    }
+
+    let collect_fn = match collect_fn {
+        Some(f) => f,
+        None => return ToError::NullPointer,
+    };
+
+    let cfg = &*config;
+
+    // Get time tracking
+    let start_time = std::time::Instant::now();
+    let time_budget = if cfg.time_budget_secs > 0.0 {
+        std::time::Duration::from_secs_f64(cfg.time_budget_secs)
+    } else {
+        std::time::Duration::from_secs(30)
+    };
+
+    // Phase 1: Collect calibration samples
+    let mut cal_baseline = vec![0u64; TO_TEST_CALIBRATION_SAMPLES];
+    let mut cal_sample = vec![0u64; TO_TEST_CALIBRATION_SAMPLES];
+
+    collect_fn(
+        cal_baseline.as_mut_ptr(),
+        cal_sample.as_mut_ptr(),
+        TO_TEST_CALIBRATION_SAMPLES,
+        user_ctx,
+    );
+
+    // Phase 2: Run calibration
+    let mut error = ToError::Ok;
+    let cal_ptr = to_calibrate(
+        cal_baseline.as_ptr(),
+        cal_sample.as_ptr(),
+        TO_TEST_CALIBRATION_SAMPLES,
+        config,
+        &mut error,
+    );
+
+    if cal_ptr.is_null() || error != ToError::Ok {
+        return if error != ToError::Ok {
+            error
+        } else {
+            ToError::CalibrationFailed
+        };
+    }
+
+    let cal = &(*cal_ptr).inner;
+    let ns_per_tick = (*cal_ptr).ns_per_tick;
+
+    // Create adaptive state
+    let mut state = AdaptiveState::new();
+
+    // Create step config
+    let step_config = AdaptiveStepConfig {
+        pass_threshold: cfg.pass_threshold,
+        fail_threshold: cfg.fail_threshold,
+        time_budget_secs: cfg.time_budget_secs,
+        max_samples: if cfg.max_samples == 0 {
+            100_000
+        } else {
+            cfg.max_samples as usize
+        },
+        theta_ns: cfg.threshold_ns(),
+        seed: if cfg.seed == 0 { 42 } else { cfg.seed },
+        ..Default::default()
+    };
+
+    // Phase 3: Adaptive sampling loop
+    let mut batch_baseline = vec![0u64; TO_TEST_BATCH_SIZE];
+    let mut batch_sample = vec![0u64; TO_TEST_BATCH_SIZE];
+
+    loop {
+        // Check time budget before collecting more samples
+        let elapsed = start_time.elapsed();
+        if elapsed >= time_budget {
+            // Time budget exceeded - return inconclusive result
+            *result_out = ToResult {
+                outcome: ToOutcome::Inconclusive,
+                leak_probability: state.current_posterior().map(|p| p.leak_probability).unwrap_or(0.5),
+                inconclusive_reason: ToInconclusiveReason::TimeBudgetExceeded,
+                elapsed_secs: elapsed.as_secs_f64(),
+                samples_used: state.n_total() as u64 / 2,
+                ..ToResult::default()
+            };
+            to_calibration_free(cal_ptr);
+            return ToError::Ok;
+        }
+
+        // Collect a batch of samples
+        collect_fn(
+            batch_baseline.as_mut_ptr(),
+            batch_sample.as_mut_ptr(),
+            TO_TEST_BATCH_SIZE,
+            user_ctx,
+        );
+
+        // Add batch to state
+        state.add_batch(batch_baseline.clone(), batch_sample.clone());
+
+        // Run adaptive step
+        let elapsed_secs = start_time.elapsed().as_secs_f64();
+        let step_result = timing_oracle_core::adaptive::adaptive_step(
+            cal,
+            &mut state,
+            ns_per_tick,
+            elapsed_secs,
+            &step_config,
+        );
+
+        match step_result {
+            StepResult::Continue { .. } => {
+                // Continue loop
+            }
+            StepResult::Decision(outcome) => {
+                // Convert outcome to C result
+                *result_out = convert_adaptive_outcome(&outcome, cal, cfg);
+                to_calibration_free(cal_ptr);
+                return ToError::Ok;
+            }
+        }
     }
 }
 

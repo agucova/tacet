@@ -12,7 +12,7 @@
 //! Key insight from SILENT: classical tools have inflated type-1 error
 //! (false positives) when Φ > 0 and deflated power when Φ < 0.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{
     export_autocorr_heatmap_csv, generate_ar1_samples, wilson_ci, AutocorrCell, CalibrationConfig,

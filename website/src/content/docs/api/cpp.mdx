@@ -5,47 +5,31 @@ sidebar:
   order: 3
 ---
 
-C++ wrapper for timing-oracle, providing RAII semantics and modern C++ idioms.
+Header-only C++ wrapper for timing-oracle, providing RAII semantics, modern C++ idioms, and a fluent builder API.
 
 ## Quick Reference
 
 ```cpp
 #include <timing_oracle.hpp>
 #include <iostream>
-#include <cstring>
-#include <random>
+
+using namespace timing_oracle;
+using namespace std::chrono_literals;
 
 int main() {
-    auto result = timing_oracle::test(
-        timing_oracle::AttackerModel::AdjacentNetwork,
-        32,  // input size
-        [](bool is_baseline, uint8_t* out, size_t size) {
-            if (is_baseline) {
-                std::memset(out, 0, size);
-            } else {
-                std::random_device rd;
-                std::generate(out, out + size, [&rd]() { return rd(); });
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(30s)
+        .maxSamples(100000)
+        .fromEnv()  // Allow CI to override via TO_* env vars
+        .test([](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+            for (size_t i = 0; i < baseline.size(); i++) {
+                baseline[i] = measure(generate_baseline());
+                sample[i] = measure(generate_sample());
             }
-        },
-        [](const uint8_t* input, size_t size) {
-            my_crypto_function(input, size);
-        }
-    );
+        });
 
-    switch (result.outcome()) {
-        case timing_oracle::Outcome::Pass:
-            std::cout << "No leak detected\n";
-            break;
-        case timing_oracle::Outcome::Fail:
-            std::cout << "Leak: " << result.effect().shift_ns << " ns\n";
-            break;
-        case timing_oracle::Outcome::Inconclusive:
-            std::cout << "Inconclusive\n";
-            break;
-        case timing_oracle::Outcome::Unmeasurable:
-            std::cout << "Too fast to measure\n";
-            break;
-    }
+    std::cout << result << std::endl;  // Pretty-printed output
+    return result.outcome == ToOutcome::Fail ? 1 : 0;
 }
 ```
 
@@ -61,105 +45,212 @@ cd timing-oracle
 cargo build --release -p timing-oracle-c
 
 # Headers at:
-#   crates/timing-oracle-c/include/timing_oracle.h   (C API)
-#   crates/timing-oracle-c/include/timing_oracle.hpp (C++ wrapper)
+#   crates/timing-oracle-c/include/timing_oracle.h
+#   bindings/cpp/timing_oracle.hpp
 # Library at: target/release/libtiming_oracle_c.{a,so,dylib}
 ```
 
+Requires C++20 for `std::span` and `std::chrono_literals`.
+
 ---
 
-## Namespace
+## Oracle Builder Class
 
-All C++ API types are in the `timing_oracle` namespace.
+The `Oracle` class provides a fluent builder interface for configuring and running tests.
+
+### Factory Method
 
 ```cpp
-namespace timing_oracle {
-    enum class AttackerModel { ... };
-    enum class Outcome { ... };
-    struct Effect { ... };
-    struct Result { ... };
-    struct Config { ... };
-    Result test(...);
+// Create Oracle for your attacker model
+Oracle oracle = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork);  // LAN, HTTP/2
+Oracle oracle = Oracle::forAttacker(ToAttackerModel::SharedHardware);   // SGX, containers
+Oracle oracle = Oracle::forAttacker(ToAttackerModel::RemoteNetwork);    // Public internet
+Oracle oracle = Oracle::forAttacker(ToAttackerModel::Research);         // Detect any difference
+```
+
+### Builder Methods
+
+All builder methods return a new `Oracle` instance (immutable pattern):
+
+```cpp
+using namespace std::chrono_literals;
+
+auto oracle = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .timeBudget(60s)           // std::chrono duration
+    .maxSamples(50000)         // Max samples per class
+    .passThreshold(0.01)       // P(leak) below this -> Pass
+    .failThreshold(0.99)       // P(leak) above this -> Fail
+    .seed(12345)               // Reproducibility
+    .thresholdNs(500.0)        // Custom threshold (overrides attacker model)
+    .timerFrequencyHz(24000000)  // Timer frequency for tick conversion
+    .fromEnv();                // Merge TO_* environment variables
+```
+
+### Terminal Methods
+
+```cpp
+// Run test with callback
+ToResult result = oracle.test([](std::span<uint64_t> baseline,
+                                  std::span<uint64_t> sample) {
+    for (size_t i = 0; i < baseline.size(); i++) {
+        baseline[i] = measure_baseline();
+        sample[i] = measure_sample();
+    }
+});
+
+// Analyze pre-collected data
+std::vector<uint64_t> baseline_data, sample_data;
+ToResult result = oracle.analyze(baseline_data, sample_data);
+```
+
+### Accessors
+
+```cpp
+const ToConfig& config = oracle.config();  // Underlying C config
+double threshold = oracle.thresholdNs();   // Effective threshold
+```
+
+---
+
+## Configuration Functions
+
+For the low-level API, create configurations using these functions:
+
+```cpp
+// Specific attacker models
+ToConfig cfg = config_adjacent_network();  // 100ns threshold
+ToConfig cfg = config_shared_hardware();   // ~0.6ns threshold
+ToConfig cfg = config_remote_network();    // 50μs threshold
+ToConfig cfg = config_default(ToAttackerModel::Research);
+
+// Environment variable override
+ToConfig cfg = config_default(ToAttackerModel::AdjacentNetwork);
+cfg.time_budget_secs = 30.0;
+cfg.max_samples = 100000;
+cfg = config_from_env(cfg);
+```
+
+---
+
+## Environment Variables
+
+Allow CI systems to override configuration:
+
+```cpp
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .timeBudget(30s)
+    .maxSamples(100000)
+    .fromEnv()  // Merges TO_* env vars
+    .test(collector);
+```
+
+Supported variables:
+- `TO_TIME_BUDGET_SECS` - Time budget in seconds
+- `TO_MAX_SAMPLES` - Maximum samples per class
+- `TO_PASS_THRESHOLD` - Pass threshold (e.g., 0.05)
+- `TO_FAIL_THRESHOLD` - Fail threshold (e.g., 0.95)
+- `TO_SEED` - Random seed
+- `TO_THRESHOLD_NS` - Custom threshold in nanoseconds
+
+---
+
+## Stream Operators
+
+All enums and result types have `operator<<` overloads:
+
+```cpp
+#include <iostream>
+
+ToResult result = /* ... */;
+
+// Print individual fields
+std::cout << result.outcome << std::endl;        // "Pass", "Fail", etc.
+std::cout << result.quality << std::endl;        // "Excellent", "Good", etc.
+std::cout << result.exploitability << std::endl; // "StandardRemote", etc.
+
+// Print entire result (pretty-formatted)
+std::cout << result << std::endl;
+// Output:
+// Outcome: Pass
+// Leak probability: 3.20%
+// Effect: 2.50 ns (shift) + 1.30 ns (tail) [1.00, 5.00] ns 95% CI, pattern: Mixed
+// Quality: Good
+// Samples: 15000 per class
+// Elapsed: 12.34 seconds
+// Thresholds: user=100.00 ns, effective=100.00 ns, floor=5.00 ns
+```
+
+---
+
+## Low-Level API
+
+For more control, use the calibrate/step API with RAII wrappers:
+
+### RAII Classes
+
+```cpp
+// State manages adaptive sampling state
+State state;  // Automatically freed on destruction
+state.total_samples();     // Samples collected
+state.leak_probability();  // Current estimate (0.5 initially)
+
+// Calibration manages calibration data
+Calibration cal = calibrate(baseline, sample, config);
+```
+
+### Adaptive Loop
+
+```cpp
+auto config = config_default(ToAttackerModel::AdjacentNetwork);
+config.time_budget_secs = 30.0;
+config.max_samples = 100000;
+
+// Calibration phase
+std::vector<uint64_t> cal_baseline(5000), cal_sample(5000);
+collect_samples(cal_baseline, cal_sample);
+Calibration calibration = calibrate(cal_baseline, cal_sample, config);
+
+// Create state
+State state;
+
+// Adaptive loop
+auto start = std::chrono::steady_clock::now();
+while (true) {
+    std::vector<uint64_t> batch_b(1000), batch_s(1000);
+    collect_samples(batch_b, batch_s);
+
+    auto elapsed = std::chrono::steady_clock::now() - start;
+    double elapsed_secs = std::chrono::duration<double>(elapsed).count();
+
+    ToStepResult step_result = step(calibration, state, batch_b, batch_s,
+                                     config, elapsed_secs);
+
+    if (step_result.has_decision) {
+        // step_result.result contains the final ToResult
+        std::cout << step_result.result << std::endl;
+        break;
+    }
 }
+// State and Calibration automatically freed
 ```
 
----
-
-## Configuration
-
-### AttackerModel
+### One-Shot Analysis
 
 ```cpp
-enum class AttackerModel {
-    SharedHardware,    // ~0.6 ns threshold
-    PostQuantum,       // ~3.3 ns threshold
-    AdjacentNetwork,   // 100 ns threshold (default)
-    RemoteNetwork,     // 50 μs threshold
-    Research,          // ~0 threshold
-    Custom             // User-defined threshold
-};
-```
+std::vector<uint64_t> baseline(10000), sample(10000);
+// ... collect samples ...
 
-### Config Builder
-
-```cpp
-auto config = timing_oracle::Config::builder()
-    .attacker_model(timing_oracle::AttackerModel::SharedHardware)
-    .time_budget_secs(60.0)
-    .max_samples(50000)
-    .pass_threshold(0.01)
-    .fail_threshold(0.99)
-    .build();
-
-auto result = timing_oracle::test(config, 32, generator, operation);
-```
-
----
-
-## Test Function
-
-### Lambda-based API
-
-```cpp
-template<typename Generator, typename Operation>
-Result test(
-    AttackerModel model,
-    size_t input_size,
-    Generator&& generator,
-    Operation&& operation
-);
-```
-
-**Generator signature:**
-```cpp
-void generator(bool is_baseline, uint8_t* output, size_t size);
-```
-
-**Operation signature:**
-```cpp
-void operation(const uint8_t* input, size_t size);
-```
-
-### Config-based API
-
-```cpp
-template<typename Generator, typename Operation>
-Result test(
-    const Config& config,
-    size_t input_size,
-    Generator&& generator,
-    Operation&& operation
-);
+ToResult result = analyze(baseline, sample, config);
 ```
 
 ---
 
 ## Result Types
 
-### Outcome
+### ToOutcome
 
 ```cpp
-enum class Outcome {
+enum class ToOutcome {
     Pass,         // No leak detected
     Fail,         // Leak confirmed
     Inconclusive, // Cannot decide
@@ -167,51 +258,79 @@ enum class Outcome {
 };
 ```
 
-### Result
+### ToResult
+
+The result struct contains all analysis information:
 
 ```cpp
-struct Result {
-    Outcome outcome() const;
-    double leak_probability() const;
-    Effect effect() const;
-    Exploitability exploitability() const;
-    Quality quality() const;
-    InconclusiveReason inconclusive_reason() const;
-    size_t samples_used() const;
-    std::string recommendation() const;
-
-    // Convenience methods
-    bool passed() const { return outcome() == Outcome::Pass; }
-    bool failed() const { return outcome() == Outcome::Fail; }
-    bool is_conclusive() const;
+struct ToResult {
+    ToOutcome outcome;
+    double leak_probability;      // P(effect > threshold | data)
+    ToEffect effect;              // Effect size estimate
+    ToMeasurementQuality quality; // Measurement precision
+    uint64_t samples_used;        // Samples per class
+    double elapsed_secs;          // Test duration
+    ToExploitability exploitability;
+    ToInconclusiveReason inconclusive_reason;
+    double mde_shift_ns;          // Minimum detectable shift
+    double mde_tail_ns;           // Minimum detectable tail
+    double theta_user_ns;         // Requested threshold
+    double theta_eff_ns;          // Effective threshold
+    double theta_floor_ns;        // Measurement floor
+    ToDiagnostics diagnostics;    // Detailed diagnostics
 };
 ```
 
-### Effect
+### Other Enums
 
 ```cpp
-struct Effect {
-    double shift_ns;
-    double tail_ns;
-    std::pair<double, double> credible_interval;
-    EffectPattern pattern;
+enum class ToMeasurementQuality {
+    Excellent,  // MDE < 5ns
+    Good,       // MDE 5-20ns
+    Poor,       // MDE 20-100ns
+    TooNoisy    // MDE > 100ns
+};
 
-    double total_ns() const {
-        return std::sqrt(shift_ns * shift_ns + tail_ns * tail_ns);
-    }
+enum class ToExploitability {
+    SharedHardwareOnly,  // < 10ns
+    Http2Multiplexing,   // 10-100ns
+    StandardRemote,      // 100ns - 10μs
+    ObviousLeak          // > 10μs
+};
+
+enum class ToEffectPattern {
+    UniformShift,   // Constant timing difference
+    TailEffect,     // Difference in upper quantiles
+    Mixed,          // Both components
+    Indeterminate   // Cannot determine
 };
 ```
 
-### Exploitability
+---
+
+## Exception Safety
+
+The C++ wrapper throws exceptions for errors:
 
 ```cpp
-enum class Exploitability {
-    SharedHardwareOnly,  // < 10 ns
-    Http2Multiplexing,   // 10-100 ns
-    StandardRemote,      // 100 ns - 10 μs
-    ObviousLeak          // > 10 μs
-};
+try {
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(30s)
+        .test(collector);
+} catch (const timing_oracle::CalibrationError& e) {
+    std::cerr << "Calibration failed: " << e.what() << std::endl;
+} catch (const timing_oracle::Error& e) {
+    std::cerr << "Error: " << e.what() << std::endl;
+}
 ```
+
+Exception types:
+- `Error` - Base class
+- `NullPointerError`
+- `InvalidConfigError`
+- `CalibrationError`
+- `AnalysisError`
+- `NotEnoughSamplesError`
 
 ---
 
@@ -220,105 +339,119 @@ enum class Exploitability {
 ```cpp
 #include <timing_oracle.hpp>
 #include <iostream>
-#include <cstring>
 #include <random>
-#include <array>
+#include <cstring>
 
-std::array<uint8_t, 32> secret = {/* ... */};
+using namespace timing_oracle;
+using namespace std::chrono_literals;
+
+// Platform-specific timer
+#if defined(__x86_64__)
+inline uint64_t read_timer() {
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return (static_cast<uint64_t>(hi) << 32) | lo;
+}
+#elif defined(__aarch64__)
+inline uint64_t read_timer() {
+    uint64_t val;
+    __asm__ volatile("mrs %0, cntvct_el0" : "=r"(val));
+    return val;
+}
+#endif
+
+#define DO_NOT_OPTIMIZE(x) __asm__ volatile("" : : "r,m"(x) : "memory")
+
+// Leaky comparison (for testing)
+bool leaky_compare(const uint8_t* a, const uint8_t* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+        if (a[i] != b[i]) return false;  // Early exit!
+    }
+    return true;
+}
 
 int main() {
-    // Use a seeded RNG for reproducibility in tests
-    std::mt19937 rng(42);
+    std::array<uint8_t, 32> secret;
+    std::random_device rd;
+    std::generate(secret.begin(), secret.end(), std::ref(rd));
+
+    std::mt19937_64 rng(42);
     std::uniform_int_distribution<uint8_t> dist(0, 255);
 
-    auto result = timing_oracle::test(
-        timing_oracle::AttackerModel::AdjacentNetwork,
-        32,
-        [&](bool is_baseline, uint8_t* out, size_t size) {
-            if (is_baseline) {
-                std::copy(secret.begin(), secret.end(), out);
-            } else {
-                std::generate(out, out + size, [&]() { return dist(rng); });
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(30s)
+        .maxSamples(100000)
+        .fromEnv()
+        .test([&](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+            std::array<uint8_t, 32> input;
+
+            for (size_t i = 0; i < baseline.size(); i++) {
+                // Baseline: all zeros
+                std::fill(input.begin(), input.end(), 0);
+                uint64_t start = read_timer();
+                bool r = leaky_compare(input.data(), secret.data(), 32);
+                uint64_t end = read_timer();
+                DO_NOT_OPTIMIZE(r);
+                baseline[i] = end - start;
+
+                // Sample: random
+                std::generate(input.begin(), input.end(),
+                              [&]() { return dist(rng); });
+                start = read_timer();
+                r = leaky_compare(input.data(), secret.data(), 32);
+                end = read_timer();
+                DO_NOT_OPTIMIZE(r);
+                sample[i] = end - start;
             }
-        },
-        [](const uint8_t* input, size_t size) {
-            // Constant-time comparison
-            volatile uint8_t result = 0;
-            for (size_t i = 0; i < size; i++) {
-                result |= (secret[i] ^ input[i]);
-            }
-        }
-    );
+        });
 
-    std::cout << "Outcome: ";
-    switch (result.outcome()) {
-        case timing_oracle::Outcome::Pass:
-            std::cout << "PASS - No timing leak\n";
-            std::cout << "Leak probability: "
-                      << (result.leak_probability() * 100) << "%\n";
-            break;
-
-        case timing_oracle::Outcome::Fail:
-            std::cout << "FAIL - Timing leak detected!\n";
-            std::cout << "Effect: " << result.effect().shift_ns << " ns shift, "
-                      << result.effect().tail_ns << " ns tail\n";
-            std::cout << "Exploitability: ";
-            switch (result.exploitability()) {
-                case timing_oracle::Exploitability::SharedHardwareOnly:
-                    std::cout << "Shared hardware only\n"; break;
-                case timing_oracle::Exploitability::Http2Multiplexing:
-                    std::cout << "HTTP/2 multiplexing\n"; break;
-                case timing_oracle::Exploitability::StandardRemote:
-                    std::cout << "Standard remote\n"; break;
-                case timing_oracle::Exploitability::ObviousLeak:
-                    std::cout << "Obvious leak\n"; break;
-            }
-            break;
-
-        case timing_oracle::Outcome::Inconclusive:
-            std::cout << "INCONCLUSIVE\n";
-            break;
-
-        case timing_oracle::Outcome::Unmeasurable:
-            std::cout << "UNMEASURABLE - " << result.recommendation() << "\n";
-            break;
-    }
-
-    return result.failed() ? 1 : 0;
+    std::cout << result << std::endl;
+    return result.outcome == ToOutcome::Fail ? 1 : 0;
 }
 ```
 
 ### Compilation
 
 ```bash
-g++ -std=c++17 -o timing_test timing_test.cpp \
+clang++ -std=c++20 -stdlib=libc++ -O3 -o timing_test timing_test.cpp \
     -I/path/to/timing-oracle/crates/timing-oracle-c/include \
+    -I/path/to/timing-oracle/bindings/cpp \
     -L/path/to/timing-oracle/target/release \
     -ltiming_oracle_c
 ```
 
 ---
 
-## Exception Safety
+## Comparison: Builder API vs Low-Level API
 
-The C++ wrapper is exception-safe:
-
-- **Generator exceptions**: Caught and translated to `Unmeasurable` result
-- **Operation exceptions**: Caught and translated to `Unmeasurable` result
-- **Memory**: RAII ensures no leaks
+### Builder API (Recommended)
 
 ```cpp
-// Safe to throw from callbacks
-auto result = timing_oracle::test(
-    timing_oracle::AttackerModel::AdjacentNetwork,
-    32,
-    [](bool is_baseline, uint8_t* out, size_t size) {
-        if (size > 1024) {
-            throw std::invalid_argument("Input too large");
-        }
-        // ...
-    },
-    operation
-);
-// Exception is caught, result.outcome() == Outcome::Unmeasurable
+auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+    .timeBudget(60s)
+    .maxSamples(100000)
+    .fromEnv()
+    .test([](auto baseline, auto sample) {
+        // collect samples
+    });
+
+std::cout << result << std::endl;
 ```
+
+### Low-Level API
+
+```cpp
+auto config = config_default(ToAttackerModel::AdjacentNetwork);
+config.time_budget_secs = 60.0;
+config.max_samples = 100000;
+config = config_from_env(config);
+
+auto calibration = calibrate(cal_baseline, cal_sample, config);
+State state;
+// ... manual loop with step() ...
+
+ToResult result = /* ... */;
+std::cout << "Outcome: " << outcome_to_string(result.outcome) << std::endl;
+```
+
+The builder API is more ergonomic, handles the adaptive loop internally, and provides `operator<<` for easy output.

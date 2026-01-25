@@ -8,7 +8,7 @@
 //! - **RMSE**: How much variance is there in the estimates?
 //! - **Coverage**: Do 95% CIs contain the true value ~95% of the time?
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{
     busy_wait_ns, compute_estimation_stats_by_effect, CalibrationConfig, EstimationPoint,

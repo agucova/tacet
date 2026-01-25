@@ -464,3 +464,68 @@ if outcome.is_measurable() {
 ```
 
 Environment variable `TIMING_ORACLE_UNRELIABLE_POLICY` can override: set to `fail_closed` for stricter CI.
+
+---
+
+## Design Context
+
+### Users
+
+**Primary audience:** Cryptographic library authors, security auditors, and researchers studying side-channel attacks. These are technically sophisticated users who care deeply about correctness and need tools they can trust. They arrive at the docs with a specific job: verify their code doesn't leak timing information.
+
+**Context:** Users are often under pressure—auditing code before a release, investigating a potential vulnerability, or validating a new implementation. They need to quickly understand if timing-oracle is credible, how to use it, and how to interpret results.
+
+### Brand Personality
+
+**Three words:** Precise, rigorous, accessible
+
+**Voice:** Expert but not gatekeeping. The library was designed by people who deeply understand timing side-channels and statistical methodology—and that expertise should be evident without being intimidating. Write with authority but explain clearly. Show your work.
+
+**Emotional goal:** "These people have clearly thought this through." Users should feel confident the methodology is sound, the implementation is careful, and the tool will give them real answers rather than security theater.
+
+### Aesthetic Direction
+
+**Visual tone:** Scientific instrumentation meets modern developer tooling. Think oscilloscope aesthetics—waveforms, measurement grids, precise data visualization—but abstracted and simplified. Technical without being cluttered.
+
+**References:**
+- **Zed** (zed.dev): Dark mode forward, grid/dot patterns in backgrounds, blue tones, clean and technical without being cold
+- **Oxide Computer** (oxide.computer): TUI/CLI/ASCII-inspired visual language, monospace typography as design element, green palette, Pentagram-designed identity with distinctive character
+
+**Anti-references:**
+- Hacker/edgy aesthetic (Matrix green, skulls, "cyber" vibes)—too gimmicky
+- Corporate enterprise (stock photos, generic blue gradients, buzzwords)—soulless
+- Overly academic/dense (walls of text, no visual hierarchy)—intimidating
+
+**Theme:** Dark mode primary, with well-designed light mode as secondary option.
+
+**Color palette direction:** Move away from the template blue. Explore:
+- Deep slate grays as base (Oxide-inspired)
+- A distinctive accent—consider teal/cyan (measurement/oscilloscope associations), or a warm amber (precision instruments, Rust ecosystem nod)
+- High contrast for readability; avoid muddy mid-tones
+
+### Logo/Isologotype Direction
+
+A simplified, abstract waveform or timing trace. Not photorealistic—geometric and clean, working at small sizes (favicon). Should read as "measurement" or "signal" without being literal. Consider how it works in monochrome and on dark backgrounds.
+
+### Typography
+
+Non-generic fonts with character. Avoid over-used choices (Inter, system fonts). Consider:
+- **Headings/UI elements:** Monospace or semi-monospace for technical feel (à la Oxide/PlanetScale), or a distinctive sans with good numeric figures
+- **Body:** A quality sans serif with good readability at smaller sizes—Berkeley Mono, JetBrains Mono (for code), or a clean humanist sans for prose
+- Strong distinction between prose and code; generous use of monospace in tables, data, and technical content
+
+### Accessibility
+
+WCAG AA compliance: proper contrast ratios, keyboard navigation, screen reader support. No critical information conveyed by color alone.
+
+### Design Principles
+
+1. **Precision is the aesthetic.** Every detail—spacing, alignment, typography—should feel deliberate. The design itself demonstrates the care that went into the methodology.
+
+2. **Show, don't decorate.** Favor useful visualization (timing distributions, effect decomposition) over ornamental graphics. If something is decorative, it should reinforce the technical identity (grid patterns, subtle waveforms).
+
+3. **Confidence through clarity.** Dense technical content is fine; unclear hierarchy is not. Use typography, spacing, and structure to make complex information scannable.
+
+4. **Dark mode is home.** Design for dark first—it's where developers live and where the terminal-inspired aesthetic shines. Light mode should work well but isn't the primary canvas.
+
+5. **Distinctive but not distracting.** The brand should be recognizable and have character (not "generic Rust library") without drawing attention away from the content. The docs are the product.

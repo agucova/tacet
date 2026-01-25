@@ -9,7 +9,7 @@ This document is the authoritative specification for timing-oracle, a Bayesian t
 
 For implementation guidance, see the [Implementation Guide](/guides/implementation). For language-specific APIs, see the [Rust API](/api/rust), [C API](/api/c), or [Go API](/api/go). For interpreting results, see the [User Guide](/guides/user-guide).
 
----
+***
 
 ## Terminology (RFC 2119)
 
@@ -22,7 +22,7 @@ In summary:
 - **SHOULD NOT**: Strong discouragement (valid reasons to deviate may exist)
 - **MAY** / **OPTIONAL**: Truly optional
 
----
+***
 
 ## 1. Overview
 
@@ -41,8 +41,8 @@ timing-oracle addresses these issues with:
 
 1. **Quantile-based statistics**: Compare nine deciles to capture both uniform shifts and tail effects
 2. **Adaptive Bayesian inference**: Collect samples until confident, with natural early stopping
-3. **Three-way decisions**: Pass / Fail / Inconclusive—distinguishing "safe" from "unmeasurable"
-4. **Interpretable output**: Posterior probability (0–100%) instead of p-values
+3. **Three-way decisions**: Pass / Fail / Inconclusive, distinguishing "safe" from "unmeasurable"
+4. **Interpretable output**: Posterior probability (0-100%) instead of p-values
 5. **Fail-safe design**: Prefer Inconclusive over confidently wrong
 
 ### 1.3 Design Goals
@@ -55,7 +55,7 @@ timing-oracle addresses these issues with:
 - **Fail-safe**: CI verdicts SHOULD almost never be confidently wrong
 - **Reproducible**: Deterministic results given identical samples and configuration
 
----
+***
 
 ## 2. Abstract Types and Semantics
 
@@ -331,11 +331,11 @@ IssueCode =
   | LambdaMixingPoor | KappaMixingPoor | LikelihoodInflated
 ```
 
----
+***
 
 ## 3. Statistical Methodology
 
-This section describes the mathematical foundation of timing-oracle. All formulas in this section are normative—implementations MUST produce equivalent results.
+This section describes the mathematical foundation of timing-oracle. All formulas in this section are normative; implementations MUST produce equivalent results.
 
 ### 3.1 Test Statistic: Quantile Differences
 
@@ -428,7 +428,7 @@ The system operates in two phases:
 
 **Why this structure?**
 
-The key insight is that covariance scales as 1/n for quantile estimators. By estimating the covariance *rate* once during calibration, we can cheaply update the posterior as more data arrives—no re-bootstrapping needed. This makes adaptive sampling computationally tractable.
+The key insight is that covariance scales as 1/n for quantile estimators. By estimating the covariance *rate* once during calibration, we can cheaply update the posterior as more data arrives; no re-bootstrapping needed. This makes adaptive sampling computationally tractable.
 
 ### 3.3 Calibration Phase
 
@@ -464,11 +464,11 @@ $$
 F := \{y_t : c_t = F\}, \quad R := \{y_t : c_t = R\}
 $$
 
-**Critical principle:** The acquisition stream is the data-generating process. All bootstrap and dependence estimation MUST preserve adjacency in acquisition order, not per-class position. The underlying stochastic process—including drift, frequency scaling, and cache state evolution—operates in continuous time indexed by $t$. Splitting by label and treating each class as an independent time series is statistically incorrect.
+**Critical principle:** The acquisition stream is the data-generating process. All bootstrap and dependence estimation MUST preserve adjacency in acquisition order, not per-class position. The underlying stochastic process (including drift, frequency scaling, and cache state evolution) operates in continuous time indexed by $t$. Splitting by label and treating each class as an independent time series is statistically incorrect.
 
 #### 3.3.2 Covariance Estimation via Stream-Based Block Bootstrap
 
-Timing measurements exhibit autocorrelation—nearby samples are more similar than distant ones due to cache state, frequency scaling, etc. Standard bootstrap assumes i.i.d. samples, underestimating variance. Implementations MUST use block bootstrap on the acquisition stream to preserve the true dependence structure.
+Timing measurements exhibit autocorrelation: nearby samples are more similar than distant ones due to cache state, frequency scaling, etc. Standard bootstrap assumes i.i.d. samples, underestimating variance. Implementations MUST use block bootstrap on the acquisition stream to preserve the true dependence structure.
 
 **Politis-White automatic block length selection:**
 
@@ -494,7 +494,7 @@ $$
 |\hat{\rho}^{(\max)}_k| = \max(|\hat{\rho}^{(F)}_k|, |\hat{\rho}^{(R)}_k|)
 $$
 
-This measures within-class dependence at acquisition-stream lags—the quantity that actually drives $\mathrm{Var}(\Delta)$—without being masked by class alternation.
+This measures within-class dependence at acquisition-stream lags (the quantity that actually drives $\mathrm{Var}(\Delta)$) without being masked by class alternation.
 
 **Why class-conditional ACF?** The variance of quantile estimators $\hat{q}(F)$ and $\hat{q}(R)$ depends on within-class autocorrelation. When computing ACF on the pooled interleaved stream, adjacent samples often belong to different classes, artificially reducing apparent autocorrelation. Class-conditional ACF preserves acquisition-stream timing (lag $k$ means $k$ acquisition steps apart) while measuring the relevant dependence structure.
 
@@ -569,7 +569,7 @@ $$
 \Sigma_{\text{rate}} = \hat{\Sigma}_{\text{cal}} \cdot n_{\text{cal}}
 $$
 
-**Effective sample size (n_eff) — normative:**
+**Effective sample size (n_eff) (normative):**
 
 Under strong temporal dependence, n samples do not provide n independent observations. Implementations MUST define the effective sample size using the selected block length (dependence length estimate):
 
@@ -745,7 +745,7 @@ $$
 
 chosen adaptively (start at $10^{-10}$, increase on Cholesky failure).
 
-**Robustness fallback (fragile regimes) — normative:** In fragile regimes (§3.3) or when $\mathrm{cond}(R) > 10^4$, implementations MUST apply shrinkage:
+**Robustness fallback (fragile regimes) (normative):** In fragile regimes (§3.3) or when $\mathrm{cond}(R) > 10^4$, implementations MUST apply shrinkage:
 
 $$
 R \leftarrow (1-\lambda_{\text{shrink}})R + \lambda_{\text{shrink}} I, \quad \lambda_{\text{shrink}} \in [0.01, 0.2]
@@ -761,7 +761,7 @@ $$
 
 via a triangular solve.
 
-**Degrees of freedom ($\nu$) — normative:**
+**Degrees of freedom ($\nu$) (normative):**
 
 Implementations MUST use:
 
@@ -774,7 +774,7 @@ $$
 - Finite variance (required for Gate 1): $\mathrm{Var}(\delta)$ exists for $\nu > 2$
 - Stable Gibbs mixing: not so heavy that $\lambda$ becomes degenerate
 
-**Scale-mixture representation — normative:**
+**Scale-mixture representation (normative):**
 
 The Student's *t* prior MUST be implemented via the scale-mixture representation:
 
@@ -788,7 +788,7 @@ $$
 
 **Gamma parameterization:** This specification uses **shape–rate** parameterization throughout. Under this parameterization, $E[\lambda] = 1$ and $\mathrm{Var}(\lambda) = 2/\nu$.
 
-**Calibrating $\sigma$ via exceedance target — normative:**
+**Calibrating $\sigma$ via exceedance target (normative):**
 
 The scale $\sigma$ MUST be chosen so that the prior exceedance probability equals a fixed target $\pi_0$ (default 0.62):
 
@@ -809,7 +809,7 @@ For each of M draws (SHOULD use M = 50,000):
 
 The exceedance probability is the fraction of draws exceeding $\theta_{\text{eff}}$.
 
-**Search bounds — normative:**
+**Search bounds (normative):**
 
 Let the calibration-time standard errors be:
 
@@ -831,7 +831,7 @@ To ensure reproducible results, all random number generation MUST be determinist
 
 **Normative requirement:**
 
-> Given identical timing samples and configuration, the oracle MUST produce identical results (up to floating-point roundoff). Algorithmic randomness is not epistemic uncertainty about the leak—it is approximation error that MUST NOT influence the decision rule.
+> Given identical timing samples and configuration, the oracle MUST produce identical results (up to floating-point roundoff). Algorithmic randomness is not epistemic uncertainty about the leak; it is approximation error that MUST NOT influence the decision rule.
 
 **Seeding policy:**
 
@@ -869,7 +869,7 @@ $$
 \delta \in \mathbb{R}^9 \quad \text{(true decile-difference profile)}
 $$
 
-This is unconstrained—the model can represent any quantile-difference pattern, unlike a low-rank projection.
+This is unconstrained: the model can represent any quantile-difference pattern, unlike a low-rank projection.
 
 #### 3.4.2 Likelihood (Robust t-likelihood via scale mixture)
 
@@ -893,7 +893,7 @@ where $\Sigma_n = \Sigma_{\text{rate}} / n_{\text{eff}}$ is the scaled covarianc
 
 **Gamma parameterization:** shape–rate. $E[\kappa] = 1$.
 
-**Degrees of freedom for likelihood ($\nu_{\ell}$) — normative default:**
+**Degrees of freedom for likelihood ($\nu_{\ell}$) (normative) default:**
 
 Implementations MUST use $\nu_{\ell}$ := 8 unless overridden by a calibration-driven conservatism escalation policy (§3.8).
 
@@ -941,7 +941,7 @@ A Gaussian prior with scale calibrated to the exceedance target can cause catast
 
 **Why Student's *t* instead of Gaussian mixture?**
 
-A 2-component Gaussian mixture (as in v5.2) suffers from discrete scale selection. Under correlated likelihoods, the Bayes factor computation for mixture weights is dominated by Occam penalties (log-det terms), causing the posterior to stick to the narrow component even when data clearly favors larger effects — but not as large as the slab.
+A 2-component Gaussian mixture (as in v5.2) suffers from discrete scale selection. Under correlated likelihoods, the Bayes factor computation for mixture weights is dominated by Occam penalties (log-det terms), causing the posterior to stick to the narrow component even when data clearly favors larger effects, but not as large as the slab.
 
 The Student's *t* prior makes the effective scale $\lambda$ continuous. The posterior on $\lambda$ can settle at whatever scale the data supports, rather than being forced to choose between two fixed options.
 
@@ -975,7 +975,7 @@ $$
 \mu(\lambda, \kappa) = \Lambda(\lambda, \kappa) \cdot \kappa \Sigma_n^{-1} \Delta
 $$
 
-**Sampling without explicit inverses — normative:**
+**Sampling without explicit inverses (normative):**
 
 Let $Q(\lambda, \kappa) := \kappa \Sigma_n^{-1} + (\lambda/\sigma^2) R^{-1}$. Note that $\Sigma_n^{-1}$ and $R^{-1}$ here denote the result of applying the inverse operator, which MUST be computed via Cholesky solves, not explicit matrix inversion. Compute the Cholesky factorization:
 
@@ -1015,7 +1015,7 @@ $$
 
 **Derivation:** Combining the Gamma($\nu/2, \nu/2$) prior on $\lambda$ with the Gaussian likelihood contribution $\exp\left(-(\lambda/2\sigma^2)\delta^\top R^{-1}\delta\right)$ yields a Gamma posterior with shape increased by $d/2$ and rate increased by $q/(2\sigma^2)$.
 
-**Conditional 3: $\kappa$ | $\delta$, $\Delta$ (Gamma) — normative**
+**Conditional 3: $\kappa$ | $\delta$, $\Delta$ (Gamma) (normative)**
 
 The likelihood precision multiplier $\kappa$ is sampled conditional on $\delta$ and $\Delta$. Let d = 9 and define the Mahalanobis residual:
 
@@ -1035,7 +1035,7 @@ where $\nu_{\ell}$ = 8 is the likelihood degrees of freedom (see §3.4.2).
 
 **Interpretation:** When the observed residual s is large relative to expectations under $\Sigma_n$ (indicating potential covariance misestimation), $\kappa$ is pulled below 1, effectively inflating the likelihood covariance and preventing false certainty.
 
-**Gibbs schedule — normative:**
+**Gibbs schedule (normative):**
 
 Implementations MUST use the following deterministic schedule:
 
@@ -1045,7 +1045,7 @@ Implementations MUST use the following deterministic schedule:
 | N_burn | 64 | Burn-in (discarded) |
 | N_keep | 192 | Retained samples |
 
-**Initialization — normative:**
+**Initialization (normative):**
 
 The Gibbs sampler MUST be initialized at:
 
@@ -1076,9 +1076,9 @@ To minimize per-iteration cost, implementations MUST precompute during calibrati
 2. **$L_{\Sigma}$** (Cholesky factor of $\Sigma_n$, updated when n changes)
 3. **$\Sigma_n^{-1} \Delta$** (the "data precision-weighted observation", computed via Cholesky solve)
 
-Per iteration, the dominant cost is the Cholesky factorization of $Q(\lambda)$, which is $O(9^3) \approx 729$ flops — negligible.
+Per iteration, the dominant cost is the Cholesky factorization of $Q(\lambda)$, which is $O(9^3) \approx 729$ flops (negligible).
 
-**$\lambda$ mixing diagnostics — normative:**
+**$\lambda$ mixing diagnostics (normative):**
 
 Implementations SHOULD compute $\lambda$ mixing diagnostics and SHOULD set `lambda_mixing_ok = false` when either:
 
@@ -1097,7 +1097,7 @@ where $\hat{\rho}_k$ is the lag-k autocorrelation of the $\lambda$ chain, summed
 
 When `lambda_mixing_ok = false`, implementations SHOULD emit a quality issue with code `LambdaMixingPoor` and guidance suggesting the user increase Gibbs iterations (if configurable) or noting that the posterior may be unreliable.
 
-**$\kappa$ mixing diagnostics — normative:**
+**$\kappa$ mixing diagnostics (normative):**
 
 Implementations SHOULD compute $\kappa$ mixing diagnostics and SHOULD set `kappa_mixing_ok = false` when either:
 
@@ -1118,7 +1118,7 @@ When `kappa_mixing_ok = false`, implementations SHOULD emit a quality issue with
 
 **Verdict-blocking status:**
 
-These diagnostics MUST NOT be verdict-blocking. Poor $\lambda$ or $\kappa$ mixing typically indicates unusual data rather than invalid inference — the Gibbs sampler may simply be exploring a complex posterior.
+These diagnostics MUST NOT be verdict-blocking. Poor $\lambda$ or $\kappa$ mixing typically indicates unusual data rather than invalid inference; the Gibbs sampler may simply be exploring a complex posterior.
 
 #### 3.4.5 Decision Functional and Leak Probability
 
@@ -1134,7 +1134,7 @@ $$
 P(\text{leak} > \theta_{\text{eff}} \mid \Delta) = P(m(\delta) > \theta_{\text{eff}} \mid \Delta)
 $$
 
-**Estimation via Gibbs samples — normative:**
+**Estimation via Gibbs samples (normative):**
 
 Implementations MUST estimate the leak probability from the retained Gibbs samples:
 
@@ -1142,7 +1142,7 @@ $$
 \widehat{P}(\text{leak}) = \frac{1}{N_{\text{keep}}} \sum_{s=1}^{N_{\text{keep}}} \mathbf{1}\left[m(\delta^{(s)}) > \theta_{\text{eff}}\right]
 $$
 
-**Posterior summaries — normative:**
+**Posterior summaries (normative):**
 
 Implementations MUST compute:
 
@@ -1187,8 +1187,8 @@ X = \begin{bmatrix} \mathbf{1} & \mathbf{b}_{\text{tail}} \end{bmatrix} \in \mat
 $$
 
 where:
-- **1** = (1, 1, 1, 1, 1, 1, 1, 1, 1)ᵀ — uniform shift
-- **b_tail** = (−0.5, −0.375, −0.25, −0.125, 0, 0.125, 0.25, 0.375, 0.5)ᵀ — tail effect
+- **1** = (1, 1, 1, 1, 1, 1, 1, 1, 1)ᵀ: uniform shift
+- **b_tail** = (−0.5, −0.375, −0.25, −0.125, 0, 0.125, 0.25, 0.375, 0.5)ᵀ: tail effect
 
 **GLS projection operator:**
 
@@ -1196,12 +1196,12 @@ $$
 A := (X^\top \Sigma_n^{-1} X)^{-1} X^\top \Sigma_n^{-1}
 $$
 
-**Conditioning stability for $\Sigma_n$ — normative:** In fragile regimes (§3.3), $\Sigma_n$ may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to $\Sigma_n$ before use in the Gibbs sampler and GLS projection:
+**Conditioning stability for $\Sigma_n$ (normative):** In fragile regimes (§3.3), $\Sigma_n$ may be severely ill-conditioned due to high correlations between quantiles. Implementations MUST apply condition-number-based regularization to $\Sigma_n$ before use in the Gibbs sampler and GLS projection:
 
 - If $\mathrm{cond}(\Sigma_n) > 10^4$ but $\le 10^6$: Apply shrinkage $\Sigma_n \leftarrow (1-\lambda)\Sigma_n + \lambda \cdot \mathrm{diag}(\Sigma_n)$ with $\lambda \in [0.1, 0.95]$ based on condition severity
 - If $\mathrm{cond}(\Sigma_n) > 10^6$ or Cholesky fails: Fall back to diagonal matrix $\mathrm{diag}(\Sigma_n)$ (weighted OLS, preserves per-quantile variances)
 
-**Posterior for projection summary — normative:**
+**Posterior for projection summary (normative):**
 
 Implementations MUST compute $\beta$ projection statistics empirically from Gibbs draws rather than analytically. This ensures robustness when $\Sigma_n$ is regularized.
 
@@ -1218,7 +1218,7 @@ The projection gives interpretable components:
 
 **Important:** The 2D projection is for reporting only. Decisions MUST be based on the 9D posterior. When the projection doesn't fit well (see §3.5.3), implementations MUST add an interpretation caveat and provide alternative explanations.
 
-**Pattern Classification via Posterior Draws — normative:**
+**Pattern Classification via Posterior Draws (normative):**
 
 Pattern classification MUST use dominance probabilities computed from retained Gibbs draws, not point estimates or significance tests. This approach is robust to covariance regularization and discrete mode quantization.
 
@@ -1261,13 +1261,13 @@ The adaptive loop terminates when any of these conditions is met:
 
 Frequentist methods suffer from **optional stopping**: if you keep sampling until you get a significant result, you inflate your false positive rate.
 
-Bayesian methods don't have this problem. The posterior probability is valid regardless of when you stop—this is the **likelihood principle**. Your inference depends only on the data observed, not your sampling plan.
+Bayesian methods don't have this problem. The posterior probability is valid regardless of when you stop; this is the **likelihood principle**. Your inference depends only on the data observed, not your sampling plan.
 
 #### 3.5.2 Quality Gates (Verdict-Blocking)
 
 Quality gates detect when data is too poor to reach a confident decision. When any gate triggers, the outcome MUST be Inconclusive.
 
-**Gate 1: Low Information Gain (Posterior ≈ Prior) — verdict-blocking**
+**Gate 1: Low Information Gain (Posterior ≈ Prior) (verdict-blocking)**
 
 Gate 1 MUST trigger Inconclusive when the data provides insufficient information relative to the prior. Implementations MUST compute the KL divergence between Gaussian surrogates of the prior and posterior.
 
@@ -1295,7 +1295,7 @@ $$
 
 The posterior surrogate is $\mathcal{N}(\mu_{\text{post}}, \Lambda_{\text{post}})$.
 
-**KL divergence computation — normative:**
+**KL divergence computation (normative):**
 
 The KL divergence from the prior surrogate to the posterior surrogate is:
 
@@ -1363,7 +1363,7 @@ If variance ratio is outside [0.5, 2.0], or autocorrelation change exceeds 0.3, 
 
 **Projection Mismatch Diagnostic**
 
-Under the 9D model, there is no risk of "mean model cannot represent the observed shape"—the 9D posterior can represent any quantile pattern. The projection mismatch diagnostic measures whether the 2D shift+tail summary faithfully describes the inferred 9D shape.
+Under the 9D model, there is no risk of "mean model cannot represent the observed shape": the 9D posterior can represent any quantile pattern. The projection mismatch diagnostic measures whether the 2D shift+tail summary faithfully describes the inferred 9D shape.
 
 **Projection mismatch statistic:**
 
@@ -1491,8 +1491,8 @@ Implementations MUST provide (or run in internal test suite) a "fixed-vs-fixed" 
 
 - Run the full pipeline under null (same distribution both classes)
 - Compute two distinct FPR metrics:
-  - FPR_overall = P(Fail | H₀) — unconditional false positive rate
-  - FPR_gated = P(Fail | H₀, all verdict-blocking gates pass) — FPR conditional on conclusive results
+  - FPR_overall = P(Fail | H₀): unconditional false positive rate
+  - FPR_gated = P(Fail | H₀, all verdict-blocking gates pass): FPR conditional on conclusive results
 - Also track Inconclusive rate and reasons
 
 **Trial count requirement:**
@@ -1583,7 +1583,7 @@ Assert: P(leak) > 0.99
 - Tests MUST use deterministic seeds per §3.3.6
 - Tests MUST NOT invoke verdict-blocking quality gates
 
----
+***
 
 ## 4. Measurement Requirements
 
@@ -1647,7 +1647,7 @@ Implementations SHOULD perform pre-flight checks:
 - **Harness sanity (fixed-vs-fixed)**: Detect test harness bugs
 - **Stationarity**: Detect drift during measurement
 
----
+***
 
 ## 5. API Design Principles
 
@@ -1713,7 +1713,7 @@ Quality issues SHOULD be included in results even for `Pass`/`Fail` outcomes, al
 
 Pre-flight warnings SHOULD distinguish informational messages from result-undermining issues.
 
----
+***
 
 ## 6. Configuration Parameters
 
@@ -1735,7 +1735,7 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | batch_size | 1,000 | Samples per adaptive batch |
 | bootstrap_iterations | 2,000 | Bootstrap iterations for covariance |
 
----
+***
 
 ## Appendix A: Mathematical Notation
 
@@ -1788,7 +1788,7 @@ Pre-flight warnings SHOULD distinguish informational messages from result-underm
 | KL | KL divergence: KL(posterior ∥ prior) for Gate 1 |
 | KL_min | Minimum KL threshold for conclusive verdict (default 0.7 nats) |
 
----
+***
 
 ## Appendix B: Normative Constants
 
@@ -1836,44 +1836,44 @@ These constants define conformant implementations. Implementations MAY use diffe
 | $\kappa$ mixing ESS threshold | 20 | SHOULD | Detect slow mixing |
 | Likelihood inflation threshold | 0.3 | SHOULD | $\kappa_{\text{mean}}$ triggering LikelihoodInflated |
 
----
+***
 
 ## Appendix C: References
 
 **Statistical methodology:**
 
-1. Bishop, C. M. (2006). Pattern Recognition and Machine Learning, Ch. 3. Springer. — Bayesian linear regression
+1. Bishop, C. M. (2006). Pattern Recognition and Machine Learning, Ch. 3. Springer. (Bayesian linear regression)
 
 2. Politis, D. N. & White, H. (2004). "Automatic Block-Length Selection for the Dependent Bootstrap." Econometric Reviews 23(1):53–70.
 
-3. Künsch, H. R. (1989). "The Jackknife and the Bootstrap for General Stationary Observations." Annals of Statistics. — Block bootstrap
+3. Künsch, H. R. (1989). "The Jackknife and the Bootstrap for General Stationary Observations." Annals of Statistics. (Block bootstrap)
 
 4. Hyndman, R. J. & Fan, Y. (1996). "Sample quantiles in statistical packages." The American Statistician 50(4):361–365.
 
 5. Welford, B. P. (1962). "Note on a Method for Calculating Corrected Sums of Squares and Products." Technometrics 4(3):419–420.
 
-6. Gelman, A. et al. (2013). Bayesian Data Analysis, 3rd ed., Ch. 11–12. CRC Press. — Gibbs sampling, scale mixtures
+6. Gelman, A. et al. (2013). Bayesian Data Analysis, 3rd ed., Ch. 11-12. CRC Press. (Gibbs sampling, scale mixtures)
 
-7. Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). "Robust Statistical Modeling Using the t Distribution." JASA 84(408):881–896. — Student's t for robustness
+7. Lange, K. L., Little, R. J. A., & Taylor, J. M. G. (1989). "Robust Statistical Modeling Using the t Distribution." JASA 84(408):881-896. (Student's t for robustness)
 
 **Timing attacks:**
 
-8. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. — DudeCT methodology
+8. Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. (DudeCT methodology)
 
-9. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. — Exploitability thresholds
+9. Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and Limits of Remote Timing Attacks." ACM TISSEC 12(3):17. (Exploitability thresholds)
 
-10. Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. — HTTP/2 timing attacks
+10. Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. (HTTP/2 timing attacks)
 
-11. Bernstein, D. J. et al. (2024). "KyberSlash." — Timing vulnerability example
+11. Bernstein, D. J. et al. (2024). "KyberSlash." (Timing vulnerability example)
 
-12. Dunsche, M. et al. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. — Relevant hypotheses framework
+12. Dunsche, M. et al. (2025). "SILENT: A New Lens on Statistics in Software Timing Side Channels." arXiv:2504.19821. (Relevant hypotheses framework)
 
 **Existing tools:**
 
 13. dudect (C): https://github.com/oreparaz/dudect
 14. dudect-bencher (Rust): https://github.com/rozbb/dudect-bencher
 
----
+***
 
 ## Appendix D: Changelog
 
@@ -1949,7 +1949,7 @@ These constants define conformant implementations. Implementations MAY use diffe
 
 - **Changed:** Prior is now multivariate Student's *t* with $\nu = 4$: $\delta \sim t_4(0, \sigma^2 R)$
 - **Removed:** 2-component Gaussian mixture ($w$, $\sigma_1$, $\sigma_2$, $\Lambda_{0,1}$, $\Lambda_{0,2}$)
-- **Rationale:** The discrete mixture suffered from Occam penalty pathology under correlated likelihoods — the slab's log-det penalty dominated even when data favored moderate (not extreme) scale increases. Student's *t* provides continuous scale adaptation via the latent $\lambda$.
+- **Rationale:** The discrete mixture suffered from Occam penalty pathology under correlated likelihoods; the slab's log-det penalty dominated even when data favored moderate (not extreme) scale increases. Student's *t* provides continuous scale adaptation via the latent $\lambda$.
 
 **Gibbs sampling inference (§3.4.4, §3.4.5):**
 

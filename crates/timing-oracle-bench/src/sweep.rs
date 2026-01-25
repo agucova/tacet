@@ -186,7 +186,7 @@ impl SweepConfig {
     /// Uses SharedHardware attacker model (θ=0.6ns) for fair comparison with
     /// other tools that don't have configurable thresholds.
     ///
-    /// - Effect sizes: 16 points from 0 to 10μs
+    /// - Effect sizes: 19 points from 0 to 10μs (including 1ns, 2ns, 5ns for SharedHardware)
     /// - 6 patterns: Null, Shift, Tail, Variance, Bimodal, Quantized
     /// - 9 noise models: IID, AR(±0.2), AR(±0.4), AR(±0.6), AR(±0.8)
     /// - 100 datasets per point
@@ -198,6 +198,10 @@ impl SweepConfig {
             // Sub-microsecond effects (real crypto vulns) + microsecond range
             effect_multipliers: vec![
                 0.0,      // 0ns (FPR test)
+                // Sub-10ns: SharedHardware threshold region
+                0.00001,  // 1ns
+                0.00002,  // 2ns
+                0.00005,  // 5ns
                 // Sub-microsecond: cache timing, branches, table lookups
                 0.0001,   // 10ns
                 0.0005,   // 50ns
@@ -825,8 +829,6 @@ impl SweepRunner {
             .map(|(p, m, n, id, d)| (p, m, n, id, Arc::new(d)))
             .collect();
 
-        progress(0.05, "Running tools...");
-
         // Step 3: Create (dataset × tool × attacker_model) work items
         // For tools that don't support attacker_model, only include one work item with None
         let work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
@@ -846,6 +848,12 @@ impl SweepRunner {
         let total_work = work_items.len();
         let completed = AtomicUsize::new(0);
 
+        // Progress: 0-5% for dataset generation (done above), 5-100% for tool runs
+        // Scale tool progress from 5% to 100% as work completes
+        let scale_progress = |done: usize| -> f64 {
+            0.05 + 0.95 * (done as f64 / total_work as f64)
+        };
+
         // Step 4: Process all (dataset × tool × attacker_model) triples in parallel
         #[cfg(feature = "parallel")]
         let all_results: Vec<BenchmarkResult> = if config.use_realistic {
@@ -856,7 +864,7 @@ impl SweepRunner {
                     let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
                     let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                    progress(done as f64 / total_work as f64, &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
+                    progress(scale_progress(done), &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
                     result
                 })
                 .collect()
@@ -880,7 +888,7 @@ impl SweepRunner {
                 let (pattern, mult, noise, dataset_id, dataset) = &datasets[dataset_idx];
                 let result = self.run_tool(config, *pattern, *mult, *noise, *dataset_id, dataset, tool_idx, attacker_model);
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
-                progress(done as f64 / total_work as f64, &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
+                progress(scale_progress(done), &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()));
                 result
             })
             .collect();
@@ -967,8 +975,6 @@ impl SweepRunner {
             .map(|(p, m, n, id, d)| (p, m, n, id, Arc::new(d)))
             .collect();
 
-        progress(0.05, "Running tools...");
-
         // Step 3: Create (dataset × tool × attacker_model) work items
         // For tools that don't support attacker_model, only include one work item with None
         let all_work_items: Vec<(usize, usize, Option<AttackerModel>)> = (0..datasets.len())
@@ -1013,9 +1019,16 @@ impl SweepRunner {
         };
 
         let remaining_work = work_items.len();
+
+        // Progress: 0-5% for dataset generation (done above), 5-100% for tool runs
+        // Scale tool progress from 5% to 100% as work completes
+        let scale_progress = |done: usize| -> f64 {
+            0.05 + 0.95 * (done as f64 / total_work as f64)
+        };
+
         if resumed_count > 0 {
             progress(
-                resumed_count as f64 / total_work as f64,
+                scale_progress(resumed_count),
                 &format!("Resuming ({} already complete)...", resumed_count),
             );
         }
@@ -1041,7 +1054,7 @@ impl SweepRunner {
 
                     let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
                     progress(
-                        done as f64 / total_work as f64,
+                        scale_progress(done),
                         &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
                     );
                     result
@@ -1084,7 +1097,7 @@ impl SweepRunner {
 
                 let done = completed.fetch_add(1, Ordering::Relaxed) + 1;
                 progress(
-                    done as f64 / total_work as f64,
+                    scale_progress(done),
                     &format!("{}-{:.2}σ-{}", pattern.name(), mult, noise.name()),
                 );
                 result

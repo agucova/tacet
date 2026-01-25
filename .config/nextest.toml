@@ -1,11 +1,166 @@
+# timing-oracle nextest configuration
+#
+# Test organization:
+#   - core: Baseline validation (known_leaky, known_safe)
+#   - crypto: Real crypto library timing tests (rustcrypto, ring, dalek, pqcrypto)
+#   - synthetic: Attack patterns, effect patterns, exploitability
+#   - calibration: Statistical calibration (FPR, power, coverage)
+#   - unit: Fast config/types/helpers tests
+#   - platform: PMU-based timing (kperf, perf)
+#   - runtime: Async/concurrency tests
+#   - macros: Proc macro tests
+#   - investigation: One-off debugging (excluded from CI)
+
+# =============================================================================
+# Default Profile
+# =============================================================================
+
 [profile.default]
 failure-output = "immediate"
 status-level = "pass"
 final-status-level = "pass"
 retries = 0
-# Exclude slow statistical tests from default runs
-default-filter = "not (binary(power_analysis) | binary(/^calibration_/) | test(/^fpr_alpha/) | test(/^bayesian_prior/))"
+# Exclude slow calibration and investigation tests from default runs
+default-filter = "not (binary(calibration) | binary(investigation))"
 
+# =============================================================================
+# Speed Tiers
+# =============================================================================
+
+# Quick smoke tests (~5s, ~300 tests)
+# Lib tests + unit tests only (no timing measurements)
+# Usage: cargo nextest run --profile quick
+[profile.quick]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "15s", terminate-after = 2 }
+retries = 0
+default-filter = "kind(lib) | binary(unit)"
+
+# Smoke tests with sample crypto (~30s)
+# Core + unit + fast crypto samples
+# Usage: cargo nextest run --profile smoke
+[profile.smoke]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "60s", terminate-after = 2 }
+retries = 0
+default-filter = """
+(
+  kind(lib) |
+  binary(unit) |
+  binary(core) |
+  (binary(crypto) & test(/rustcrypto::blake2::rustcrypto_blake2b512_ct/)) |
+  (binary(aead_timing) & test(/chacha20poly1305_encrypt/))
+)
+"""
+
+# All crypto tests (~10min)
+# Usage: cargo nextest run --profile crypto
+[profile.crypto]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+default-filter = "binary(crypto) | binary(core) | binary(aead_timing) | binary(pqcrypto_timing)"
+
+# Full suite (~30min, excludes calibration and investigation)
+# Usage: cargo nextest run --profile full
+[profile.full]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "300s", terminate-after = 2 }
+retries = 0
+default-filter = "not (binary(calibration) | binary(investigation)) & not test(/#ignore/)"
+
+# =============================================================================
+# Category-Specific Profiles
+# =============================================================================
+
+# Calibration suite (slow statistical tests)
+# Usage: cargo nextest run --profile calibration
+[profile.calibration]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "600s", terminate-after = 2 }
+retries = 0
+default-filter = "binary(calibration)"
+
+# Synthetic/attack pattern tests
+# Usage: cargo nextest run --profile synthetic
+[profile.synthetic]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+default-filter = "binary(synthetic)"
+
+# Investigation tests (one-off debugging, not for CI)
+# Usage: cargo nextest run --profile investigation
+[profile.investigation]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "600s", terminate-after = 2 }
+retries = 0
+default-filter = "binary(investigation)"
+
+# =============================================================================
+# Crypto Crate-Specific Profiles
+# =============================================================================
+
+# RustCrypto ecosystem tests
+# Usage: cargo nextest run --profile rustcrypto
+[profile.rustcrypto]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+default-filter = "binary(crypto) & test(/^rustcrypto::/)"
+
+# ring crate tests
+# Usage: cargo nextest run --profile ring
+[profile.ring]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+default-filter = "(binary(crypto) & test(/^ring::/)) | (binary(aead_timing) & test(/aes_256_gcm|ring_chacha/))"
+
+# dalek ecosystem tests
+# Usage: cargo nextest run --profile dalek
+[profile.dalek]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "120s", terminate-after = 3 }
+retries = 0
+default-filter = "binary(crypto) & test(/^dalek::/)"
+
+# Post-quantum crypto tests
+# Usage: cargo nextest run --profile pqcrypto
+[profile.pqcrypto]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "180s", terminate-after = 3 }
+retries = 0
+default-filter = "binary(pqcrypto_timing)"
+
+# =============================================================================
+# Platform-Specific Profiles
+# =============================================================================
+
+# Timing-sensitive tests (single-threaded)
+# Usage: cargo nextest run --profile timing
 [profile.timing]
 test-threads = 1
 failure-output = "immediate"
@@ -14,88 +169,25 @@ final-status-level = "fail"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
 
-# PMU-based timing (kperf on macOS, perf_event on Linux)
-# Uses single thread to ensure exclusive PMU access
-# Usage: sudo -E cargo nextest run --profile kperf
-[profile.kperf]
+# PMU-based timing (macOS kperf / Linux perf)
+# Requires sudo, single-threaded for exclusive PMU access
+# Usage: sudo -E cargo nextest run --profile platform
+[profile.platform]
 test-threads = 1
 failure-output = "immediate"
 status-level = "fail"
 final-status-level = "fail"
 slow-timeout = { period = "120s", terminate-after = 3 }
 retries = 0
+default-filter = "binary(platform)"
 
-# Statistical power and extended calibration tests (slow)
-# Usage: cargo nextest run --profile power
-[profile.power]
-failure-output = "immediate"
-status-level = "pass"
-final-status-level = "pass"
-slow-timeout = { period = "600s", terminate-after = 2 }
-retries = 0
-default-filter = "binary(power_analysis) | binary(/^calibration_/)"
-
-# Calibration suite only
-# Usage: cargo nextest run --profile calibration
-[profile.calibration]
-failure-output = "immediate"
-status-level = "pass"
-final-status-level = "pass"
-slow-timeout = { period = "300s", terminate-after = 2 }
-retries = 0
-default-filter = "binary(/^calibration_/)"
-
-# Quick smoke tests - runs in ~5s (333 tests)
-# Includes lib tests + fast integration tests (config, types, helpers, macros, crypto samples)
-# Usage: cargo nextest run --profile quick
-[profile.quick]
-failure-output = "immediate"
-status-level = "pass"
-final-status-level = "pass"
-slow-timeout = { period = "15s", terminate-after = 2 }
-retries = 0
-# Lib tests + fast integration tests
-default-filter = """
-(
-  kind(lib) |
-  binary(config_validation) |
-  binary(types_unit) |
-  binary(reliability) |
-  binary(helpers_test) |
-  binary(integration) |
-  binary(test_perf) |
-  binary(macro_tests) |
-  binary(concurrency_test) |
-  (binary(aead_timing) & test(/aes_gcm_hamming|chacha20poly1305_encrypt/)) |
-  (binary(crypto_attacks) & test(/aes_sbox_timing_fast|cache_line_boundary/))
-) & not test(/kperf_lock/)
-"""
-
-# Quick smoke tests with kperf/perf (requires sudo)
-# Same as quick but includes PMU-based timing tests, single-threaded
+# Quick smoke with kperf/perf (requires sudo)
 # Usage: sudo -E cargo nextest run --profile quick-kperf
 [profile.quick-kperf]
 test-threads = 1
 failure-output = "immediate"
 status-level = "pass"
 final-status-level = "pass"
-slow-timeout = { period = "15s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 2 }
 retries = 0
-# Same as quick but includes kperf/perf tests
-default-filter = """
-(
-  kind(lib) |
-  binary(config_validation) |
-  binary(types_unit) |
-  binary(reliability) |
-  binary(helpers_test) |
-  binary(integration) |
-  binary(test_perf) |
-  binary(test_kperf) |
-  binary(macro_tests) |
-  binary(concurrency_test) |
-  (binary(aead_timing) & test(/aes_gcm_hamming|chacha20poly1305_encrypt/)) |
-  (binary(crypto_attacks) & test(/aes_sbox_timing_fast|cache_line_boundary/))
-)
-"""
-
+default-filter = "kind(lib) | binary(unit) | binary(platform)"

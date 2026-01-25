@@ -431,6 +431,34 @@ typedef struct ToStepResult {
   struct ToResult result;
 } ToStepResult;
 
+/**
+ * Callback function type for collecting timing samples.
+ *
+ * The callback is invoked by `to_test()` to collect batches of timing samples.
+ * The user must fill `baseline_out` and `sample_out` with `count` samples each.
+ *
+ * # Parameters
+ * - `baseline_out`: Array to fill with baseline timing samples (in timer ticks)
+ * - `sample_out`: Array to fill with sample timing samples (in timer ticks)
+ * - `count`: Number of samples to collect for each class
+ * - `user_ctx`: User context pointer passed to `to_test()`
+ *
+ * # Example
+ *
+ * ```c
+ * void my_collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+ *     for (size_t i = 0; i < count; i++) {
+ *         baseline[i] = measure_baseline_operation();
+ *         sample[i] = measure_sample_operation();
+ *     }
+ * }
+ * ```
+ */
+typedef void (*ToCollectFn)(uint64_t *baseline_out,
+                            uint64_t *sample_out,
+                            uintptr_t count,
+                            void *user_ctx);
+
 #ifdef __cplusplus
 extern "C" {
 #endif // __cplusplus
@@ -454,6 +482,31 @@ struct ToConfig to_config_adjacent_network(void);
  * Create a configuration for RemoteNetwork attacker model.
  */
 struct ToConfig to_config_remote_network(void);
+
+/**
+ * Merge configuration from TO_* environment variables.
+ *
+ * Allows CI systems to override configuration without recompiling.
+ *
+ * Supported environment variables:
+ * - TO_TIME_BUDGET_SECS: Time budget in seconds (float)
+ * - TO_MAX_SAMPLES: Maximum samples per class (integer)
+ * - TO_PASS_THRESHOLD: Pass threshold for P(leak) (float, e.g., 0.05)
+ * - TO_FAIL_THRESHOLD: Fail threshold for P(leak) (float, e.g., 0.95)
+ * - TO_SEED: Random seed (integer, 0 = use default)
+ * - TO_THRESHOLD_NS: Custom threshold in nanoseconds (float)
+ *
+ * # Example
+ *
+ * ```c
+ * // In shell: export TO_TIME_BUDGET_SECS=60
+ * ToConfig cfg = to_config_adjacent_network();
+ * cfg.time_budget_secs = 30.0;
+ * cfg.max_samples = 100000;
+ * cfg = to_config_from_env(cfg);  // CI can override
+ * ```
+ */
+struct ToConfig to_config_from_env(struct ToConfig base);
 
 /**
  * Create a new adaptive state for tracking the measurement loop.
@@ -556,6 +609,66 @@ enum ToError to_step(const struct ToCalibration *calibration,
                      const struct ToConfig *config,
                      double elapsed_secs,
                      struct ToStepResult *result_out);
+
+/**
+ * Run a complete timing test using a callback for sample collection.
+ *
+ * This is the recommended API for testing timing side channels. It handles
+ * the full adaptive sampling loop internally:
+ *
+ * 1. Collects calibration samples via the callback
+ * 2. Runs calibration phase
+ * 3. Loops: collects batches via callback, runs adaptive step
+ * 4. Stops when a decision is reached or budget is exceeded
+ *
+ * The callback function is called multiple times to collect samples. Each
+ * invocation should fill the provided arrays with fresh timing measurements.
+ *
+ * # Parameters
+ * - `config`: Configuration (use presets like `to_config_balanced()`)
+ * - `collect_fn`: Callback function to collect timing samples
+ * - `user_ctx`: User context pointer passed to the callback (can be NULL)
+ * - `result_out`: Pointer to receive the final result
+ *
+ * # Returns
+ * Error code.
+ *
+ * # Example
+ *
+ * ```c
+ * void my_collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+ *     for (size_t i = 0; i < count; i++) {
+ *         baseline[i] = measure(baseline_input());
+ *         sample[i] = measure(sample_input());
+ *     }
+ * }
+ *
+ * int main(void) {
+ *     ToConfig cfg = to_config_balanced();
+ *     cfg = to_config_from_env(cfg);  // CI can override via TO_TIME_BUDGET_SECS
+ *
+ *     ToResult result;
+ *     to_test(&cfg, my_collect, NULL, &result);
+ *
+ *     if (result.outcome == Fail) {
+ *         printf("Leak: P=%.1f%%, effect=%.1fns\\n",
+ *                result.leak_probability * 100, result.effect.shift_ns);
+ *         return 1;
+ *     }
+ *     return 0;
+ * }
+ * ```
+ *
+ * # Safety
+ * - `config` must be a valid pointer
+ * - `collect_fn` must be a valid function pointer
+ * - `result_out` must be a valid pointer
+ * - The callback must fill exactly `count` samples in each array
+ */
+enum ToError to_test(const struct ToConfig *config,
+                     ToCollectFn collect_fn,
+                     void *user_ctx,
+                     struct ToResult *result_out);
 
 /**
  * Analyze pre-collected timing samples.

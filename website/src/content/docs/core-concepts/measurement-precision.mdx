@@ -1,0 +1,172 @@
+---
+title: Measurement Precision
+description: Understanding measurement floors, threshold elevation, and platform limits
+sidebar:
+  order: 3
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Every timing measurement has a precision limit: the smallest timing difference that can be reliably detected. This page explains how measurement precision affects your tests and what to do when you can't achieve the precision you want.
+
+## What determines precision
+
+Three factors determine the smallest timing difference you can detect:
+
+1. **Timer resolution**: How finely the hardware timer counts time. A timer that ticks every 42ns cannot distinguish differences smaller than that.
+
+2. **System noise**: Background processes, CPU frequency changes, and cache effects add random variation to measurements. This noise makes small timing differences hard to distinguish from random fluctuation.
+
+3. **Sample count**: More samples reduce the impact of noise through averaging, improving precision.
+
+The library combines these factors into a **measurement floor** (θ\_floor): the minimum detectable effect for your particular setup.
+
+## The measurement floor
+
+When you request a threshold (say, `SharedHardware` at 0.6ns), the library checks whether that precision is actually achievable. If not, it automatically elevates the threshold to something measurable.
+
+**Example scenario:**
+
+You're testing on Apple Silicon without elevated privileges:
+- Timer resolution: 42ns (standard `cntvct_el0` counter at 24 MHz)
+- After accounting for noise and sample count, θ\_floor ≈ 21ns
+
+You requested `SharedHardware` (0.6ns), but:
+- The library cannot distinguish 0.6ns differences with a 42ns timer
+- The effective threshold becomes 21ns instead
+- Results tell you whether there's a leak above 21ns, not 0.6ns
+
+This isn't a bug; it's honest reporting. The library could pretend to test at 0.6ns and give you a false sense of confidence, but instead it tells you what precision was actually achieved.
+
+## Platform precision
+
+Different platforms have different precision capabilities:
+
+| Platform | Standard Timer | Cycle-Accurate Timer | How to enable |
+|----------|----------------|---------------------|---------------|
+| x86\_64 Linux | ~1ns (rdtsc) | ~1ns | Already high precision |
+| x86\_64 macOS | ~1ns (rdtsc) | ~1ns | Already high precision |
+| Apple Silicon | ~21ns (cntvct) | ~1ns (kperf) | `sudo` + `--test-threads=1` |
+| Linux ARM64 | varies by SoC | ~1ns (perf\_event) | `sudo` or `CAP_PERFMON` |
+
+<Aside type="note">
+On x86\_64, the `rdtsc` instruction provides cycle-accurate timing without requiring elevated privileges. ARM64 platforms use a lower-resolution virtual timer counter by default, but can access cycle-accurate timers (kperf on macOS, perf\_event on Linux) with the right permissions.
+</Aside>
+
+## Improving precision
+
+If your tests are hitting the measurement floor, you have several options:
+
+### Enable cycle-accurate timers (recommended)
+
+Use the `CyclePrecision` timer preset to request cycle-accurate measurements:
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .timer_spec(TimerSpec::CyclePrecision)  // Explicitly request cycle-accurate timer
+    .test(inputs, |data| my_function(&data));
+```
+
+<Aside type="tip">
+Using `CyclePrecision` explicitly will error if cycle-accurate timing isn't available, rather than silently falling back to a coarse timer. This is safer for security-critical tests.
+</Aside>
+
+Cycle-accurate timers require elevated privileges on ARM64:
+
+<Tabs>
+<TabItem label="macOS ARM64">
+```bash
+# kperf requires both sudo AND single-threaded execution
+sudo -E cargo test --test my_tests -- --test-threads=1
+```
+
+The `--test-threads=1` is required because macOS kperf can only be accessed by one thread at a time.
+</TabItem>
+<TabItem label="Linux">
+```bash
+# Option 1: Run as root
+sudo cargo test
+
+# Option 2: Grant capability (persistent)
+sudo setcap cap_perfmon+ep target/debug/my_test_binary
+```
+</TabItem>
+</Tabs>
+
+### Accept the elevated threshold
+
+If you can't use cycle-accurate timers, consider whether the elevated threshold is acceptable:
+
+- θ\_floor of 21ns still catches most timing leaks
+- `AdjacentNetwork` (100ns) works well even with coarse timers
+- Only `SharedHardware` (0.6ns) truly requires cycle-accurate precision
+
+### Use a custom threshold
+
+Set a threshold that's above your measurement floor:
+
+```rust
+// If your floor is ~21ns, test at 25ns
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 25.0 })
+```
+
+This gives you conclusive results at an achievable precision level.
+
+## When SharedHardware is achievable
+
+The `SharedHardware` preset (0.6ns, ~2 CPU cycles) is designed for detecting cycle-level leaks exploitable in SGX enclaves, containers, or cross-VM attacks. It's achievable on:
+
+- **x86\_64**: Works with the standard `rdtsc` timer
+- **ARM64 with cycle-accurate timer**: Works when running with sudo (+ `--test-threads=1` on macOS)
+- **ARM64 without cycle-accurate timer**: Not achievable (θ\_floor is ~21ns)
+
+If you need `SharedHardware`-level precision but can't achieve it, consider:
+
+1. Testing on x86\_64 hardware where rdtsc provides inherent precision
+2. Using `Custom { threshold_ns: 10.0 }` as a realistic "shared hardware" threshold for ARM64 without cycle-accurate timing
+3. Accepting that some ultra-fine-grained leaks may not be detectable on your platform
+
+## Reading precision in results
+
+The outcome includes diagnostic information about precision:
+
+```rust
+match outcome {
+    Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
+        // What you requested
+        let requested = diagnostics.theta_user;
+
+        // What was actually tested
+        let effective = diagnostics.theta_eff;
+
+        if effective > requested {
+            println!(
+                "Note: Threshold elevated from {:.1}ns to {:.1}ns",
+                requested, effective
+            );
+        }
+    }
+    // ...
+}
+```
+
+A `ThresholdElevated` flag in diagnostics indicates when elevation occurred.
+
+## Practical guidance
+
+| Your goal | Recommended approach |
+|-----------|---------------------|
+| Test for LAN/HTTP/2 exploitability | Use `AdjacentNetwork` (100ns); works on all platforms |
+| Test for shared-hardware exploitability | Use `SharedHardware` if achievable; otherwise `Custom { threshold_ns: 10.0 }` |
+| Maximum precision on ARM64 | Use `TimerSpec::CyclePrecision` with sudo + `--test-threads=1` |
+| CI on cloud VMs | Expect higher floors due to VM noise; use `AdjacentNetwork` or longer budgets |
+
+## Summary
+
+- Every measurement setup has a precision floor (θ\_floor)
+- The library elevates your threshold if the requested precision isn't achievable
+- Check `theta_eff` vs `theta_user` in results to see if elevation occurred
+- Use `TimerSpec::CyclePrecision` for cycle-accurate measurements on ARM64
+- x86\_64 provides high precision by default via `rdtsc`

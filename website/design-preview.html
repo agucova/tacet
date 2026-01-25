@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tacet Design System Preview</title>
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ============================================
+       DESIGN TOKENS
+       ============================================ */
+    :root {
+      /* Base (Dark Mode) */
+      --color-bg-base: #0C0C0C;
+      --color-bg-elevated: #161616;
+      --color-bg-subtle: #1E1E1E;
+      --color-border: #2A2A2A;
+      --color-border-subtle: #1E1E1E;
+
+      /* Text */
+      --color-text-primary: #F5F5F5;
+      --color-text-secondary: #A0A0A0;
+      --color-text-muted: #6B6B6B;
+
+      /* Accent */
+      --color-accent: #FF6060;
+      --color-accent-hover: #FF7A7A;
+      --color-accent-muted: rgba(255, 96, 96, 0.15);
+
+      /* Typography */
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-mono-light: 'IBM Plex Mono', monospace;
+      --font-sans: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      /* Toggle font-body: --font-mono (JetBrains), --font-mono-light (IBM Plex), or --font-sans (Geist) */
+      --font-body: var(--font-mono-light);
+
+      /* Type Scale */
+      --text-xs: 0.75rem;
+      --text-sm: 0.875rem;
+      --text-base: 1rem;
+      --text-lg: 1.125rem;
+      --text-xl: 1.25rem;
+      --text-2xl: 1.5rem;
+      --text-3xl: 2rem;
+      --text-4xl: 2.5rem;
+
+      /* Spacing */
+      --space-1: 0.25rem;
+      --space-2: 0.5rem;
+      --space-3: 0.75rem;
+      --space-4: 1rem;
+      --space-6: 1.5rem;
+      --space-8: 2rem;
+      --space-12: 3rem;
+      --space-16: 4rem;
+    }
+
+    /* ============================================
+       BASE STYLES
+       ============================================ */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: var(--font-body);
+      font-size: var(--text-base);
+      line-height: 1.5;
+      color: var(--color-text-primary);
+      background-color: var(--color-bg-base);
+      padding: var(--space-8);
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    /* ============================================
+       TYPOGRAPHY
+       ============================================ */
+    h1, h2, h3, h4 {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      line-height: 1.3;
+      margin-bottom: var(--space-4);
+    }
+
+    h1 {
+      font-size: var(--text-3xl);
+      margin-bottom: var(--space-6);
+    }
+
+    h2 {
+      font-size: var(--text-2xl);
+      margin-top: var(--space-12);
+      padding-bottom: var(--space-3);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    h3 {
+      font-size: var(--text-xl);
+      margin-top: var(--space-8);
+    }
+
+    h4 {
+      font-size: var(--text-base);
+      font-weight: 500;
+      margin-top: var(--space-6);
+    }
+
+    p {
+      margin-bottom: var(--space-4);
+      color: var(--color-text-primary);
+    }
+
+    .lead {
+      font-size: var(--text-lg);
+      color: var(--color-text-secondary);
+    }
+
+    .muted {
+      color: var(--color-text-muted);
+      font-size: var(--text-sm);
+    }
+
+    a {
+      color: var(--color-accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      color: var(--color-accent-hover);
+      text-decoration: underline;
+    }
+
+    strong {
+      font-weight: 600;
+    }
+
+    /* Lists */
+    ul, ol {
+      margin-bottom: var(--space-4);
+      padding-left: var(--space-6);
+    }
+
+    li {
+      margin-bottom: var(--space-2);
+    }
+
+    li::marker {
+      color: var(--color-text-muted);
+    }
+
+    /* Inline code */
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      background-color: var(--color-bg-elevated);
+      padding: 0.15em 0.4em;
+      border-radius: 4px;
+    }
+
+    /* Code blocks */
+    pre {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      background-color: var(--color-bg-elevated);
+      padding: var(--space-4);
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: var(--space-4) 0;
+      border: 1px solid var(--color-border);
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: inherit;
+    }
+
+    /* ============================================
+       COMPONENTS
+       ============================================ */
+
+    /* Section divider */
+    .section {
+      margin-bottom: var(--space-16);
+    }
+
+    /* Color swatches */
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: var(--space-4);
+      margin: var(--space-6) 0;
+    }
+
+    .swatch {
+      display: flex;
+      flex-direction: column;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+    }
+
+    .swatch-color {
+      height: 80px;
+    }
+
+    .swatch-info {
+      padding: var(--space-3);
+      background: var(--color-bg-elevated);
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+    }
+
+    .swatch-name {
+      color: var(--color-text-primary);
+      margin-bottom: var(--space-1);
+    }
+
+    .swatch-hex {
+      color: var(--color-text-muted);
+    }
+
+    /* Type specimen */
+    .type-specimen {
+      background: var(--color-bg-elevated);
+      border-radius: 8px;
+      padding: var(--space-6);
+      margin: var(--space-4) 0;
+      border: 1px solid var(--color-border);
+    }
+
+    .type-label {
+      font-family: var(--font-mono);
+      font-size: var(--text-xs);
+      color: var(--color-text-muted);
+      margin-bottom: var(--space-2);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    /* Card */
+    .card {
+      background: var(--color-bg-elevated);
+      border-radius: 8px;
+      padding: var(--space-6);
+      border: 1px solid var(--color-border);
+      margin: var(--space-4) 0;
+    }
+
+    /* Nav example */
+    .nav-example {
+      display: flex;
+      gap: var(--space-6);
+      padding: var(--space-4) 0;
+      border-bottom: 1px solid var(--color-border);
+      margin-bottom: var(--space-8);
+      font-family: var(--font-body);
+      font-size: var(--text-sm);
+      font-weight: 500;
+    }
+
+    .nav-example a {
+      color: var(--color-text-secondary);
+    }
+
+    .nav-example a:hover {
+      color: var(--color-text-primary);
+      text-decoration: none;
+    }
+
+    .nav-example a.active {
+      color: var(--color-text-primary);
+    }
+
+    /* Logo */
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: var(--space-3);
+      margin-bottom: var(--space-8);
+    }
+
+    .logo-text {
+      font-family: var(--font-mono);
+      font-size: var(--text-xl);
+      font-weight: 400;
+      color: var(--color-text-primary);
+    }
+
+    /* Table */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: var(--space-4) 0;
+      font-size: var(--text-sm);
+    }
+
+    th {
+      font-family: var(--font-mono);
+      font-weight: 500;
+      text-align: left;
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+    }
+
+    td {
+      padding: var(--space-3) var(--space-4);
+      border-bottom: 1px solid var(--color-border-subtle);
+    }
+
+    td:first-child {
+      font-family: var(--font-mono);
+    }
+
+    /* Highlight box */
+    .highlight {
+      background: var(--color-accent-muted);
+      border-left: 3px solid var(--color-accent);
+      padding: var(--space-4) var(--space-6);
+      border-radius: 0 8px 8px 0;
+      margin: var(--space-4) 0;
+    }
+
+    .highlight p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Aside/callout */
+    .aside {
+      background: var(--color-bg-elevated);
+      border-left: 3px solid var(--color-text-muted);
+      padding: var(--space-4) var(--space-6);
+      border-radius: 0 8px 8px 0;
+      margin: var(--space-6) 0;
+    }
+
+    .aside p:last-child {
+      margin-bottom: 0;
+    }
+
+    .aside.tip {
+      border-left-color: #4ADE80;
+    }
+
+    .aside.caution {
+      border-left-color: #FBBF24;
+    }
+
+    /* ASCII diagram */
+    .diagram {
+      font-family: var(--font-mono);
+      font-size: var(--text-sm);
+      background-color: var(--color-bg-elevated);
+      padding: var(--space-6);
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: var(--space-4) 0;
+      border: 1px solid var(--color-border);
+      white-space: pre;
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Logo -->
+  <div class="logo">
+<svg width="190" height="100" viewBox="0 0 644 257" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M260.877 174C255.018 174 250.323 172.32 246.791 168.96C243.258 165.514 241.492 160.948 241.492 155.262V113.52H221.074V102.923H241.492V82.8923H253.123V102.923H282.2V113.52H253.123V155.262C253.123 157.674 253.812 159.655 255.191 161.206C256.655 162.671 258.551 163.403 260.877 163.403H281.554V174H260.877ZM325.054 175.292C317.731 175.292 311.916 173.268 307.608 169.218C303.3 165.083 301.146 159.698 301.146 153.065C301.146 148.671 302.137 144.837 304.119 141.563C306.1 138.289 308.857 135.748 312.39 133.938C315.922 132.043 319.971 131.095 324.537 131.095H346.506V125.538C346.506 116.32 341.466 111.711 331.386 111.711C326.906 111.711 323.288 112.529 320.531 114.166C317.774 115.803 316.31 118.086 316.137 121.015H304.506C304.937 115.415 307.522 110.806 312.26 107.188C317.085 103.483 323.46 101.631 331.386 101.631C340.002 101.631 346.593 103.698 351.159 107.834C355.811 111.969 358.137 117.742 358.137 125.151V174H346.636V161.077H346.377C345.688 165.471 343.491 168.96 339.786 171.545C336.082 174.043 331.171 175.292 325.054 175.292ZM327.897 165.471C333.583 165.471 338.106 164.092 341.466 161.335C344.826 158.578 346.506 154.831 346.506 150.092V140.142H325.83C322.039 140.142 318.937 141.305 316.525 143.631C314.199 145.871 313.036 148.886 313.036 152.677C313.036 156.64 314.328 159.785 316.913 162.111C319.583 164.351 323.245 165.471 327.897 165.471ZM409.779 175.292C401.164 175.292 394.271 172.88 389.102 168.055C383.933 163.231 381.348 156.597 381.348 148.154V128.769C381.348 120.326 383.933 113.692 389.102 108.868C394.271 104.043 401.164 101.631 409.779 101.631C417.964 101.631 424.554 103.828 429.551 108.222C434.634 112.615 437.305 118.603 437.564 126.185H425.933C425.674 121.618 424.124 118.129 421.281 115.717C418.438 113.218 414.604 111.969 409.779 111.969C404.696 111.969 400.604 113.434 397.502 116.363C394.487 119.206 392.979 123.298 392.979 128.64V148.154C392.979 153.495 394.487 157.631 397.502 160.56C400.604 163.489 404.696 164.954 409.779 164.954C414.604 164.954 418.438 163.705 421.281 161.206C424.124 158.708 425.674 155.218 425.933 150.738H437.564C437.305 158.32 434.634 164.308 429.551 168.702C424.554 173.095 417.964 175.292 409.779 175.292ZM486.233 175.292C477.876 175.292 471.113 172.794 465.944 167.797C460.861 162.714 458.319 155.735 458.319 146.862V130.062C458.319 121.188 460.861 114.252 465.944 109.255C471.113 104.172 477.876 101.631 486.233 101.631C491.833 101.631 496.701 102.751 500.836 104.991C505.058 107.231 508.332 110.375 510.658 114.425C512.984 118.474 514.147 123.255 514.147 128.769V141.434H469.692V148.154C469.692 153.409 471.199 157.588 474.215 160.689C477.23 163.705 481.236 165.212 486.233 165.212C490.541 165.212 494.073 164.394 496.83 162.757C499.673 161.034 501.396 158.751 501.999 155.908H513.63C512.855 161.852 509.969 166.591 504.972 170.123C499.975 173.569 493.729 175.292 486.233 175.292ZM469.692 132.388H502.775V128.769C502.775 123.169 501.31 118.862 498.381 115.846C495.538 112.745 491.489 111.194 486.233 111.194C480.978 111.194 476.885 112.745 473.956 115.846C471.113 118.862 469.692 123.169 469.692 128.769V132.388ZM570.829 174C564.97 174 560.275 172.32 556.743 168.96C553.21 165.514 551.444 160.948 551.444 155.262V113.52H531.026V102.923H551.444V82.8923H563.075V102.923H592.152V113.52H563.075V155.262C563.075 157.674 563.764 159.655 565.143 161.206C566.607 162.671 568.503 163.403 570.829 163.403H591.506V174H570.829Z" fill="#F5F5F5"/>
+<rect x="139" y="42" width="9" height="132" fill="#F5F5F5"/>
+<rect x="126" y="174" width="9" height="35" transform="rotate(-90 126 174)" fill="white"/>
+<rect x="126" y="47" width="9" height="35" transform="rotate(-90 126 47)" fill="#F5F5F5"/>
+<circle cx="143" cy="106" r="10" fill="#FF6060"/>
+<rect x="68" y="83" width="9" height="132" fill="#F5F5F5"/>
+<rect x="55" y="215" width="9" height="35" transform="rotate(-90 55 215)" fill="white"/>
+<rect x="55" y="88" width="9" height="35" transform="rotate(-90 55 88)" fill="#F5F5F5"/>
+<circle cx="72" cy="147" r="10" fill="#FF6060"/>
+</svg>
+  </div>
+
+  <!-- Navigation example -->
+  <nav class="nav-example">
+    <a href="#" class="active">Getting Started</a>
+    <a href="#">Core Concepts</a>
+    <a href="#">Guides</a>
+    <a href="#">API Reference</a>
+    <a href="#">Specification</a>
+  </nav>
+
+  <!-- Color Palette Section -->
+  <section class="section">
+    <h2>Color palette</h2>
+
+    <h3>Base</h3>
+    <div class="swatches">
+      <div class="swatch">
+        <div class="swatch-color" style="background: #0C0C0C;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">bg-base</div>
+          <div class="swatch-hex">#0C0C0C</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #161616;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">bg-elevated</div>
+          <div class="swatch-hex">#161616</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #1E1E1E;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">bg-subtle</div>
+          <div class="swatch-hex">#1E1E1E</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #2A2A2A;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">border</div>
+          <div class="swatch-hex">#2A2A2A</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Text</h3>
+    <div class="swatches">
+      <div class="swatch">
+        <div class="swatch-color" style="background: #F5F5F5;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">text-primary</div>
+          <div class="swatch-hex">#F5F5F5</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #A0A0A0;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">text-secondary</div>
+          <div class="swatch-hex">#A0A0A0</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #6B6B6B;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">text-muted</div>
+          <div class="swatch-hex">#6B6B6B</div>
+        </div>
+      </div>
+    </div>
+
+    <h3>Accent</h3>
+    <div class="swatches">
+      <div class="swatch">
+        <div class="swatch-color" style="background: #FF6060;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">accent</div>
+          <div class="swatch-hex">#FF6060</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: #FF7A7A;"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">accent-hover</div>
+          <div class="swatch-hex">#FF7A7A</div>
+        </div>
+      </div>
+      <div class="swatch">
+        <div class="swatch-color" style="background: rgba(255, 96, 96, 0.15);"></div>
+        <div class="swatch-info">
+          <div class="swatch-name">accent-muted</div>
+          <div class="swatch-hex">#FF6060 15%</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Typography Section -->
+  <section class="section">
+    <h2>Typography</h2>
+
+    <div class="type-specimen">
+      <div class="type-label">H1 — JetBrains Mono Medium, 32px</div>
+      <h1 style="margin: 0; border: none;">Quick start guide</h1>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">H2 — JetBrains Mono Medium, 24px</div>
+      <h2 style="margin: 0; border: none; padding: 0;">Configuration options</h2>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">H3 — JetBrains Mono Regular, 20px</div>
+      <h3 style="margin: 0;">Attacker model presets</h3>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">H4 — JetBrains Mono Medium, 16px</div>
+      <h4 style="margin: 0;">Time budget configuration</h4>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">Body — IBM Plex Mono Regular, 16px</div>
+      <p style="margin: 0;">Tacet uses Bayesian statistical methods to determine whether your code leaks timing information. Unlike traditional tools that output p-values, Tacet gives you what you actually want: the probability your code has a timing leak, plus how exploitable it would be.</p>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">Lead — IBM Plex Mono Regular, 18px</div>
+      <p class="lead" style="margin: 0;">Detect timing side channels in cryptographic code with statistically rigorous methods.</p>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">Muted — IBM Plex Mono Regular, 14px</div>
+      <p class="muted" style="margin: 0;">Last updated: January 2026 · 5 min read</p>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">Code block — JetBrains Mono Regular, 14px</div>
+      <pre><code>use tacet::{TimingOracle, AttackerModel, Outcome};
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
+    .test(inputs, |data| my_crypto_function(data));</code></pre>
+    </div>
+
+    <div class="type-specimen">
+      <div class="type-label">Inline code</div>
+      <p style="margin: 0;">Configure the oracle with <code>AttackerModel::SharedHardware</code> for SGX environments.</p>
+    </div>
+  </section>
+
+  <!-- Long-form Content: Attacker Models -->
+  <section class="section">
+    <h2>Long-form content example</h2>
+
+    <h1>Attacker models</h1>
+
+    <p class="lead">Choosing the right threat model and threshold for your timing tests.</p>
+
+    <p>The <strong>attacker model</strong> defines the minimum timing difference (threshold θ) that counts as a security-relevant leak. There's no single correct threshold; your choice is a statement about your threat model.</p>
+
+    <p>A 50ns timing difference might be completely unexploitable for an internet-facing API, but a serious vulnerability for code running in an SGX enclave. The attacker model captures this context.</p>
+
+    <div class="aside tip">
+      <p>If the presets don't match your threat model, you can set any threshold you want. See <a href="#">Custom thresholds</a> below.</p>
+    </div>
+
+    <h3>Available presets</h3>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Preset</th>
+          <th>θ</th>
+          <th>Use case</th>
+          <th>Notable vulnerabilities</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>SharedHardware</td>
+          <td>0.6ns (~2 cycles)</td>
+          <td>SGX, cross-VM, containers</td>
+          <td>Spectre, Meltdown, cache attacks</td>
+        </tr>
+        <tr>
+          <td>PostQuantum</td>
+          <td>3.3ns (~10 cycles)</td>
+          <td>Post-quantum crypto</td>
+          <td>KyberSlash</td>
+        </tr>
+        <tr>
+          <td>AdjacentNetwork</td>
+          <td>100ns</td>
+          <td>LAN, HTTP/2 APIs</td>
+          <td>Lucky Thirteen, ROBOT</td>
+        </tr>
+        <tr>
+          <td>RemoteNetwork</td>
+          <td>50μs</td>
+          <td>Internet-facing</td>
+          <td>Bleichenbacher, Marvin Attack</td>
+        </tr>
+        <tr>
+          <td>Research</td>
+          <td>0</td>
+          <td>Profiling only</td>
+          <td>N/A</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="aside">
+      <p><strong>If you're building a cryptographic library</strong> that others will use in unknown contexts, consider testing with <code>SharedHardware</code>. Your library might end up running in SGX enclaves or containers where cycle-level leaks become exploitable.</p>
+    </div>
+
+    <h3>SharedHardware (θ = 0.6ns)</h3>
+
+    <p>Use when an attacker has <strong>co-resident access</strong> to your hardware:</p>
+
+    <ul>
+      <li><strong>SGX enclaves</strong>: Host OS can measure enclave timing at cycle granularity</li>
+      <li><strong>Cross-VM attacks</strong>: Attacker VM on same physical host</li>
+      <li><strong>Container isolation</strong>: Adjacent containers share CPU caches</li>
+      <li><strong>Hyperthreading</strong>: Attacker on sibling logical core</li>
+    </ul>
+
+    <p>At this threshold, even 1-2 CPU cycles of timing variation is considered a leak.</p>
+
+    <p><strong>Famous vulnerabilities exploitable at this level:</strong></p>
+
+    <ul>
+      <li><a href="https://spectreattack.com/">Spectre</a> and <a href="https://meltdownattack.com/">Meltdown</a> relied on cycle-level timing</li>
+      <li>Cache timing attacks on AES T-tables (Bernstein 2005)</li>
+      <li>SGX side-channel attacks (Van Bulck et al. 2018)</li>
+    </ul>
+
+    <div class="aside caution">
+      <p><code>SharedHardware</code> requires high measurement precision. On ARM64 without cycle-accurate timing, the measurement floor is typically ~21ns, making 0.6ns testing impossible. See <a href="#">Measurement Precision</a> for platform-specific details.</p>
+    </div>
+
+    <h3>AdjacentNetwork (θ = 100ns)</h3>
+
+    <p>Use when the attacker is on the <strong>local network</strong> or uses <strong>request multiplexing</strong>:</p>
+
+    <ul>
+      <li><strong>LAN attacker</strong>: Same network segment, minimal latency</li>
+      <li><strong>HTTP/2 and HTTP/3 APIs</strong>: <a href="https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem">Timeless Timing Attacks</a> enable precise timing even from the internet</li>
+      <li><strong>gRPC and internal microservices</strong>: Low-latency service-to-service calls</li>
+    </ul>
+
+    <p><strong>Famous vulnerabilities exploitable at this level:</strong></p>
+
+    <ul>
+      <li><a href="https://www.isg.rhul.ac.uk/tls/Lucky13.html">Lucky Thirteen</a>: 100-200ns TLS CBC padding oracle</li>
+      <li><a href="https://robotattack.org/">ROBOT</a>: RSA padding oracle on TLS servers</li>
+      <li>HTTP/2 multiplexing attacks (Van Goethem et al. 2020)</li>
+    </ul>
+
+    <div class="aside tip">
+      <p><strong>Modern web APIs:</strong> If your API uses HTTP/2 or HTTP/3, treat it as <code>AdjacentNetwork</code> even for internet clients. Request multiplexing eliminates most network jitter, enabling LAN-like precision timing attacks.</p>
+    </div>
+  </section>
+
+  <!-- Long-form Content: How It Works -->
+  <section class="section">
+    <h1>How it works</h1>
+
+    <p class="lead">The statistical methodology behind Tacet.</p>
+
+    <div class="aside">
+      <p><strong>For curious users and practitioners.</strong> This page explains the statistical methodology in accessible terms. You can use Tacet effectively without understanding these details—start with <a href="#">Quick Start</a> instead.</p>
+    </div>
+
+    <h3>The core idea</h3>
+
+    <p><strong>In plain English:</strong> We run your code thousands of times with two types of inputs (baseline and sample). If the timing distributions differ by more than your threshold, we report a leak. The key innovation is <em>how</em> we make that comparison:</p>
+
+    <ol>
+      <li><strong>Compare distributions, not averages</strong>: A timing leak might only affect some runs (cache misses, branch mispredictions), so we compare the full timing distribution using multiple percentiles.</li>
+      <li><strong>Bayesian probability</strong>: Instead of a yes/no answer, we compute the <em>probability</em> that there's a security-relevant leak. This lets us say "72% confident there's a leak" rather than just "the t-statistic is 4.7."</li>
+      <li><strong>Adaptive stopping</strong>: We keep collecting samples until we're confident enough to decide. Clear cases stop early; borderline cases get more evidence.</li>
+    </ol>
+
+    <h3>Two-phase pipeline</h3>
+
+    <p>Tacet uses an adaptive two-phase approach:</p>
+
+    <div class="diagram">                    Timing Samples
+                          │
+           ┌──────────────┴──────────────┐
+           ▼                             ▼
+   ┌───────────────┐           ┌──────────────────┐
+   │  Phase 1:     │           │  Phase 2:        │
+   │  Calibration  │           │  Adaptive Loop   │
+   ├───────────────┤           ├──────────────────┤
+   │ 5,000 samples │           │ Batch collection │
+   │ Covariance    │           │ Posterior update │
+   │ estimation    │   ────>   │ Decision check   │
+   │ Prior setup   │           │ Quality gates    │
+   │               │           │                  │
+   │ Fixed cost    │           │ Stops when       │
+   │               │           │ P < 0.05 or      │
+   │               │           │ P > 0.95         │
+   └───────────────┘           └──────────────────┘</div>
+
+    <h4>Phase 1: Calibration</h4>
+
+    <p>The calibration phase collects an initial batch of samples (default: 5,000 per class) to:</p>
+
+    <ol>
+      <li><strong>Estimate noise covariance</strong>: Timing measurements are noisy. Block bootstrap estimates the covariance structure of this noise.</li>
+      <li><strong>Compute minimum detectable effect (MDE)</strong>: Based on noise levels, what's the smallest effect we could reliably detect?</li>
+      <li><strong>Set Bayesian priors</strong>: The prior distribution is centered on zero effect with spread determined by the MDE.</li>
+    </ol>
+
+    <h4>Phase 2: Adaptive loop</h4>
+
+    <p>After calibration, the adaptive loop collects samples in batches until a decision is reached:</p>
+
+    <ol>
+      <li><strong>Collect batch</strong>: Gather N samples per class (default: 1,000)</li>
+      <li><strong>Update posterior</strong>: Combine new data with existing posterior using Bayesian updating</li>
+      <li><strong>Check decision thresholds</strong>: If P(leak) < 0.05, pass. If P(leak) > 0.95, fail.</li>
+      <li><strong>Apply quality gates</strong>: Check for conditions that would make continued sampling futile</li>
+      <li><strong>Repeat or stop</strong>: Either collect more samples or return a result</li>
+    </ol>
+
+    <p>This adaptive approach:</p>
+    <ul>
+      <li><strong>Stops early</strong> on clear pass/fail cases (saves time)</li>
+      <li><strong>Gathers more evidence</strong> when the signal is near the threshold</li>
+      <li><strong>Returns Inconclusive</strong> when hitting resource limits or quality gates</li>
+    </ul>
+
+    <h3>Quality gates</h3>
+
+    <p>The adaptive loop includes five quality gates that can stop sampling early:</p>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Gate</th>
+          <th>Triggers when</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>DataTooNoisy</td>
+          <td>Posterior ≈ prior after calibration</td>
+          <td>Inconclusive</td>
+        </tr>
+        <tr>
+          <td>NotLearning</td>
+          <td>KL divergence collapsed for 5+ batches</td>
+          <td>Inconclusive</td>
+        </tr>
+        <tr>
+          <td>WouldTakeTooLong</td>
+          <td>Projected time exceeds budget</td>
+          <td>Inconclusive</td>
+        </tr>
+        <tr>
+          <td>TimeBudgetExceeded</td>
+          <td>Wall-clock time exceeded</td>
+          <td>Inconclusive</td>
+        </tr>
+        <tr>
+          <td>SampleBudgetExceeded</td>
+          <td>Sample limit reached</td>
+          <td>Inconclusive</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>These gates prevent wasting time on tests that won't converge.</p>
+
+    <h3>Bayesian inference</h3>
+
+    <p>The core question: given observed timing data, what's the probability that the timing difference exceeds your security threshold θ?</p>
+
+    <p><strong>In plain English:</strong> We start by assuming there's probably no leak (the prior). As we collect data, we update our belief. If the data strongly suggests a difference, our confidence in a leak increases. If not, it decreases. The final number (72%, 3%, etc.) represents how confident we are that there's a security-relevant leak.</p>
+
+    <p>This is different from DudeCT's t-test approach. DudeCT asks "is there <em>any</em> statistical difference?" while Tacet asks "is there a <em>security-relevant</em> difference above my threshold θ?"</p>
+
+    <h3>References</h3>
+
+    <p>For the complete mathematical specification, see the <a href="#">Specification</a>.</p>
+
+    <p><strong>Academic references:</strong></p>
+    <ul>
+      <li>Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. (Original DudeCT methodology)</li>
+      <li>Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. (HTTP/2 timing attacks)</li>
+      <li>Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and limits of remote timing attacks." ACM TISSEC. (Effect size to exploitability mapping)</li>
+    </ul>
+  </section>
+
+  <!-- Components Section -->
+  <section class="section">
+    <h2>Components</h2>
+
+    <h3>Highlight (accent)</h3>
+    <div class="highlight">
+      <p><strong>Important:</strong> The baseline input should be chosen to create timing asymmetry with the sample. For comparison functions, baseline should match the secret. See <a href="#">Choosing input classes</a> for details.</p>
+    </div>
+
+    <h3>Aside (neutral)</h3>
+    <div class="aside">
+      <p>A leak below your threshold doesn't mean "secure". It means "not exploitable under your stated threat model." If your threat model changes (e.g., you move from cloud to SGX), you may need to retest with a stricter threshold.</p>
+    </div>
+
+    <h3>Aside (tip)</h3>
+    <div class="aside tip">
+      <p>Use <code>Research</code> mode first to characterize the effect and see your measurement floor, then set your threshold accordingly.</p>
+    </div>
+
+    <h3>Aside (caution)</h3>
+    <div class="aside caution">
+      <p>Don't use <code>Research</code> in CI; it will flag timing differences that aren't security-relevant for your deployment.</p>
+    </div>
+
+    <h3>Card</h3>
+    <div class="card">
+      <h4 style="margin-top: 0;">Why Tacet?</h4>
+      <p>Existing tools like DudeCT give you t-statistics and p-values. Tacet gives you what you actually want: the probability your code has a timing leak, plus how exploitable it would be.</p>
+      <a href="#">Learn more →</a>
+    </div>
+  </section>
+
+</body>
+</html>

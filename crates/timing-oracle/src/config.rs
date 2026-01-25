@@ -276,72 +276,6 @@ impl Config {
         Self::default()
     }
 
-    /// Create a balanced configuration for CI use.
-    ///
-    /// Uses moderate resource limits suitable for continuous integration:
-    /// - 30 second time budget
-    /// - 100,000 max samples
-    /// - 500 sample batches
-    pub fn balanced() -> Self {
-        Self {
-            time_budget: Duration::from_secs(30),
-            max_samples: 100_000,
-            batch_size: 500,
-            ..Default::default()
-        }
-    }
-
-    /// Create a quick configuration for development.
-    ///
-    /// Uses minimal resource limits for rapid iteration:
-    /// - 10 second time budget
-    /// - 20,000 max samples
-    /// - 200 sample batches
-    pub fn quick() -> Self {
-        Self {
-            time_budget: Duration::from_secs(10),
-            max_samples: 20_000,
-            batch_size: 200,
-            calibration_samples: 2_000,
-            cov_bootstrap_iterations: 500,
-            ..Default::default()
-        }
-    }
-
-    /// Create a thorough configuration for detailed analysis.
-    ///
-    /// Uses generous resource limits for thorough investigation:
-    /// - 5 minute time budget
-    /// - 10,000,000 max samples
-    /// - 2,000 sample batches
-    pub fn thorough() -> Self {
-        Self {
-            time_budget: Duration::from_secs(300),
-            max_samples: 10_000_000,
-            batch_size: 2_000,
-            calibration_samples: 10_000,
-            cov_bootstrap_iterations: 5_000,
-            ..Default::default()
-        }
-    }
-
-    /// Create a configuration for calibration/validation tests.
-    ///
-    /// Uses minimal settings for running many trials:
-    /// - 5 second time budget
-    /// - 5,000 max samples
-    /// - 100 sample batches
-    pub fn calibration() -> Self {
-        Self {
-            time_budget: Duration::from_secs(5),
-            max_samples: 5_000,
-            batch_size: 100,
-            calibration_samples: 1_000,
-            cov_bootstrap_iterations: 200,
-            ..Default::default()
-        }
-    }
-
     // =========================================================================
     // Builder methods
     // =========================================================================
@@ -610,21 +544,6 @@ mod tests {
         assert_eq!(config.max_samples, 1_000_000);
         assert_eq!(config.batch_size, 1_000);
         assert_eq!(config.calibration_samples, 5_000);
-    }
-
-    #[test]
-    fn test_preset_configs() {
-        let balanced = Config::balanced();
-        assert_eq!(balanced.time_budget, Duration::from_secs(30));
-        assert_eq!(balanced.max_samples, 100_000);
-
-        let quick = Config::quick();
-        assert_eq!(quick.time_budget, Duration::from_secs(10));
-        assert_eq!(quick.max_samples, 20_000);
-
-        let thorough = Config::thorough();
-        assert_eq!(thorough.time_budget, Duration::from_secs(300));
-        assert_eq!(thorough.max_samples, 10_000_000);
     }
 
     #[test]

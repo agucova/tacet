@@ -24,20 +24,14 @@ let inputs = InputPair::new(
 let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
     .test(inputs, |data| my_function(data));
 
-// Handle all four possible outcomes
-match outcome {
-    Outcome::Pass { leak_probability, .. } => {
-        println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
-    }
-    Outcome::Fail { leak_probability, exploitability, .. } => {
-        panic!("Timing leak: P(leak)={:.1}%, {:?}", leak_probability * 100.0, exploitability);
-    }
-    Outcome::Inconclusive { reason, .. } => {
-        println!("Inconclusive: {:?}", reason);
-    }
-    Outcome::Unmeasurable { recommendation, .. } => {
-        println!("Skipped: {}", recommendation);
-    }
+// Simple: Display prints formatted output with colors
+println!("{outcome}");
+assert!(outcome.passed(), "Timing leak detected");
+
+// Or access detailed fields when needed
+if outcome.failed() {
+    let effect = outcome.effect().unwrap();
+    eprintln!("Effect: {:.1}ns shift, {:.1}ns tail", effect.shift_ns, effect.tail_ns);
 }
 ```
 
@@ -100,8 +94,8 @@ let oracle = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 
     // Timer configuration
     .timer_spec(TimerSpec::Auto)             // Auto-detect (default)
+    .timer_spec(TimerSpec::CyclePrecision)   // Require cycle-accurate timer
     .standard_timer()                        // Force standard timer
-    .prefer_pmu()                            // Prefer PMU with fallback
 
     // Reproducibility
     .seed(42);                               // Deterministic seed
@@ -118,6 +112,12 @@ pub enum Outcome {
     Inconclusive { reason, leak_probability, effect, samples_used, quality, diagnostics },
     Unmeasurable { operation_ns, threshold_ns, platform, recommendation },
 }
+```
+
+`Outcome` implements `Display` for formatted terminal output with colors:
+
+```rust
+println!("{outcome}");  // Prints formatted result
 ```
 
 ### Outcome Methods

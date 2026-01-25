@@ -6,7 +6,7 @@
 //! This is a key property of well-calibrated Bayesian inference: stated credences should
 //! match long-run frequencies.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{
     busy_wait_ns, compute_calibration_bins, compute_calibration_error, max_calibration_deviation,

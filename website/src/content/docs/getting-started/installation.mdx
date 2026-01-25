@@ -2,17 +2,22 @@
 title: Installation
 description: How to add timing-oracle to your project
 sidebar:
-  order: 2
+  order: 1
 ---
 
+import { Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 import { PackageManagers } from 'starlight-package-managers';
 
-## Rust
+timing-oracle is available for multiple languages. Choose your platform:
+
+<Tabs>
+<TabItem label="Rust">
 
 Add timing-oracle as a dev dependency:
 
 ```bash
 cargo add timing-oracle --dev
+cargo add rand --dev  # For random input generation
 ```
 
 Or add to your `Cargo.toml`:
@@ -20,37 +25,48 @@ Or add to your `Cargo.toml`:
 ```toml
 [dev-dependencies]
 timing-oracle = "0.1"
+rand = "0.8"
 ```
 
-### Feature Flags
+### Feature flags
 
-**Default features** (recommended for most users):
-
+**Default features** (recommended):
 - `parallel` - Rayon-based parallel bootstrap (4-8x speedup)
-- `kperf` (macOS ARM64 only) - PMU-based cycle counting (opt-in via `PmuTimer`, requires `sudo`)
-- `perf` (Linux only) - perf_event-based cycle counting (opt-in via `LinuxPerfTimer`, requires `sudo`)
+- `kperf` (macOS ARM64) - Cycle-accurate timing via kperf (opt-in, requires sudo)
+- `perf` (Linux) - Cycle-accurate timing via perf_event (opt-in, requires sudo)
 
 **Optional features:**
+- `macros` - Proc macros (`timing_test!`, `timing_test_checked!`)
 
-- `macros` - Proc macros (`timing_test!`, `timing_test_checked!`) for ergonomic test syntax
-
-**Minimal build** (no parallelism):
-
+**Minimal build:**
 ```toml
 [dev-dependencies]
 timing-oracle = { version = "0.1", default-features = false }
 ```
 
-## JavaScript
+</TabItem>
+<TabItem label="JavaScript">
 
-<PackageManagers pkg="@timing-oracle/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+<PackageManagers pkg="timing-oracle" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
 
-The package includes native bindings via NAPI-RS, supporting Node.js and Bun on:
+Native bindings via NAPI-RS, supporting Node.js and Bun on:
 - Linux (x86_64, aarch64)
 - macOS (x86_64, aarch64)
 - Windows (x86_64)
 
-## C/C++
+```javascript
+import { TimingOracle, AttackerModel } from 'timing-oracle';
+
+const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+  .test(
+    () => new Uint8Array(32).fill(0),  // Baseline
+    () => crypto.getRandomValues(new Uint8Array(32)),  // Sample
+    (data) => myFunction(data)
+  );
+```
+
+</TabItem>
+<TabItem label="C/C++">
 
 Build the C bindings from source:
 
@@ -59,50 +75,107 @@ git clone https://github.com/agucova/timing-oracle
 cd timing-oracle
 cargo build --release -p timing-oracle-c
 
-# Headers at: crates/timing-oracle-c/include/timing_oracle.h
-# Library at: target/release/libtiming_oracle_c.{a,so,dylib}
+# Headers:
+#   C:   crates/timing-oracle-c/include/timing_oracle.h
+#   C++: bindings/cpp/timing_oracle.hpp
+# Library:
+#   target/release/libtiming_oracle_c.{a,so,dylib}
 ```
 
-Link against `libtiming_oracle_c` and include `timing_oracle.h`.
+**C usage:**
+```c
+#include <timing_oracle.h>
 
-## Go
+timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
+timing_oracle_outcome_t outcome;
+timing_oracle_test(oracle, &inputs, measure_fn, &outcome);
+```
+
+**C++ usage:**
+```cpp
+#include <timing_oracle.hpp>
+using namespace timing_oracle;
+
+auto outcome = TimingOracle::forAttacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, [](auto& data) { myFunction(data); });
+```
+
+See [C API](/api/c) and [C++ API](/api/cpp) for full documentation.
+
+</TabItem>
+<TabItem label="Go">
 
 ```bash
 go get github.com/agucova/timing-oracle/bindings/go
 ```
 
+```go
+import timingoracle "github.com/agucova/timing-oracle/bindings/go"
+
+inputs := timingoracle.NewInputPair(
+    func() []byte { return make([]byte, 32) },
+    func() []byte { b := make([]byte, 32); rand.Read(b); return b },
+)
+
+outcome := timingoracle.ForAttacker(timingoracle.AdjacentNetwork).
+    Test(inputs, func(data []byte) { myFunction(data) })
+```
+
 The Go bindings use cgo to link against the C library.
 
-## Platform Support
+</TabItem>
+</Tabs>
+
+## Platform support
 
 | Platform | Timer | Resolution | Notes |
 |----------|-------|------------|-------|
-| Linux x86_64 | `rdtsc` | ~0.3 ns | Best precision |
-| Linux aarch64 | `cntvct_el0` | ~1-10 ns | Good precision |
-| macOS x86_64 | `rdtsc` | ~0.3 ns | Best precision |
-| macOS ARM64 | `cntvct_el0` | ~42 ns | Uses adaptive batching |
-| Windows x86_64 | `rdtsc` | ~0.3 ns | Best precision |
+| Linux x86_64 | `rdtsc` | ~0.3ns | Best precision |
+| Linux aarch64 | `cntvct_el0` | 1-10ns | Good precision |
+| macOS x86_64 | `rdtsc` | ~0.3ns | Best precision |
+| macOS ARM64 | `cntvct_el0` | ~42ns | Uses adaptive batching |
+| Windows x86_64 | `rdtsc` | ~0.3ns | Best precision |
 
 On platforms with coarse timer resolution (macOS ARM64), the library automatically uses adaptive batching to compensate.
 
-## Privileged Timers
+## Enabling cycle-accurate timers
 
-For cycle-accurate measurements, you can opt into privileged timers:
+For cycle-accurate measurements on ARM64, use `TimerSpec::CyclePrecision`:
 
-**macOS ARM64 (`PmuTimer`):**
-```bash
-# Requires sudo
-sudo cargo test --test my_test
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, TimerSpec};
+
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .timer_spec(TimerSpec::CyclePrecision)  // Request cycle-accurate timer
 ```
 
-**Linux (`LinuxPerfTimer`):**
-```bash
-# Option 1: sudo
-sudo cargo test --test my_test
+This requires elevated privileges on ARM64:
 
-# Option 2: CAP_PERFMON capability
+<Tabs>
+<TabItem label="macOS ARM64">
+```bash
+# kperf requires BOTH sudo AND single-threaded execution
+sudo -E cargo test --test my_test -- --test-threads=1
+```
+</TabItem>
+<TabItem label="Linux">
+```bash
+# Option 1: Run as root
+sudo cargo test --test my_test -- --test-threads=1
+
+# Option 2: Grant CAP_PERFMON (persistent)
 sudo setcap cap_perfmon+ep target/debug/deps/my_test-*
-cargo test --test my_test
+cargo test --test my_test -- --test-threads=1
 ```
+</TabItem>
+</Tabs>
 
-These are opt-in; the default timer works without elevated privileges.
+<Aside type="tip">
+Using `CyclePrecision` explicitly will error if cycle-accurate timing isn't available, rather than silently falling back. This is safer for security-critical tests.
+</Aside>
+
+## Next steps
+
+- [Quick Start](/getting-started/quick-start): Write your first timing test
+- [The Two-Class Pattern](/core-concepts/two-class-pattern): Understanding input class selection
+- [Attacker Models](/core-concepts/attacker-models): Choosing the right threat model

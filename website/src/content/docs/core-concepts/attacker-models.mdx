@@ -1,0 +1,243 @@
+---
+title: Attacker Models
+description: Choosing the right threat model and threshold for your timing tests
+sidebar:
+  order: 2
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The **attacker model** defines the minimum timing difference (threshold θ) that counts as a security-relevant leak. There's no single correct threshold; your choice is a statement about your threat model.
+
+A 50ns timing difference might be completely unexploitable for an internet-facing API, but a serious vulnerability for code running in an SGX enclave. The attacker model captures this context.
+
+<Aside type="tip">
+If the presets don't match your threat model, you can set any threshold you want. See [Custom thresholds](#custom-thresholds) below.
+</Aside>
+
+## Available presets
+
+| Preset | θ | Use case | Notable vulnerabilities |
+|--------|---|----------|------------------------|
+| `SharedHardware` | 0.6ns (~2 cycles) | SGX, cross-VM, containers | Spectre, Meltdown, cache attacks |
+| `PostQuantum` | 3.3ns (~10 cycles) | Post-quantum crypto | KyberSlash |
+| `AdjacentNetwork` | 100ns | LAN, HTTP/2 APIs | Lucky Thirteen, ROBOT |
+| `RemoteNetwork` | 50μs | Internet-facing | Bleichenbacher, Marvin Attack |
+| `Research` | 0 | Profiling only | N/A |
+
+<Aside>
+**If you're building a cryptographic library** that others will use in unknown contexts, consider testing with `SharedHardware`. Your library might end up running in SGX enclaves or containers where cycle-level leaks become exploitable.
+</Aside>
+
+## Decision flowchart
+
+```
+Is your code running in SGX, containers, or VMs
+where an attacker could be co-resident?
+    │
+    ├── Yes → SharedHardware (0.6ns)
+    │         (if achievable on your platform)
+    │
+    └── No
+        │
+        Are you building a cryptographic library?
+            │
+            ├── Yes → SharedHardware (0.6ns)
+            │         (users may deploy in any context)
+            │
+            └── No
+                │
+                Does your API use HTTP/2, HTTP/3, or gRPC?
+                    │
+                    ├── Yes → AdjacentNetwork (100ns)
+                    │
+                    └── No
+                        │
+                        Is the service on a private LAN?
+                            │
+                            ├── Yes → AdjacentNetwork (100ns)
+                            │
+                            └── No → RemoteNetwork (50μs)
+```
+
+## Understanding each preset
+
+### SharedHardware (θ = 0.6ns)
+
+Use when an attacker has **co-resident access** to your hardware:
+
+- **SGX enclaves**: Host OS can measure enclave timing at cycle granularity
+- **Cross-VM attacks**: Attacker VM on same physical host
+- **Container isolation**: Adjacent containers share CPU caches
+- **Hyperthreading**: Attacker on sibling logical core
+
+At this threshold, even 1-2 CPU cycles of timing variation is considered a leak.
+
+**Famous vulnerabilities exploitable at this level:**
+- [Spectre](https://spectreattack.com/) and [Meltdown](https://meltdownattack.com/) relied on cycle-level timing
+- Cache timing attacks on AES T-tables (Bernstein 2005)
+- SGX side-channel attacks (Van Bulck et al. 2018)
+
+<Aside type="caution">
+SharedHardware requires high measurement precision. On ARM64 without cycle-accurate timing, the measurement floor is typically ~21ns, making 0.6ns testing impossible. See [Measurement Precision](/core-concepts/measurement-precision) for platform-specific details.
+</Aside>
+
+### AdjacentNetwork (θ = 100ns)
+
+Use when the attacker is on the **local network** or uses **request multiplexing**:
+
+- **LAN attacker**: Same network segment, minimal latency
+- **HTTP/2 and HTTP/3 APIs**: [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) enable precise timing even from the internet
+- **gRPC and internal microservices**: Low-latency service-to-service calls
+
+**Famous vulnerabilities exploitable at this level:**
+- [Lucky Thirteen](https://www.isg.rhul.ac.uk/tls/Lucky13.html): 100-200ns TLS CBC padding oracle
+- [ROBOT](https://robotattack.org/): RSA padding oracle on TLS servers
+- HTTP/2 multiplexing attacks (Van Goethem et al. 2020)
+
+<Aside type="tip" title="Modern web APIs">
+If your API uses HTTP/2 or HTTP/3, treat it as `AdjacentNetwork` even for internet clients. Request multiplexing eliminates most network jitter, enabling LAN-like precision timing attacks. See [Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem) for the academic research.
+</Aside>
+
+### RemoteNetwork (θ = 50μs)
+
+Use when the attacker measures timing over the **general internet**:
+
+- **Legacy HTTP/1.1 services**: No request multiplexing
+- **Public APIs**: General internet exposure with variable latency
+- **Traditional protocols**: Email, FTP, SSH
+
+**Famous vulnerabilities exploitable at this level:**
+- [Bleichenbacher's attack](https://archiv.infsec.ethz.ch/education/fs08/secsem/bleichenbacher98.pdf): Original RSA PKCS#1 padding oracle (1998)
+- [Marvin Attack](https://people.redhat.com/~hkario/marvin/) (CVE-2023-49092): RSA timing leak in multiple TLS libraries
+- Original OpenSSL RSA timing attack (Brumley & Boneh 2003)
+
+### Research (θ → 0)
+
+Use for **debugging and profiling only**. Detects any statistical timing difference, no matter how small.
+
+<Aside type="caution">
+Don't use Research in CI; it will flag timing differences that aren't security-relevant for your deployment.
+</Aside>
+
+## Threshold vs exploitability
+
+The relationship between timing difference and attack feasibility, based on [Crosby et al. (2009)](https://www.usenix.org/legacy/events/usenix09/tech/full_papers/crosby/crosby.pdf):
+
+| Timing difference | Approximate queries needed | Attack scenario |
+|-------------------|---------------------------|-----------------|
+| 1-10ns | ~1,000 | Same physical core (SGX, hyperthreading) |
+| 10-100ns | ~10,000-100,000 | HTTP/2 multiplexing, LAN |
+| 100ns-10μs | ~1,000-10,000 | Network timing with averaging |
+| 10-50μs | ~100-1,000 | Standard internet timing |
+| > 50μs | < 100 | Trivially exploitable |
+
+<Aside>
+A leak below your threshold doesn't mean "secure". It means "not exploitable under your stated threat model." If your threat model changes (e.g., you move from cloud to SGX), you may need to retest with a stricter threshold.
+</Aside>
+
+## Custom thresholds
+
+When presets don't fit your requirements, use a custom threshold:
+
+```rust
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
+```
+
+See [Code examples](#code-examples) below for other languages.
+
+### Choosing a custom threshold
+
+The key constraint: **your threshold must be above your measurement floor**. Otherwise, results will be inconclusive.
+
+**Workflow:**
+
+1. Run with `Research` mode to characterize the effect and see your measurement floor
+2. Set your threshold above the floor (if floor is 21ns, use 25ns or higher)
+3. Consider your threat model (exploitability, not just measurability)
+
+### Common custom thresholds
+
+| Threshold | Use case |
+|-----------|----------|
+| 10ns | "Realistic shared hardware" when 0.6ns isn't achievable |
+| 25-50ns | Strict testing on ARM64 without cycle-accurate timing |
+| 500ns | Conservative margin for network services |
+| 1μs-10μs | Permissive, for high-latency environments |
+
+## Threshold elevation
+
+If you request a threshold below your measurement floor, the library automatically elevates it to an achievable value.
+
+For example:
+- You request `SharedHardware` (0.6ns)
+- Your measurement floor is 21ns
+- The effective threshold becomes 21ns
+
+When this happens, results tell you whether there's a leak above 21ns, not 0.6ns. Check `theta_eff` vs `theta_user` in diagnostics to see if elevation occurred.
+
+See [Measurement Precision](/core-concepts/measurement-precision) for details on improving precision and understanding platform limits.
+
+## Code examples
+
+Basic usage for each language:
+
+<Tabs>
+<TabItem label="Rust">
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+// Preset
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+
+// Custom threshold
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 500.0 })
+```
+</TabItem>
+<TabItem label="JavaScript">
+```javascript
+import { TimingOracle, AttackerModel } from 'timing-oracle';
+
+// Preset
+TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
+
+// Custom threshold
+TimingOracle.forAttacker({ Custom: { thresholdNs: 500.0 } })
+```
+</TabItem>
+<TabItem label="C">
+```c
+// Preset
+timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
+
+// Custom threshold
+timing_oracle_t* oracle = timing_oracle_for_attacker_custom(500.0);
+```
+</TabItem>
+<TabItem label="Go">
+```go
+// Preset
+oracle := timingoracle.ForAttacker(timingoracle.AdjacentNetwork)
+
+// Custom threshold
+oracle := timingoracle.ForAttackerCustom(500.0)
+```
+</TabItem>
+</Tabs>
+
+## Summary
+
+- Choose an attacker model that matches your deployment's threat model
+- `AdjacentNetwork` is a good default for most network services
+- `SharedHardware` for cryptographic libraries or SGX/container deployments
+- `SharedHardware` requires cycle-accurate timing (see [Measurement Precision](/core-concepts/measurement-precision))
+- Use custom thresholds when presets don't fit
+- Your threshold must be above your measurement floor
+
+## Academic references
+
+The threshold values and exploitability estimates are based on published research:
+
+- **Crosby et al. (2009)** "[Opportunities and Limits of Remote Timing Attacks](https://www.usenix.org/legacy/events/usenix09/tech/full_papers/crosby/crosby.pdf)" - Effect size to query count mapping
+- **Van Goethem et al. (2020)** "[Timeless Timing Attacks](https://www.usenix.org/conference/usenixsecurity20/presentation/van-goethem)" - HTTP/2 enables LAN-like precision
+- **Brumley & Boneh (2003)** "[Remote Timing Attacks are Practical](https://crypto.stanford.edu/~dabo/papers/ssl-timing.pdf)" - Classic network timing attack

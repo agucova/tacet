@@ -1,0 +1,306 @@
+---
+title: CI Integration
+description: Running timing tests in continuous integration environments
+sidebar:
+  order: 2
+---
+
+import { Aside, Tabs, TabItem, Code } from '@astrojs/starlight/components';
+
+Timing tests require more care in CI than typical unit tests. This guide covers how to run timing-oracle reliably in CI environments.
+
+## Basic test setup
+
+A basic test with formatted output:
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use std::time::Duration;
+
+#[test]
+fn test_crypto_constant_time() {
+    let inputs = InputPair::new(
+        || [0u8; 32],
+        || rand::random::<[u8; 32]>(),
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |data| {
+            my_crypto_function(&data);
+        });
+
+    // Display prints formatted output with colors
+    println!("{outcome}");
+
+    // Assert the test passed
+    assert!(outcome.passed(), "Timing leak detected");
+}
+```
+
+## Running tests
+
+### The critical flag: `--test-threads=1`
+
+Timing tests should run single-threaded:
+
+```bash
+cargo test --test timing_tests -- --test-threads=1 --nocapture
+```
+
+**Why single-threaded?**
+
+1. **Measurement isolation**: Parallel tests compete for CPU resources, adding noise to timing measurements.
+
+2. **Cycle-accurate timers**: On macOS, the kperf cycle counter can only be accessed by one thread at a time. Parallel tests cause silent fallback to the coarse timer.
+
+3. **Reproducibility**: Single-threaded execution produces more consistent results across runs.
+
+<Aside type="caution">
+Without `--test-threads=1`, tests may pass or fail inconsistently, and cycle-accurate timing won't work on macOS even with sudo.
+</Aside>
+
+### Enabling cycle-accurate timers
+
+For higher precision on ARM64, enable cycle-accurate timers. Use `TimerSpec::CyclePrecision` in your test code to explicitly request high precision:
+
+<Tabs>
+<TabItem label="macOS">
+```bash
+# Requires both sudo AND single-threaded
+sudo -E cargo test --test timing_tests -- --test-threads=1
+```
+
+The `-E` preserves your environment variables (like `PATH` and `CARGO_HOME`).
+</TabItem>
+<TabItem label="Linux">
+```bash
+# Option 1: Run as root
+sudo cargo test --test timing_tests -- --test-threads=1
+
+# Option 2: Grant capability (for CI runners)
+sudo setcap cap_perfmon+ep ./target/debug/deps/timing_tests-*
+cargo test --test timing_tests -- --test-threads=1
+```
+</TabItem>
+</Tabs>
+
+## Time budget recommendations
+
+| Context | Time budget | Rationale |
+|---------|-------------|-----------|
+| Development | 10s | Fast iteration |
+| PR checks | 30s | Balance speed and accuracy |
+| Nightly/security audit | 60s+ | Higher confidence |
+
+```rust
+// Development: quick feedback
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(10))
+
+// CI: standard checks
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(30))
+
+// Security audit: thorough
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(60))
+    .max_samples(100_000)
+```
+
+## Handling noisy environments
+
+CI runners are often noisier than local development machines. The library provides macros for handling unreliable conditions:
+
+### skip_if_unreliable!
+
+Skip tests that can't produce reliable results (fail-open):
+
+```rust
+use timing_oracle::skip_if_unreliable;
+
+#[test]
+fn test_crypto() {
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |data| my_function(&data));
+
+    // Skips if Inconclusive or Unmeasurable
+    let outcome = skip_if_unreliable!(outcome, "test_crypto");
+
+    assert!(outcome.passed(), "Timing leak detected");
+}
+```
+
+### require_reliable!
+
+Require reliable results, failing on uncertainty (fail-closed):
+
+```rust
+use timing_oracle::require_reliable;
+
+#[test]
+fn test_security_critical() {
+    let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |data| critical_function(&data));
+
+    // Fails if Inconclusive (environment too noisy)
+    let outcome = require_reliable!(outcome, "test_security_critical");
+
+    assert!(outcome.passed());
+}
+```
+
+### Environment variable override
+
+Force a policy for all tests:
+
+```bash
+# Fail-closed: all tests must produce reliable results
+TIMING_ORACLE_UNRELIABLE_POLICY=fail_closed cargo test
+
+# Fail-open: skip unreliable tests (default)
+TIMING_ORACLE_UNRELIABLE_POLICY=skip cargo test
+```
+
+## GitHub Actions example
+
+```yaml
+name: Timing Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  timing-tests:
+    runs-on: ubuntu-latest  # or macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run timing tests
+        run: |
+          cargo test --test timing_tests -- \
+            --test-threads=1 \
+            --nocapture
+        env:
+          # Optional: stricter handling for security-critical code
+          # TIMING_ORACLE_UNRELIABLE_POLICY: fail_closed
+          RUST_BACKTRACE: 1
+
+      - name: Run timing tests (with cycle-accurate timer, Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          # Grant perf_event access to test binary
+          sudo setcap cap_perfmon+ep ./target/debug/deps/timing_tests-*
+          cargo test --test timing_tests -- \
+            --test-threads=1 \
+            --nocapture
+```
+
+<Aside type="tip">
+For macOS runners, `sudo` is available but you'll need to handle authentication. Consider whether cycle-accurate precision is necessary for your CI. `AdjacentNetwork` (100ns) works well without it.
+</Aside>
+
+## Platform considerations
+
+### Cloud VMs
+
+Cloud VMs typically have:
+- **Higher noise** from noisy neighbors and hypervisor overhead
+- **Variable CPU frequency** unless you pin to specific instance types
+- **No cycle-accurate timer access** in most configurations
+
+Recommendations:
+- Use `AdjacentNetwork` (100ns) threshold, not `SharedHardware`
+- Increase time budgets (60s for thorough testing)
+- Use `skip_if_unreliable!` for graceful degradation
+
+### Bare metal
+
+Bare metal runners provide the best measurement quality:
+- Lower noise
+- Stable CPU frequency (if configured)
+- Cycle-accurate timers available
+
+If you have access to bare metal CI (GitHub large runners, self-hosted), use it for security-critical timing tests.
+
+### Self-hosted runners
+
+For self-hosted runners:
+
+1. **Disable CPU frequency scaling:**
+   ```bash
+   sudo cpupower frequency-set -g performance
+   ```
+
+2. **Disable turbo boost:**
+   ```bash
+   echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+   ```
+
+3. **Minimize background processes** during timing test runs
+
+4. **Pin tests to specific cores** if possible
+
+## Organizing tests
+
+Consider separating timing tests from your regular test suite:
+
+```
+tests/
+├── unit/           # Fast unit tests
+├── integration/    # Integration tests
+└── timing/         # Timing side channel tests
+    ├── aes.rs
+    ├── ecdh.rs
+    └── rsa.rs
+```
+
+Run them separately:
+
+```bash
+# Regular tests (fast, parallel)
+cargo test --test unit --test integration
+
+# Timing tests (slower, single-threaded)
+cargo test --test timing -- --test-threads=1
+```
+
+## Cargo.toml configuration
+
+Set default test threads for timing tests:
+
+```toml
+# In .cargo/config.toml
+[env]
+# Only applies when running tests
+RUST_TEST_THREADS = "1"
+```
+
+Or per-test-file:
+
+```rust
+// At the top of your timing test file
+#![cfg(test)]
+
+// Force single-threaded for this test module
+fn main() {
+    // This file's tests will respect --test-threads=1
+}
+```
+
+## Summary
+
+1. **Always use `--test-threads=1`** for timing tests
+2. **Use 30s time budget** for CI, longer for security audits
+3. **Use `TimerSpec::CyclePrecision`** with sudo/capabilities for higher precision on ARM64
+4. **Handle noisy environments** with `skip_if_unreliable!` or `require_reliable!`
+5. **Separate timing tests** from regular tests in your CI workflow
+6. **Cloud VMs are noisier**: use relaxed thresholds or longer budgets

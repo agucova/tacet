@@ -1,0 +1,277 @@
+---
+title: Interpreting Results
+description: Understanding outcomes, leak probability, and effect decomposition
+sidebar:
+  order: 4
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+When a timing test completes, you receive an `Outcome` that tells you whether a timing leak was detected, how confident the result is, and details about the effect size. This page explains how to interpret these results.
+
+## The four outcomes
+
+Every test returns one of four outcomes:
+
+| Outcome | Meaning | Probability Range |
+|---------|---------|-------------------|
+| **Pass** | No timing leak detected above your threshold | P(leak) < 5% |
+| **Fail** | Timing leak confirmed above your threshold | P(leak) > 95% |
+| **Inconclusive** | Cannot reach a confident decision | 5% ≤ P(leak) ≤ 95% |
+| **Unmeasurable** | Operation too fast to measure reliably | N/A |
+
+### Handling all outcomes
+
+<Tabs>
+<TabItem label="Rust">
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
+
+let inputs = InputPair::new(|| [0u8; 32], || rand::random());
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| my_function(&data));
+
+match outcome {
+    Outcome::Pass { leak_probability, quality, .. } => {
+        println!("No leak detected (P={:.1}%)", leak_probability * 100.0);
+        println!("Measurement quality: {:?}", quality);
+    }
+    Outcome::Fail { leak_probability, effect, exploitability, .. } => {
+        println!("Timing leak detected (P={:.1}%)", leak_probability * 100.0);
+        println!("Effect: {:.1}ns shift, {:.1}ns tail", effect.shift_ns, effect.tail_ns);
+        println!("Exploitability: {:?}", exploitability);
+    }
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        println!("Inconclusive: {:?}", reason);
+        println!("Current estimate: P={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Unmeasurable { recommendation, .. } => {
+        println!("Cannot measure: {}", recommendation);
+    }
+}
+```
+</TabItem>
+<TabItem label="Go">
+```go
+inputs := timingoracle.NewInputPair(
+    func() []byte { return make([]byte, 32) },
+    func() []byte { b := make([]byte, 32); rand.Read(b); return b },
+)
+
+outcome := timingoracle.ForAttacker(timingoracle.AdjacentNetwork).
+    Test(inputs, func(data []byte) { myFunction(data) })
+
+switch o := outcome.(type) {
+case *timingoracle.Pass:
+    fmt.Printf("No leak (P=%.1f%%)\n", o.LeakProbability*100)
+case *timingoracle.Fail:
+    fmt.Printf("Leak detected (P=%.1f%%)\n", o.LeakProbability*100)
+case *timingoracle.Inconclusive:
+    fmt.Printf("Inconclusive: %s\n", o.Reason)
+case *timingoracle.Unmeasurable:
+    fmt.Printf("Cannot measure: %s\n", o.Recommendation)
+}
+```
+</TabItem>
+<TabItem label="C">
+```c
+timing_oracle_outcome_t outcome;
+timing_oracle_test(oracle, inputs, measure_fn, &outcome);
+
+switch (outcome.tag) {
+    case TIMING_ORACLE_PASS:
+        printf("No leak (P=%.1f%%)\n", outcome.pass.leak_probability * 100);
+        break;
+    case TIMING_ORACLE_FAIL:
+        printf("Leak detected (P=%.1f%%)\n", outcome.fail.leak_probability * 100);
+        break;
+    case TIMING_ORACLE_INCONCLUSIVE:
+        printf("Inconclusive: %s\n", outcome.inconclusive.reason);
+        break;
+    case TIMING_ORACLE_UNMEASURABLE:
+        printf("Cannot measure: %s\n", outcome.unmeasurable.recommendation);
+        break;
+}
+```
+</TabItem>
+</Tabs>
+
+## Understanding leak probability
+
+The `leak_probability` is a **Bayesian posterior probability**: given the timing data collected, what's the probability that the maximum effect exceeds your threshold?
+
+```
+P(leak) = P(max|Δ| > θ | data)
+```
+
+This is different from a p-value:
+
+| Bayesian posterior | Frequentist p-value |
+|--------------------|---------------------|
+| "72% probability of a leak" | "If there were no leak, we'd see this data 28% of the time" |
+| Directly interpretable | Requires careful interpretation |
+| Converges with more data | Can produce more false positives with more data |
+
+<Aside type="tip" title="Why this matters">
+With classical t-tests (like DudeCT), running more samples can increase false positive rates. timing-oracle's Bayesian approach converges toward the true answer as you collect more data.
+</Aside>
+
+### Probability thresholds
+
+| Range | Interpretation | Outcome |
+|-------|----------------|---------|
+| P < 5% | Confident there's no exploitable leak | **Pass** |
+| 5% ≤ P ≤ 50% | Probably no leak, but uncertain | Inconclusive |
+| 50% < P < 95% | Probably a leak, but uncertain | Inconclusive |
+| P > 95% | Confident there's an exploitable leak | **Fail** |
+
+You can adjust these thresholds for stricter or more lenient testing:
+
+```rust
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .pass_threshold(0.01)   // Require P < 1% for pass (stricter)
+    .fail_threshold(0.99)   // Require P > 99% for fail (stricter)
+```
+
+## Effect decomposition
+
+When a leak is detected, the `effect` field breaks down the timing difference into interpretable components:
+
+### Shift vs tail
+
+- **Shift (μ)**: A uniform timing difference affecting all measurements equally. Typical cause: the code takes a different branch.
+
+- **Tail (τ)**: Upper quantiles (slower measurements) are affected more than lower quantiles. Typical cause: cache misses that only occur for certain inputs.
+
+```rust
+Outcome::Fail { effect, .. } => {
+    println!("Shift: {:.1}ns", effect.shift_ns);
+    println!("Tail: {:.1}ns", effect.tail_ns);
+    println!("95% CI: [{:.1}, {:.1}]ns",
+             effect.credible_interval_ns.0,
+             effect.credible_interval_ns.1);
+}
+```
+
+### Effect patterns
+
+| Pattern | What it means | Typical cause |
+|---------|---------------|---------------|
+| `UniformShift` | All quantiles shifted equally | Branch on secret bit, different code path |
+| `TailEffect` | Upper quantiles shifted more | Cache misses, memory access patterns |
+| `Mixed` | Both shift and tail are significant | Multiple leak sources interacting |
+| `Complex` | Doesn't fit standard patterns | Asymmetric or multi-modal effects |
+
+<Aside>
+Effect decomposition helps you understand *how* the leak manifests, which can guide remediation. A `UniformShift` suggests a conditional branch, while `TailEffect` suggests data-dependent memory access.
+</Aside>
+
+## Exploitability assessment
+
+For `Fail` outcomes, the `exploitability` field estimates how difficult it would be to actually exploit the leak:
+
+| Level | Effect Size | Attack scenario |
+|-------|-------------|-----------------|
+| `SharedHardwareOnly` | < 10ns | ~1k queries with shared physical core (SGX, containers) |
+| `Http2Multiplexing` | 10-100ns | ~100k concurrent HTTP/2 requests from the internet |
+| `StandardRemote` | 100ns-10μs | ~1k-10k queries with network timing |
+| `ObviousLeak` | > 10μs | < 100 queries, trivially exploitable |
+
+This is based on research by Crosby et al. (2009) on the relationship between timing precision and query complexity for remote timing attacks.
+
+<Aside type="caution">
+Exploitability is a heuristic based on effect size. Actual exploitability depends on your specific deployment: network conditions, caching layers, concurrent load, and attacker capabilities.
+</Aside>
+
+## Handling inconclusive results
+
+An `Inconclusive` outcome means the test couldn't reach a confident decision. The `reason` field tells you why:
+
+| Reason | Meaning | What to do |
+|--------|---------|------------|
+| `DataTooNoisy` | Measurement noise is too high | Reduce system noise, use `TimerSpec::CyclePrecision`, or increase time budget |
+| `NotLearning` | Posterior stopped updating | Check for measurement setup issues |
+| `TimeBudgetExceeded` | Ran out of time before reaching conclusion | Increase `time_budget` |
+| `SampleBudgetExceeded` | Hit sample limit | Increase `max_samples` |
+| `WouldTakeTooLong` | Projected time to conclusion exceeds budget | Accept uncertainty or increase budget |
+
+```rust
+Outcome::Inconclusive { reason, leak_probability, .. } => {
+    match reason {
+        InconclusiveReason::DataTooNoisy => {
+            eprintln!("Environment too noisy for reliable measurement");
+        }
+        InconclusiveReason::TimeBudgetExceeded => {
+            eprintln!("Need more time; current estimate: P={:.0}%", leak_probability * 100.0);
+        }
+        _ => {
+            eprintln!("Inconclusive: {:?}", reason);
+        }
+    }
+}
+```
+
+## Handling unmeasurable results
+
+An `Unmeasurable` outcome means the operation completes faster than the timer can reliably measure:
+
+```rust
+Outcome::Unmeasurable { operation_ns, threshold_ns, recommendation, .. } => {
+    println!("Operation takes ~{:.0}ns, need >{:.0}ns to measure",
+             operation_ns, threshold_ns);
+    println!("{}", recommendation);
+}
+```
+
+Common solutions:
+- Use `TimerSpec::CyclePrecision` for finer resolution (see [Measurement Precision](/core-concepts/measurement-precision))
+- Test a larger input size or more iterations
+- Accept that ultra-fast operations may not be measurable on your platform
+
+## Quality indicators
+
+The `quality` field indicates overall measurement reliability:
+
+| Quality | MDE | Meaning |
+|---------|-----|---------|
+| `Excellent` | < 5ns | Cycle-level precision |
+| `Good` | 5-20ns | Suitable for most testing |
+| `Poor` | 20-100ns | May miss small leaks |
+| `TooNoisy` | > 100ns | Results unreliable |
+
+MDE (Minimum Detectable Effect) is the smallest timing difference that could be reliably detected given the noise level.
+
+## Threshold diagnostics
+
+The diagnostics include information about threshold elevation:
+
+```rust
+match outcome {
+    Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
+        if diagnostics.theta_eff > diagnostics.theta_user * 1.1 {
+            println!("Note: Threshold elevated from {:.1}ns to {:.1}ns",
+                     diagnostics.theta_user, diagnostics.theta_eff);
+            println!("See: /core-concepts/measurement-precision");
+        }
+    }
+    _ => {}
+}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `theta_user` | The threshold you requested (via attacker model) |
+| `theta_floor` | The minimum detectable effect for this setup |
+| `theta_eff` | The threshold actually used: max(theta\_user, theta\_floor) |
+
+When `theta_eff > theta_user`, your results answer "is there a leak above theta\_eff?" rather than "is there a leak above theta\_user?". See [Measurement Precision](/core-concepts/measurement-precision) for details.
+
+## Summary
+
+- **Pass** (P < 5%): No leak detected above your threshold
+- **Fail** (P > 95%): Leak confirmed, with effect size and exploitability assessment
+- **Inconclusive**: Check the reason; often fixable by adjusting budget or environment
+- **Unmeasurable**: Operation too fast; use `TimerSpec::CyclePrecision` or test larger workload
+- Leak probability is Bayesian (converges with more data, unlike p-values)
+- Effect decomposition tells you *how* the leak manifests (shift vs tail)
+- Check `theta_eff` vs `theta_user` to understand if threshold was elevated

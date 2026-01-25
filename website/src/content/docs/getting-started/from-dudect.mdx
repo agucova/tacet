@@ -1,0 +1,399 @@
+---
+title: Migration from DudeCT
+description: Quick guide for users familiar with DudeCT
+sidebar:
+  order: 4
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+If you're familiar with [DudeCT](https://github.com/oreparaz/dudect), this guide shows how to translate your existing patterns to timing-oracle.
+
+## Key differences
+
+| DudeCT | timing-oracle |
+|--------|---------------|
+| t-statistic (larger = worse) | Probability of leak (0-100%) |
+| Fixed threshold (t > 4.5) | Attacker model presets |
+| More samples → more false positives | More samples → more confidence |
+| Manual result interpretation | Four-outcome enum with diagnostics |
+| C library | Rust library with C/Go/JS bindings |
+
+### Why the probability matters
+
+DudeCT outputs a t-statistic. A t > 4.5 traditionally indicates a leak, but:
+- The threshold is somewhat arbitrary
+- More samples can push t higher even for small effects
+- You need to interpret whether the effect is exploitable
+
+timing-oracle gives you:
+- **Probability of leak**: "72% chance the effect exceeds your threshold"
+- **Effect size in nanoseconds**: "~50ns timing difference"
+- **Exploitability assessment**: "Exploitable via HTTP/2 multiplexing"
+
+## Mapping concepts
+
+### Input types
+
+<Tabs>
+<TabItem label="DudeCT (C)">
+```c
+typedef struct {
+    uint8_t *data;
+    size_t len;
+} input_t;
+
+void prepare_inputs(input_t *inputs, uint8_t *classes, int n) {
+    for (int i = 0; i < n; i++) {
+        if (classes[i] == 0) {
+            // Class 0: fixed input
+            memset(inputs[i].data, 0x00, inputs[i].len);
+        } else {
+            // Class 1: random input
+            random_fill(inputs[i].data, inputs[i].len);
+        }
+    }
+}
+```
+</TabItem>
+<TabItem label="timing-oracle (Rust)">
+```rust
+use timing_oracle::helpers::InputPair;
+
+let inputs = InputPair::new(
+    || [0u8; 32],           // Class 0: fixed
+    || rand::random(),      // Class 1: random
+);
+```
+</TabItem>
+<TabItem label="timing-oracle (C)">
+```c
+#include <timing_oracle.h>
+
+timing_oracle_inputs_t inputs = {
+    .baseline = baseline_generator,  // Returns fixed data
+    .sample = sample_generator,      // Returns random data
+    .ctx = NULL
+};
+```
+</TabItem>
+</Tabs>
+
+### The measurement function
+
+<Tabs>
+<TabItem label="DudeCT (C)">
+```c
+uint8_t do_one_computation(uint8_t *data) {
+    // Perform the operation to test
+    return crypto_operation(data);
+}
+```
+</TabItem>
+<TabItem label="timing-oracle (Rust)">
+```rust
+let outcome = oracle.test(inputs, |data| {
+    // Perform the operation to test
+    crypto_operation(&data);
+});
+```
+</TabItem>
+<TabItem label="timing-oracle (C)">
+```c
+void measure_fn(const uint8_t* data, size_t len, void* ctx) {
+    // Perform the operation to test
+    crypto_operation(data, len);
+}
+```
+</TabItem>
+</Tabs>
+
+### Running the test
+
+<Tabs>
+<TabItem label="DudeCT (C)">
+```c
+dudect_ctx_t ctx;
+dudect_init(&ctx, do_one_computation);
+
+for (int i = 0; i < num_measurements; i++) {
+    prepare_inputs(inputs, classes, BATCH_SIZE);
+    dudect_run(&ctx, inputs, classes, BATCH_SIZE);
+}
+
+// Check t-statistic
+if (ctx.t > 4.5) {
+    printf("Timing leak detected (t = %.2f)\n", ctx.t);
+}
+```
+</TabItem>
+<TabItem label="timing-oracle (Rust)">
+```rust
+use timing_oracle::{TimingOracle, AttackerModel};
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| crypto_operation(&data));
+
+println!("{outcome}");  // Formatted output with colors
+assert!(outcome.passed(), "Timing leak detected");
+```
+</TabItem>
+<TabItem label="timing-oracle (C)">
+```c
+timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
+timing_oracle_outcome_t outcome;
+
+timing_oracle_test(oracle, &inputs, measure_fn, NULL, &outcome);
+
+timing_oracle_print(&outcome);  // Formatted output
+
+if (outcome.tag == TIMING_ORACLE_FAIL) {
+    fprintf(stderr, "Timing leak detected\n");
+    exit(1);
+}
+
+timing_oracle_free(oracle);
+```
+</TabItem>
+</Tabs>
+
+## Complete migration example
+
+### DudeCT test for AES
+
+```c
+// dudect_aes.c
+#include "dudect.h"
+#include <aes.h>
+
+static uint8_t key[16] = { /* ... */ };
+
+uint8_t do_one_computation(uint8_t *data) {
+    uint8_t block[16];
+    memcpy(block, data, 16);
+    aes_encrypt(block, key);
+    return block[0];  // Return something to prevent optimization
+}
+
+int main() {
+    dudect_ctx_t ctx;
+    dudect_init(&ctx, do_one_computation);
+
+    while (1) {
+        // ... prepare inputs and run measurements ...
+
+        if (ctx.t > 4.5) {
+            printf("Leak detected (t = %.2f)\n", ctx.t);
+            break;
+        }
+        if (ctx.total_measurements > 1000000) {
+            printf("No leak detected after 1M measurements\n");
+            break;
+        }
+    }
+}
+```
+
+### Equivalent timing-oracle test
+
+<Tabs>
+<TabItem label="Rust">
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+use aes::Aes128;
+
+#[test]
+fn test_aes_constant_time() {
+    let key = GenericArray::from([0x42u8; 16]);
+    let cipher = Aes128::new(&key);
+
+    let inputs = InputPair::new(
+        || [0u8; 16],
+        || rand::random::<[u8; 16]>(),
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |data| {
+            let mut block = GenericArray::clone_from_slice(data);
+            cipher.encrypt_block(&mut block);
+            std::hint::black_box(block);
+        });
+
+    println!("{outcome}");
+    assert!(outcome.passed(), "Timing leak detected");
+}
+```
+</TabItem>
+<TabItem label="C">
+```c
+#include <timing_oracle.h>
+#include <aes.h>
+
+static uint8_t key[16] = { 0x42, /* ... */ };
+static AES_KEY aes_key;
+
+void baseline_gen(uint8_t* buf, size_t len, void* ctx) {
+    memset(buf, 0x00, len);
+}
+
+void sample_gen(uint8_t* buf, size_t len, void* ctx) {
+    random_fill(buf, len);
+}
+
+void measure_aes(const uint8_t* data, size_t len, void* ctx) {
+    uint8_t block[16];
+    memcpy(block, data, 16);
+    AES_encrypt(block, block, &aes_key);
+}
+
+int main() {
+    AES_set_encrypt_key(key, 128, &aes_key);
+
+    timing_oracle_inputs_t inputs = {
+        .baseline = baseline_gen,
+        .sample = sample_gen,
+        .data_len = 16,
+        .ctx = NULL
+    };
+
+    timing_oracle_t* oracle = timing_oracle_for_attacker(ATTACKER_ADJACENT_NETWORK);
+    timing_oracle_outcome_t outcome;
+
+    timing_oracle_test(oracle, &inputs, measure_aes, NULL, &outcome);
+    timing_oracle_print(&outcome);
+
+    int result = (outcome.tag == TIMING_ORACLE_FAIL) ? 1 : 0;
+    timing_oracle_free(oracle);
+    return result;
+}
+```
+</TabItem>
+</Tabs>
+
+## Interpreting results
+
+### DudeCT t-statistic → timing-oracle probability
+
+| DudeCT t-statistic | Interpretation | timing-oracle equivalent |
+|--------------------|----------------|-------------------------|
+| t < 4.5 | No leak | `Outcome::Pass` (P < 5%) |
+| t > 4.5 | Leak detected | `Outcome::Fail` (P > 95%) |
+| Borderline | Unclear | `Outcome::Inconclusive` |
+
+### More samples, better convergence
+
+In DudeCT, collecting more samples can increase t even for tiny effects that aren't security-relevant. You might get t = 10 for a 0.1ns difference that no attacker could exploit.
+
+In timing-oracle, more samples means more confidence in the *same* answer. The probability converges toward the true state: either there's an exploitable leak or there isn't.
+
+## Attacker models vs fixed thresholds
+
+DudeCT uses a fixed t = 4.5 threshold. timing-oracle lets you specify your threat model:
+
+```rust
+// "Is there a leak exploitable by a LAN attacker?" (100ns threshold)
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+
+// "Is there a leak exploitable with shared hardware?" (0.6ns threshold)
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+
+// "Is there a leak exploitable over the internet?" (50μs threshold)
+TimingOracle::for_attacker(AttackerModel::RemoteNetwork)
+```
+
+This is a more meaningful question than "is there any statistical difference?"
+
+## What's different about the two-class pattern
+
+Both DudeCT and timing-oracle use the two-class pattern (fixed vs random inputs). The key insight is the same: if code is constant-time, both classes take the same time.
+
+However, timing-oracle's documentation emphasizes:
+- **For comparison functions**, baseline must match the secret
+- **For most crypto**, zeros vs random is the right pattern
+
+See [The Two-Class Pattern](/core-concepts/two-class-pattern) for details.
+
+## Migrating from dudect-bencher
+
+If you're using the [dudect-bencher](https://crates.io/crates/dudect-bencher) Rust crate, the migration is similar but with different type names:
+
+<Tabs>
+<TabItem label="dudect-bencher">
+```rust
+use dudect_bencher::{ctbench_main, BenchRng, Class, CtRunner};
+use rand::Rng;
+
+fn vec_eq(runner: &mut CtRunner, rng: &mut BenchRng) {
+    let mut inputs = Vec::new();
+    let mut classes = Vec::new();
+
+    for _ in 0..10000 {
+        let v1: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+
+        if rng.gen::<bool>() {
+            let v2 = v1.clone();
+            inputs.push((v1, v2));
+            classes.push(Class::Left);
+        } else {
+            let mut v2 = v1.clone();
+            v2[5] = 0xFF;
+            inputs.push((v1, v2));
+            classes.push(Class::Right);
+        }
+    }
+
+    for (class, (a, b)) in classes.into_iter().zip(inputs) {
+        runner.run_one(class, || a == b);
+    }
+}
+
+ctbench_main!(vec_eq);
+```
+</TabItem>
+<TabItem label="timing-oracle">
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+
+#[test]
+fn test_vec_eq_constant_time() {
+    let inputs = InputPair::new(
+        || ([0u8; 32], [0u8; 32]),      // Left: equal vectors
+        || {
+            let v1: [u8; 32] = rand::random();
+            let mut v2 = v1;
+            v2[5] = 0xFF;
+            (v1, v2)                     // Right: differ at index 5
+        },
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .test(inputs, |(a, b)| {
+            std::hint::black_box(a == b);
+        });
+
+    println!("{outcome}");
+    assert!(outcome.passed(), "Timing leak detected");
+}
+```
+</TabItem>
+</Tabs>
+
+**Key differences from dudect-bencher:**
+
+| dudect-bencher | timing-oracle |
+|----------------|---------------|
+| `Class::Left` / `Class::Right` | Baseline / Sample closures |
+| `runner.run_one(class, \|\| ...)` | `oracle.test(inputs, \|data\| ...)` |
+| `ctbench_main!` macro, runs forever | Standard `#[test]`, adaptive stopping |
+| t-statistic output | Probability + effect size |
+
+<Aside type="tip">
+timing-oracle's adaptive loop automatically determines when to stop, so you don't need to manually specify iteration counts or check t-statistics in a loop.
+</Aside>
+
+## Next steps
+
+- [Quick Start](/getting-started/quick-start): Walk through your first test
+- [Attacker Models](/core-concepts/attacker-models): Choose the right threat model
+- [Testing Cryptographic Code](/guides/testing-crypto): Patterns for specific operations

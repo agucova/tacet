@@ -13,7 +13,7 @@
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{busy_wait_ns, select_attacker_model, CalibrationConfig, Decision};
 use rand::{rngs::StdRng, Rng, SeedableRng};

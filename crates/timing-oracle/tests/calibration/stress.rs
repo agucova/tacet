@@ -12,7 +12,7 @@
 
 #![allow(dead_code)]
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{select_attacker_model, CalibrationConfig, Decision, TrialRunner};
 use rand::{rngs::StdRng, Rng, SeedableRng};

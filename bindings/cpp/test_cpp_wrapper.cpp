@@ -22,10 +22,12 @@
 #include "timing_oracle.hpp"
 
 #include <cassert>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <random>
+#include <sstream>
 #include <vector>
 
 using namespace timing_oracle;
@@ -390,6 +392,226 @@ TEST(enum_to_string_inconclusive_reason) {
     ASSERT(std::strcmp(inconclusive_reason_to_string(ToInconclusiveReason::WouldTakeTooLong), "WouldTakeTooLong") == 0);
     ASSERT(std::strcmp(inconclusive_reason_to_string(ToInconclusiveReason::TimeBudgetExceeded), "TimeBudgetExceeded") == 0);
     ASSERT(std::strcmp(inconclusive_reason_to_string(ToInconclusiveReason::SampleBudgetExceeded), "SampleBudgetExceeded") == 0);
+}
+
+// ============================================================================
+// Configuration Tests
+// ============================================================================
+
+TEST(config_from_env) {
+    // Just test that it returns a valid config (env vars not set in test)
+    auto base = config_default(ToAttackerModel::AdjacentNetwork);
+    auto cfg = config_from_env(base);
+    // Without env vars set, should be unchanged
+    ASSERT_EQ(cfg.attacker_model, base.attacker_model);
+    ASSERT(cfg.time_budget_secs == base.time_budget_secs);
+}
+
+// ============================================================================
+// Oracle Builder Tests
+// ============================================================================
+
+TEST(oracle_factory_methods) {
+    // Test forAttacker factory method with different attacker models
+    auto o1 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork);
+    ASSERT_EQ(o1.config().attacker_model, ToAttackerModel::AdjacentNetwork);
+
+    auto o2 = Oracle::forAttacker(ToAttackerModel::SharedHardware);
+    ASSERT_EQ(o2.config().attacker_model, ToAttackerModel::SharedHardware);
+
+    auto o3 = Oracle::forAttacker(ToAttackerModel::RemoteNetwork);
+    ASSERT_EQ(o3.config().attacker_model, ToAttackerModel::RemoteNetwork);
+
+    auto o4 = Oracle::forAttacker(ToAttackerModel::Research);
+    ASSERT_EQ(o4.config().attacker_model, ToAttackerModel::Research);
+}
+
+TEST(oracle_builder_methods) {
+    using namespace std::chrono_literals;
+
+    // Test builder chain
+    auto oracle = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(60s)
+        .maxSamples(50000)
+        .passThreshold(0.01)
+        .failThreshold(0.99)
+        .seed(12345)
+        .thresholdNs(500.0);
+
+    const auto& cfg = oracle.config();
+    ASSERT(cfg.time_budget_secs >= 59.0 && cfg.time_budget_secs <= 61.0);
+    ASSERT_EQ(cfg.max_samples, 50000u);
+    ASSERT(cfg.pass_threshold >= 0.009 && cfg.pass_threshold <= 0.011);
+    ASSERT(cfg.fail_threshold >= 0.989 && cfg.fail_threshold <= 0.991);
+    ASSERT_EQ(cfg.seed, 12345u);
+    ASSERT(cfg.custom_threshold_ns >= 499.0 && cfg.custom_threshold_ns <= 501.0);
+}
+
+TEST(oracle_builder_immutability) {
+    // Builder methods should not modify original
+    auto o1 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork);
+    auto o2 = o1.maxSamples(1000);
+
+    ASSERT_NE(o1.config().max_samples, 1000u);
+    ASSERT_EQ(o2.config().max_samples, 1000u);
+}
+
+TEST(oracle_chrono_duration) {
+    using namespace std::chrono_literals;
+
+    // Test various duration types
+    auto o1 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork).timeBudget(30s);
+    ASSERT(o1.config().time_budget_secs >= 29.0 && o1.config().time_budget_secs <= 31.0);
+
+    auto o2 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork).timeBudget(2min);
+    ASSERT(o2.config().time_budget_secs >= 119.0 && o2.config().time_budget_secs <= 121.0);
+
+    auto o3 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork).timeBudget(500ms);
+    ASSERT(o3.config().time_budget_secs >= 0.49 && o3.config().time_budget_secs <= 0.51);
+}
+
+TEST(oracle_from_env) {
+    auto oracle = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork).fromEnv();
+    // Just test it compiles and runs
+    ASSERT(oracle.config().time_budget_secs > 0);
+}
+
+TEST(oracle_threshold_ns) {
+    auto o1 = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork);
+    ASSERT(o1.thresholdNs() >= 50 && o1.thresholdNs() <= 200);  // ~100ns
+
+    auto o2 = o1.thresholdNs(500.0);
+    ASSERT(o2.thresholdNs() >= 499.0 && o2.thresholdNs() <= 501.0);
+}
+
+TEST(oracle_analyze) {
+    // Test Oracle::analyze method
+    std::vector<uint64_t> data(10000, 100);
+
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .analyze(data, data);
+    ASSERT(result.outcome == ToOutcome::Pass ||
+           result.outcome == ToOutcome::Inconclusive);
+}
+
+TEST(oracle_test_callback) {
+    // Test Oracle::test method with callback
+    using namespace std::chrono_literals;
+
+    std::mt19937_64 rng(42);
+    std::normal_distribution<double> dist(100.0, 10.0);
+
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(5s)
+        .maxSamples(50000)
+        .test([&](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+            // Generate identical distributions (should pass)
+            for (size_t i = 0; i < baseline.size(); i++) {
+                baseline[i] = static_cast<uint64_t>(std::max(1.0, dist(rng)));
+                sample[i] = static_cast<uint64_t>(std::max(1.0, dist(rng)));
+            }
+        });
+
+    // Identical distributions should pass or be inconclusive
+    ASSERT(result.outcome == ToOutcome::Pass ||
+           result.outcome == ToOutcome::Inconclusive);
+}
+
+TEST(oracle_test_callback_with_leak) {
+    // Test Oracle::test detecting a leak
+    using namespace std::chrono_literals;
+
+    std::mt19937_64 rng(123);
+    std::normal_distribution<double> dist_baseline(100.0, 5.0);
+    std::normal_distribution<double> dist_sample(250.0, 5.0);  // 150ns difference
+
+    auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+        .timeBudget(10s)
+        .maxSamples(100000)
+        .test([&](std::span<uint64_t> baseline, std::span<uint64_t> sample) {
+            for (size_t i = 0; i < baseline.size(); i++) {
+                baseline[i] = static_cast<uint64_t>(std::max(1.0, dist_baseline(rng)));
+                sample[i] = static_cast<uint64_t>(std::max(1.0, dist_sample(rng)));
+            }
+        });
+
+    // Should detect the leak
+    ASSERT_EQ(result.outcome, ToOutcome::Fail);
+    ASSERT(result.leak_probability > 0.9);
+}
+
+// ============================================================================
+// Stream Operator Tests
+// ============================================================================
+
+TEST(stream_operator_outcome) {
+    std::ostringstream oss;
+    oss << ToOutcome::Pass;
+    ASSERT_EQ(oss.str(), std::string("Pass"));
+}
+
+TEST(stream_operator_quality) {
+    std::ostringstream oss;
+    oss << ToMeasurementQuality::Good;
+    ASSERT_EQ(oss.str(), std::string("Good"));
+}
+
+TEST(stream_operator_exploitability) {
+    std::ostringstream oss;
+    oss << ToExploitability::StandardRemote;
+    ASSERT_EQ(oss.str(), std::string("StandardRemote"));
+}
+
+TEST(stream_operator_pattern) {
+    std::ostringstream oss;
+    oss << ToEffectPattern::UniformShift;
+    ASSERT_EQ(oss.str(), std::string("UniformShift"));
+}
+
+TEST(stream_operator_attacker_model) {
+    std::ostringstream oss;
+    oss << ToAttackerModel::AdjacentNetwork;
+    ASSERT_EQ(oss.str(), std::string("AdjacentNetwork"));
+}
+
+TEST(stream_operator_inconclusive_reason) {
+    std::ostringstream oss;
+    oss << ToInconclusiveReason::TimeBudgetExceeded;
+    ASSERT_EQ(oss.str(), std::string("TimeBudgetExceeded"));
+}
+
+TEST(stream_operator_effect) {
+    ToEffect effect{};
+    effect.shift_ns = 10.5;
+    effect.tail_ns = 5.25;
+    effect.ci_low_ns = 8.0;
+    effect.ci_high_ns = 18.0;
+    effect.pattern = ToEffectPattern::Mixed;
+
+    std::ostringstream oss;
+    oss << effect;
+    std::string s = oss.str();
+
+    ASSERT(s.find("10.5") != std::string::npos);  // shift_ns
+    ASSERT(s.find("5.25") != std::string::npos);  // tail_ns
+    ASSERT(s.find("Mixed") != std::string::npos);  // pattern
+}
+
+TEST(stream_operator_result) {
+    ToResult result{};
+    result.outcome = ToOutcome::Pass;
+    result.leak_probability = 0.02;
+    result.samples_used = 5000;
+    result.quality = ToMeasurementQuality::Excellent;
+
+    std::ostringstream oss;
+    oss << result;
+    std::string s = oss.str();
+
+    ASSERT(s.find("Pass") != std::string::npos);
+    ASSERT(s.find("2.00%") != std::string::npos);  // 0.02 * 100
+    ASSERT(s.find("5000") != std::string::npos);
+    ASSERT(s.find("Excellent") != std::string::npos);
 }
 
 // ============================================================================

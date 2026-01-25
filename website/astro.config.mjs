@@ -44,16 +44,20 @@ export default defineConfig({
           autogenerate: { directory: 'getting-started' },
         },
         {
+          label: 'Core Concepts',
+          autogenerate: { directory: 'core-concepts' },
+        },
+        {
           label: 'Guides',
           autogenerate: { directory: 'guides' },
         },
         {
-          label: 'API Reference',
-          autogenerate: { directory: 'api' },
-        },
-        {
           label: 'Reference',
           autogenerate: { directory: 'reference' },
+        },
+        {
+          label: 'API Reference',
+          autogenerate: { directory: 'api' },
         },
         {
           label: 'Case Studies',

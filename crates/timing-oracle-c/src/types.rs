@@ -424,3 +424,31 @@ impl Default for ToStepResult {
         }
     }
 }
+
+// ============================================================================
+// Callback Function Types
+// ============================================================================
+
+/// Callback function type for collecting timing samples.
+///
+/// The callback is invoked by `to_test()` to collect batches of timing samples.
+/// The user must fill `baseline_out` and `sample_out` with `count` samples each.
+///
+/// # Parameters
+/// - `baseline_out`: Array to fill with baseline timing samples (in timer ticks)
+/// - `sample_out`: Array to fill with sample timing samples (in timer ticks)
+/// - `count`: Number of samples to collect for each class
+/// - `user_ctx`: User context pointer passed to `to_test()`
+///
+/// # Example
+///
+/// ```c
+/// void my_collect(uint64_t* baseline, uint64_t* sample, size_t count, void* ctx) {
+///     for (size_t i = 0; i < count; i++) {
+///         baseline[i] = measure_baseline_operation();
+///         sample[i] = measure_sample_operation();
+///     }
+/// }
+/// ```
+pub type ToCollectFn =
+    Option<unsafe extern "C" fn(baseline_out: *mut u64, sample_out: *mut u64, count: usize, user_ctx: *mut std::ffi::c_void)>;

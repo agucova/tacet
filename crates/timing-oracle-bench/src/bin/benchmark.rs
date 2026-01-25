@@ -306,15 +306,18 @@ fn main() {
     };
 
     // Set up progress bar
+    // Note: indicatif's {eta} produces garbage values at position 0 (division by zero).
+    // We show our own ETA in the message field once we have enough data points.
     let total_work = config.total_datasets() * runner.num_tools();
     let progress_bar = ProgressBar::new(total_work as u64);
     progress_bar.set_style(
         ProgressStyle::default_bar()
-            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) ETA: {eta} | {msg}")
+            .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({percent}%) | {msg}")
             .unwrap()
             .progress_chars("=>-"),
     );
     progress_bar.enable_steady_tick(std::time::Duration::from_millis(100));
+    progress_bar.set_message("warming up...");
 
     // Set initial progress position if resuming
     if let Some(ref cp) = checkpoint {
@@ -326,6 +329,34 @@ fn main() {
     ));
     let start = Instant::now();
 
+    // Helper to format ETA from seconds
+    fn format_eta(secs: f64) -> String {
+        if secs < 60.0 {
+            format!("{:.0}s", secs)
+        } else if secs < 3600.0 {
+            format!("{}m {}s", (secs / 60.0) as u64, (secs % 60.0) as u64)
+        } else {
+            format!(
+                "{}h {}m",
+                (secs / 3600.0) as u64,
+                ((secs % 3600.0) / 60.0) as u64
+            )
+        }
+    }
+
+    // Helper to build progress message with ETA
+    let make_message = |progress: f64, task: &str, elapsed_secs: f64| -> String {
+        // Only show ETA after 5% progress to get stable estimates
+        if progress > 0.05 {
+            let eta_secs = elapsed_secs / progress * (1.0 - progress);
+            format!("ETA: {} | {}", format_eta(eta_secs), task)
+        } else if progress > 0.0 {
+            format!("estimating... | {}", task)
+        } else {
+            "warming up...".to_string()
+        }
+    };
+
     // Run benchmark (with or without checkpoint)
     let results = if let Some(cp) = checkpoint.clone() {
         runner.run_with_checkpoint(&config, Some(cp), |progress, task| {
@@ -334,7 +365,8 @@ fn main() {
             if current > last {
                 last_update.store(current, Ordering::Relaxed);
                 progress_bar.set_position(current);
-                progress_bar.set_message(task.to_string());
+                let msg = make_message(progress, task, start.elapsed().as_secs_f64());
+                progress_bar.set_message(msg);
             }
         })
     } else {
@@ -344,7 +376,8 @@ fn main() {
             if current > last {
                 last_update.store(current, Ordering::Relaxed);
                 progress_bar.set_position(current);
-                progress_bar.set_message(task.to_string());
+                let msg = make_message(progress, task, start.elapsed().as_secs_f64());
+                progress_bar.set_message(msg);
             }
         })
     };

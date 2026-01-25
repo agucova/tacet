@@ -5,7 +5,7 @@
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{busy_wait_ns, CalibrationConfig, Decision, TimerBackend, TrialRunner};
 use timing_oracle::helpers::InputPair;

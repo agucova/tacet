@@ -7,11 +7,28 @@
  * - std::span for array views
  * - Exception-based error handling
  * - Move semantics (no copies for opaque handles)
+ * - Builder pattern Oracle class for ergonomic configuration
+ * - operator<< overloads for easy printing
  *
  * Usage:
  *   #include "timing_oracle.hpp"
  *   using namespace timing_oracle;
+ *   using namespace std::chrono_literals;
  *
+ *   // Builder-pattern API:
+ *   auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+ *       .timeBudget(30s)
+ *       .maxSamples(100000)
+ *       .fromEnv()
+ *       .test([](auto baseline, auto sample) {
+ *           for (size_t i = 0; i < baseline.size(); i++) {
+ *               baseline[i] = measure_baseline();
+ *               sample[i] = measure_sample();
+ *           }
+ *       });
+ *   std::cout << result << std::endl;
+ *
+ *   // Low-level API:
  *   auto config = config_adjacent_network();
  *   auto result = analyze(baseline_span, sample_span, config);
  *
@@ -24,9 +41,13 @@ extern "C" {
 #include "timing_oracle.h"
 }
 
+#include <chrono>
 #include <cstdint>
+#include <iomanip>
 #include <memory>
+#include <ostream>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -514,6 +535,345 @@ inline const char* inconclusive_reason_to_string(ToInconclusiveReason reason) {
     case ToInconclusiveReason::ThresholdElevated:    return "ThresholdElevated";
     default:                                         return "Unknown";
     }
+}
+
+/**
+ * @brief Merge configuration from TO_* environment variables.
+ *
+ * Supported environment variables:
+ * - TO_TIME_BUDGET_SECS: Time budget in seconds (float)
+ * - TO_MAX_SAMPLES: Maximum samples per class (integer)
+ * - TO_PASS_THRESHOLD: Pass threshold for P(leak) (float, e.g., 0.05)
+ * - TO_FAIL_THRESHOLD: Fail threshold for P(leak) (float, e.g., 0.95)
+ * - TO_SEED: Random seed (integer, 0 = use default)
+ * - TO_THRESHOLD_NS: Custom threshold in nanoseconds (float)
+ */
+inline ToConfig config_from_env(ToConfig base) {
+    return to_config_from_env(base);
+}
+
+// ============================================================================
+// Oracle Builder Class
+// ============================================================================
+
+/**
+ * @brief Builder-pattern class for configuring and running timing tests.
+ *
+ * Oracle provides an ergonomic, fluent interface for timing side-channel
+ * detection. It wraps the C configuration struct and provides type-safe
+ * builder methods.
+ *
+ * @example
+ *   using namespace std::chrono_literals;
+ *
+ *   auto result = Oracle::forAttacker(ToAttackerModel::AdjacentNetwork)
+ *       .timeBudget(30s)
+ *       .maxSamples(100000)
+ *       .fromEnv()
+ *       .test([](auto baseline, auto sample) {
+ *           for (size_t i = 0; i < baseline.size(); i++) {
+ *               baseline[i] = measure_baseline();
+ *               sample[i] = measure_sample();
+ *           }
+ *       });
+ *
+ *   if (result.outcome == ToOutcome::Fail) {
+ *       std::cerr << "Timing leak detected!" << std::endl;
+ *   }
+ */
+class Oracle {
+public:
+    // ========================================================================
+    // Factory Method
+    // ========================================================================
+
+    /**
+     * @brief Create an Oracle with default configuration for given attacker model.
+     *
+     * Use builder methods like timeBudget() and maxSamples() to customize.
+     */
+    static Oracle forAttacker(ToAttackerModel model) {
+        return Oracle(to_config_default(model));
+    }
+
+    // ========================================================================
+    // Builder Methods (return new Oracle with modified config)
+    // ========================================================================
+
+    /**
+     * @brief Set the time budget using std::chrono duration.
+     *
+     * @param duration Any std::chrono duration (e.g., 30s, 5min, 500ms)
+     * @return New Oracle with updated time budget
+     */
+    template<typename Rep, typename Period>
+    [[nodiscard]] Oracle timeBudget(std::chrono::duration<Rep, Period> duration) const {
+        Oracle copy = *this;
+        copy.config_.time_budget_secs =
+            std::chrono::duration_cast<std::chrono::duration<double>>(duration).count();
+        return copy;
+    }
+
+    /**
+     * @brief Set the maximum samples per class.
+     *
+     * @param n Maximum number of samples
+     * @return New Oracle with updated max samples
+     */
+    [[nodiscard]] Oracle maxSamples(uint64_t n) const {
+        Oracle copy = *this;
+        copy.config_.max_samples = n;
+        return copy;
+    }
+
+    /**
+     * @brief Set the pass threshold for P(leak).
+     *
+     * Pass if P(leak) < threshold. Default: 0.05
+     *
+     * @param threshold Probability threshold (0.0 to 1.0)
+     * @return New Oracle with updated pass threshold
+     */
+    [[nodiscard]] Oracle passThreshold(double threshold) const {
+        Oracle copy = *this;
+        copy.config_.pass_threshold = threshold;
+        return copy;
+    }
+
+    /**
+     * @brief Set the fail threshold for P(leak).
+     *
+     * Fail if P(leak) > threshold. Default: 0.95
+     *
+     * @param threshold Probability threshold (0.0 to 1.0)
+     * @return New Oracle with updated fail threshold
+     */
+    [[nodiscard]] Oracle failThreshold(double threshold) const {
+        Oracle copy = *this;
+        copy.config_.fail_threshold = threshold;
+        return copy;
+    }
+
+    /**
+     * @brief Set the random seed for reproducibility.
+     *
+     * @param s Seed value (0 = use default)
+     * @return New Oracle with updated seed
+     */
+    [[nodiscard]] Oracle seed(uint64_t s) const {
+        Oracle copy = *this;
+        copy.config_.seed = s;
+        return copy;
+    }
+
+    /**
+     * @brief Set a custom threshold in nanoseconds.
+     *
+     * This overrides the attacker model's default threshold.
+     *
+     * @param ns Threshold in nanoseconds
+     * @return New Oracle with custom threshold
+     */
+    [[nodiscard]] Oracle thresholdNs(double ns) const {
+        Oracle copy = *this;
+        copy.config_.custom_threshold_ns = ns;
+        return copy;
+    }
+
+    /**
+     * @brief Set the timer frequency for tick-to-nanosecond conversion.
+     *
+     * @param hz Timer frequency in Hz (0 = assume 1 tick = 1 ns)
+     * @return New Oracle with updated timer frequency
+     */
+    [[nodiscard]] Oracle timerFrequencyHz(uint64_t hz) const {
+        Oracle copy = *this;
+        copy.config_.timer_frequency_hz = hz;
+        return copy;
+    }
+
+    /**
+     * @brief Merge configuration from TO_* environment variables.
+     *
+     * This allows CI systems to override configuration via environment.
+     *
+     * @return New Oracle with environment variables applied
+     */
+    [[nodiscard]] Oracle fromEnv() const {
+        return Oracle(to_config_from_env(config_));
+    }
+
+    // ========================================================================
+    // Terminal Methods (perform analysis)
+    // ========================================================================
+
+    /**
+     * @brief Analyze pre-collected timing samples.
+     *
+     * @param baseline Baseline timing samples (timer ticks)
+     * @param sample Sample timing samples (timer ticks)
+     * @return Analysis result
+     * @throws Error if analysis fails
+     */
+    ToResult analyze(
+        std::span<const uint64_t> baseline,
+        std::span<const uint64_t> sample
+    ) const {
+        return timing_oracle::analyze(baseline, sample, config_);
+    }
+
+    /**
+     * @brief Run a complete timing test using a callback for sample collection.
+     *
+     * The callback is invoked multiple times to collect batches of timing
+     * samples. The library handles calibration and adaptive sampling internally.
+     *
+     * @tparam Collector Callable with signature void(std::span<uint64_t>, std::span<uint64_t>)
+     * @param collect Callback that fills baseline and sample spans with timing measurements
+     * @return Analysis result
+     * @throws Error if test fails
+     *
+     * @example
+     *   auto result = Oracle::balanced().test([](auto baseline, auto sample) {
+     *       for (size_t i = 0; i < baseline.size(); i++) {
+     *           baseline[i] = measure_baseline();
+     *           sample[i] = measure_sample();
+     *       }
+     *   });
+     */
+    template<typename Collector>
+    ToResult test(Collector&& collect) const {
+        // Create thunk context
+        struct Context {
+            Collector* collector;
+        };
+        Context ctx{&collect};
+
+        // C callback thunk that invokes the C++ callable
+        auto thunk = [](uint64_t* baseline_out, uint64_t* sample_out,
+                        size_t count, void* user_ctx) {
+            auto* context = static_cast<Context*>(user_ctx);
+            std::span<uint64_t> baseline{baseline_out, count};
+            std::span<uint64_t> sample{sample_out, count};
+            (*context->collector)(baseline, sample);
+        };
+
+        ToResult result{};
+        ToError err = to_test(&config_, thunk, &ctx, &result);
+        throw_on_error(err);
+        return result;
+    }
+
+    // ========================================================================
+    // Accessors
+    // ========================================================================
+
+    /**
+     * @brief Get the underlying ToConfig struct.
+     */
+    const ToConfig& config() const noexcept { return config_; }
+
+    /**
+     * @brief Get the effective threshold in nanoseconds.
+     */
+    double thresholdNs() const {
+        if (config_.custom_threshold_ns > 0.0) {
+            return config_.custom_threshold_ns;
+        }
+        return to_attacker_threshold_ns(config_.attacker_model);
+    }
+
+private:
+    explicit Oracle(ToConfig config) : config_(config) {}
+
+    ToConfig config_;
+};
+
+// ============================================================================
+// Stream Output Operators
+// ============================================================================
+
+/**
+ * @brief Output operator for ToOutcome.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToOutcome outcome) {
+    return os << outcome_to_string(outcome);
+}
+
+/**
+ * @brief Output operator for ToMeasurementQuality.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToMeasurementQuality quality) {
+    return os << quality_to_string(quality);
+}
+
+/**
+ * @brief Output operator for ToExploitability.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToExploitability exploitability) {
+    return os << exploitability_to_string(exploitability);
+}
+
+/**
+ * @brief Output operator for ToEffectPattern.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToEffectPattern pattern) {
+    return os << pattern_to_string(pattern);
+}
+
+/**
+ * @brief Output operator for ToAttackerModel.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToAttackerModel model) {
+    return os << attacker_model_to_string(model);
+}
+
+/**
+ * @brief Output operator for ToInconclusiveReason.
+ */
+inline std::ostream& operator<<(std::ostream& os, ToInconclusiveReason reason) {
+    return os << inconclusive_reason_to_string(reason);
+}
+
+/**
+ * @brief Output operator for ToEffect.
+ */
+inline std::ostream& operator<<(std::ostream& os, const ToEffect& effect) {
+    os << std::fixed << std::setprecision(2);
+    os << effect.shift_ns << " ns (shift) + " << effect.tail_ns << " ns (tail)";
+    os << " [" << effect.ci_low_ns << ", " << effect.ci_high_ns << "] ns 95% CI";
+    os << ", pattern: " << effect.pattern;
+    return os;
+}
+
+/**
+ * @brief Output operator for ToResult.
+ *
+ * Provides a human-readable summary of the analysis result.
+ */
+inline std::ostream& operator<<(std::ostream& os, const ToResult& result) {
+    os << "Outcome: " << result.outcome << "\n";
+    os << std::fixed << std::setprecision(2);
+    os << "Leak probability: " << (result.leak_probability * 100.0) << "%\n";
+    os << "Effect: " << result.effect << "\n";
+    os << "Quality: " << result.quality << "\n";
+    os << "Samples: " << result.samples_used << " per class\n";
+    os << "Elapsed: " << result.elapsed_secs << " seconds\n";
+
+    if (result.outcome == ToOutcome::Fail) {
+        os << "Exploitability: " << result.exploitability << "\n";
+    }
+
+    if (result.outcome == ToOutcome::Inconclusive &&
+        result.inconclusive_reason != ToInconclusiveReason::None) {
+        os << "Reason: " << result.inconclusive_reason << "\n";
+    }
+
+    os << "Thresholds: user=" << result.theta_user_ns << " ns, "
+       << "effective=" << result.theta_eff_ns << " ns, "
+       << "floor=" << result.theta_floor_ns << " ns";
+
+    return os;
 }
 
 } // namespace timing_oracle

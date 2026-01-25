@@ -1,0 +1,440 @@
+---
+title: Testing Cryptographic Code
+description: Practical patterns for timing tests on cryptographic operations
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This guide provides copy-paste patterns for testing common cryptographic operations. For background on how to choose input classes, see [The Two-Class Pattern](/core-concepts/two-class-pattern).
+
+## Before you start
+
+### Verify your harness
+
+Before trusting results from timing tests, verify the test harness itself works:
+
+**1. Identical inputs should pass:**
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || [0u8; 32],  // Same as baseline
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::Research)
+    .test(inputs, |data| my_function(&data));
+
+assert!(outcome.passed(), "Sanity check failed");
+```
+
+**2. Known-leaky code should fail:**
+
+```rust
+fn definitely_leaky(data: &[u8]) -> bool {
+    data.iter().all(|&b| b == 0)
+}
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || [0xFFu8; 64],
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        definitely_leaky(&data);
+    });
+
+assert!(outcome.failed(), "Harness should detect obvious leak");
+```
+
+If both checks pass, your harness is working correctly.
+
+---
+
+## Block ciphers
+
+### AES
+
+```rust
+use aes::cipher::{BlockEncrypt, KeyInit, generic_array::GenericArray};
+use aes::Aes128;
+
+let key = GenericArray::from([0x42u8; 16]);
+let cipher = Aes128::new(&key);
+
+let inputs = InputPair::new(
+    || [0u8; 16],
+    || rand::random::<[u8; 16]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |plaintext| {
+        let mut block = GenericArray::clone_from_slice(plaintext);
+        cipher.encrypt_block(&mut block);
+        std::hint::black_box(block);
+    });
+```
+
+<Aside type="tip">
+`black_box` prevents the compiler from optimizing away the encryption. Always use it when the result isn't otherwise consumed.
+</Aside>
+
+### AES with multiple blocks
+
+```rust
+let inputs = InputPair::new(
+    || [[0u8; 16]; 4],
+    || std::array::from_fn(|_| rand::random::<[u8; 16]>()),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |blocks| {
+        for block in blocks {
+            let mut b = GenericArray::clone_from_slice(block);
+            cipher.encrypt_block(&mut b);
+            std::hint::black_box(b);
+        }
+    });
+```
+
+---
+
+## AEAD ciphers
+
+### ChaCha20-Poly1305
+
+AEAD ciphers require unique nonces. Use an atomic counter:
+
+```rust
+use chacha20poly1305::{ChaCha20Poly1305, KeyInit, AeadInPlace, Nonce};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+let key = ChaCha20Poly1305::generate_key(&mut rand::thread_rng());
+let cipher = ChaCha20Poly1305::new(&key);
+let nonce_counter = AtomicU64::new(0);
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || rand::random::<[u8; 64]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |plaintext| {
+        let n = nonce_counter.fetch_add(1, Ordering::Relaxed);
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..8].copy_from_slice(&n.to_le_bytes());
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let mut buffer = plaintext.to_vec();
+        cipher.encrypt_in_place(nonce, b"", &mut buffer).unwrap();
+        std::hint::black_box(buffer);
+    });
+```
+
+### AES-GCM
+
+```rust
+use aes_gcm::{Aes256Gcm, KeyInit, AeadInPlace, Nonce};
+use std::sync::atomic::{AtomicU64, Ordering};
+
+let key = Aes256Gcm::generate_key(&mut rand::thread_rng());
+let cipher = Aes256Gcm::new(&key);
+let nonce_counter = AtomicU64::new(0);
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || rand::random::<[u8; 64]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |plaintext| {
+        let n = nonce_counter.fetch_add(1, Ordering::Relaxed);
+        let mut nonce_bytes = [0u8; 12];
+        nonce_bytes[..8].copy_from_slice(&n.to_le_bytes());
+        let nonce = Nonce::from_slice(&nonce_bytes);
+
+        let mut buffer = plaintext.to_vec();
+        cipher.encrypt_in_place(nonce, b"", &mut buffer).unwrap();
+        std::hint::black_box(buffer);
+    });
+```
+
+<Aside type="caution" title="Nonce handling">
+Never reuse nonces in AEAD encryption; it breaks security. The atomic counter ensures each measurement uses a unique nonce.
+</Aside>
+
+---
+
+## Hash functions
+
+### SHA-3
+
+```rust
+use sha3::{Sha3_256, Digest};
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || rand::random::<[u8; 64]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        let mut hasher = Sha3_256::new();
+        hasher.update(&data);
+        std::hint::black_box(hasher.finalize());
+    });
+```
+
+### BLAKE2
+
+```rust
+use blake2::{Blake2b512, Digest};
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || rand::random::<[u8; 64]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        let mut hasher = Blake2b512::new();
+        hasher.update(&data);
+        std::hint::black_box(hasher.finalize());
+    });
+```
+
+### Incremental hashing
+
+```rust
+use sha3::{Sha3_256, Digest};
+
+let inputs = InputPair::new(
+    || [[0u8; 64]; 4],
+    || std::array::from_fn(|_| rand::random::<[u8; 64]>()),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |chunks| {
+        let mut hasher = Sha3_256::new();
+        for chunk in chunks {
+            hasher.update(chunk);
+        }
+        std::hint::black_box(hasher.finalize());
+    });
+```
+
+---
+
+## Elliptic curves
+
+### X25519 scalar multiplication
+
+```rust
+use x25519_dalek::PublicKey;
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |scalar_bytes| {
+        // PublicKey::from performs scalar multiplication with basepoint
+        let public = PublicKey::from(*scalar_bytes);
+        std::hint::black_box(public);
+    });
+```
+
+### Full ECDH
+
+```rust
+use x25519_dalek::{EphemeralSecret, PublicKey};
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |peer_public_bytes| {
+        let secret = EphemeralSecret::random_from_rng(&mut rand::thread_rng());
+        let peer_public = PublicKey::from(*peer_public_bytes);
+        let shared = secret.diffie_hellman(&peer_public);
+        std::hint::black_box(shared);
+    });
+```
+
+---
+
+## RSA
+
+### RSA signing
+
+```rust
+use rsa::{RsaPrivateKey, pkcs1v15::SigningKey, signature::Signer};
+use sha2::Sha256;
+
+let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+let signing_key = SigningKey::<Sha256>::new(private_key);
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(60))  // RSA is slow
+    .test(inputs, |message| {
+        let signature = signing_key.sign(message);
+        std::hint::black_box(signature);
+    });
+```
+
+### RSA decryption
+
+```rust
+use rsa::{RsaPrivateKey, RsaPublicKey, Pkcs1v15Encrypt};
+
+let private_key = RsaPrivateKey::new(&mut rand::thread_rng(), 2048).unwrap();
+let public_key = RsaPublicKey::from(&private_key);
+
+// Pre-encrypt messages for timing test
+let encrypt_msg = |msg: &[u8]| {
+    public_key.encrypt(&mut rand::thread_rng(), Pkcs1v15Encrypt, msg).unwrap()
+};
+
+let inputs = InputPair::new(
+    move || encrypt_msg(&[0u8; 32]),
+    move || encrypt_msg(&rand::random::<[u8; 32]>()),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .time_budget(Duration::from_secs(60))
+    .test(inputs, |ciphertext| {
+        let _ = private_key.decrypt(Pkcs1v15Encrypt, &ciphertext);
+    });
+```
+
+---
+
+## Comparison functions
+
+For comparison functions, the baseline must match the secret:
+
+```rust
+let secret = [0u8; 32];
+
+let inputs = InputPair::new(
+    || [0u8; 32],           // Matches secret → full comparison
+    || rand::random(),      // Mismatches → early exit (if leaky)
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        constant_time_compare(&secret, &data);
+    });
+```
+
+See [The Two-Class Pattern](/core-concepts/two-class-pattern#the-comparison-function-trap) for why this matters.
+
+---
+
+## Input generation patterns
+
+### Fresh random values (correct)
+
+```rust
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),  // Fresh each time
+);
+```
+
+### Thread-safe counters
+
+For deterministic sequences:
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+
+let counter = AtomicU64::new(0);
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || {
+        let i = counter.fetch_add(1, Ordering::Relaxed);
+        let mut data = [0u8; 32];
+        data[..8].copy_from_slice(&i.to_le_bytes());
+        data
+    },
+);
+```
+
+### Pre-initialized state
+
+Expensive setup should happen outside the measurement:
+
+```rust
+// Setup once
+let key = expensive_key_derivation();
+let cipher = Aes256Gcm::new(&key);
+
+let inputs = InputPair::new(|| [0u8; 64], || rand::random());
+
+// Measure only the operation
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |plaintext| {
+        // cipher is already initialized
+        cipher.encrypt(&nonce, &plaintext);
+    });
+```
+
+---
+
+## Async operations
+
+For async code, use `block_on`:
+
+```rust
+use tokio::runtime::Runtime;
+
+// Create runtime once
+let rt = tokio::runtime::Builder::new_current_thread()
+    .enable_time()
+    .build()
+    .unwrap();
+
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        rt.block_on(async {
+            async_crypto_operation(&data).await;
+        })
+    });
+```
+
+<Aside type="tip">
+Use `new_current_thread()` for lower noise. Multi-threaded runtimes add scheduling jitter.
+</Aside>
+
+---
+
+## Quick reference
+
+| Operation | Baseline | Sample | Notes |
+|-----------|----------|--------|-------|
+| Block cipher | `[0u8; 16]` | `rand::random()` | Standard pattern |
+| AEAD | `[0u8; 64]` | `rand::random()` | Use atomic nonce counter |
+| Hash | `[0u8; 64]` | `rand::random()` | Standard pattern |
+| ECC scalar mult | `[0u8; 32]` | `rand::random()` | Standard pattern |
+| RSA | `[0u8; 32]` | `rand::random()` | Use longer time budget |
+| Comparison | Match secret | `rand::random()` | Baseline must equal secret |
+| HMAC verify | Valid tag | Invalid tag | Test verification path |

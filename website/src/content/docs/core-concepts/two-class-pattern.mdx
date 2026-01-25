@@ -1,0 +1,301 @@
+---
+title: The Two-Class Pattern
+description: How to choose input classes that reveal timing side channels
+sidebar:
+  order: 1
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+timing-oracle uses **two-class testing** to detect timing side channels. You provide two types of inputs (baseline and sample) and the library measures whether they take different amounts of time. If your code is constant-time, both classes complete in the same duration. If there's a timing leak, one class is consistently faster or slower than the other.
+
+This page explains how to choose input classes that will actually reveal timing leaks in your code.
+
+## Starting with a simple case
+
+Let's start with an example where the input class choice is straightforward: testing whether a hash function has data-dependent timing.
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use sha3::{Sha3_256, Digest};
+
+let inputs = InputPair::new(
+    || [0u8; 64],           // Baseline: all zeros
+    || rand::random(),      // Sample: random bytes
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        let mut hasher = Sha3_256::new();
+        hasher.update(&data);
+        std::hint::black_box(hasher.finalize());
+    });
+```
+
+This works because SHA-3 processes all input bytes the same way regardless of their values. The zeros and random bytes go through identical code paths, so any timing difference would indicate a leak.
+
+**Why this pattern works here:**
+- Both inputs are the same size (64 bytes)
+- Both inputs go through the same hash computation
+- The only difference is the byte values themselves
+- A constant-time hash function treats all byte values identically
+
+This **zeros vs random** pattern is your default for most cryptographic primitives: block ciphers, hash functions, MACs, and many asymmetric operations.
+
+## Why zeros vs random works
+
+Zeros are a useful baseline because they're a *degenerate case*: no bits are set, all bytes are identical, and any computation over them has uniform behavior. Random data, by contrast, has varied bit patterns that exercise different internal states.
+
+If an implementation has timing that depends on input values (like branching on individual bits or accessing different cache lines based on byte values), zeros and random inputs will trigger measurably different execution times.
+
+```
+Baseline (zeros):  [0x00, 0x00, 0x00, ...] → uniform computation
+Sample (random):   [0x7A, 0xF2, 0x1B, ...] → varied computation
+
+Constant-time code: both take the same time ✓
+Leaky code: one is faster than the other ✗
+```
+
+## When zeros vs random isn't enough
+
+Some functions have timing that depends on the *relationship* between the input and some internal state, not just the input values themselves. For these functions, zeros vs random won't create the timing asymmetry you need.
+
+### The comparison function trap
+
+Consider testing an early-exit comparison function:
+
+```rust
+// A leaky comparison (exits on first mismatch)
+fn leaky_compare(a: &[u8], b: &[u8]) -> bool {
+    for i in 0..a.len() {
+        if a[i] != b[i] {
+            return false;  // Early exit!
+        }
+    }
+    true
+}
+```
+
+If you test this naively:
+
+```rust
+let secret = [0x42u8; 32];  // Secret value being compared
+
+let inputs = InputPair::new(
+    || [0u8; 32],           // Baseline: zeros
+    || rand::random(),      // Sample: random
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        leaky_compare(&secret, &data);
+    });
+```
+
+**This test will incorrectly pass.** Here's why:
+
+- Baseline `[0x00, 0x00, ...]` compared to secret `[0x42, 0x42, ...]`: mismatch on byte 0, exits immediately
+- Sample `[0x7A, 0xF2, ...]` compared to secret `[0x42, 0x42, ...]`: mismatch on byte 0, exits immediately
+
+Both inputs exit on the very first byte! There's no timing difference to detect, even though the function is clearly not constant-time.
+
+### The fix: baseline must match the secret
+
+For comparison functions, the baseline must match what's being compared against:
+
+```rust
+let secret = [0u8; 32];  // Use a secret that baseline will match
+
+let inputs = InputPair::new(
+    || [0u8; 32],           // Baseline: matches secret → checks ALL bytes
+    || rand::random(),      // Sample: random → exits on first mismatch
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        leaky_compare(&secret, &data);
+    });
+```
+
+Now:
+- Baseline `[0x00, 0x00, ...]` matches secret → compares all 32 bytes (slow)
+- Sample `[0x7A, 0xF2, ...]` mismatches → exits on first differing byte (fast)
+
+The early-exit leak creates a measurable timing difference, and the test correctly fails.
+
+## The general principle
+
+To detect a timing leak, your two input classes must trigger different timing behaviors:
+
+| Class | Purpose |
+|-------|---------|
+| **Baseline** | Triggers one timing behavior (often the slow path) |
+| **Sample** | Triggers a different timing behavior (often the fast path) |
+
+If your code is constant-time, both classes take the same time regardless of which path you intended them to trigger. If there's a leak, one class is consistently faster.
+
+The key question to ask: **What makes this operation take different amounts of time?**
+
+| What causes timing variation | Baseline | Sample |
+|------------------------------|----------|--------|
+| Branches on bit values | All zeros (no bits set) | Random (many bits set) |
+| Early-exit on mismatch | Matches the secret | Random (mismatches early) |
+| Cache access by index | Same indices repeatedly | Random indices |
+| Conditional operations on high bits | All zeros (high bits clear) | Random (high bits vary) |
+
+## Patterns by operation type
+
+### Block ciphers, hash functions, MACs
+
+Use the standard zeros vs random pattern:
+
+```rust
+let inputs = InputPair::new(
+    || [0u8; 16],           // Baseline: zeros
+    || rand::random(),      // Sample: random
+);
+```
+
+These primitives should process all input bytes identically.
+
+### AEAD ciphers (AES-GCM, ChaCha20-Poly1305)
+
+Use zeros vs random for the plaintext, but ensure unique nonces:
+
+```rust
+use std::sync::atomic::{AtomicU64, Ordering};
+
+let nonce_counter = AtomicU64::new(0);
+
+let inputs = InputPair::new(
+    || [0u8; 64],
+    || rand::random(),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |plaintext| {
+        let n = nonce_counter.fetch_add(1, Ordering::Relaxed);
+        let mut nonce = [0u8; 12];
+        nonce[..8].copy_from_slice(&n.to_le_bytes());
+
+        cipher.encrypt(&nonce, &plaintext);
+    });
+```
+
+<Aside type="tip">
+AEAD ciphers require unique nonces. Using the same nonce for every measurement would be cryptographically unsafe and could also introduce spurious timing variations.
+</Aside>
+
+### Comparison and equality functions
+
+Baseline must match the value being compared:
+
+```rust
+let secret = [0u8; 32];
+
+let inputs = InputPair::new(
+    || [0u8; 32],           // Matches secret
+    || rand::random(),      // Mismatches
+);
+```
+
+### Scalar multiplication (X25519, ECDH)
+
+Use zeros vs random for the scalar:
+
+```rust
+let inputs = InputPair::new(
+    || [0u8; 32],           // Baseline: zero scalar
+    || rand::random(),      // Sample: random scalar
+);
+```
+
+Constant-time implementations should handle all scalar values identically. A naive square-and-multiply implementation would branch on scalar bits.
+
+### RSA operations
+
+Use zeros vs random for the message/plaintext:
+
+```rust
+let inputs = InputPair::new(
+    || vec![0u8; 256],      // Baseline: zero-padded
+    || random_padded_msg(), // Sample: random content
+);
+```
+
+## Verifying your test harness
+
+Before trusting results from a timing test, verify that your harness itself is working correctly.
+
+### Sanity check: identical inputs should pass
+
+If you test with both classes generating the same input, the test should always pass:
+
+```rust
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || [0u8; 32],  // Same as baseline
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::Research)
+    .test(inputs, |data| my_function(&data));
+
+assert!(outcome.passed(), "Sanity check failed: identical inputs should pass");
+```
+
+If this fails, there's likely an environmental issue (high system noise, measurement problems) rather than a timing leak in your code.
+
+### Known-leaky test: verify detection works
+
+Test against a function you know is not constant-time:
+
+```rust
+fn definitely_leaky(data: &[u8]) -> bool {
+    data.iter().all(|&b| b == 0)  // Early exit on non-zero
+}
+
+let inputs = InputPair::new(
+    || [0u8; 64],           // All zeros → checks all bytes
+    || [0xFFu8; 64],        // All 0xFF → exits on first byte
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        definitely_leaky(&data);
+    });
+
+assert!(outcome.failed(), "Should detect the obvious leak");
+```
+
+If your harness can't detect this obvious leak, something is wrong with your measurement setup.
+
+## Input generation: closures, not values
+
+The `InputPair::new()` function takes closures that generate fresh inputs for each measurement:
+
+```rust
+// ✓ Correct: fresh random value each time
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random::<[u8; 32]>(),  // Called on each measurement
+);
+
+// ✗ Wrong: same captured value for all measurements
+let random_value = rand::random::<[u8; 32]>();
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || random_value,  // Always returns the same value!
+);
+```
+
+Generating fresh random values ensures that sample-class measurements exercise varied code paths across the test run.
+
+## Summary
+
+1. **Default pattern**: zeros vs random works for most crypto primitives
+2. **Comparison functions**: baseline must match the secret
+3. **The key question**: what makes this operation take different amounts of time?
+4. **Verify your harness**: test with identical inputs (should pass) and known-leaky code (should fail)
+5. **Use closures**: generate fresh inputs for each measurement
+
+For copy-paste patterns for specific cryptographic operations, see [Testing Cryptographic Code](/guides/testing-crypto).

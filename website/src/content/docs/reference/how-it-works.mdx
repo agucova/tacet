@@ -1,0 +1,217 @@
+---
+title: How It Works
+description: The statistical methodology behind timing-oracle
+sidebar:
+  order: 1
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+<Aside>
+**For curious users and practitioners.** This page explains the statistical methodology in accessible terms. You can use timing-oracle effectively without understanding these details. Start with [Quick Start](/getting-started/quick-start) instead.
+
+**For statisticians and researchers:** This is a simplified overview. For the complete mathematical specification with formal definitions, see the [Specification](/reference/specification).
+</Aside>
+
+This page describes the statistical methodology used by timing-oracle to detect timing side channels.
+
+## The core idea
+
+**In plain English:** We run your code thousands of times with two types of inputs (baseline and sample). If the timing distributions differ by more than your threshold, we report a leak. The key innovation is *how* we make that comparison:
+
+1. **Compare distributions, not averages**: A timing leak might only affect some runs (cache misses, branch mispredictions), so we compare the full timing distribution using multiple percentiles.
+
+2. **Bayesian probability**: Instead of a yes/no answer, we compute the *probability* that there's a security-relevant leak. This lets us say "72% confident there's a leak" rather than just "the t-statistic is 4.7."
+
+3. **Adaptive stopping**: We keep collecting samples until we're confident enough to decide. Clear cases stop early; borderline cases get more evidence.
+
+## Two-phase pipeline
+
+timing-oracle uses an adaptive two-phase approach:
+
+```
+                    Timing Samples
+                          │
+           ┌──────────────┴──────────────┐
+           ▼                             ▼
+   ┌───────────────┐           ┌──────────────────┐
+   │  Phase 1:     │           │  Phase 2:        │
+   │  Calibration  │           │  Adaptive Loop   │
+   ├───────────────┤           ├──────────────────┤
+   │ 5,000 samples │           │ Batch collection │
+   │ Covariance    │           │ Posterior update │
+   │ estimation    │           │ Decision check   │
+   │ Prior setup   │   ────>   │ Quality gates    │
+   │               │           │                  │
+   │ Fixed cost    │           │ Stops when       │
+   │               │           │ P < 0.05 or      │
+   │               │           │ P > 0.95         │
+   └───────────────┘           └──────────────────┘
+```
+
+### Phase 1: Calibration
+
+The calibration phase collects an initial batch of samples (default: 5,000 per class) to:
+
+1. **Estimate noise covariance**: Timing measurements are noisy. Block bootstrap estimates the covariance structure of this noise.
+
+2. **Compute minimum detectable effect (MDE)**: Based on noise levels, what's the smallest effect we could reliably detect?
+
+3. **Set Bayesian priors**: The prior distribution is centered on zero effect with spread determined by the MDE.
+
+### Phase 2: Adaptive loop
+
+After calibration, the adaptive loop collects samples in batches until a decision is reached:
+
+1. **Collect batch**: Gather N samples per class (default: 1,000)
+
+2. **Update posterior**: Combine new data with existing posterior using Bayesian updating
+
+3. **Check decision thresholds**: If P(leak) < 0.05, pass. If P(leak) > 0.95, fail.
+
+4. **Apply quality gates**: Check for conditions that would make continued sampling futile
+
+5. **Repeat or stop**: Either collect more samples or return a result
+
+This adaptive approach:
+- **Stops early** on clear pass/fail cases (saves time)
+- **Gathers more evidence** when the signal is near the threshold
+- **Returns Inconclusive** when hitting resource limits or quality gates
+
+## Quantile-based statistics
+
+Rather than comparing means (which can miss distributional differences), timing-oracle compares **nine deciles** between baseline and sample classes:
+
+$$
+\begin{aligned}
+\text{Baseline:} \quad & [q_{10}, q_{20}, q_{30}, q_{40}, q_{50}, q_{60}, q_{70}, q_{80}, q_{90}] \\
+\text{Sample:} \quad & [q_{10}, q_{20}, q_{30}, q_{40}, q_{50}, q_{60}, q_{70}, q_{80}, q_{90}] \\[0.5em]
+& \Downarrow \\[0.5em]
+\text{Difference:} \quad & \boldsymbol{\Delta} \in \mathbb{R}^9
+\end{aligned}
+$$
+
+This captures two types of effects:
+
+- **Uniform shift**: All quantiles move by the same amount (e.g., different code path)
+- **Tail effect**: Upper quantiles move more than lower (e.g., cache misses)
+
+### Effect decomposition
+
+The difference vector $\boldsymbol{\Delta}$ is projected onto an orthogonalized basis:
+
+$$
+\boldsymbol{\Delta} = \mu \cdot \mathbf{1} + \tau \cdot \mathbf{v}_{\text{tail}} + \boldsymbol{\varepsilon}
+$$
+
+where $\mathbf{1} = [1,1,\ldots,1]^\top$ is the uniform vector and $\mathbf{v}_{\text{tail}}$ is a linear contrast vector $[-0.5, -0.375, \ldots, 0.375, 0.5]^\top$.
+
+- **$\mu$ (shift)**: Uniform component affecting all quantiles equally
+- **$\tau$ (tail)**: Linear component affecting upper quantiles more
+- **$\boldsymbol{\varepsilon}$**: Residual noise
+
+This decomposition is useful because:
+- A pure **UniformShift** suggests a branch on secret data
+- A pure **TailEffect** suggests data-dependent cache behavior
+- **Mixed** patterns suggest multiple leak sources
+
+## Bayesian inference
+
+The core question: given observed timing data, what's the probability that the timing difference exceeds your security threshold θ?
+
+**In plain English:** We start by assuming there's probably no leak (the prior). As we collect data, we update our belief. If the data strongly suggests a difference, our confidence in a leak increases. If not, it decreases. The final number (72%, 3%, etc.) represents how confident we are that there's a security-relevant leak.
+
+### Prior
+
+We start by assuming "probably no leak":
+- The prior is centered at zero effect
+- Its spread is determined by how noisy our measurements are (the MDE)
+- Default: 75% prior probability of no leak
+
+### Likelihood
+
+Each batch of samples updates our belief. The likelihood tells us: "How probable is this data if the true effect is X?" We model timing differences using multivariate normal distributions.
+
+### Posterior
+
+After each batch, we combine our prior belief with the new evidence using Bayes' theorem:
+
+$$
+p(\boldsymbol{\theta} \mid \text{data}) \propto p(\text{data} \mid \boldsymbol{\theta}) \cdot p(\boldsymbol{\theta})
+$$
+
+This gives us an updated probability distribution over possible effect sizes $\boldsymbol{\theta} = (\mu, \tau)$.
+
+### Decision
+
+We integrate the posterior to answer: "What's the probability that the effect exceeds the security threshold $\theta$?"
+
+$$
+P(\text{leak}) = P\bigl(\|\boldsymbol{\Delta}\| > \theta \mid \text{all data}\bigr)
+$$
+
+| Probability | Decision |
+|-------------|----------|
+| $P(\text{leak}) < 0.05$ | **Pass**: confident there's no exploitable leak |
+| $P(\text{leak}) > 0.95$ | **Fail**: confident there's a leak |
+| $0.05 \leq P(\text{leak}) \leq 0.95$ | Continue collecting or **Inconclusive** |
+
+This is different from DudeCT's t-test approach. DudeCT asks "is there *any* statistical difference?" while timing-oracle asks "is there a *security-relevant* difference above my threshold $\theta$?"
+
+## Quality gates
+
+The adaptive loop includes five quality gates that can stop sampling early:
+
+| Gate | Triggers when | Outcome |
+|------|---------------|---------|
+| `DataTooNoisy` | Posterior ≈ prior after calibration | Inconclusive |
+| `NotLearning` | KL divergence collapsed for 5+ batches | Inconclusive |
+| `WouldTakeTooLong` | Projected time exceeds budget | Inconclusive |
+| `TimeBudgetExceeded` | Wall-clock time exceeded | Inconclusive |
+| `SampleBudgetExceeded` | Sample limit reached | Inconclusive |
+
+These gates prevent wasting time on tests that won't converge.
+
+## Adaptive batching
+
+On platforms with coarse timer resolution (e.g., Apple Silicon's ~42ns counter), single-operation measurements are quantized. Adaptive batching compensates:
+
+1. **Pilot measurement**: Measure ~100 warmup iterations to estimate operation time $t_{\text{op}}$
+
+2. **$K$ selection**: Choose batch size $K$ to achieve ≥50 timer ticks per measurement:
+
+$$
+K = \max\!\left(1, \left\lceil \frac{50 \cdot r_{\text{timer}}}{t_{\text{op}}} \right\rceil\right)
+$$
+
+   where $r_{\text{timer}}$ is the timer resolution in nanoseconds.
+
+3. **Bound $K$**: Cap at $K = 20$ to avoid microarchitectural artifacts
+
+4. **Batch measurement**: Measure $K$ iterations together, analyze batch totals
+
+Batching is disabled when:
+- Timer resolution is already fine (>5 ticks per call)
+- Using cycle-accurate timers (kperf, perf\_event)
+- Operation is slow enough
+- Running on x86_64 (rdtsc provides cycle-accurate timing)
+
+## Block bootstrap
+
+Covariance estimation uses **circular block bootstrap** to account for potential autocorrelation in timing data:
+
+1. Divide samples into overlapping blocks of length $\ell \approx n^{1/3}$
+2. Resample blocks with replacement
+3. Compute quantile differences on resampled data
+4. Repeat $B = 2{,}000$ times to estimate covariance matrix $\hat{\Sigma}$
+
+Block bootstrap handles short-range dependencies that might arise from CPU state, cache effects, or measurement overhead.
+
+## References
+
+For the complete mathematical specification, see the [Specification](/reference/specification).
+
+**Academic references:**
+- Reparaz, O., Balasch, J., & Verbauwhede, I. (2016). "Dude, is my code constant time?" DATE. (Original DudeCT methodology)
+- Van Goethem, T., et al. (2020). "Timeless Timing Attacks." USENIX Security. (HTTP/2 timing attacks)
+- Crosby, S. A., Wallach, D. S., & Riedi, R. H. (2009). "Opportunities and limits of remote timing attacks." ACM TISSEC. (Effect size to exploitability mapping)

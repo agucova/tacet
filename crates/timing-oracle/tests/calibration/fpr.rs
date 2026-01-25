@@ -9,7 +9,7 @@
 //!
 //! See docs/calibration-test-spec.md for the full specification.
 
-mod calibration_utils;
+use crate::calibration_utils;
 
 use calibration_utils::{rand_bytes, CalibrationConfig, Decision, TrialRunner};
 use timing_oracle::helpers::InputPair;

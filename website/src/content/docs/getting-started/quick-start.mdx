@@ -2,164 +2,97 @@
 title: Quick Start
 description: Write your first timing side channel test
 sidebar:
-  order: 3
+  order: 2
 ---
 
-import { Aside } from '@astrojs/starlight/components';
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
 
-This guide walks through writing your first timing test to verify that a cryptographic operation is constant-time.
+This guide walks through writing and running your first timing test. You've seen the [basic pattern on the landing page](/); now let's create a complete, runnable test.
 
-## Basic Example
-
-```rust
-use timing_oracle::{timing_test_checked, TimingOracle, AttackerModel, Outcome};
-
-#[test]
-fn constant_time_compare() {
-    let secret = [0u8; 32];
-
-    let outcome = timing_test_checked! {
-        oracle: TimingOracle::for_attacker(AttackerModel::AdjacentNetwork),
-        baseline: || [0u8; 32],
-        sample: || rand::random::<[u8; 32]>(),
-        measure: |input| {
-            constant_time_eq(&secret, &input);
-        },
-    };
-
-    match outcome {
-        Outcome::Pass { .. } => { /* No leak */ }
-        Outcome::Fail { exploitability, .. } => panic!("Timing leak: {:?}", exploitability),
-        Outcome::Inconclusive { .. } => { /* Could not determine */ }
-        Outcome::Unmeasurable { .. } => { /* Operation too fast */ }
-    }
-}
-```
-
-## Understanding the Test
-
-### The Two-Class Pattern
-
-timing-oracle uses **DudeCT's two-class testing pattern**. You provide two input classes:
-
-- **Baseline**: Inputs that trigger one timing behavior
-- **Sample**: Inputs that trigger a different timing behavior
-
-If the operation is constant-time, both classes take the same time and no leak is detected.
-
-<Aside type="caution" title="Choosing input classes">
-For comparison functions, the baseline should **match** the secret so it runs the full comparison (slow), while random samples exit early (fast). See [Choosing Input Classes](/guides/user-guide#choosing-your-input-classes) for details.
-</Aside>
-
-### Attacker Models
-
-The `AttackerModel` determines the minimum timing difference (theta) that counts as a leak:
-
-| Model | Threshold | Use Case |
-|-------|-----------|----------|
-| `SharedHardware` | 0.6 ns (~2 cycles) | SGX, containers, cross-VM |
-| `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs |
-| `RemoteNetwork` | 50 us | Internet-facing services |
-
-Choose based on your threat model. See [Attacker Models](/getting-started/attacker-models) for guidance.
-
-### Outcomes
-
-The test returns one of four outcomes:
-
-- **Pass**: No timing leak detected (P(leak) < 5%)
-- **Fail**: Timing leak confirmed (P(leak) > 95%)
-- **Inconclusive**: Could not reach a decision within the time budget
-- **Unmeasurable**: Operation is too fast to measure reliably
-
-## Builder API
-
-For more control, use the builder API directly:
-
-```rust
-use timing_oracle::{TimingOracle, AttackerModel, Outcome, helpers::InputPair};
-use std::time::Duration;
-
-let inputs = InputPair::new(
-    || [0u8; 32],                   // Baseline
-    || rand::random::<[u8; 32]>()   // Sample
-);
-
-let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-    .time_budget(Duration::from_secs(30))
-    .max_samples(100_000)
-    .test(inputs, |data| {
-        my_crypto_function(data);
-    });
-```
-
-### Configuration Options
-
-```rust
-TimingOracle::for_attacker(AttackerModel::SharedHardware)
-    .time_budget(Duration::from_secs(60))   // How long to run
-    .max_samples(100_000)                   // Maximum samples per class
-    .pass_threshold(0.01)                   // More confident pass (default: 0.05)
-    .fail_threshold(0.99)                   // More confident fail (default: 0.95)
-```
-
-## Interpreting Results
-
-### Pass
-
-```rust
-Outcome::Pass { leak_probability, quality, .. } => {
-    println!("No leak: P(leak)={:.1}%", leak_probability * 100.0);
-    println!("Measurement quality: {:?}", quality);
-}
-```
-
-A pass means the timing difference is below your threshold with high confidence.
-
-### Fail
-
-```rust
-Outcome::Fail { leak_probability, effect, exploitability, .. } => {
-    println!("Timing leak detected!");
-    println!("Effect: {:.1} ns shift, {:.1} ns tail",
-             effect.shift_ns, effect.tail_ns);
-    println!("Exploitability: {:?}", exploitability);
-}
-```
-
-A fail includes:
-- **Effect size**: How large the timing difference is (in nanoseconds)
-- **Exploitability**: How easily an attacker could exploit it
-
-### Inconclusive
-
-```rust
-Outcome::Inconclusive { reason, leak_probability, .. } => {
-    println!("Inconclusive: {:?}", reason);
-    println!("Current estimate: P(leak)={:.1}%", leak_probability * 100.0);
-}
-```
-
-Common reasons:
-- `DataTooNoisy` - Measurement noise is too high
-- `NotLearning` - Posterior stopped updating
-- `TimeBudgetExceeded` - Ran out of time
-
-## Running Tests
+## Add the dependencies
 
 ```bash
-# Run all timing tests
-cargo test --test crypto_attacks
-
-# Run with output visible
-cargo test --test crypto_attacks -- --nocapture
-
-# Run a specific test
-cargo test --test crypto_attacks aes_constant_time -- --nocapture
+cargo add timing-oracle --dev
+cargo add rand --dev  # For random input generation
+cargo add subtle --dev  # For the constant-time comparison example
 ```
 
-## Next Steps
+## Write a test
 
-- [Attacker Models](/getting-started/attacker-models) - Choose the right threat model
-- [User Guide](/guides/user-guide) - Deep dive into the methodology
-- [Testing Patterns](/guides/testing-patterns) - Common patterns for different crypto operations
+Create a test file (e.g., `tests/timing.rs`):
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+use std::time::Duration;
+
+#[test]
+fn test_constant_time_compare() {
+    let secret = [0u8; 32];
+
+    // Baseline matches secret (slow path if leaky)
+    // Sample is random (fast path if leaky)
+    let inputs = InputPair::new(
+        || [0u8; 32],
+        || rand::random::<[u8; 32]>(),
+    );
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .time_budget(Duration::from_secs(30))
+        .test(inputs, |input| {
+            // Test your comparison function
+            constant_time_eq(&secret, &input);
+        });
+
+    // Display prints nicely formatted output with colors
+    println!("{outcome}");
+
+    // Assert the test passed (panics on Fail, warns on Inconclusive/Unmeasurable)
+    assert!(outcome.passed(), "Timing leak detected");
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    // Your constant-time comparison implementation
+    subtle::ConstantTimeEq::ct_eq(a, b).into()
+}
+```
+
+## Run the test
+
+```bash
+cargo test --test timing -- --test-threads=1 --nocapture
+```
+
+<Aside type="tip">
+`--test-threads=1` is important: parallel tests interfere with timing measurements. See [CI Integration](/guides/ci-integration) for details.
+</Aside>
+
+You should see output like:
+
+```
+[test_constant_time_compare]
+timing-oracle
+──────────────────────────────────────────────────────────────
+
+  Samples: 6000 per class
+  Quality: Good
+
+  ✓ No timing leak detected
+
+    Probability of leak: 0.0%
+    95% CI: 0.0–12.5 ns
+
+──────────────────────────────────────────────────────────────
+```
+
+## What just happened
+
+The library ran your function thousands of times with two types of inputs (baseline zeros and random samples), measured execution times, and compared the timing distributions using Bayesian statistics. The result tells you whether there's a security-relevant timing difference above your chosen threshold.
+
+For details on the statistical methodology, see [How It Works](/reference/how-it-works).
+
+## Next steps
+
+- [The Two-Class Pattern](/core-concepts/two-class-pattern): Understanding how to choose input classes
+- [Attacker Models](/core-concepts/attacker-models): Choosing the right threat model
+- [Interpreting Results](/core-concepts/interpreting-results): Understanding outcomes in depth
+- [Testing Cryptographic Code](/guides/testing-crypto): Patterns for specific cryptographic operations

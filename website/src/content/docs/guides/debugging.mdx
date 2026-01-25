@@ -1,0 +1,480 @@
+---
+title: Debugging
+description: Diagnosing and fixing common timing test issues
+sidebar:
+  order: 3
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This guide helps diagnose issues when timing tests don't behave as expected.
+
+## First step: verify your harness
+
+Before investigating other issues, confirm your test harness is working:
+
+```rust
+use timing_oracle::{TimingOracle, AttackerModel, helpers::InputPair};
+
+// Test 1: Identical inputs should pass
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || [0u8; 32],  // Same as baseline
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::Research)
+    .test(inputs, |data| my_function(&data));
+
+assert!(outcome.passed(), "Sanity check failed: identical inputs should pass");
+
+// Test 2: Obviously leaky code should fail
+fn leaky(data: &[u8]) -> bool {
+    data.iter().all(|&b| b == 0)
+}
+
+let inputs = InputPair::new(|| [0u8; 64], || [0xFFu8; 64]);
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| { leaky(&data); });
+
+assert!(outcome.failed(), "Harness should detect obvious leak");
+```
+
+If Test 1 fails, there's an environmental issue. If Test 2 fails, check your measurement setup.
+
+---
+
+## High noise / TooNoisy quality
+
+**Symptoms:**
+- `quality: TooNoisy` or `Poor`
+- High minimum detectable effect (> 100ns)
+- Inconsistent results across runs
+- `Inconclusive` with `DataTooNoisy` reason
+
+**Causes and solutions:**
+
+### Run single-threaded
+
+Parallel tests interfere with timing measurements:
+
+```bash
+cargo test --test timing_tests -- --test-threads=1
+```
+
+### Check CPU governor (Linux)
+
+Power-saving mode causes CPU frequency fluctuations:
+
+```bash
+# Check current governor
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+
+# Set to performance
+sudo cpupower frequency-set -g performance
+```
+
+### Disable turbo boost
+
+Turbo boost changes CPU frequency dynamically:
+
+```bash
+# Intel
+echo 1 | sudo tee /sys/devices/system/cpu/intel_pstate/no_turbo
+
+# AMD
+echo 0 | sudo tee /sys/devices/system/cpu/cpufreq/boost
+```
+
+### Reduce background load
+
+- Close unnecessary applications
+- Check system load: `top`, `htop`
+- Avoid running during heavy I/O (builds, downloads)
+
+### Enable cycle-accurate timer
+
+Use `TimerSpec::CyclePrecision` for higher precision:
+
+```rust
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .timer_spec(TimerSpec::CyclePrecision)
+```
+
+This requires elevated privileges on ARM64:
+
+<Tabs>
+<TabItem label="macOS">
+```bash
+sudo -E cargo test -- --test-threads=1
+```
+</TabItem>
+<TabItem label="Linux">
+```bash
+sudo cargo test -- --test-threads=1
+# Or grant capability:
+sudo setcap cap_perfmon+ep ./target/debug/deps/my_test-*
+```
+</TabItem>
+</Tabs>
+
+---
+
+## False positives
+
+**Symptoms:**
+- Constant-time code flagged as leaky
+- Simple operations (XOR, memcpy) show timing differences
+- `leak_probability` high on known-safe code
+
+**Causes and solutions:**
+
+### Run the sanity check
+
+Test with identical inputs:
+
+```rust
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || [0u8; 32],  // Identical
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::Research)
+    .test(inputs, |data| my_function(&data));
+
+if !outcome.passed() {
+    println!("Environment issue detected: {:?}", outcome);
+}
+```
+
+If this fails, the problem is environmental, not your code.
+
+### Check preflight warnings
+
+The library runs preflight checks that may indicate issues:
+
+```rust
+match outcome {
+    Outcome::Pass { diagnostics, .. } | Outcome::Fail { diagnostics, .. } => {
+        if !diagnostics.preflight_warnings.is_empty() {
+            println!("Preflight warnings: {:?}", diagnostics.preflight_warnings);
+        }
+    }
+    _ => {}
+}
+```
+
+### Ensure identical code paths
+
+Both input classes must execute the same code:
+
+```rust
+// ✗ Wrong: different code paths
+let inputs = InputPair::new(
+    || encrypt_with_key_a(&data),  // Uses key A
+    || encrypt_with_key_b(&data),  // Uses key B
+);
+
+// ✓ Correct: same operation, different input data
+let inputs = InputPair::new(
+    || [0u8; 32],
+    || rand::random(),
+);
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| encrypt_with_key_a(&data));  // Same key
+```
+
+### Check for state pollution
+
+Ensure no global state is modified between measurements:
+
+```rust
+// ✗ Wrong: modifying shared state
+static mut COUNTER: u64 = 0;
+let outcome = oracle.test(inputs, |data| {
+    unsafe { COUNTER += 1; }  // Side effect!
+    process(data);
+});
+
+// ✓ Correct: isolated state
+let outcome = oracle.test(inputs, |data| {
+    process(data);  // No side effects
+});
+```
+
+---
+
+## Can't detect known leaks
+
+**Symptoms:**
+- Early-exit comparison shows `leak_probability < 0.5`
+- Tests pass on code you know is leaky
+- Known-leaky harness test passes
+
+**Causes and solutions:**
+
+### Verify the leak exists
+
+Manually check timing difference:
+
+```rust
+use std::time::Instant;
+
+let fixed_input = [0u8; 32];
+let random_input: [u8; 32] = rand::random();
+
+let mut fixed_times = Vec::new();
+let mut random_times = Vec::new();
+
+for _ in 0..1000 {
+    let start = Instant::now();
+    my_function(&fixed_input);
+    fixed_times.push(start.elapsed());
+
+    let start = Instant::now();
+    my_function(&random_input);
+    random_times.push(start.elapsed());
+}
+
+// Compare medians
+fixed_times.sort();
+random_times.sort();
+println!("Fixed median: {:?}", fixed_times[500]);
+println!("Random median: {:?}", random_times[500]);
+```
+
+### Prevent compiler optimization
+
+Use `black_box` to prevent the compiler from optimizing away the operation:
+
+```rust
+use std::hint::black_box;
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |data| {
+        black_box(my_function(black_box(data)));
+    });
+```
+
+### Prevent inlining
+
+Mark the function under test with `#[inline(never)]`:
+
+```rust
+#[inline(never)]
+fn my_function(data: &[u8]) -> bool {
+    // ...
+}
+```
+
+### Use larger inputs
+
+Larger inputs amplify timing differences:
+
+```rust
+// Small input: timing difference may be too small
+let inputs = InputPair::new(|| [0u8; 8], || rand::random::<[u8; 8]>());
+
+// Larger input: timing difference is amplified
+let inputs = InputPair::new(|| [0u8; 512], || rand::random::<[u8; 512]>());
+```
+
+### Use stricter threshold
+
+A tighter threshold may detect smaller effects:
+
+```rust
+// AdjacentNetwork (100ns) may miss small leaks
+TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+
+// SharedHardware (0.6ns) catches cycle-level differences
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+
+// Or custom threshold
+TimingOracle::for_attacker(AttackerModel::Custom { threshold_ns: 10.0 })
+```
+
+### Check input class selection
+
+For comparison functions, baseline must match the secret:
+
+```rust
+let secret = [0u8; 32];
+
+// ✗ Wrong: both exit early
+let inputs = InputPair::new(
+    || [0xFFu8; 32],        // Mismatches secret
+    || rand::random(),       // Also mismatches
+);
+
+// ✓ Correct: baseline matches, sample mismatches
+let inputs = InputPair::new(
+    || [0u8; 32],           // Matches secret → full comparison
+    || rand::random(),       // Mismatches → early exit
+);
+```
+
+See [The Two-Class Pattern](/core-concepts/two-class-pattern) for details.
+
+---
+
+## Unmeasurable results
+
+**Symptoms:**
+- `Outcome::Unmeasurable` returned
+- Message says operation is too fast
+
+**Causes and solutions:**
+
+### Use cycle-accurate timer
+
+Use `TimerSpec::CyclePrecision` for higher resolution:
+
+```rust
+TimingOracle::for_attacker(AttackerModel::SharedHardware)
+    .timer_spec(TimerSpec::CyclePrecision)
+```
+
+<Tabs>
+<TabItem label="macOS">
+```bash
+# Requires BOTH sudo AND single-threaded
+sudo -E cargo test -- --test-threads=1
+```
+</TabItem>
+<TabItem label="Linux">
+```bash
+sudo cargo test -- --test-threads=1
+```
+</TabItem>
+</Tabs>
+
+### Batch operations
+
+Test multiple iterations together:
+
+```rust
+let inputs = InputPair::new(
+    || [[0u8; 16]; 100],  // 100 blocks
+    || std::array::from_fn(|_| rand::random::<[u8; 16]>()),
+);
+
+let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+    .test(inputs, |blocks| {
+        for block in blocks {
+            cipher.encrypt_block(&mut block.into());
+        }
+    });
+```
+
+### Accept the limitation
+
+Some operations are genuinely too fast to measure:
+
+```rust
+match outcome {
+    Outcome::Unmeasurable { operation_ns, .. } => {
+        // If operation is <1ns, it may not be measurable on any platform
+        if operation_ns < 1.0 {
+            println!("Operation inherently unmeasurable");
+        }
+    }
+    _ => {}
+}
+```
+
+---
+
+## Platform-specific issues
+
+### macOS ARM64
+
+**kperf requires both sudo AND single-threaded:**
+
+```bash
+# This won't work (parallel tests)
+sudo cargo test
+
+# This works
+sudo -E cargo test -- --test-threads=1
+```
+
+Without `--test-threads=1`, kperf access fails. Use `TimerSpec::CyclePrecision` to get an error instead of silent fallback to the coarse ~42ns timer.
+
+### Linux perf_event
+
+**Check perf_event_paranoid setting:**
+
+```bash
+cat /proc/sys/kernel/perf_event_paranoid
+# 3 = no access, 2 = user only, 1 = limited, 0/-1 = full access
+
+# Allow unprivileged access (temporary)
+echo 1 | sudo tee /proc/sys/kernel/perf_event_paranoid
+
+# Or grant capability (persistent)
+sudo setcap cap_perfmon+ep ./target/debug/deps/my_test-*
+```
+
+### Virtual machines
+
+VMs have inherently higher timing noise:
+
+- Hypervisor overhead
+- Noisy neighbors
+- Timer virtualization
+
+**Recommendations:**
+- Use `AdjacentNetwork` threshold, not `SharedHardware`
+- Increase time budgets (60s+)
+- Accept some `Inconclusive` results
+- Consider bare metal for security-critical tests
+
+---
+
+## Getting more information
+
+### Enable verbose output
+
+```bash
+cargo test -- --nocapture
+```
+
+### Check diagnostics
+
+```rust
+match outcome {
+    Outcome::Pass { diagnostics, quality, .. }
+    | Outcome::Fail { diagnostics, quality, .. } => {
+        println!("Quality: {:?}", quality);
+        println!("Samples used: {}", diagnostics.samples_used);
+        println!("Theta user: {:.1}ns", diagnostics.theta_user);
+        println!("Theta effective: {:.1}ns", diagnostics.theta_eff);
+        println!("Theta floor: {:.1}ns", diagnostics.theta_floor);
+        if !diagnostics.preflight_warnings.is_empty() {
+            println!("Warnings: {:?}", diagnostics.preflight_warnings);
+        }
+    }
+    Outcome::Inconclusive { reason, leak_probability, .. } => {
+        println!("Inconclusive: {:?}", reason);
+        println!("Current estimate: P={:.1}%", leak_probability * 100.0);
+    }
+    Outcome::Unmeasurable { operation_ns, threshold_ns, recommendation, .. } => {
+        println!("Operation: {:.1}ns", operation_ns);
+        println!("Threshold: {:.1}ns", threshold_ns);
+        println!("Recommendation: {}", recommendation);
+    }
+}
+```
+
+---
+
+## Summary
+
+| Symptom | First thing to check |
+|---------|---------------------|
+| High noise / TooNoisy | Run with `--test-threads=1` |
+| False positive | Run sanity check (identical inputs) |
+| Can't detect leak | Check input class selection |
+| Unmeasurable | Use `TimerSpec::CyclePrecision` or batch operations |
+| Inconsistent results | Check CPU governor, disable turbo |
+| macOS kperf not working | Use both `sudo` AND `--test-threads=1` |

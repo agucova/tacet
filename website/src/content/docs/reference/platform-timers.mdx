@@ -1,0 +1,174 @@
+---
+title: Platform Timers
+description: Timer implementation details and platform-specific behavior
+sidebar:
+  order: 2
+---
+
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+This reference describes the timer implementations used by timing-oracle on different platforms.
+
+## Timer selection
+
+timing-oracle automatically selects the best available timer:
+
+| Platform | Standard Timer | Resolution | Cycle-Accurate Timer | Resolution |
+|----------|----------------|------------|---------------------|------------|
+| x86_64 Linux | `rdtsc` | ~0.3ns | `perf_event` | ~0.3ns |
+| x86_64 macOS | `rdtsc` | ~0.3ns | N/A | N/A |
+| ARM64 Linux | `cntvct_el0` | 1-40ns | `perf_event` | ~0.3ns |
+| ARM64 macOS | `cntvct_el0` | ~42ns | `kperf` | ~1ns |
+
+<Aside>
+ARM64 Linux resolution varies by SoC: AWS Graviton4 ~1ns, Ampere Altra ~40ns, Raspberry Pi 4 ~18ns.
+</Aside>
+
+## Enabling cycle-accurate timers
+
+Use `TimerSpec::CyclePrecision` to request cycle-accurate measurements. This uses kperf on macOS ARM64 and perf\_event on Linux:
+
+<Tabs>
+<TabItem label="macOS ARM64">
+```bash
+# Requires BOTH sudo AND single-threaded
+sudo -E cargo test -- --test-threads=1
+```
+
+kperf uses Apple's private performance framework. It requires root privileges and can only be accessed by one thread at a time; parallel tests silently fall back to the standard timer.
+</TabItem>
+<TabItem label="Linux">
+```bash
+# Option 1: Run as root
+sudo cargo test
+
+# Option 2: Grant CAP_PERFMON capability
+sudo setcap cap_perfmon+ep target/debug/deps/my_test-*
+
+# Option 3: Adjust perf_event_paranoid (temporary)
+echo 2 | sudo tee /proc/sys/kernel/perf_event_paranoid
+```
+
+Check current setting:
+```bash
+cat /proc/sys/kernel/perf_event_paranoid
+# 3 = no access, 2 = user only, 1 = limited, 0/-1 = full
+```
+</TabItem>
+</Tabs>
+
+## x86_64 details
+
+### rdtsc
+
+The `rdtsc` (Read Time-Stamp Counter) instruction reads the CPU's cycle counter:
+
+- **Invariant TSC**: Modern CPUs maintain constant rate regardless of frequency scaling
+- **Resolution**: ~0.3ns at 3 GHz
+- **No privileges required**
+
+The library uses serialization barriers (`mfence`/`lfence`) to prevent out-of-order execution from affecting measurements.
+
+### perf_event (Linux)
+
+Linux `perf_event` provides access to hardware performance counters:
+
+- Same resolution as rdtsc
+- Provides additional isolation from software overhead
+- Requires `CAP_PERFMON` or `perf_event_paranoid ≤ 2`
+
+## ARM64 macOS (Apple Silicon)
+
+### cntvct_el0
+
+The virtual timer counter runs at a fixed 24 MHz on M1/M2/M3/M4:
+
+- **Resolution**: ~41.67ns (1/24 MHz)
+- **No privileges required**
+- **Consistent across P/E cores**
+
+This relatively coarse resolution is compensated by adaptive batching.
+
+### kperf
+
+Apple's private performance framework provides cycle-accurate timing:
+
+- **Resolution**: ~1ns
+- **Requires root**
+- **Single-threaded only** (global resource)
+
+To use kperf:
+```bash
+sudo -E cargo test -- --test-threads=1
+```
+
+## ARM64 Linux
+
+### cntvct_el0
+
+Counter frequency varies by SoC:
+
+| SoC | Frequency | Resolution |
+|-----|-----------|------------|
+| AWS Graviton4 (ARMv8.6+) | 1 GHz | ~1ns |
+| Ampere Altra | 25 MHz | ~40ns |
+| Raspberry Pi 4 | 54 MHz | ~18ns |
+
+### perf_event
+
+Same as x86_64 Linux; requires `CAP_PERFMON` or `perf_event_paranoid ≤ 2`.
+
+## Adaptive batching
+
+On platforms with coarse timer resolution, fast operations complete in fewer timer ticks than needed for reliable measurement. The library automatically compensates:
+
+1. **Pilot measurement**: Run ~100 iterations to measure ticks per operation
+2. **Enable batching**: If < 5 ticks per call, batch multiple operations together
+3. **Select K**: Choose batch size K = min(ceil(50/ticks_per_call), 20)
+4. **Measure batches**: Record total time for K operations as one sample
+
+Batching is disabled when:
+- Timer has sufficient resolution (≥ 5 ticks per operation)
+- Using cycle-accurate timers (kperf, perf\_event)
+- Operation is slow enough
+
+## Pre-flight checks
+
+Before measurement begins, the library runs several checks:
+
+### Timer sanity
+- Verify timer is monotonic (second read ≥ first read)
+- Check timer advances at a reasonable rate
+- Detect if timer resolution is too coarse for any measurement
+
+### Harness sanity
+- Compare two halves of baseline samples
+- Detects problems like generator timing or side effects
+- If "leak" found between identical inputs, harness has a bug
+
+### Stationarity check
+- Detect drift over time that would violate statistical assumptions
+- Divide samples into windows, compare medians
+- Flags quality warning if significant drift detected
+
+## Unmeasurable operations
+
+Operations completing faster than ~10ns on Apple Silicon (or proportionally fast on other platforms) cannot be reliably measured:
+
+```
+Operation too fast to measure
+  Operation: ~5ns
+  Timer resolution: ~42ns
+  Recommendation: Use TimerSpec::CyclePrecision with sudo (~1ns resolution)
+```
+
+Options:
+1. Use `TimerSpec::CyclePrecision` for higher resolution
+2. Test a larger workload (more iterations, larger input)
+3. Accept that ultra-fast operations may not be measurable
+
+## Further reading
+
+- [Measurement Precision](/core-concepts/measurement-precision): Understanding θ_floor and threshold elevation
+- [How It Works](/reference/how-it-works): Full statistical methodology
+- [Specification](/reference/specification): Normative technical specification
