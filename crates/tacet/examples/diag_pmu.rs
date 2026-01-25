@@ -54,19 +54,9 @@ fn main() {
 }
 
 fn busy_wait_ns(ns: u64) {
-    let ticks = (ns * 24 + 999) / 1000;
-    let start: u64;
-    unsafe {
-        core::arch::asm!("mrs {}, cntvct_el0", out(reg) start);
-    }
-    loop {
-        let now: u64;
-        unsafe {
-            core::arch::asm!("mrs {}, cntvct_el0", out(reg) now);
-        }
-        if now.wrapping_sub(start) >= ticks {
-            break;
-        }
+    let start = std::time::Instant::now();
+    let target = Duration::from_nanos(ns);
+    while start.elapsed() < target {
         std::hint::spin_loop();
     }
 }
