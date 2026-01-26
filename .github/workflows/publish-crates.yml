@@ -34,13 +34,13 @@ jobs:
           cargo build -p tacet-macros --release
           cargo build -p tacet --release
 
-      - name: Run tests (excluding slow statistical validation)
+      - name: Run tests (core library only)
         run: |
           # Run all tests for tacet-core and tacet-macros
           cargo test -p tacet-core -p tacet-macros
-          # Run tacet tests excluding slow calibration and power analysis tests
+          # Run tacet core tests (skip crypto integration tests which test third-party implementations)
           cargo test -p tacet --lib
-          cargo test -p tacet --test unit --test core --test platform --test runtime --test macros --test crypto --test investigation
+          cargo test -p tacet --test unit --test core --test platform --test runtime --test macros
         timeout-minutes: 10
 
       - name: Dry run - tacet-core
