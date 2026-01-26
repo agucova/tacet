@@ -515,7 +515,7 @@ impl TimerSpec {
                 // On x86_64: rdtsc is already high-precision, use it directly
                 #[cfg(target_arch = "x86_64")]
                 {
-                    (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
+                    return (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None);
                 }
 
                 // On ARM64: try PMU timers first (cntvct_el0 is often coarse),
@@ -663,7 +663,7 @@ impl TimerSpec {
                 #[cfg(all(target_os = "linux", feature = "perf"))]
                 {
                     match LinuxPerfTimer::new() {
-                        Ok(perf) => (BoxedTimer::Perf(perf), TimerFallbackReason::None),
+                        Ok(perf) => return (BoxedTimer::Perf(perf), TimerFallbackReason::None),
                         Err(e) => {
                             panic!(
                                 "RequireCycleAccurate: perf_event initialization failed: {:?}",
@@ -709,23 +709,24 @@ impl TimerSpec {
     /// Returns `true` if a cycle-accurate timer can be initialized
     /// (i.e., running with sufficient privileges on platforms that require them,
     /// or always true on x86_64 where rdtsc is available without privileges).
+    #[allow(clippy::needless_return)] // Returns are needed for mutually exclusive cfg blocks
     pub fn cycle_accurate_available() -> bool {
         // x86_64 rdtsc is always cycle-accurate
         #[cfg(target_arch = "x86_64")]
         {
-            true
+            return true;
         }
 
         // ARM64 macOS: check if kperf can be initialized
         #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
         {
-            PmuTimer::new().is_ok()
+            return PmuTimer::new().is_ok();
         }
 
         // Linux with perf feature: check if perf_event can be initialized
         #[cfg(all(target_os = "linux", feature = "perf"))]
         {
-            LinuxPerfTimer::new().is_ok()
+            return LinuxPerfTimer::new().is_ok();
         }
 
         // ARM64 without kperf feature (Linux without perf, or other platforms)
