@@ -511,6 +511,7 @@ impl TimerSpec {
                 }
             },
 
+            #[allow(clippy::needless_return)] // Returns needed in cfg blocks for early exit
             TimerSpec::Auto => {
                 // On x86_64: rdtsc is already high-precision, use it directly
                 #[cfg(target_arch = "x86_64")]
@@ -640,6 +641,7 @@ impl TimerSpec {
                 }
             }
 
+            #[allow(clippy::needless_return)] // Returns needed in cfg blocks for early exit
             TimerSpec::RequireCycleAccurate => {
                 // User explicitly requested cycle-accurate timing - fail hard if unavailable
                 #[cfg(all(target_os = "macos", target_arch = "aarch64", feature = "kperf"))]
