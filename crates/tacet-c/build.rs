@@ -104,13 +104,17 @@ fn generate_pkgconfig(crate_dir: &str) {
     let pc_content = substitute_template(&template, &version, platform_libs);
 
     // Write to target directory (profile-specific: debug or release)
+    // When cross-compiling, cargo sets TARGET and OUT_DIR points to target-specific dir
+    let out_dir = env::var("OUT_DIR").unwrap();
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-    let target_dir = PathBuf::from(crate_dir)
-        .join("../../target")
-        .join(&profile);
 
-    // Create target directory if it doesn't exist
-    fs::create_dir_all(&target_dir).ok();
+    // OUT_DIR is like target/$rust_target/$profile/build/tacet-c-xxx/out
+    // We need to write to target/$rust_target/$profile/tacet.pc
+    let out_path = PathBuf::from(&out_dir);
+    let target_dir = out_path
+        .ancestors()
+        .find(|p| p.ends_with(&profile))
+        .expect("Could not find profile directory");
 
     let pc_file = target_dir.join("tacet.pc");
     fs::write(&pc_file, pc_content)
