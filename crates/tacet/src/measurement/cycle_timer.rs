@@ -515,7 +515,7 @@ impl TimerSpec {
                 // On x86_64: rdtsc is already high-precision, use it directly
                 #[cfg(target_arch = "x86_64")]
                 {
-                    return (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None);
+                    (BoxedTimer::Standard(Timer::new()), TimerFallbackReason::None)
                 }
 
                 // On ARM64: try PMU timers first (cntvct_el0 is often coarse),
@@ -663,7 +663,7 @@ impl TimerSpec {
                 #[cfg(all(target_os = "linux", feature = "perf"))]
                 {
                     match LinuxPerfTimer::new() {
-                        Ok(perf) => return (BoxedTimer::Perf(perf), TimerFallbackReason::None),
+                        Ok(perf) => (BoxedTimer::Perf(perf), TimerFallbackReason::None),
                         Err(e) => {
                             panic!(
                                 "RequireCycleAccurate: perf_event initialization failed: {:?}",
@@ -713,7 +713,7 @@ impl TimerSpec {
         // x86_64 rdtsc is always cycle-accurate
         #[cfg(target_arch = "x86_64")]
         {
-            return true;
+            true
         }
 
         // ARM64 macOS: check if kperf can be initialized
@@ -725,7 +725,7 @@ impl TimerSpec {
         // Linux with perf feature: check if perf_event can be initialized
         #[cfg(all(target_os = "linux", feature = "perf"))]
         {
-            return LinuxPerfTimer::new().is_ok();
+            LinuxPerfTimer::new().is_ok()
         }
 
         // ARM64 without kperf feature (Linux without perf, or other platforms)

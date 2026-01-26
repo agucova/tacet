@@ -191,10 +191,8 @@ impl LinuxPerfTimer {
 
                 // Check wall clock time periodically
                 // (checking every iteration would dominate measurement)
-                if dummy & 0xFFFF == 0 {
-                    if start_time.elapsed().as_micros() >= 1000 {
-                        break;
-                    }
+                if dummy & 0xFFFF == 0 && start_time.elapsed().as_micros() >= 1000 {
+                    break;
                 }
             }
 

@@ -109,6 +109,7 @@ thread_local! {
 /// Pre-measures the cost of executing spin_bundle(1) many times,
 /// allowing runtime execution without measurement overhead.
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Used only in perf-enabled configurations
 struct BundleCalibration {
     /// Nanoseconds per single spin iteration.
     ///
@@ -198,6 +199,7 @@ impl BundleCalibration {
     ///
     /// Returns the iteration count that minimizes error vs target_ns.
     /// Uses the calibrated cost per unit iteration for sub-timer precision.
+    #[allow(dead_code)] // Used only in bundle-calibrated configurations
     fn iterations_for_target(&self, target_ns: u64) -> u64 {
         if target_ns == 0 || self.cost_per_unit <= 0.0 {
             return 0;
@@ -811,7 +813,7 @@ fn sysctl_read_u64(name: &str) -> Option<u64> {
 /// Check if a TSC frequency is reasonable (500 MHz to 10 GHz).
 #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
 fn is_reasonable_tsc_freq(freq: u64) -> bool {
-    freq >= 500_000_000 && freq <= 10_000_000_000
+    (500_000_000..=10_000_000_000).contains(&freq)
 }
 
 /// Fallback: Calibrate TSC frequency by measuring against Instant.
@@ -889,7 +891,7 @@ fn rdtsc() -> u64 {
 fn ns_to_ticks_x86_64(ns: u64) -> u64 {
     let freq = x86_64_tsc_freq();
     // ticks = ns * freq / 1e9
-    ((ns as u128 * freq as u128 + 999_999_999) / 1_000_000_000) as u64
+    ((ns as u128 * freq as u128).div_ceil(1_000_000_000)) as u64
 }
 
 // =============================================================================

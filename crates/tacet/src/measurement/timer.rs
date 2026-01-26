@@ -198,6 +198,7 @@ fn estimate_resolution_ns(cycles_per_ns: f64) -> f64 {
 }
 
 /// Empirically measure timer resolution by finding minimum non-zero difference.
+#[cfg_attr(target_arch = "x86_64", allow(dead_code))] // Used only on ARM64 and fallback
 fn measure_timer_resolution(cycles_per_ns: f64) -> f64 {
     let mut min_diff = u64::MAX;
 
