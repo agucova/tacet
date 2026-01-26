@@ -725,8 +725,8 @@ impl TimerSpec {
             return PmuTimer::new().is_ok();
         }
 
-        // Linux with perf feature: check if perf_event can be initialized
-        #[cfg(all(target_os = "linux", feature = "perf"))]
+        // Linux ARM64 with perf feature: check if perf_event can be initialized
+        #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
         {
             return LinuxPerfTimer::new().is_ok();
         }
