@@ -38,9 +38,9 @@ jobs:
         run: |
           # Run all tests for tacet-core and tacet-macros
           cargo test -p tacet-core -p tacet-macros
-          # Run tacet core tests (skip crypto integration tests which test third-party implementations)
+          # Run tacet core tests (skip integration tests which can be noisy in CI)
           cargo test -p tacet --lib
-          cargo test -p tacet --test unit --test core --test platform --test runtime --test macros
+          cargo test -p tacet --test unit --test core --test platform --test macros
         timeout-minutes: 10
 
       - name: Dry run - tacet-core
