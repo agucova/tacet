@@ -34,7 +34,7 @@ mod validation {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             mmap_measurements.push(cycles);
         }
 
@@ -84,7 +84,7 @@ mod validation {
         for _ in 0..1000 {
             let cycles = timer.measure_cycles(|| {
                 std::hint::black_box(42)
-            });
+            }).unwrap();
             if cycles > 0 {
                 measurements.push(cycles);
             }
@@ -130,7 +130,7 @@ mod validation {
         for _ in 0..20 {
             let cycles = timer.measure_cycles(|| {
                 std::hint::black_box(42)
-            });
+            }).unwrap();
             empty_cycles.push(cycles);
         }
         let empty_mean = empty_cycles.iter().sum::<u64>() as f64 / empty_cycles.len() as f64;
@@ -144,7 +144,7 @@ mod validation {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             small_cycles.push(cycles);
         }
         let small_mean = small_cycles.iter().sum::<u64>() as f64 / small_cycles.len() as f64;
@@ -158,7 +158,7 @@ mod validation {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             large_cycles.push(cycles);
         }
         let large_mean = large_cycles.iter().sum::<u64>() as f64 / large_cycles.len() as f64;
@@ -198,7 +198,7 @@ mod validation {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             measurements.push(cycles);
         }
 

@@ -35,7 +35,7 @@ mod comparison {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             measurements.push(cycles);
         }
 
@@ -95,7 +95,7 @@ mod comparison {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             measurements.push(cycles);
         }
 
@@ -152,7 +152,7 @@ mod comparison {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             measurements.push(cycles);
         }
 

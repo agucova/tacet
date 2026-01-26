@@ -62,7 +62,7 @@ fn test_perf_timer_measurement() {
             sum = sum.wrapping_add(std::hint::black_box(i));
         }
         std::hint::black_box(sum)
-    });
+    }).unwrap();
 
     eprintln!("Measured {} cycles for 10k additions", cycles);
     assert!(cycles > 0, "Should measure non-zero cycles");
@@ -95,7 +95,7 @@ fn test_perf_timer_consistency() {
                 sum = sum.wrapping_add(std::hint::black_box(i));
             }
             std::hint::black_box(sum)
-        });
+        }).unwrap();
         samples.push(cycles as f64);
     }
 
@@ -151,7 +151,7 @@ fn test_perf_timer_zero_work() {
     };
 
     // Measure essentially no work
-    let cycles = timer.measure_cycles(|| std::hint::black_box(42));
+    let cycles = timer.measure_cycles(|| std::hint::black_box(42)).unwrap();
 
     eprintln!("Measured {} cycles for minimal work", cycles);
     // Should be a small number (may be 0 or very small on some systems)
@@ -223,7 +223,7 @@ fn test_perf_vs_standard_timer() {
             let mut perf_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
                 let cycles =
-                    perf_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
+                    perf_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17))).unwrap();
                 perf_samples.push(cycles);
             }
 
@@ -231,7 +231,7 @@ fn test_perf_vs_standard_timer() {
             let mut std_samples: Vec<u64> = Vec::with_capacity(iterations);
             for _ in 0..iterations {
                 let cycles =
-                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17)));
+                    std_timer.measure_cycles(|| std::hint::black_box(42u64.wrapping_mul(17))).unwrap();
                 std_samples.push(cycles);
             }
 

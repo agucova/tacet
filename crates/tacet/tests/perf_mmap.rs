@@ -21,7 +21,7 @@ mod mmap_tests {
 
         let cycles = timer.measure_cycles(|| {
             std::hint::black_box(42)
-        });
+        }).unwrap();
 
         // Cycles might be 0 if permissions are denied, but shouldn't panic
         assert!(cycles >= 0);
@@ -39,7 +39,7 @@ mod mmap_tests {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
 
             // Should measure some cycles
             assert!(cycles > 0 || cycles == 0); // May be 0 if no permissions
@@ -68,7 +68,7 @@ mod mmap_tests {
         let mut timer = LinuxPerfTimer::new().unwrap();
 
         // Measure a no-op
-        let cycles = timer.measure_cycles(|| {});
+        let cycles = timer.measure_cycles(|| {}).unwrap();
 
         // Should be small but may vary
         assert!(cycles >= 0);
@@ -95,7 +95,7 @@ mod mmap_tests {
                 sum = sum.wrapping_add(std::hint::black_box(i));
             }
             std::hint::black_box(sum)
-        });
+        }).unwrap();
 
         // Should measure significant cycles for 10k iterations
         assert!(
@@ -126,7 +126,7 @@ mod mmap_tests {
                     sum = sum.wrapping_add(std::hint::black_box(i));
                 }
                 std::hint::black_box(sum)
-            });
+            }).unwrap();
             measurements.push(cycles);
         }
 
