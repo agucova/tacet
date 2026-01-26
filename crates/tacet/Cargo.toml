@@ -1,6 +1,6 @@
 [package]
 name = "tacet"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 rust-version = "1.90"
 license = "MPL-2.0"
@@ -13,8 +13,8 @@ documentation = "https://docs.rs/tacet"
 homepage = "https://github.com/agucova/tacet"
 
 [dependencies]
-tacet-core = { version = "0.3.1", path = "../tacet-core" }
-tacet-macros = { version = "0.3.1", path = "../tacet-macros", optional = true }
+tacet-core = { version = "0.3.2", path = "../tacet-core" }
+tacet-macros = { version = "0.3.2", path = "../tacet-macros", optional = true }
 colored = "3.0.0"
 nalgebra = { version = "0.34.1", default-features = false, features = ["std"] }
 rand = "0.9.2"

@@ -2135,7 +2135,7 @@ dependencies = [
 
 [[package]]
 name = "tacet"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aes",
  "aes-gcm",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-bench"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "clap 4.5.53",
  "indicatif",
@@ -2200,7 +2200,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-c"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "cbindgen",
  "tacet-core",
@@ -2208,7 +2208,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "colored",
  "hashbrown",
@@ -2224,7 +2224,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-macros"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2233,7 +2233,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-napi"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "napi",
  "napi-build",
@@ -2247,7 +2247,7 @@ dependencies = [
 
 [[package]]
 name = "tacet-wasm"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "console_error_panic_hook",
  "getrandom 0.2.16",
