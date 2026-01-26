@@ -19,12 +19,11 @@ mod mmap_tests {
         // Should work even if mmap setup fails (graceful fallback)
         let mut timer = LinuxPerfTimer::new().unwrap();
 
-        let cycles = timer.measure_cycles(|| {
+        let _cycles = timer.measure_cycles(|| {
             std::hint::black_box(42)
         }).unwrap();
 
-        // Cycles might be 0 if permissions are denied, but shouldn't panic
-        assert!(cycles >= 0);
+        // Measurement succeeded (unwrap didn't panic)
     }
 
     #[test]
@@ -33,7 +32,7 @@ mod mmap_tests {
 
         // Run multiple measurements to verify stability
         for _ in 0..100 {
-            let cycles = timer.measure_cycles(|| {
+            let _cycles = timer.measure_cycles(|| {
                 let mut sum = 0u64;
                 for i in 0..100 {
                     sum = sum.wrapping_add(std::hint::black_box(i));
@@ -41,8 +40,7 @@ mod mmap_tests {
                 std::hint::black_box(sum)
             }).unwrap();
 
-            // Should measure some cycles
-            assert!(cycles > 0 || cycles == 0); // May be 0 if no permissions
+            // Measurement succeeded
         }
     }
 
@@ -68,10 +66,9 @@ mod mmap_tests {
         let mut timer = LinuxPerfTimer::new().unwrap();
 
         // Measure a no-op
-        let cycles = timer.measure_cycles(|| {}).unwrap();
+        let _cycles = timer.measure_cycles(|| {}).unwrap();
 
-        // Should be small but may vary
-        assert!(cycles >= 0);
+        // Measurement succeeded - cycle count may be 0 or small
     }
 
     /// Integration test requiring root privileges and sysctl configuration.
