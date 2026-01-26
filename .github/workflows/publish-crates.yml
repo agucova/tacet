@@ -55,10 +55,12 @@ jobs:
       # (cargo publish --dry-run downloads deps from crates.io, not local paths)
       # The build verification above already checks tacet compiles correctly
 
-      # Uses crates.io trusted publishing (OIDC) - no token needed
+      # Uses crates.io trusted publishing (OIDC) or fallback to token
       # Configure at: https://crates.io/settings/tokens/trusted-publishers
       - name: Publish tacet-core
         if: inputs.dry_run != true
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p tacet-core
 
       - name: Wait for crates.io index update
@@ -67,6 +69,8 @@ jobs:
 
       - name: Publish tacet-macros
         if: inputs.dry_run != true
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p tacet-macros
 
       - name: Wait for crates.io index update
@@ -75,4 +79,6 @@ jobs:
 
       - name: Publish tacet
         if: inputs.dry_run != true
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: cargo publish -p tacet
