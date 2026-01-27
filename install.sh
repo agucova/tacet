@@ -101,20 +101,26 @@ check_write_permission() {
     fi
 }
 
-# Request sudo if needed
-ensure_sudo() {
+# Check sudo requirement and exit with instructions if needed
+check_sudo_requirement() {
     local prefix=$1
 
     if ! check_write_permission "$prefix"; then
-        warn "Installation to $prefix requires elevated privileges"
-
-        if ! sudo -v; then
-            error "Failed to obtain sudo privileges"
-            exit 1
+        error "Installation to $prefix requires elevated privileges"
+        echo ""
+        echo "Please re-run the installation with sudo:"
+        echo ""
+        if [ -f "$0" ]; then
+            echo "  sudo -E bash \"$0\""
+        else
+            echo "  curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | sudo -E bash"
         fi
-
-        # Re-run script with sudo
-        exec sudo -E bash "$0" "$@"
+        echo ""
+        echo "Or choose a different PREFIX where you have write access:"
+        echo ""
+        echo "  PREFIX=\$HOME/.local bash <(curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh)"
+        echo ""
+        exit 1
     fi
 }
 
@@ -147,8 +153,8 @@ main() {
         info "Installing version: $VERSION"
     fi
 
-    # Check write permissions (may trigger sudo)
-    ensure_sudo "$PREFIX"
+    # Check write permissions (exit if sudo required)
+    check_sudo_requirement "$PREFIX"
 
     # Download artifacts
     BASE_URL="https://github.com/agucova/tacet/releases/download/${VERSION}"

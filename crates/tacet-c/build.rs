@@ -83,14 +83,16 @@ fn get_platform_libs() -> &'static str {
     }
 }
 
-/// Substitute template variables in the pkg-config template
+/// Substitute template variables in the pkg-config template.
+///
+/// Keep PREFIX, LIBDIR, INCLUDEDIR as placeholders for install-time substitution.
+/// Only substitute VERSION and PLATFORM_LIBS at build time.
 fn substitute_template(template: &str, version: &str, platform_libs: &str) -> String {
     template
-        .replace("@PREFIX@", "/usr/local")
-        .replace("@LIBDIR@", "/usr/local/lib")
-        .replace("@INCLUDEDIR@", "/usr/local/include/tacet")
         .replace("@VERSION@", version)
         .replace("@PLATFORM_LIBS@", platform_libs)
+    // Note: @PREFIX@, @LIBDIR@, @INCLUDEDIR@ are preserved for install.sh
+    // to substitute at install time based on the user's chosen PREFIX
 }
 
 /// Generate pkg-config file from template
@@ -104,6 +106,8 @@ fn generate_pkgconfig(crate_dir: &str) {
     let pc_content = substitute_template(&template, &version, platform_libs);
 
     // Write to target directory (profile-specific: debug or release)
+    // Note: @PREFIX@, @LIBDIR@, @INCLUDEDIR@ remain as placeholders
+    // for install.sh to substitute at install time
     // When cross-compiling, cargo sets TARGET and OUT_DIR points to target-specific dir
     let out_dir = env::var("OUT_DIR").unwrap();
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());

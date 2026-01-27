@@ -683,8 +683,20 @@ impl SweepResults {
                     noise.name()
                 };
 
-                // Iterate over attacker models to properly separate results
-                for &attacker_model in &self.config.attacker_models {
+                // Check if any results exist for this tool that support attacker models
+                let tool_supports_attacker = self.results.iter().any(|r| {
+                    r.tool == tool && r.attacker_threshold_ns.is_some()
+                });
+
+                // For tools that support attacker models, iterate over each model
+                // For tools that don't, create a single summary with threshold=None
+                let attacker_models_to_iterate: Vec<Option<AttackerModel>> = if tool_supports_attacker {
+                    self.config.attacker_models.clone()
+                } else {
+                    vec![None]
+                };
+
+                for &attacker_model in &attacker_models_to_iterate {
                     let expected_threshold = attacker_threshold_ns(attacker_model);
 
                     let matching: Vec<&BenchmarkResult> = self
@@ -698,6 +710,7 @@ impl SweepResults {
                             } else {
                                 (r.effect_sigma_mult - mult).abs() / mult.abs() < 0.01
                             };
+
                             r.tool == tool
                                 && r.effect_pattern == pattern.name()
                                 && effect_matches

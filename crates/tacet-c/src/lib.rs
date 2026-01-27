@@ -192,6 +192,26 @@ pub extern "C" fn to_config_from_env(mut base: ToConfig) -> ToConfig {
     base
 }
 
+/// Automatically detect the system timer frequency in Hz.
+///
+/// This function uses the same sophisticated detection logic as the Rust API:
+/// - ARM64: Reads CNTFRQ_EL0 register with firmware validation and fallbacks
+/// - x86_64: Reads TSC frequency from sysfs/CPUID with invariant TSC checks
+/// - Falls back to runtime calibration if needed
+///
+/// Returns the detected frequency in Hz (e.g., 24000000 for 24 MHz, 3000000000 for 3 GHz).
+///
+/// # Safety
+/// Safe to call from any context. May take 1-2ms on first call (calibration if needed).
+///
+/// # Returns
+/// - Timer frequency in Hz for platforms with cycle counters
+/// - 0 for platforms without cycle counters (fallback timer)
+#[no_mangle]
+pub extern "C" fn to_detect_timer_frequency() -> u64 {
+    tacet_core::timer::counter_frequency_hz()
+}
+
 // ============================================================================
 // Low-Level API: C Measurement Loop
 // ============================================================================
@@ -300,11 +320,20 @@ pub unsafe extern "C" fn to_calibrate(
     // Get threshold from config
     let theta_ns = cfg.threshold_ns();
 
-    // Convert to nanoseconds (assuming 1 tick = 1 ns if no frequency specified)
-    let ns_per_tick = if cfg.timer_frequency_hz == 0 {
-        1.0
+    // Auto-detect timer frequency if not explicitly set
+    let timer_freq_hz = if cfg.timer_frequency_hz == 0 {
+        // User wants automatic detection (zero-config)
+        to_detect_timer_frequency()
     } else {
-        1e9 / cfg.timer_frequency_hz as f64
+        // User provided explicit frequency
+        cfg.timer_frequency_hz
+    };
+
+    // Convert to nanoseconds
+    let ns_per_tick = if timer_freq_hz == 0 {
+        1.0  // Final fallback: assume 1 tick = 1 ns
+    } else {
+        1e9 / timer_freq_hz as f64
     };
 
     let baseline_ns: Vec<f64> = baseline_slice
@@ -867,12 +896,23 @@ pub unsafe extern "C" fn to_analyze(
     let sample_slice = slice::from_raw_parts(sample, count);
     let cfg = &*config;
 
-    // Get threshold and conversion factor
+    // Get threshold from config
     let theta_ns = cfg.threshold_ns();
-    let ns_per_tick = if cfg.timer_frequency_hz == 0 {
-        1.0
+
+    // Auto-detect timer frequency if not explicitly set
+    let timer_freq_hz = if cfg.timer_frequency_hz == 0 {
+        // User wants automatic detection (zero-config)
+        to_detect_timer_frequency()
     } else {
-        1e9 / cfg.timer_frequency_hz as f64
+        // User provided explicit frequency
+        cfg.timer_frequency_hz
+    };
+
+    // Convert to nanoseconds
+    let ns_per_tick = if timer_freq_hz == 0 {
+        1.0  // Final fallback: assume 1 tick = 1 ns
+    } else {
+        1e9 / timer_freq_hz as f64
     };
 
     // Convert to nanoseconds

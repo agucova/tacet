@@ -509,6 +509,25 @@ struct ToConfig to_config_remote_network(void);
 struct ToConfig to_config_from_env(struct ToConfig base);
 
 /**
+ * Automatically detect the system timer frequency in Hz.
+ *
+ * This function uses the same sophisticated detection logic as the Rust API:
+ * - ARM64: Reads CNTFRQ_EL0 register with firmware validation and fallbacks
+ * - x86_64: Reads TSC frequency from sysfs/CPUID with invariant TSC checks
+ * - Falls back to runtime calibration if needed
+ *
+ * Returns the detected frequency in Hz (e.g., 24000000 for 24 MHz, 3000000000 for 3 GHz).
+ *
+ * # Safety
+ * Safe to call from any context. May take 1-2ms on first call (calibration if needed).
+ *
+ * # Returns
+ * - Timer frequency in Hz for platforms with cycle counters
+ * - 0 for platforms without cycle counters (fallback timer)
+ */
+uint64_t to_detect_timer_frequency(void);
+
+/**
  * Create a new adaptive state for tracking the measurement loop.
  *
  * Must be freed with `to_state_free()`.

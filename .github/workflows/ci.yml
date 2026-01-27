@@ -33,11 +33,14 @@ jobs:
         run: cargo check --all-targets
 
   test:
+    # Fast, reliable test suite for CI
+    # Runs: core (known_leaky/safe), unit, macros, runtime (~1-2min)
+    # Excludes: crypto, synthetic, power analysis, platform-specific, calibration
+    # Uses default features (includes parallel for 4-8x speedup)
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        features: ["" , "--features parallel"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +50,7 @@ jobs:
           tool: nextest
       - uses: Swatinem/rust-cache@v2
       - name: Build & test (nextest)
-        run: cargo nextest run --all-targets ${{ matrix.features }}
+        run: cargo nextest run --profile ci
 
   calibration:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

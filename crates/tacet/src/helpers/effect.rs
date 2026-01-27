@@ -358,23 +358,10 @@ pub fn using_precise_timer() -> bool {
 /// # Returns
 /// - The counter frequency in Hz for precise timers
 /// - 0 for the fallback timer (no meaningful frequency)
-pub fn counter_frequency_hz() -> u64 {
-    #[cfg(target_arch = "aarch64")]
-    {
-        aarch64_counter_freq()
-    }
-    #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
-    {
-        x86_64_tsc_freq()
-    }
-    #[cfg(not(any(
-        target_arch = "aarch64",
-        all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos"))
-    )))]
-    {
-        0 // Fallback has no meaningful counter frequency
-    }
-}
+///
+/// # Note
+/// This function is re-exported from `tacet_core::timer` for backward compatibility.
+pub use tacet_core::timer::counter_frequency_hz;
 
 /// Returns the timer resolution in nanoseconds.
 ///
@@ -384,14 +371,10 @@ pub fn counter_frequency_hz() -> u64 {
 /// # Returns
 /// - Resolution in nanoseconds (e.g., 0.33 for 3GHz TSC)
 /// - f64::INFINITY for the fallback timer
-pub fn timer_resolution_ns() -> f64 {
-    let freq = counter_frequency_hz();
-    if freq == 0 {
-        f64::INFINITY
-    } else {
-        1_000_000_000.0 / freq as f64
-    }
-}
+///
+/// # Note
+/// This function is re-exported from `tacet_core::timer` for backward compatibility.
+pub use tacet_core::timer::timer_resolution_ns;
 
 /// Compute minimum reliably injectable effect based on timer resolution.
 ///

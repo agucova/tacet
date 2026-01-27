@@ -39,6 +39,7 @@ pub mod orchestration;
 pub mod preflight;
 pub mod result;
 pub mod statistics;
+pub mod timer;
 pub mod types;
 
 // Re-export commonly used items at crate root
