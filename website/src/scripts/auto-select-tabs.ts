@@ -48,22 +48,59 @@ function isLanguageTabGroup(tabList: Element): boolean {
 
 /**
  * Auto-select the tab matching the preferred language in a tab group.
+ * Uses direct DOM manipulation to avoid focus/scroll side effects.
  */
 function autoSelectTab(tabList: Element, preferredLang: Language): boolean {
-	const tabs = tabList.querySelectorAll('[role="tab"]');
+	const starlightTabs = tabList.closest('starlight-tabs');
+	if (!starlightTabs) return false;
 
-	for (const tab of tabs) {
-		const label = tab.textContent?.trim() || '';
+	const tabs = Array.from(tabList.querySelectorAll('[role="tab"]'));
+	const panels = Array.from(
+		starlightTabs.querySelectorAll(':scope > [role="tabpanel"]')
+	);
+
+	// Find the index of the tab to select
+	let targetIndex = -1;
+	for (let i = 0; i < tabs.length; i++) {
+		const label = tabs[i].textContent?.trim() || '';
 		const tabLang = getLanguageFromLabel(label);
-
-		if (tabLang === preferredLang && tab instanceof HTMLElement) {
-			// Click the tab to select it
-			tab.click();
-			return true;
+		if (tabLang === preferredLang) {
+			targetIndex = i;
+			break;
 		}
 	}
 
-	return false;
+	// No matching tab or already selected (index 0)
+	if (targetIndex < 1) return false;
+
+	const newTab = tabs[targetIndex];
+	const newPanel = panels[targetIndex];
+	if (!newTab || !newPanel) return false;
+
+	// Switch tabs by manipulating attributes directly (same as StarlightTabsRestore)
+	// This avoids focus() which causes scroll
+	tabs.forEach((tab) => {
+		tab.setAttribute('aria-selected', 'false');
+		tab.setAttribute('tabindex', '-1');
+	});
+	panels.forEach((panel) => {
+		panel.setAttribute('hidden', 'true');
+	});
+
+	newTab.removeAttribute('tabindex');
+	newTab.setAttribute('aria-selected', 'true');
+	newPanel.removeAttribute('hidden');
+
+	// Persist the selection for synced tabs
+	const syncKey = starlightTabs.getAttribute('data-sync-key');
+	if (syncKey && typeof localStorage !== 'undefined') {
+		const label = newTab.textContent?.trim();
+		if (label) {
+			localStorage.setItem(`starlight-synced-tabs__${syncKey}`, label);
+		}
+	}
+
+	return true;
 }
 
 /**
