@@ -51,24 +51,16 @@ use crate::measurement::perf::LinuxPerfTimer;
 // Linux ARM64: Get or initialize the effect timer
 #[cfg(all(target_os = "linux", target_arch = "aarch64", feature = "perf"))]
 fn get_effect_timer() -> Option<&'static LinuxPerfTimer> {
-    // CRITICAL: Do NOT use perf_event for effect calibration!
-    //
-    // Creating a persistent perf_event timer here causes PMU multiplexing with
-    // the dataset measurement timer, leading to constant index==0 and
-    // RetryExhausted errors even with semaphore=1 limiting concurrent datasets.
-    //
-    // Root cause: Each thread has:
-    // - 1 persistent effect timer (this static)
-    // - 1 transient dataset timer
-    // = 2 perf_events competing for PMU counters on the same CPU
-    //
-    // Effect injection only needs approximate delays (~μs accuracy) for busy-wait,
-    // not cycle-accurate timing, so cntvct_el0 or Instant provide sufficient
-    // accuracy without consuming PMU resources.
-    //
-    // This allows dataset measurements to use perf_mmap's zero-overhead reads
-    // (~300ns) without multiplexing interference.
-    None
+    use std::sync::OnceLock;
+    use crate::measurement::perf::LinuxPerfTimer;
+
+    static EFFECT_TIMER: OnceLock<Option<LinuxPerfTimer>> = OnceLock::new();
+
+    EFFECT_TIMER.get_or_init(|| {
+        // Try to create a perf_event timer for effect calibration
+        // This uses syscall-based reads (not mmap) so no PMU multiplexing issues
+        LinuxPerfTimer::new().ok()
+    }).as_ref()
 }
 
 // =============================================================================

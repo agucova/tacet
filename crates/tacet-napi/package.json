@@ -1,6 +1,6 @@
 {
   "name": "@tacet/js",
-  "version": "0.2.0",
+  "version": "0.3.3",
   "description": "Timing side-channel detection for Node.js/Bun",
   "sideEffects": false,
   "main": "dist/index.js",
@@ -79,11 +79,11 @@
     "constant-time"
   ],
   "optionalDependencies": {
-    "@tacet/js-darwin-arm64": "0.2.0",
-    "@tacet/js-darwin-x64": "0.2.0",
-    "@tacet/js-linux-arm64-gnu": "0.2.0",
-    "@tacet/js-linux-x64-gnu": "0.2.0",
-    "@tacet/js-linux-x64-musl": "0.2.0",
-    "@tacet/js-win32-x64-msvc": "0.2.0"
+    "@tacet/js-darwin-arm64": "0.3.3",
+    "@tacet/js-darwin-x64": "0.3.3",
+    "@tacet/js-linux-arm64-gnu": "0.3.3",
+    "@tacet/js-linux-x64-gnu": "0.3.3",
+    "@tacet/js-linux-x64-musl": "0.3.3",
+    "@tacet/js-win32-x64-msvc": "0.3.3"
   }
 }
