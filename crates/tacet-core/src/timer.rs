@@ -38,50 +38,47 @@ pub fn get_aarch64_counter_freq_hz() -> u64 {
     // Validate: CNTFRQ_EL0 can be incorrectly programmed by firmware
     // Valid range: 1 MHz to 10 GHz
     if is_reasonable_aarch64_freq(freq) {
-        return freq;
-    }
-
-    // CNTFRQ_EL0 looks wrong - try platform-specific fallbacks
-    #[cfg(feature = "std")]
-    {
-        eprintln!(
-            "[tacet-core] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
-            freq
-        );
-
-        #[cfg(target_os = "linux")]
-        if let Some(platform_freq) = detect_aarch64_platform_freq() {
+        freq
+    } else {
+        // CNTFRQ_EL0 looks wrong - try platform-specific fallbacks
+        #[cfg(feature = "std")]
+        {
             eprintln!(
-                "[tacet-core] Using platform-detected frequency: {} Hz",
-                platform_freq
+                "[tacet-core] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
+                freq
             );
-            return platform_freq;
+
+            #[cfg(target_os = "linux")]
+            if let Some(platform_freq) = detect_aarch64_platform_freq() {
+                eprintln!(
+                    "[tacet-core] Using platform-detected frequency: {} Hz",
+                    platform_freq
+                );
+                platform_freq
+            } else {
+                eprintln!("[tacet-core] Calibrating ARM64 counter frequency...");
+                calibrate_aarch64_frequency()
+            }
+
+            #[cfg(target_os = "macos")]
+            {
+                // Fallback for older macOS or unusual configurations
+                // Try 1GHz first (M3+), then 24MHz (M1/M2)
+                eprintln!("[tacet-core] Using macOS fallback frequency: 1 GHz");
+                1_000_000_000
+            }
+
+            #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
+            {
+                24_000_000
+            }
         }
 
-        #[cfg(target_os = "macos")]
+        // No-std fallback: assume 24MHz (Apple Silicon M1/M2)
+        #[cfg(not(feature = "std"))]
         {
-            // Fallback for older macOS or unusual configurations
-            // Try 1GHz first (M3+), then 24MHz (M1/M2)
-            eprintln!("[tacet-core] Using macOS fallback frequency: 1 GHz");
-            return 1_000_000_000;
+            24_000_000
         }
-
-        #[cfg(target_os = "linux")]
-        {
-            eprintln!("[tacet-core] Calibrating ARM64 counter frequency...");
-            return calibrate_aarch64_frequency();
-        }
-    }
-
-    // No-std fallback: assume 24MHz (Apple Silicon M1/M2)
-    #[cfg(not(feature = "std"))]
-    {
-        24_000_000
-    }
-
-    #[cfg(all(feature = "std", not(any(target_os = "macos", target_os = "linux"))))]
-    {
-        24_000_000
     }
 }
 
@@ -187,16 +184,21 @@ pub fn get_x86_64_tsc_freq_hz() -> u64 {
     {
         #[cfg(target_os = "linux")]
         if let Some(freq) = get_tsc_freq_linux() {
-            return freq;
+            freq
+        } else if let Some(freq) = get_tsc_freq_macos() {
+            freq
+        } else {
+            // Fallback: calibration
+            calibrate_tsc_frequency()
         }
 
-        #[cfg(target_os = "macos")]
+        #[cfg(not(target_os = "linux"))]
         if let Some(freq) = get_tsc_freq_macos() {
-            return freq;
+            freq
+        } else {
+            // Fallback: calibration
+            calibrate_tsc_frequency()
         }
-
-        // Fallback: calibration
-        return calibrate_tsc_frequency();
     }
 
     // No-std fallback: assume 3GHz (common Intel base frequency)
