@@ -4,12 +4,12 @@
       vars = {
   version = "1.11.2";
   system = "aarch64-darwin";
-  devenv_root = "/Users/agucova/repos/timing-oracle";
-  project_input_ref = "path:/Users/agucova/repos/timing-oracle";
-  devenv_dotfile = "/Users/agucova/repos/timing-oracle/.devenv";
+  devenv_root = "/Users/agucova/repos/tacet";
+  project_input_ref = "path:/Users/agucova/repos/tacet";
+  devenv_dotfile = "/Users/agucova/repos/tacet/.devenv";
   devenv_dotfile_path = ./.devenv;
   devenv_tmpdir = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/";
-  devenv_runtime = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/devenv-e02bb14";
+  devenv_runtime = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/devenv-19c1a42";
   devenv_istesting = false;
   devenv_direnvrc_latest_version = 1;
   container_name = null;
@@ -17,7 +17,7 @@
   ];
   hostname = "tachyon";
   username = "agucova";
-  git_root = "/Users/agucova/repos/timing-oracle";
+  git_root = "/Users/agucova/repos/tacet";
   secretspec = null;
 };
     in
@@ -41,12 +41,12 @@
       vars = {
   version = "1.11.2";
   system = "aarch64-darwin";
-  devenv_root = "/Users/agucova/repos/timing-oracle";
-  project_input_ref = "path:/Users/agucova/repos/timing-oracle";
-  devenv_dotfile = "/Users/agucova/repos/timing-oracle/.devenv";
+  devenv_root = "/Users/agucova/repos/tacet";
+  project_input_ref = "path:/Users/agucova/repos/tacet";
+  devenv_dotfile = "/Users/agucova/repos/tacet/.devenv";
   devenv_dotfile_path = ./.devenv;
   devenv_tmpdir = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/";
-  devenv_runtime = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/devenv-e02bb14";
+  devenv_runtime = "/var/folders/lk/jgh211f55z72kb1lr9zp7d1c0000gn/T/devenv-19c1a42";
   devenv_istesting = false;
   devenv_direnvrc_latest_version = 1;
   container_name = null;
@@ -54,7 +54,7 @@
   ];
   hostname = "tachyon";
   username = "agucova";
-  git_root = "/Users/agucova/repos/timing-oracle";
+  git_root = "/Users/agucova/repos/tacet";
   secretspec = null;
 };
       devenv =

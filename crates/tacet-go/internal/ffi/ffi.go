@@ -16,7 +16,7 @@
 package ffi
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/../../../tacet-c/include
+#cgo CFLAGS: -I${SRCDIR}/include
 
 // Platform-specific static libraries
 // The install command places these in the module cache at build time
