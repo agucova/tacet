@@ -15,8 +15,8 @@
 use crate::calibration_utils;
 
 use calibration_utils::{
-    export_autocorr_heatmap_csv, generate_ar1_samples, wilson_ci, AutocorrCell, CalibrationConfig,
-    Tier,
+    export_autocorr_heatmap_csv, generate_ar1_samples, init_effect_injection, wilson_ci,
+    AutocorrCell, CalibrationConfig, Tier,
 };
 use rand::{rngs::StdRng, SeedableRng};
 use std::cell::RefCell;
@@ -143,6 +143,8 @@ fn run_autocorr_grid(
     effect_mults: &[f64],
     autocorrs: &[f64],
 ) {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;

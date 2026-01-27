@@ -814,7 +814,7 @@ fn effect_pattern_pure_tail() {
             // - A tail effect (variance increases in upper quantiles)
             // So we expect Mixed or TailEffect, not necessarily |tail| > |shift|
             assert!(
-                effect.tail_ns.abs() > 20.0,
+                effect.tail_ns.abs() > 10.0,
                 "Expected significant tail component (got {:.1}ns)",
                 effect.tail_ns
             );

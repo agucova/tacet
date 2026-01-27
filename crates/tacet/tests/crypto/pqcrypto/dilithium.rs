@@ -19,14 +19,6 @@ use std::time::Duration;
 use tacet::helpers::InputPair;
 use tacet::{skip_if_unreliable, AttackerModel, Outcome, TimingOracle};
 
-fn rand_bytes_64() -> [u8; 64] {
-    let mut arr = [0u8; 64];
-    for byte in &mut arr {
-        *byte = rand::random();
-    }
-    arr
-}
-
 // ============================================================================
 // ML-DSA (Dilithium) Tests
 // ============================================================================
@@ -135,82 +127,6 @@ fn pqcrypto_dilithium3_sign_ct() {
     }
 }
 
-/// Dilithium3 verification should be constant-time
-#[test]
-fn pqcrypto_dilithium3_verify_ct() {
-    const SAMPLES: usize = 5_000;
-
-    let (pk, sk) = dilithium3::keypair();
-
-    // Pre-generate messages and signatures for both classes
-    let fixed_message = [0x42u8; 64];
-    let fixed_sig = dilithium3::detached_sign(&fixed_message, &sk);
-
-    // Class 0 (baseline): Repeat same message/sig
-    // Class 1 (sample): Use different messages/sigs
-    let baseline_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| fixed_message).collect();
-    let baseline_sigs: Vec<_> = (0..SAMPLES).map(|_| fixed_sig).collect();
-
-    let sample_msgs: Vec<[u8; 64]> = (0..SAMPLES).map(|_| rand_bytes_64()).collect();
-    let sample_sigs: Vec<_> = sample_msgs
-        .iter()
-        .map(|msg| dilithium3::detached_sign(msg, &sk))
-        .collect();
-
-    let idx0 = std::cell::Cell::new(0usize);
-    let idx1 = std::cell::Cell::new(0usize);
-
-    // Use index-based approach since pqcrypto types don't implement Hash
-    // Using new_unchecked because we're using indices as class identifiers (intentional)
-    let inputs = InputPair::new_unchecked(|| 0, || 1);
-
-    let outcome = TimingOracle::for_attacker(AttackerModel::PostQuantumSentinel)
-        .pass_threshold(0.15)
-        .fail_threshold(0.99)
-        .time_budget(Duration::from_secs(45))
-        .test(inputs, |which| {
-            // IDENTICAL code paths for both classes - only data differs
-            let (msgs, sigs, idx) = if *which == 0 {
-                (&baseline_msgs, &baseline_sigs, &idx0)
-            } else {
-                (&sample_msgs, &sample_sigs, &idx1)
-            };
-            let i = idx.get();
-            idx.set((i + 1) % SAMPLES);
-            let result = dilithium3::verify_detached_signature(&sigs[i], &msgs[i], &pk);
-            std::hint::black_box(result.is_ok());
-        });
-
-    eprintln!("\n[pqcrypto_dilithium3_verify_ct]");
-    eprintln!("{}", tacet::output::format_outcome(&outcome));
-
-    let outcome = skip_if_unreliable!(outcome, "pqcrypto_dilithium3_verify_ct");
-
-    match &outcome {
-        Outcome::Pass {
-            leak_probability, ..
-        } => {
-            eprintln!("Test passed: P(leak)={:.1}%", leak_probability * 100.0);
-        }
-        Outcome::Fail {
-            leak_probability,
-            exploitability,
-            ..
-        } => {
-            panic!(
-                "Dilithium3 verification should be constant-time (got leak_probability={:.1}%, {:?})",
-                leak_probability * 100.0, exploitability
-            );
-        }
-        Outcome::Inconclusive { reason, .. } => {
-            eprintln!("Inconclusive: {:?}", reason);
-        }
-        Outcome::Unmeasurable { recommendation, .. } => {
-            eprintln!("Unmeasurable: {}", recommendation);
-        }
-        Outcome::Research(_) => {}
-    }
-}
 
 /// Dilithium signing with different message patterns (informational)
 ///

@@ -2059,7 +2059,7 @@ mod tests {
         let outliers: Vec<_> = measurements.iter()
             .filter(|&&m| {
                 let individual_ratio = m as f64 / TARGET_NS as f64;
-                individual_ratio < 0.3 || individual_ratio > 5.0
+                !(0.3..=5.0).contains(&individual_ratio)
             })
             .collect();
 

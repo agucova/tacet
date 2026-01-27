@@ -58,7 +58,7 @@ pub fn get_aarch64_counter_freq_hz() -> u64 {
             let ratio = calibrated as f64 / cntfrq as f64;
 
             // Allow 10% tolerance for measurement noise
-            if ratio < 0.9 || ratio > 1.1 {
+            if !(0.9..=1.1).contains(&ratio) {
                 eprintln!(
                     "[tacet-core] WARNING: CNTFRQ_EL0 ({} Hz / {:.2} MHz) differs from calibrated frequency ({} Hz / {:.2} MHz) by {:.1}%",
                     cntfrq, cntfrq as f64 / 1e6,

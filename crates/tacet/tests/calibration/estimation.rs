@@ -11,8 +11,8 @@
 use crate::calibration_utils;
 
 use calibration_utils::{
-    busy_wait_ns, compute_estimation_stats_by_effect, CalibrationConfig, EstimationPoint,
-    TimerBackend, TrialRunner,
+    busy_wait_ns, compute_estimation_stats_by_effect, init_effect_injection, CalibrationConfig,
+    EstimationPoint, TimerBackend, TrialRunner,
 };
 use tacet::helpers::InputPair;
 use tacet::{AttackerModel, Outcome, TimingOracle};
@@ -120,6 +120,8 @@ fn estimation_accuracy_validation_remote_network() {
 // =============================================================================
 
 fn run_estimation_test(test_name: &str, attacker_model: AttackerModel, effects: &[u64]) {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;

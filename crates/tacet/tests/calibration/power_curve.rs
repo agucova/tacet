@@ -13,7 +13,8 @@
 use crate::calibration_utils;
 
 use calibration_utils::{
-    busy_wait_ns, export_power_curve_csv, wilson_ci, CalibrationConfig, PowerCurvePoint,
+    busy_wait_ns, export_power_curve_csv, init_effect_injection, wilson_ci, CalibrationConfig,
+    PowerCurvePoint,
 };
 use std::time::Instant;
 use tacet::helpers::InputPair;
@@ -119,6 +120,8 @@ fn power_curve_validation_research() {
 // =============================================================================
 
 fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipliers: &[f64]) {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;

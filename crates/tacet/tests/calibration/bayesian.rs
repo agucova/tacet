@@ -9,8 +9,9 @@
 use crate::calibration_utils;
 
 use calibration_utils::{
-    busy_wait_ns, compute_calibration_bins, compute_calibration_error, max_calibration_deviation,
-    CalibrationConfig, CalibrationPoint, TimerBackend, TrialRunner, MIN_CALIBRATION_BIN_SAMPLES,
+    busy_wait_ns, compute_calibration_bins, compute_calibration_error, init_effect_injection,
+    max_calibration_deviation, CalibrationConfig, CalibrationPoint, TimerBackend, TrialRunner,
+    MIN_CALIBRATION_BIN_SAMPLES,
 };
 use tacet::helpers::InputPair;
 use tacet::{AttackerModel, Outcome, TimingOracle};
@@ -136,6 +137,8 @@ fn bayesian_calibration_validation_pmu() {
 // =============================================================================
 
 fn run_calibration_test(test_name: &str, calibration: &CalibrationEffects, _pmu_required: bool) {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;

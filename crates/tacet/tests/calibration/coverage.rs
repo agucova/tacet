@@ -15,7 +15,9 @@
 
 use crate::calibration_utils;
 
-use calibration_utils::{busy_wait_ns, select_attacker_model, CalibrationConfig, Decision};
+use calibration_utils::{
+    busy_wait_ns, init_effect_injection, select_attacker_model, CalibrationConfig, Decision,
+};
 use rand::{rngs::StdRng, Rng, SeedableRng};
 use tacet::helpers::InputPair;
 use tacet::{Outcome, TimingOracle};
@@ -553,6 +555,8 @@ impl CoverageStats {
 
 /// Run a coverage test across multiple effect sizes.
 fn run_coverage_test(test_name: &str, effects: &[u64]) {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[{}] Skipped: CALIBRATION_DISABLED=1", test_name);
         return;
