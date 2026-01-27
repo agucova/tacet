@@ -1,7 +1,12 @@
 ---
-title: " "
+title: Tacet — Detect side channels
 description: Detect side channels in cryptographic code with statistically rigorous methods
 template: splash
+head:
+  - tag: meta
+    attrs:
+      property: og:title
+      content: Tacet — Detect side channels
 hero:
   tagline: Detect side channels in cryptographic code with statistically rigorous methods.
   image:
@@ -93,25 +98,24 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
 println!("{:?}", outcome);
 ```
 
-This results output like:
+This results in output like:
 
 ```
-[test_rsa_decrypt]
-tacet
 ──────────────────────────────────────────────────────────────
+Samples: 6000 per class
+Quality: Good
 
-  Samples: 42000 per class
-  Quality: Good
+⚠ Timing leak detected
 
-  ✗ Timing leak detected
+  Probability of leak: 100.0%
+  Effect: 63799.1 ns (uniform shift)
+    Shift: 63798.0 ns
+    Tail:  366.3 ns
+    95% CI: 57192.6–70405.6 ns
 
-    Probability of leak: 99.2%
-    Effect: 487 ns (uniform shift)
-    Exploitability: Http2Multiplexing
-
-    This leak is exploitable via ~100k concurrent HTTP/2
-    requests from an adjacent network position.
-
+  Exploitability (heuristic):
+    Attack vector:  Any (trivially observable)
+    Queries needed: <100
 ──────────────────────────────────────────────────────────────
 ```
 
@@ -119,7 +123,7 @@ tacet
 
 Traditional statistical timing analysis tools (dudect, RTLF, tlsfuzzer, etc) give you p-values or t-statistics that are hard to interpret and easy to get wrong. They're prone to false positives from system noise and false negatives from insufficient sampling. It's impractical to use them in CI given their inherent flakiness, and it's typically understood that they provide only weak evidence of constant-time behavior.
 
-Tacet is built from the ground-up to be statistically rigorous, reliable in real-world conditions, and easy to use in CI. When you run a tacet test, instead of a p-value, you get a posterior probability ("83% chance of a leak above 10ns") and a three-way verdict: Pass, Fail, or Inconclusive. That third category matters: when measurement conditions can't support a confident answer, tacet says so rather than guessing. Sampling is automatic and adaptive, collecting data until either we have enough evidence to make a decision or we realize that a reliable result isn't possible.
+Tacet is built from the ground-up to be statistically rigorous, reliable in real-world conditions, and easy to use in CI. When you run a tacet test, instead of a p-value, you get the probability of a leak and a three-way verdict: Pass, Fail, or Inconclusive. When measurement conditions can't support a confident answer, we use Indeterminate to avoid providing false confidence. Sampling is automatic and adaptive, collecting data until either we have enough evidence to make a decision or we realize that a reliable result isn't possible.
 
 Tacet is also highly performant, works across platforms, and can be used to test code written in multiple programming languages (Rust, C, C++, Go, JavaScript/TypeScript).
 
@@ -127,7 +131,7 @@ Finally, tacet has experimental support for power and EM side-channel analysis, 
 
 ## How does it work?
 
-At a high level, tacet fits a Bayesian model to the timing differences between two input classes (typically fixed vs. random), estimating the posterior probability that the true effect exceeds a threshold you specify. Rather than comparing means, the model operates on nine quantile differences, capturing both uniform shifts from branch changes and tail effects that arise from cache behavior. Sampling is adaptive: tacet collects data until the posterior crosses a decision boundary (>95% → Fail, <5% → Pass) or a quality gate determines the measurement can't support a confident verdict (Inconclusive).
+At a high level, tacet fits a Bayesian model to the timing differences between two input classes (typically fixed vs. random), estimating the posterior probability that the true effect exceeds a threshold you specify. Rather than comparing means, the model operates on nine quantile differences, capturing both uniform shifts from branch changes and tail effects that arise from cache behavior. Sampling is adaptive: tacet collects data until the posterior crosses a decision boundary (> 95% → Fail, < 5% → Pass) or a quality gate determines the measurement can't support a confident verdict (Inconclusive).
 
 To handle temporal autocorrelation between samples, covariance is estimated via block bootstrap on the interleaved acquisition stream. To prevent the prior from shrinking real leaks toward zero, the model uses a Student's t prior whose scale adapts to the data. To guard against overconfident results when measurement noise is underestimated, the likelihood automatically inflates uncertainty when residuals are larger than expected. You can find a high-level description of how this all works [here](https://tacet.sh/reference/how-it-works/), and read about the full methodology [here](/reference/specification).
 

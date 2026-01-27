@@ -192,6 +192,14 @@ export default defineConfig({
             content: "en_US",
           },
         },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image:alt",
+            content:
+              "Tacet — Detect timing side channels in cryptographic code",
+          },
+        },
         // Twitter Card
         {
           tag: "meta",
@@ -203,8 +211,45 @@ export default defineConfig({
         {
           tag: "meta",
           attrs: {
+            name: "twitter:site",
+            content: "@agucova",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:creator",
+            content: "@austinc3301",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:title",
+            content: "Tacet — Detect side channels",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:description",
+            content:
+              "Detect timing side channels in cryptographic code with statistically rigorous methods",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
             name: "twitter:image",
             content: "https://tacet.sh/og-image.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:image:alt",
+            content:
+              "Tacet — Detect timing side channels in cryptographic code",
           },
         },
       ],

@@ -15,7 +15,7 @@
 use num_bigint::BigUint;
 use num_traits::{One, Zero};
 use std::time::Duration;
-use tacet::helpers::effect::busy_wait_ns;
+use tacet::helpers::effect::{busy_wait_ns, init_effect_injection};
 use tacet::helpers::InputPair;
 use tacet::{
     skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, InconclusiveReason, Outcome,
@@ -671,6 +671,8 @@ fn table_lookup_large_cache_thrash() {
 /// 4.1 Pure Uniform Shift - Validates UniformShift classification
 #[test]
 fn effect_pattern_pure_uniform_shift() {
+    init_effect_injection();
+
     // Use a larger delay (2μs) to ensure uniform shift dominates quantization noise
     // Note: On Apple Silicon, actual granularity is ~42ns regardless of reported frequency,
     // so smaller delays (~500ns) can have significant quantization-induced variance
@@ -735,6 +737,8 @@ fn effect_pattern_pure_uniform_shift() {
 /// 4.2 Pure Tail Effect - Validates TailEffect classification
 #[test]
 fn effect_pattern_pure_tail() {
+    init_effect_injection();
+
     use std::cell::Cell;
 
     // Use nanosecond-based delays for cross-platform consistency
@@ -828,6 +832,8 @@ fn effect_pattern_pure_tail() {
 /// 4.3 Mixed Pattern - Validates Mixed classification
 #[test]
 fn effect_pattern_mixed() {
+    init_effect_injection();
+
     use std::cell::Cell;
 
     // Use nanosecond-based delays for cross-platform consistency
@@ -1003,6 +1009,8 @@ fn exploitability_negligible() {
 /// 5.2 StandardRemote (100ns-10μs) - Should classify appropriately
 #[test]
 fn exploitability_standard_remote() {
+    init_effect_injection();
+
     // Medium delay targeting ~250ns (StandardRemote range: 100ns-10μs)
     const MEDIUM_DELAY_NS: u64 = 250;
 
@@ -1088,6 +1096,8 @@ fn exploitability_standard_remote() {
 /// 5.3 StandardRemote large (100ns-10μs) - Should classify appropriately
 #[test]
 fn exploitability_standard_remote_large() {
+    init_effect_injection();
+
     // Large delay targeting ~2μs (StandardRemote range: 100ns-10μs)
     const LARGE_DELAY_NS: u64 = 2000;
 
@@ -1166,6 +1176,8 @@ fn exploitability_standard_remote_large() {
 /// 5.4 ObviousLeak (>10μs) - Should classify appropriately
 #[test]
 fn exploitability_obvious_leak() {
+    init_effect_injection();
+
     // Very large delay targeting ~50μs (ObviousLeak range: >10μs)
     const HUGE_DELAY_NS: u64 = 50_000;
 

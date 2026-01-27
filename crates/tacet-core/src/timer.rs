@@ -29,55 +29,69 @@ use core::arch::asm;
 /// Counter frequency in Hz, or a reasonable fallback if detection fails.
 #[cfg(target_arch = "aarch64")]
 pub fn get_aarch64_counter_freq_hz() -> u64 {
-    // Read counter frequency from CNTFRQ_EL0 register
-    let freq: u64;
-    unsafe {
-        asm!("mrs {}, cntfrq_el0", out(reg) freq);
+    // One-time initialization with validation (not thread-local)
+    #[cfg(feature = "std")]
+    {
+        use std::sync::OnceLock;
+        static VALIDATED_FREQ: OnceLock<u64> = OnceLock::new();
+
+        *VALIDATED_FREQ.get_or_init(|| {
+            // Read counter frequency from CNTFRQ_EL0 register
+            let cntfrq: u64;
+            unsafe {
+                asm!("mrs {}, cntfrq_el0", out(reg) cntfrq);
+            }
+
+            // Quick validation: is the frequency value reasonable?
+            if !is_reasonable_aarch64_freq(cntfrq) {
+                eprintln!(
+                    "[tacet-core] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
+                    cntfrq
+                );
+                eprintln!("[tacet-core] Calibrating ARM64 counter frequency...");
+                return calibrate_aarch64_frequency();
+            }
+
+            // Sanity check: does CNTFRQ_EL0 match runtime calibration?
+            // This catches virtualization issues where CNTFRQ_EL0 is incorrectly programmed
+            let calibrated = calibrate_aarch64_frequency();
+            let ratio = calibrated as f64 / cntfrq as f64;
+
+            // Allow 10% tolerance for measurement noise
+            if ratio < 0.9 || ratio > 1.1 {
+                eprintln!(
+                    "[tacet-core] WARNING: CNTFRQ_EL0 ({} Hz / {:.2} MHz) differs from calibrated frequency ({} Hz / {:.2} MHz) by {:.1}%",
+                    cntfrq, cntfrq as f64 / 1e6,
+                    calibrated, calibrated as f64 / 1e6,
+                    (ratio - 1.0) * 100.0
+                );
+                eprintln!(
+                    "[tacet-core] This typically indicates virtualization (VM/CI) with misconfigured timers."
+                );
+                eprintln!(
+                    "[tacet-core] Using calibrated frequency: {} Hz ({:.2} MHz)",
+                    calibrated, calibrated as f64 / 1e6
+                );
+                return calibrated;
+            }
+
+            // CNTFRQ_EL0 matches calibration - trust it
+            cntfrq
+        })
     }
 
-    // Validate: CNTFRQ_EL0 can be incorrectly programmed by firmware
-    // Valid range: 1 MHz to 10 GHz
-    if is_reasonable_aarch64_freq(freq) {
-        freq
-    } else {
-        // CNTFRQ_EL0 looks wrong - try platform-specific fallbacks
-        #[cfg(feature = "std")]
-        {
-            eprintln!(
-                "[tacet-core] WARNING: CNTFRQ_EL0 returned suspicious value: {} Hz",
-                freq
-            );
-
-            #[cfg(target_os = "linux")]
-            if let Some(platform_freq) = detect_aarch64_platform_freq() {
-                eprintln!(
-                    "[tacet-core] Using platform-detected frequency: {} Hz",
-                    platform_freq
-                );
-                platform_freq
-            } else {
-                eprintln!("[tacet-core] Calibrating ARM64 counter frequency...");
-                calibrate_aarch64_frequency()
-            }
-
-            #[cfg(target_os = "macos")]
-            {
-                // Fallback for older macOS or unusual configurations
-                // Try 1GHz first (M3+), then 24MHz (M1/M2)
-                eprintln!("[tacet-core] Using macOS fallback frequency: 1 GHz");
-                1_000_000_000
-            }
-
-            #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
-            {
-                24_000_000
-            }
+    // No-std fallback: trust CNTFRQ_EL0 (can't calibrate without std::time)
+    #[cfg(not(feature = "std"))]
+    {
+        let freq: u64;
+        unsafe {
+            asm!("mrs {}, cntfrq_el0", out(reg) freq);
         }
 
-        // No-std fallback: assume 24MHz (Apple Silicon M1/M2)
-        #[cfg(not(feature = "std"))]
-        {
-            24_000_000
+        if is_reasonable_aarch64_freq(freq) {
+            freq
+        } else {
+            24_000_000 // Assume 24MHz (Apple Silicon M1/M2)
         }
     }
 }
@@ -179,26 +193,27 @@ fn calibrate_aarch64_frequency() -> u64 {
 /// TSC frequency in Hz, or a reasonable estimate if detection fails.
 #[cfg(all(target_arch = "x86_64", any(target_os = "linux", target_os = "macos")))]
 pub fn get_x86_64_tsc_freq_hz() -> u64 {
-    // Try platform-specific reliable sources first
+    // One-time initialization (not thread-local)
     #[cfg(feature = "std")]
     {
-        #[cfg(target_os = "linux")]
-        if let Some(freq) = get_tsc_freq_linux() {
-            freq
-        } else if let Some(freq) = get_tsc_freq_macos() {
-            freq
-        } else {
-            // Fallback: calibration
-            calibrate_tsc_frequency()
-        }
+        use std::sync::OnceLock;
+        static VALIDATED_FREQ: OnceLock<u64> = OnceLock::new();
 
-        #[cfg(not(target_os = "linux"))]
-        if let Some(freq) = get_tsc_freq_macos() {
-            freq
-        } else {
-            // Fallback: calibration
+        *VALIDATED_FREQ.get_or_init(|| {
+            // Try platform-specific reliable sources first
+            #[cfg(target_os = "linux")]
+            if let Some(freq) = get_tsc_freq_linux() {
+                return freq;
+            }
+
+            #[cfg(target_os = "macos")]
+            if let Some(freq) = get_tsc_freq_macos() {
+                return freq;
+            }
+
+            // Fallback: runtime calibration
             calibrate_tsc_frequency()
-        }
+        })
     }
 
     // No-std fallback: assume 3GHz (common Intel base frequency)

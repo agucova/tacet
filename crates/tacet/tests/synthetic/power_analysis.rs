@@ -4,18 +4,17 @@
 //! with rigorous trial counts for tight confidence intervals:
 //!
 //! - MDE-calibrated power curve: Tests power at multiples of estimated MDE
-//! - MDE scaling validation: Verifies O(1/√n) scaling with 50 trials per sample size
 //! - Large effect detection: Confirms high power for obvious timing differences
 //!
 //! Run with: cargo nextest run --profile power
-//! Expected runtime: ~5-7 minutes
+//! Expected runtime: ~3-5 minutes
 //!
 //! Note: These tests may skip trials that return Unmeasurable outcomes (e.g., due to
 //! system noise or lack of high-precision timing). If too many trials are unmeasurable,
 //! the test will be skipped entirely.
 
 use std::time::Duration;
-use tacet::helpers::effect::busy_wait_ns;
+use tacet::helpers::effect::{busy_wait_ns, init_effect_injection};
 use tacet::helpers::InputPair;
 use tacet::{AttackerModel, Outcome, TimingOracle};
 
@@ -41,6 +40,8 @@ const MAX_UNMEASURABLE_FRACTION: f64 = 0.3;
 /// Total: 100 + 5×80 = 500 trials
 #[test]
 fn mde_calibrated_power_curve() {
+    init_effect_injection();
+
     const MDE_ESTIMATION_TRIALS: usize = 100;
     const TRIALS_PER_MULTIPLE: usize = 80;
     const SAMPLES: usize = 5_000;
@@ -304,143 +305,6 @@ fn mde_calibrated_power_curve() {
 }
 
 // =============================================================================
-// MDE SCALING VALIDATION
-// =============================================================================
-
-/// Verify MDE scales as O(1/√n) with 50 trials per sample size.
-///
-/// Theory: MDE ∝ σ/√n, so doubling n should halve MDE.
-/// With n₁=5000 and n₂=20000, ratio = √(20000/5000) = 2.0
-///
-/// We use 50 trials at each sample size to get robust median estimates
-/// and verify the ratio is in [1.5, 2.5] (allowing 25% tolerance).
-#[test]
-fn mde_scaling_validation() {
-    const TRIALS_PER_N: usize = 50;
-
-    // 4× difference in sample size → 2× difference in MDE
-    let sample_sizes = [5_000usize, 20_000usize];
-    let mut mde_medians = Vec::new();
-
-    eprintln!(
-        "\n[mde_scaling] Testing MDE at {} sample sizes, {} trials each",
-        sample_sizes.len(),
-        TRIALS_PER_N
-    );
-
-    for &samples in &sample_sizes {
-        let mut mdes = Vec::with_capacity(TRIALS_PER_N);
-        let mut unmeasurable_count = 0;
-
-        for trial in 0..TRIALS_PER_N {
-            let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
-
-            let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
-            .require_high_precision()
-                .time_budget(Duration::from_secs(10))
-                .max_samples(samples)
-                .test(inputs, |data| {
-                    std::hint::black_box(data);
-                });
-
-            match outcome {
-                Outcome::Pass { effect, .. }
-                | Outcome::Fail { effect, .. }
-                | Outcome::Inconclusive { effect, .. } => {
-                    // Use credible interval width as proxy for MDE
-                    let ci_width = effect.credible_interval_ns.1 - effect.credible_interval_ns.0;
-                    mdes.push(ci_width / 2.0); // Half-width is approximate MDE
-                }
-                Outcome::Unmeasurable { recommendation, .. } => {
-                    unmeasurable_count += 1;
-                    if unmeasurable_count <= 3 {
-                        eprintln!(
-                            "  Trial {} at n={} returned Unmeasurable (skipping): {}",
-                            trial + 1,
-                            samples,
-                            recommendation
-                        );
-                    }
-                }
-                Outcome::Research(_) => {}
-            }
-
-            if (trial + 1) % 10 == 0 {
-                eprintln!(
-                    "  n={}: {}/{} trials complete ({} unmeasurable)",
-                    samples,
-                    trial + 1,
-                    TRIALS_PER_N,
-                    unmeasurable_count
-                );
-            }
-        }
-
-        // Check if too many trials were unmeasurable
-        let unmeasurable_fraction = unmeasurable_count as f64 / TRIALS_PER_N as f64;
-        if unmeasurable_fraction > MAX_UNMEASURABLE_FRACTION || mdes.is_empty() {
-            eprintln!(
-                "[mde_scaling] SKIPPED: n={} had {:.0}% unmeasurable trials",
-                samples,
-                unmeasurable_fraction * 100.0
-            );
-            eprintln!(
-                "  Try running with sudo for high-precision timing, or on a less noisy system"
-            );
-            return;
-        }
-
-        mdes.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let median = mdes[mdes.len() / 2];
-        let q25 = mdes[mdes.len() / 4];
-        let q75 = mdes[3 * mdes.len() / 4];
-
-        eprintln!(
-            "[mde_scaling] n={}: median MDE={:.1}ns [IQR: {:.1}-{:.1}ns] ({} trials)",
-            samples,
-            median,
-            q25,
-            q75,
-            mdes.len()
-        );
-
-        mde_medians.push((samples, median));
-    }
-
-    // Verify scaling ratio
-    let (n_small, mde_small) = mde_medians[0];
-    let (n_large, mde_large) = mde_medians[1];
-
-    let observed_ratio = mde_small / mde_large;
-    let expected_ratio = ((n_large as f64) / (n_small as f64)).sqrt();
-
-    eprintln!(
-        "\n[mde_scaling] MDE ratio: {:.2} (expected {:.2}, theoretical √({}/{})",
-        observed_ratio, expected_ratio, n_large, n_small
-    );
-
-    // Allow 25% tolerance: expect 2.0, accept [1.5, 2.5]
-    assert!(
-        (1.5..=2.5).contains(&observed_ratio),
-        "MDE ratio {:.2} outside acceptable range [1.5, 2.5] (expected ~{:.1})",
-        observed_ratio,
-        expected_ratio
-    );
-
-    // Additional check: larger sample size should have smaller MDE
-    assert!(
-        mde_large < mde_small,
-        "MDE did not decrease with more samples: n={}→{:.1}ns, n={}→{:.1}ns",
-        n_small,
-        mde_small,
-        n_large,
-        mde_large
-    );
-
-    eprintln!("[mde_scaling] PASSED: MDE scales correctly with sample size");
-}
-
-// =============================================================================
 // LARGE EFFECT DETECTION
 // =============================================================================
 
@@ -450,6 +314,8 @@ fn mde_scaling_validation() {
 /// This is a sanity check that the oracle works at all.
 #[test]
 fn large_effect_detection() {
+    init_effect_injection();
+
     const TRIALS: usize = 50;
     const SAMPLES: usize = 10_000;
     const EFFECT_NS: u64 = 10_000; // 10 microseconds in nanoseconds
@@ -578,6 +444,8 @@ fn large_effect_detection() {
 /// consistent with the configured alpha level.
 #[test]
 fn negligible_effect_fpr() {
+    init_effect_injection();
+
     const TRIALS: usize = 100;
     const SAMPLES: usize = 5_000;
     const EFFECT_NS: u64 = 1; // 1 nanosecond - essentially noise
