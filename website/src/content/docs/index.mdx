@@ -23,32 +23,29 @@ import { Tabs, TabItem, Code, LinkCard, CardGrid } from '@astrojs/starlight/comp
 
 <Tabs syncKey="language">
 <TabItem label="Rust" icon="seti:rust">
+Add tacet as a dev dependency:
 ```bash
 cargo add tacet --dev
-cargo add rand --dev  # For random input generation
 ```
-Default features include parallel processing and cycle-accurate timer support (kperf/perf). See [installation](/getting-started/installation) for feature flags.
+Most useful features are enabled by default. See [installation](/getting-started/installation) for more details.
 </TabItem>
 <TabItem label="JavaScript" icon="seti:javascript">
+Install via your preferred package manager:
+
 ```bash
-# npm
-npm install @tacet/js
-
-# bun
 bun add @tacet/js
-
-# pnpm/yarn
-pnpm add @tacet/js
 ```
-Native bindings (NAPI-RS) for Node.js and Bun on Linux, macOS, and Windows. See [installation](/getting-started/installation) for platform details.
+
+We support Node.js, Deno and Bun. See [installation](/getting-started/installation) for more platform details.
 </TabItem>
 <TabItem label="C" icon="seti:c">
-**Install script (Linux/macOS):**
+Install the shared library and headers:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
 ```
 
-**Homebrew (macOS):**
+Or via Homebrew on macOS:
 ```bash
 brew install agucova/tacet/tacet-c
 ```
@@ -56,12 +53,12 @@ brew install agucova/tacet/tacet-c
 See [installation](/getting-started/installation#c) for pkg-config setup and CMake integration.
 </TabItem>
 <TabItem label="C++" icon="seti:cpp">
-**Install script (Linux/macOS):**
+Install the shared library and headers:
 ```bash
 curl -fsSL https://raw.githubusercontent.com/agucova/tacet/main/install.sh | bash
 ```
 
-**Homebrew (macOS):**
+Or via Homebrew on macOS:
 ```bash
 brew install agucova/tacet/tacet-c
 ```
@@ -69,11 +66,12 @@ brew install agucova/tacet/tacet-c
 See [installation](/getting-started/installation#c-1) for pkg-config setup and CMake integration (requires C++20).
 </TabItem>
 <TabItem label="Go" icon="seti:go">
+Install via Go modules:
 ```bash
 go get github.com/agucova/tacet/crates/tacet-go
 go run github.com/agucova/tacet/crates/tacet-go/cmd/tacet-install@latest
 ```
-Downloads pre-built native library (~12MB) for your platform. Requires Go 1.22+ with CGo. See [installation](/getting-started/installation) for details.
+This will download a pre-built native library (~12MB) for your platform. Requires Go 1.22+ with CGo. See [installation](/getting-started/installation) for details.
 </TabItem>
 </Tabs>
 
@@ -92,28 +90,50 @@ let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         my_crypto_function(&data);
     });
 
-assert!(outcome.passed(), "Timing leak detected: {:?}", outcome);
+println!("{:?}", outcome);
+```
+
+This results output like:
+
+```
+[test_rsa_decrypt]
+tacet
+──────────────────────────────────────────────────────────────
+
+  Samples: 42000 per class
+  Quality: Good
+
+  ✗ Timing leak detected
+
+    Probability of leak: 99.2%
+    Effect: 487 ns (uniform shift)
+    Exploitability: Http2Multiplexing
+
+    This leak is exploitable via ~100k concurrent HTTP/2
+    requests from an adjacent network position.
+
+──────────────────────────────────────────────────────────────
 ```
 
 ## Why Tacet?
 
-Existing tools like [DudeCT](https://github.com/oreparaz/dudect) output t-statistics and p-values. Tacet gives you what you actually want: **the probability your code has a timing leak**, plus how exploitable it would be.
+Traditional statistical timing analysis tools (dudect, RTLF, tlsfuzzer, etc) give you p-values or t-statistics that are hard to interpret and easy to get wrong. They're prone to false positives from system noise and false negatives from insufficient sampling. It's impractical to use them in CI given their inherent flakiness, and it's typically understood that they provide only weak evidence of constant-time behavior.
 
-| | DudeCT | Tacet |
-|---|--------|-------|
-| **Output** | t-statistic + p-value | Probability of leak (0–100%) |
-| **False positives** | Unbounded | Converges to correct answer |
-| **Effect size** | Not provided | Estimated in nanoseconds |
-| **Exploitability** | Manual interpretation | Automatic classification |
-| **CI-friendly** | Flaky without tuning | Works out of the box |
+Tacet is built from the ground-up to be statistically rigorous, reliable in real-world conditions, and easy to use in CI. When you run a tacet test, instead of a p-value, you get a posterior probability ("83% chance of a leak above 10ns") and a three-way verdict: Pass, Fail, or Inconclusive. That third category matters: when measurement conditions can't support a confident answer, tacet says so rather than guessing. Sampling is automatic and adaptive, collecting data until either we have enough evidence to make a decision or we realize that a reliable result isn't possible.
+
+Tacet is also highly performant, works across platforms, and can be used to test code written in multiple programming languages (Rust, C, C++, Go, JavaScript/TypeScript).
+
+Finally, tacet has experimental support for power and EM side-channel analysis, making it a versatile tool for side-channel researchers more generally. See the [Power Analysis Guide](/guides/power-analysis) for details.
+
+## How does it work?
+
+At a high level, tacet fits a Bayesian model to the timing differences between two input classes (typically fixed vs. random), estimating the posterior probability that the true effect exceeds a threshold you specify. Rather than comparing means, the model operates on nine quantile differences, capturing both uniform shifts from branch changes and tail effects that arise from cache behavior. Sampling is adaptive: tacet collects data until the posterior crosses a decision boundary (>95% → Fail, <5% → Pass) or a quality gate determines the measurement can't support a confident verdict (Inconclusive).
+
+To handle temporal autocorrelation between samples, covariance is estimated via block bootstrap on the interleaved acquisition stream. To prevent the prior from shrinking real leaks toward zero, the model uses a Student's t prior whose scale adapts to the data. To guard against overconfident results when measurement noise is underestimated, the likelihood automatically inflates uncertainty when residuals are larger than expected. You can find a high-level description of how this all works [here](https://tacet.sh/reference/how-it-works/), and read about the full methodology [here](/reference/specification).
 
 ## Real-world validation
 
-While testing the library, I incidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate—a ~500ns timing leak in RSA decryption. I wasn't looking for it; the library just flagged it. See the [full investigation](/case-studies/rsa-timing-anomaly).
-
-## Beyond timing
-
-Experimental support for power and EM side-channel analysis is available in the Rust crate via the `power` feature. See the [Power Analysis Guide](/guides/power-analysis) for details.
+The library is pretty new, and I'm in the process of auditing real-world cryptographic implementations with it. When I was first building our test suite of 'known constant time' functions, I accidentally rediscovered [CVE-2023-49092](https://rustsec.org/advisories/RUSTSEC-2023-0071.html) (Marvin Attack) in the RustCrypto `rsa` crate, a ~500ns timing leak in RSA decryption. See the [full investigation](/case-studies/rsa-timing-anomaly).
 
 ## Next steps
 
