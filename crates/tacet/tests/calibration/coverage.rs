@@ -218,6 +218,8 @@ fn coverage_iteration() {
 /// contains the true value at least min_coverage% of the time.
 #[test]
 fn coverage_quick_500ns() {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[coverage_quick_500ns] Skipped: CALIBRATION_DISABLED=1");
         return;
@@ -309,6 +311,8 @@ fn coverage_quick_500ns() {
 /// Tests coverage calibration across 200ns, 500ns, and 1000ns effects.
 #[test]
 fn coverage_quick_multi_effect() {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[coverage_quick_multi_effect] Skipped: CALIBRATION_DISABLED=1");
         return;
@@ -428,6 +432,8 @@ fn coverage_quick_multi_effect() {
 #[test]
 #[ignore]
 fn coverage_validation_rigorous() {
+    init_effect_injection();
+
     if CalibrationConfig::is_disabled() {
         eprintln!("[coverage_validation_rigorous] Skipped: CALIBRATION_DISABLED=1");
         return;
