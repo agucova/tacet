@@ -5,7 +5,9 @@ edition = "2021"
 license = "MPL-2.0"
 readme = "README.md"
 description = "Proc macros for tacet timing side-channel detection"
-repository = "https://github.com/agucova/tacet"
+# TODO: Restore github.com/agucova/tacet after anonymous review
+repository = "https://anonymous.4open.science/r/tacet-75EB/"
+homepage = "https://tacet.sh"
 keywords = ["timing", "side-channel", "security", "cryptography", "testing"]
 categories = ["development-tools::testing", "cryptography"]
 

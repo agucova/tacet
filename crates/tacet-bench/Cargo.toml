@@ -4,7 +4,9 @@ version = "0.3.3"
 edition = "2021"
 description = "Benchmark comparison infrastructure for tacet"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/agucova/tacet"
+# TODO: Restore github.com/agucova/tacet after anonymous review
+repository = "https://anonymous.4open.science/r/tacet-75EB/"
+homepage = "https://tacet.sh"
 readme = "README.md"
 
 [features]

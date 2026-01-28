@@ -31,16 +31,18 @@ export default defineConfig({
           },
         }),
       ],
+      // TODO: Restore github.com/agucova/tacet after anonymous review
       social: [
         {
           icon: "github",
-          label: "GitHub",
-          href: "https://github.com/agucova/tacet",
+          label: "Source",
+          href: "https://anonymous.4open.science/r/tacet-75EB/",
         },
       ],
-      editLink: {
-        baseUrl: "https://github.com/agucova/tacet/edit/main/website/",
-      },
+      // TODO: Restore after anonymous review
+      // editLink: {
+      //   baseUrl: "https://github.com/agucova/tacet/edit/main/website/",
+      // },
       lastUpdated: true,
       components: {
         Header: "./src/components/Header.astro",
@@ -142,13 +144,14 @@ export default defineConfig({
             content: "#0C0C0C",
           },
         },
-        {
-          tag: "meta",
-          attrs: {
-            name: "author",
-            content: "Agustín Covarrubias",
-          },
-        },
+        // TODO: Restore after anonymous review
+        // {
+        //   tag: "meta",
+        //   attrs: {
+        //     name: "author",
+        //     content: "Agustín Covarrubias",
+        //   },
+        // },
         // Open Graph
         {
           tag: "meta",
@@ -208,20 +211,21 @@ export default defineConfig({
             content: "summary_large_image",
           },
         },
-        {
-          tag: "meta",
-          attrs: {
-            name: "twitter:site",
-            content: "@agucova",
-          },
-        },
-        {
-          tag: "meta",
-          attrs: {
-            name: "twitter:creator",
-            content: "@austinc3301",
-          },
-        },
+        // TODO: Restore after anonymous review
+        // {
+        //   tag: "meta",
+        //   attrs: {
+        //     name: "twitter:site",
+        //     content: "@agucova",
+        //   },
+        // },
+        // {
+        //   tag: "meta",
+        //   attrs: {
+        //     name: "twitter:creator",
+        //     content: "@austinc3301",
+        //   },
+        // },
         {
           tag: "meta",
           attrs: {

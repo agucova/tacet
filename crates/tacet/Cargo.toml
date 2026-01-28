@@ -8,9 +8,10 @@ readme = "README.md"
 description = "Detect timing side channels in cryptographic code"
 keywords = ["security", "cryptography", "timing", "side-channel"]
 categories = ["cryptography", "development-tools::testing"]
-repository = "https://github.com/agucova/tacet"
+# TODO: Restore github.com/agucova/tacet after anonymous review
+repository = "https://anonymous.4open.science/r/tacet-75EB/"
 documentation = "https://docs.rs/tacet"
-homepage = "https://github.com/agucova/tacet"
+homepage = "https://tacet.sh"
 
 [dependencies]
 tacet-core = { version = "0.3.3", path = "../tacet-core" }

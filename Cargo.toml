@@ -18,7 +18,9 @@ exclude = [
 edition = "2021"
 rust-version = "1.90"
 license = "MPL-2.0"
-repository = "https://github.com/agucova/tacet"
+# TODO: Restore github.com/agucova/tacet after anonymous review
+repository = "https://anonymous.4open.science/r/tacet-75EB/"
+homepage = "https://tacet.sh"
 
 [profile.release]
 debug = true
