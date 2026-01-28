@@ -9,37 +9,14 @@ Run any example with:
 cargo run --example <name>
 ```
 
-## Examples by Category
-
-### Core Usage
+## Examples
 
 | Example | Description | Run Command |
 |---------|-------------|-------------|
 | `simple` | Basic usage with InputPair and both simple/builder APIs | `cargo run --example simple` |
 | `compare` | Side-by-side comparison of leaky vs constant-time code | `cargo run --example compare` |
 | `test_xor` | Verify XOR is constant-time (should not detect leak) | `cargo run --example test_xor` |
-
-### Real-World Crypto
-
-| Example | Description | Run Command |
-|---------|-------------|-------------|
 | `aes` | Test AES-256-GCM encryption for timing leaks | `cargo run --example aes` |
-
-### Development and Debugging
-
-| Example | Description | Run Command |
-|---------|-------------|-------------|
-| `profile_oracle` | Profile oracle performance | `cargo run --example profile_oracle --release` |
-| `test_no_batch` | Test behavior without adaptive batching | `cargo run --example test_no_batch` |
-| `test_exact_copy` | Test exact copy operations | `cargo run --example test_exact_copy` |
-
-### Benchmarking (Internal)
-
-| Example | Description | Run Command |
-|---------|-------------|-------------|
-| `bench_bootstrap` | Benchmark bootstrap performance | `cargo run --example bench_bootstrap --release` |
-| `benchmark_baseline` | Establish baseline measurements | `cargo run --example benchmark_baseline --release` |
-| `compare_mde_methods` | Compare MDE calculation methods | `cargo run --example compare_mde_methods --release` |
 
 ## Suggested Reading Order
 
@@ -48,10 +25,6 @@ cargo run --example <name>
 2. `compare` - See how leaky vs safe code differs
 3. `test_xor` - Verify constant-time operations don't false-positive
 4. `aes` - Real-world crypto testing
-
-**If you're debugging performance:**
-1. `profile_oracle` - Identify bottlenecks
-2. `benchmark_baseline` - Establish baseline
 
 ## Key Patterns
 

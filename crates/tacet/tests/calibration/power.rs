@@ -276,15 +276,14 @@ fn run_power_test(test_name: &str, effect_sizes: &EffectSizes, effect_index: usi
             break;
         }
 
-        let inputs = InputPair::new(|| false, || true);
+        // Pass effect directly: 0 for baseline, effect_ns for sample
+        let inputs = InputPair::new(|| 0u64, || effect_ns);
 
         let outcome = TimingOracle::for_attacker(effect_sizes.attacker_model)
             .max_samples(config.samples_per_trial)
             .time_budget(config.time_budget_per_trial)
-            .test(inputs, |&should_delay| {
-                if should_delay {
-                    busy_wait_ns(effect_ns);
-                }
+            .test(inputs, |&effect| {
+                busy_wait_ns(effect);
                 std::hint::black_box(0);
             });
 
@@ -363,16 +362,14 @@ fn run_power_curve(test_name: &str, effect_sizes: &EffectSizes) {
                 break;
             }
 
-            let effect = effect_ns;
-            let inputs = InputPair::new(|| false, || true);
+            // Pass effect directly: 0 for baseline, effect_ns for sample
+            let inputs = InputPair::new(|| 0u64, || effect_ns);
 
             let outcome = TimingOracle::for_attacker(effect_sizes.attacker_model)
                 .max_samples(config.samples_per_trial)
                 .time_budget(config.time_budget_per_trial)
-                .test(inputs, move |&should_delay| {
-                    if should_delay {
-                        busy_wait_ns(effect);
-                    }
+                .test(inputs, move |&effect| {
+                    busy_wait_ns(effect);
                     std::hint::black_box(0);
                 });
 

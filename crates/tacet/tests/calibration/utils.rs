@@ -1329,7 +1329,7 @@ pub struct AutocorrCell {
 pub fn export_power_curve_csv(test_name: &str, points: &[PowerCurvePoint]) {
     let dir = match std::env::var("CALIBRATION_DATA_DIR") {
         Ok(d) => PathBuf::from(d),
-        Err(_) => PathBuf::from("calibration_data"),
+        Err(_) => PathBuf::from("data/calibration"),
     };
 
     if let Err(e) = fs::create_dir_all(&dir) {
@@ -1377,7 +1377,7 @@ pub fn export_power_curve_csv(test_name: &str, points: &[PowerCurvePoint]) {
 pub fn export_autocorr_heatmap_csv(test_name: &str, cells: &[AutocorrCell]) {
     let dir = match std::env::var("CALIBRATION_DATA_DIR") {
         Ok(d) => PathBuf::from(d),
-        Err(_) => PathBuf::from("calibration_data"),
+        Err(_) => PathBuf::from("data/calibration"),
     };
 
     if let Err(e) = fs::create_dir_all(&dir) {

@@ -152,24 +152,16 @@ fn run_estimation_test(test_name: &str, attacker_model: AttackerModel, effects: 
                 break;
             }
 
-            // Use simple boolean to distinguish baseline vs sample
-            let inputs = InputPair::new(|| false, || true);
-            let effect = effect_ns;
+            // Pass effect directly: 0 for baseline, effect_ns for sample
+            let inputs = InputPair::new(|| 0u64, || effect_ns);
 
             let outcome = TimingOracle::for_attacker(attacker_model)
                 .max_samples(config.samples_per_trial)
                 .time_budget(config.time_budget_per_trial)
-                .test(inputs, move |&should_delay| {
-                    // Base operation (~2μs) to ensure:
-                    // 1. Operation is measurable on coarse timers
-                    // 2. Adaptive batching uses K=1 (no multiplier)
-                    // Uses busy_wait for precise, constant-time delay.
-                    busy_wait_ns(2000);
-
-                    // Inject additional delay only for sample class
-                    if should_delay {
-                        busy_wait_ns(effect);
-                    }
+                .test(inputs, move |&effect| {
+                    // Single busy_wait call with effect baked in ensures symmetric
+                    // function call overhead. Base 2μs ensures measurability.
+                    busy_wait_ns(2000 + effect);
                 });
 
             runner.record(&outcome);

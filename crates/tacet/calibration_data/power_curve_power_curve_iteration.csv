@@ -1,4 +1,0 @@
-effect_mult,effect_ns,trials,detections,detection_rate,ci_low,ci_high,median_samples,median_time_ms
-0.0000,0.0,100,0,0.0000,0.0000,0.0362,3500,181
-1.0000,100.0,100,85,0.8500,0.7672,0.9069,3500,177
-2.0000,200.0,100,89,0.8900,0.8137,0.9375,3500,177

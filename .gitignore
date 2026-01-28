@@ -132,3 +132,6 @@ bench_results/
 
 # Random PDFs that ended up here
 *.pdf
+
+# AI assistant configuration (personal/local)
+.claude/

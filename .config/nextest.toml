@@ -105,13 +105,26 @@ default-filter = """
 # Category-Specific Profiles
 # =============================================================================
 
-# Calibration suite (slow statistical tests)
+# Calibration suite - quick/iteration tests only (~20min)
 # Usage: cargo nextest run --profile calibration
 [profile.calibration]
 failure-output = "immediate"
 status-level = "pass"
 final-status-level = "pass"
 slow-timeout = { period = "600s", terminate-after = 2 }
+retries = 0
+default-filter = "binary(calibration)"
+
+# Calibration suite - full validation (~2-3 hours)
+# Includes #[ignore] validation tests for thorough pre-release verification
+# Note: run-ignored is CLI-only in nextest, so use --run-ignored flag:
+#   cargo nextest run --profile calibration-full --run-ignored all
+# Or use justfile: just calibrate nextest-full
+[profile.calibration-full]
+failure-output = "immediate"
+status-level = "pass"
+final-status-level = "pass"
+slow-timeout = { period = "1800s", terminate-after = 2 }
 retries = 0
 default-filter = "binary(calibration)"
 

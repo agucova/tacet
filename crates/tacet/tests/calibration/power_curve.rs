@@ -153,18 +153,15 @@ fn run_power_curve(test_name: &str, model: AttackerModel, theta_ns: f64, multipl
         for trial in 0..trials {
             let start = Instant::now();
 
-            let inputs = InputPair::new(|| false, || true);
-            let effect = effect_ns;
+            // Pass effect directly: 0 for baseline, effect_ns for sample
+            let inputs = InputPair::new(|| 0u64, || effect_ns);
 
             let outcome = TimingOracle::for_attacker(model)
                 .max_samples(config.samples_per_trial)
                 .time_budget(config.time_budget_per_trial)
-                .test(inputs, move |&should_delay| {
-                    // Base operation (~2μs) for measurability
-                    busy_wait_ns(2000);
-                    if should_delay {
-                        busy_wait_ns(effect);
-                    }
+                .test(inputs, move |&effect| {
+                    // Single call with effect baked in ensures symmetric overhead
+                    busy_wait_ns(2000 + effect);
                 });
 
             let elapsed_ms = start.elapsed().as_millis() as u64;
