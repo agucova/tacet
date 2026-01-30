@@ -1273,8 +1273,12 @@ mod tests {
     fn test_timer_backend_name() {
         let name = timer_backend_name();
         // Should be one of the known backends
+        // Note: On Linux ARM64 with perf feature + sudo, "perf_event" is used
         assert!(
-            name == "cntvct_el0" || name == "rdtsc" || name == "instant_fallback",
+            name == "cntvct_el0"
+                || name == "rdtsc"
+                || name == "instant_fallback"
+                || name == "perf_event",
             "Unknown timer backend: {}",
             name
         );
@@ -1301,7 +1305,20 @@ mod tests {
 
         #[cfg(target_arch = "aarch64")]
         {
+            // On Linux ARM64 with perf feature enabled, either timer is valid:
+            // - "perf_event" when running with sudo (perf_event syscall available)
+            // - "cntvct_el0" when running without sudo (fallback to native counter)
+            // On macOS ARM64, always "cntvct_el0"
+            #[cfg(all(target_os = "linux", feature = "perf"))]
+            assert!(
+                backend == "cntvct_el0" || backend == "perf_event",
+                "Expected cntvct_el0 or perf_event on Linux ARM64, got: {}",
+                backend
+            );
+
+            #[cfg(not(all(target_os = "linux", feature = "perf")))]
             assert_eq!(backend, "cntvct_el0");
+
             assert!(precise);
         }
 
