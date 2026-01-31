@@ -95,7 +95,7 @@ pub enum BenchmarkPreset {
     /// Inspired by SILENT paper (arXiv:2504.19821) heatmap methodology
     FineThreshold,
     /// Threshold-relative: Tests effects scaled to each attacker model's threshold θ
-    /// Covers SharedHardware (0.6ns), AdjacentNetwork (100ns), RemoteNetwork (50μs)
+    /// Covers SharedHardware (0.4ns), AdjacentNetwork (100ns), RemoteNetwork (50μs)
     ThresholdRelative,
     /// SharedHardware stress test: Wide effect range with fixed SharedHardware model
     /// Tests detection from below threshold (0.3ns) to far above (100μs)
@@ -228,7 +228,7 @@ impl SweepConfig {
     /// - Sub-microsecond (10ns–500ns): cache timing, branch misprediction, table lookups
     /// - Microsecond (1μs–10μs): larger timing differences
     ///
-    /// Uses SharedHardware attacker model (θ=0.6ns) for fair comparison with
+    /// Uses SharedHardware attacker model (θ=0.4ns) for fair comparison with
     /// other tools that don't have configurable thresholds.
     ///
     /// - Effect sizes: 19 points from 0 to 10μs (including 1ns, 2ns, 5ns for SharedHardware)
@@ -362,12 +362,12 @@ impl SweepConfig {
     ///
     /// | Attacker Model   | θ       | Test effects (multiples of θ)           |
     /// |------------------|---------|----------------------------------------|
-    /// | SharedHardware   | 0.6ns   | 0.3, 0.6, 1.2, 3, 6 ns                 |
+    /// | SharedHardware   | 0.4ns   | 0.2, 0.4, 0.8, 2, 4 ns                 |
     /// | AdjacentNetwork  | 100ns   | 50, 100, 200, 500 ns                   |
     /// | RemoteNetwork    | 50μs    | 25μs, 50μs, 100μs, 250μs               |
     ///
     /// With σ = 100,000ns (100μs), the effect multipliers map to:
-    /// - SharedHardware range: 0.000003σ to 0.00006σ (0.3-6ns)
+    /// - SharedHardware range: 0.000002σ to 0.00004σ (0.2-4ns)
     /// - AdjacentNetwork range: 0.0005σ to 0.005σ (50-500ns)
     /// - RemoteNetwork range: 0.25σ to 2.5σ (25-250μs)
     ///
@@ -381,12 +381,12 @@ impl SweepConfig {
             // Effect sizes covering all three attacker model thresholds
             // σ = 100,000ns, so:
             //
-            // SharedHardware (θ = 0.6ns):
-            //   0.5θ = 0.3ns  = 0.000003σ
-            //   1θ   = 0.6ns  = 0.000006σ
-            //   2θ   = 1.2ns  = 0.000012σ
-            //   5θ   = 3ns    = 0.00003σ
-            //   10θ  = 6ns    = 0.00006σ
+            // SharedHardware (θ = 0.4ns):
+            //   0.5θ = 0.2ns  = 0.000002σ
+            //   1θ   = 0.4ns  = 0.000004σ
+            //   2θ   = 0.8ns  = 0.000008σ
+            //   5θ   = 2ns    = 0.00002σ
+            //   10θ  = 4ns    = 0.00004σ
             //
             // AdjacentNetwork (θ = 100ns):
             //   0.5θ = 50ns   = 0.0005σ
@@ -401,12 +401,12 @@ impl SweepConfig {
             //   5θ   = 250μs  = 2.5σ
             effect_multipliers: vec![
                 0.0, // FPR test (no effect)
-                // SharedHardware range (0.6ns threshold)
-                0.000003, // 0.3ns  (0.5θ)
-                0.000006, // 0.6ns  (1θ)
-                0.000012, // 1.2ns  (2θ)
-                0.00003,  // 3ns    (5θ)
-                0.00006,  // 6ns    (10θ)
+                // SharedHardware range (0.4ns threshold)
+                0.000002, // 0.2ns  (0.5θ)
+                0.000004, // 0.4ns  (1θ)
+                0.000008, // 0.8ns  (2θ)
+                0.00002,  // 2ns    (5θ)
+                0.00004,  // 4ns    (10θ)
                 // AdjacentNetwork range (100ns threshold)
                 0.0005, // 50ns   (0.5θ)
                 0.001,  // 100ns  (1θ)
@@ -439,37 +439,37 @@ impl SweepConfig {
     /// SharedHardware stress test: Tests detection across a wide effect range
     ///
     /// Purpose: Validate that tacet correctly detects both small and
-    /// very large effects when using the SharedHardware attacker model (θ = 0.6ns).
+    /// very large effects when using the SharedHardware attacker model (θ = 0.4ns).
     /// This tests whether the Bayesian prior handles extreme effect sizes correctly.
     ///
-    /// Effect range: 0ns to 100μs (0 to ~166,667× threshold)
+    /// Effect range: 0ns to 100μs (0 to ~250,000× threshold)
     ///
     /// | Multiplier | Effect    | Relation to θ       |
     /// |------------|-----------|---------------------|
     /// | 0.0        | 0ns       | Null (FPR)          |
-    /// | 0.000003   | 0.3ns     | 0.5× threshold      |
-    /// | 0.000006   | 0.6ns     | 1× threshold        |
-    /// | 0.00001    | 1ns       | ~2× threshold       |
-    /// | 0.00002    | 2ns       | ~3× threshold       |
-    /// | 0.00005    | 5ns       | ~8× threshold       |
-    /// | 0.0001     | 10ns      | ~17× threshold      |
-    /// | 0.0005     | 50ns      | ~83× threshold      |
-    /// | 0.001      | 100ns     | ~167× threshold     |
-    /// | 0.005      | 500ns     | ~833× threshold     |
-    /// | 0.01       | 1μs       | ~1,667× threshold   |
-    /// | 0.1        | 10μs      | ~16,667× threshold  |
-    /// | 1.0        | 100μs     | ~166,667× threshold |
+    /// | 0.000002   | 0.2ns     | 0.5× threshold      |
+    /// | 0.000004   | 0.4ns     | 1× threshold        |
+    /// | 0.00001    | 1ns       | ~2.5× threshold     |
+    /// | 0.00002    | 2ns       | ~5× threshold       |
+    /// | 0.00005    | 5ns       | ~12.5× threshold    |
+    /// | 0.0001     | 10ns      | ~25× threshold      |
+    /// | 0.0005     | 50ns      | ~125× threshold     |
+    /// | 0.001      | 100ns     | ~250× threshold     |
+    /// | 0.005      | 500ns     | ~1,250× threshold   |
+    /// | 0.01       | 1μs       | ~2,500× threshold   |
+    /// | 0.1        | 10μs      | ~25,000× threshold  |
+    /// | 1.0        | 100μs     | ~250,000× threshold |
     pub fn shared_hardware_stress() -> Self {
         Self {
             preset: BenchmarkPreset::SharedHardwareStress,
             samples_per_class: 10_000,
             datasets_per_point: 20,
             // Wide range from below threshold to far above
-            // σ = 100,000ns, SharedHardware θ = 0.6ns
+            // σ = 100,000ns, SharedHardware θ = 0.4ns
             effect_multipliers: vec![
                 0.0,      // 0ns (FPR test)
-                0.000003, // 0.3ns (below threshold)
-                0.000006, // 0.6ns (at threshold)
+                0.000002, // 0.2ns (below threshold)
+                0.000004, // 0.4ns (at threshold)
                 0.00001,  // 1ns
                 0.00002,  // 2ns
                 0.00005,  // 5ns

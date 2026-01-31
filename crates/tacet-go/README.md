@@ -75,12 +75,13 @@ func main() {
 
 ## Attacker Models
 
-Choose based on your threat scenario:
+Choose based on your threat scenario.
+Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 
 | Model | Threshold | Use Case |
 |-------|-----------|----------|
-| `SharedHardware` | 0.6 ns | SGX, containers, cross-VM |
-| `PostQuantum` | 3.3 ns | Post-quantum crypto |
+| `SharedHardware` | 0.4 ns (~2 cycles @ 5 GHz) | SGX, containers, cross-VM |
+| `PostQuantum` | 2.0 ns (~10 cycles @ 5 GHz) | ML-KEM, ML-DSA, lattice crypto |
 | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs |
 | `RemoteNetwork` | 50 μs | Internet-exposed services |
 | `Research` | 0 | Detect any difference |

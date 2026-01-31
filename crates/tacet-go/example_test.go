@@ -107,7 +107,7 @@ func ExampleWithAttacker() {
 	_, _ = tacet.Test(
 		tacet.NewZeroGenerator(1),
 		op, 32,
-		tacet.WithAttacker(tacet.SharedHardware), // 0.6ns threshold
+		tacet.WithAttacker(tacet.SharedHardware), // 0.4ns threshold
 		tacet.WithTimeBudget(5*time.Second),
 	)
 

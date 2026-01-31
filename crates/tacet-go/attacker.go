@@ -2,15 +2,17 @@ package tacet
 
 // AttackerModel represents the threat model for timing analysis.
 // Choose based on your deployment scenario.
+//
+// Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 type AttackerModel int
 
 const (
-	// SharedHardware: theta = 0.6 ns (~2 cycles @ 3GHz)
+	// SharedHardware: theta = 0.4 ns (~2 cycles @ 5 GHz)
 	// Use for SGX enclaves, cross-VM attacks, containers, hyperthreading.
 	// Attacker shares physical hardware with victim.
 	SharedHardware AttackerModel = iota
 
-	// PostQuantum: theta = 3.3 ns (~10 cycles)
+	// PostQuantum: theta = 2.0 ns (~10 cycles @ 5 GHz)
 	// Use for post-quantum cryptographic implementations.
 	// KyberSlash-class attacks exploit ~10 cycle differences.
 	PostQuantum
@@ -50,12 +52,13 @@ func (m AttackerModel) String() string {
 }
 
 // ThresholdNs returns the timing threshold in nanoseconds for this model.
+// Cycle-based models use a 5 GHz reference frequency (conservative).
 func (m AttackerModel) ThresholdNs() float64 {
 	switch m {
 	case SharedHardware:
-		return 0.6
+		return 0.4 // ~2 cycles @ 5 GHz
 	case PostQuantum:
-		return 3.3
+		return 2.0 // ~10 cycles @ 5 GHz
 	case AdjacentNetwork:
 		return 100.0
 	case RemoteNetwork:

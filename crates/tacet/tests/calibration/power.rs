@@ -53,32 +53,32 @@ const REMOTE_NETWORK_EFFECTS: EffectSizes = EffectSizes {
     ],
 };
 
-// PostQuantumSentinel has θ ≈ 3.3ns which is below Instant precision,
+// PostQuantumSentinel has θ = 2.0ns (~10 cycles @ 5 GHz) which is below Instant precision,
 // so we use larger multipliers (requires PMU timer)
 const PQ_SENTINEL_EFFECTS: EffectSizes = EffectSizes {
     model_name: "PostQuantumSentinel",
     attacker_model: AttackerModel::PostQuantumSentinel,
-    theta_ns: 3.3,
+    theta_ns: 2.0,
     effects: [
-        (3.0, 10),     // ~3×θ ≈ 10ns (minimum measurable)
-        (10.0, 33),    // ~10×θ
-        (30.0, 100),   // ~30×θ
-        (100.0, 330),  // ~100×θ
-        (300.0, 1000), // ~300×θ (1μs)
+        (5.0, 10),     // ~5×θ ≈ 10ns (minimum measurable)
+        (15.0, 30),    // ~15×θ
+        (50.0, 100),   // ~50×θ
+        (150.0, 300),  // ~150×θ
+        (500.0, 1000), // ~500×θ (1μs)
     ],
 };
 
-// SharedHardware has θ ≈ 0.6ns which requires PMU timer
+// SharedHardware has θ = 0.4ns (~2 cycles @ 5 GHz) which requires PMU timer
 const SHARED_HARDWARE_EFFECTS: EffectSizes = EffectSizes {
     model_name: "SharedHardware",
     attacker_model: AttackerModel::SharedHardware,
-    theta_ns: 0.6,
+    theta_ns: 0.4,
     effects: [
-        (10.0, 6),     // ~10×θ ≈ 6ns
-        (50.0, 30),    // ~50×θ
-        (100.0, 60),   // ~100×θ
-        (500.0, 300),  // ~500×θ
-        (1000.0, 600), // ~1000×θ
+        (15.0, 6),      // ~15×θ ≈ 6ns
+        (75.0, 30),     // ~75×θ
+        (150.0, 60),    // ~150×θ
+        (750.0, 300),   // ~750×θ
+        (1500.0, 600),  // ~1500×θ
     ],
 };
 
@@ -197,7 +197,7 @@ fn power_validation_curve_remote_network() {
 
 /// Power curve for PostQuantumSentinel model.
 ///
-/// Note: Uses higher multipliers because θ ≈ 3.3ns is below Instant precision.
+/// Note: Uses higher multipliers because θ = 2.0ns is below Instant precision.
 #[test]
 #[ignore]
 fn power_validation_curve_pq_sentinel() {
@@ -210,7 +210,7 @@ fn power_validation_curve_pq_sentinel() {
 
 /// Power curve for SharedHardware model with PMU timer.
 ///
-/// SharedHardware has θ ≈ 0.6ns which is only measurable with PMU timers.
+/// SharedHardware has θ = 0.4ns (~2 cycles @ 5 GHz) which is only measurable with PMU timers.
 /// Skip if PMU is not available.
 #[test]
 #[ignore]

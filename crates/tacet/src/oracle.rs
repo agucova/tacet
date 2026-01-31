@@ -84,9 +84,10 @@ use crate::types::{AttackerModel, Class};
 ///
 /// | Preset | theta | Use case |
 /// |--------|-------|----------|
-/// | `SharedHardware` | ~0.6ns | SGX, cross-VM, containers |
-/// | `AdjacentNetwork` | 100ns | LAN, HTTP/2 endpoints |
-/// | `RemoteNetwork` | 50us | Public APIs, general internet |
+/// | `SharedHardware` | 0.4 ns (~2 cycles @ 5 GHz) | SGX, cross-VM, containers |
+/// | `PostQuantumSentinel` | 2.0 ns (~10 cycles @ 5 GHz) | ML-KEM, ML-DSA, lattice crypto |
+/// | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 endpoints |
+/// | `RemoteNetwork` | 50 μs | Public APIs, general internet |
 /// | `Research` | 0 | Academic analysis (not for CI) |
 #[derive(Debug, Clone)]
 pub struct TimingOracle {
@@ -121,9 +122,10 @@ impl TimingOracle {
     ///
     /// | Preset | theta | Use case |
     /// |--------|-------|----------|
-    /// | `SharedHardware` | ~0.6ns | SGX, cross-VM, containers |
-    /// | `AdjacentNetwork` | 100ns | LAN, HTTP/2 endpoints |
-    /// | `RemoteNetwork` | 50us | Public APIs, general internet |
+    /// | `SharedHardware` | 0.4 ns (~2 cycles @ 5 GHz) | SGX, cross-VM, containers |
+    /// | `PostQuantumSentinel` | 2.0 ns (~10 cycles @ 5 GHz) | ML-KEM, ML-DSA, lattice crypto |
+    /// | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 endpoints |
+    /// | `RemoteNetwork` | 50 μs | Public APIs, general internet |
     /// | `Research` | 0 | Academic analysis (not for CI) |
     pub fn for_attacker(model: AttackerModel) -> Self {
         Self {
@@ -633,10 +635,8 @@ impl TimingOracle {
         // Step 1: Create timer based on spec (auto-detects PMU if available)
         let (mut timer, fallback_reason) = self.timer_spec.create_timer();
 
-        // Resolve the theta threshold based on attacker model and timer
-        let raw_theta_ns = self
-            .config
-            .resolve_min_effect_ns(Some(timer.cycles_per_ns()), Some(timer.resolution_ns()));
+        // Resolve the theta threshold based on attacker model
+        let raw_theta_ns = self.config.resolve_min_effect_ns();
         // Clamp theta to at least timer resolution to avoid degenerate priors
         // (Research mode returns 0, which causes zero prior covariance and Cholesky failure)
         let theta_ns = raw_theta_ns.max(timer.resolution_ns());
@@ -1645,7 +1645,7 @@ impl TimingOracle {
     pub fn analyze_raw_samples(&self, baseline_ns: &[f64], test_ns: &[f64]) -> Outcome {
         use crate::adaptive::single_pass::{analyze_single_pass, SinglePassConfig};
 
-        let theta_ns = self.config.resolve_min_effect_ns(None, None);
+        let theta_ns = self.config.resolve_min_effect_ns();
 
         let config = SinglePassConfig {
             theta_ns,

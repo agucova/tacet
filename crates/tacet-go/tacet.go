@@ -33,9 +33,10 @@
 //
 // # Attacker Models
 //
-// Choose an attacker model based on your threat scenario:
-//   - SharedHardware (theta=0.6ns): SGX, containers, cross-VM attacks
-//   - PostQuantum (theta=3.3ns): Post-quantum crypto implementations
+// Choose an attacker model based on your threat scenario.
+// Cycle-based thresholds use a 5 GHz reference frequency (conservative).
+//   - SharedHardware (theta=0.4ns, ~2 cycles @ 5 GHz): SGX, containers, cross-VM attacks
+//   - PostQuantum (theta=2.0ns, ~10 cycles @ 5 GHz): Post-quantum crypto implementations
 //   - AdjacentNetwork (theta=100ns): LAN services, HTTP/2 APIs
 //   - RemoteNetwork (theta=50us): Internet-exposed services
 //   - Research (theta->0): Detect any difference (not for CI)

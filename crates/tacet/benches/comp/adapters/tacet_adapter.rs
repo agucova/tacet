@@ -43,7 +43,7 @@ impl TimingOracleDetector {
     pub fn new() -> Self {
         Self {
             // Use SharedHardware for cycle-level sensitivity comparable to dudect
-            // This sets threshold to ~0.6ns (~2 cycles at 3GHz)
+            // This sets threshold to 0.4ns (~2 cycles at 5 GHz)
             attacker_model: AttackerModel::SharedHardware,
             current_ops: RefCell::new(None),
         }

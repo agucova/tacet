@@ -79,11 +79,13 @@ Existing tools like DudeCT output t-statistics and p-values that are hard to int
 
 ## Attacker Model Presets
 
-Choose your threat model to define what timing differences matter:
+Choose your threat model to define what timing differences matter.
+Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 
 | Preset | Threshold | Use case |
 |--------|-----------|----------|
-| `SharedHardware` | 0.6 ns (~2 cycles) | SGX, cross-VM, containers |
+| `SharedHardware` | 0.4 ns (~2 cycles @ 5 GHz) | SGX, cross-VM, containers |
+| `PostQuantumSentinel` | 2.0 ns (~10 cycles @ 5 GHz) | ML-KEM, ML-DSA, lattice crypto |
 | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs |
 | `RemoteNetwork` | 50 μs | Public internet APIs |
 | `Research` | 0 | Detect any difference |

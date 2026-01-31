@@ -246,7 +246,7 @@ export function configAdjacentNetwork(): Config {
 /**
  * Get configuration preset for shared hardware attacker model.
  *
- * Threshold: 0.6 ns (~2 cycles @ 3GHz). Use for SGX, cross-VM, containers.
+ * Threshold: 0.4 ns (~2 cycles @ 5 GHz). Use for SGX, cross-VM, containers.
  *
  * @returns Configuration with SharedHardware defaults
  */
@@ -308,9 +308,9 @@ export class TimingOracle {
    *
    * @param model The attacker model (determines threshold theta)
    *
-   * Available models:
-   * - `SharedHardware` (0.6ns) - SGX, cross-VM, containers
-   * - `PostQuantum` (3.3ns) - Post-quantum crypto
+   * Available models (cycle-based use 5 GHz reference):
+   * - `SharedHardware` (0.4ns, ~2 cycles @ 5 GHz) - SGX, cross-VM, containers
+   * - `PostQuantum` (2.0ns, ~10 cycles @ 5 GHz) - Post-quantum crypto
    * - `AdjacentNetwork` (100ns) - LAN, HTTP/2
    * - `RemoteNetwork` (50μs) - General internet
    * - `Research` (0) - Detect any difference

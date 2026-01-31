@@ -15,13 +15,15 @@ use tacet_core::types::AttackerModel as CoreAttackerModel;
 use tsify::Tsify;
 
 /// Attacker model determines the minimum effect threshold (theta) for leak detection.
+///
+/// Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum AttackerModel {
-    /// theta = 0.6 ns (~2 cycles @ 3GHz) - SGX, cross-VM, containers
+    /// theta = 0.4 ns (~2 cycles @ 5 GHz) - SGX, cross-VM, containers
     SharedHardware,
-    /// theta = 3.3 ns (~10 cycles) - Post-quantum crypto
+    /// theta = 2.0 ns (~10 cycles @ 5 GHz) - Post-quantum crypto
     PostQuantum,
     /// theta = 100 ns - LAN, HTTP/2 (Timeless Timing Attacks)
     #[default]

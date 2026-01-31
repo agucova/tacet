@@ -163,8 +163,8 @@ func TestAttackerModelThresholds(t *testing.T) {
 		expected  float64
 		tolerance float64
 	}{
-		{SharedHardware, 0.6, 0.01},
-		{PostQuantum, 3.3, 0.01},
+		{SharedHardware, 0.4, 0.01},
+		{PostQuantum, 2.0, 0.01},
 		{AdjacentNetwork, 100.0, 0.01},
 		{RemoteNetwork, 50000.0, 0.01},
 		{Research, 0.0, 0.01},

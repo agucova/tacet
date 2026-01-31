@@ -64,11 +64,13 @@ switch (result.outcome) {
 
 ## Attacker Models
 
-Choose your attacker model based on your threat scenario:
+Choose your attacker model based on your threat scenario.
+Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 
 | Model | Threshold | Use Case |
 |-------|-----------|----------|
-| `SharedHardware` | 0.6 ns | SGX, cross-VM, containers |
+| `SharedHardware` | 0.4 ns (~2 cycles @ 5 GHz) | SGX, cross-VM, containers |
+| `PostQuantum` | 2.0 ns (~10 cycles @ 5 GHz) | ML-KEM, ML-DSA, lattice crypto |
 | `AdjacentNetwork` | 100 ns | LAN, HTTP/2 APIs |
 | `RemoteNetwork` | 50 μs | Internet-facing services |
 | `Research` | 0 | Detect any difference |

@@ -20,9 +20,9 @@
 
 #include "../include/tacet.h"
 
-/* Threshold values from spec */
-#define SHARED_HARDWARE_THRESHOLD_NS 0.6
-#define POST_QUANTUM_THRESHOLD_NS 3.3
+/* Threshold values from spec (5 GHz reference frequency) */
+#define SHARED_HARDWARE_THRESHOLD_NS 0.4
+#define POST_QUANTUM_THRESHOLD_NS 2.0
 #define ADJACENT_NETWORK_THRESHOLD_NS 100.0
 #define REMOTE_NETWORK_THRESHOLD_NS 50000.0  /* 50 microseconds */
 

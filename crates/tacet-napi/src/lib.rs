@@ -95,7 +95,7 @@ pub fn config_adjacent_network() -> Config {
     default_config(AttackerModel::AdjacentNetwork)
 }
 
-/// Create a configuration for shared hardware attacker (0.6ns threshold).
+/// Create a configuration for shared hardware attacker (0.4ns threshold).
 #[napi]
 pub fn config_shared_hardware() -> Config {
     default_config(AttackerModel::SharedHardware)

@@ -28,11 +28,12 @@ export declare function calibrateSamples(baseline: BigInt64Array, sample: BigInt
 export declare function adaptiveStepBatch(calibration: Calibration, state: AdaptiveState, baseline: BigInt64Array, sample: BigInt64Array, config: Config, elapsedSecs: number): AdaptiveStepResult
 /** Run complete analysis on pre-collected timing data. */
 export declare function analyze(baseline: BigInt64Array, sample: BigInt64Array, config: Config, timerFrequencyHz: number): AnalysisResult
-/** Attacker model determines the minimum effect threshold (theta) for leak detection. */
+/** Attacker model determines the minimum effect threshold (theta) for leak detection.
+ * Cycle-based thresholds use a 5 GHz reference frequency (conservative). */
 export enum AttackerModel {
-  /** theta = 0.6 ns (~2 cycles @ 3GHz) - SGX, cross-VM, containers */
+  /** theta = 0.4 ns (~2 cycles @ 5 GHz) - SGX, cross-VM, containers */
   SharedHardware = 0,
-  /** theta = 3.3 ns (~10 cycles) - Post-quantum crypto */
+  /** theta = 2.0 ns (~10 cycles @ 5 GHz) - Post-quantum crypto */
   PostQuantum = 1,
   /** theta = 100 ns - LAN, HTTP/2 (Timeless Timing Attacks) */
   AdjacentNetwork = 2,
@@ -239,7 +240,7 @@ export declare function version(): string
 export declare function defaultConfig(attackerModel: AttackerModel): Config
 /** Create a configuration for adjacent network attacker (100ns threshold). */
 export declare function configAdjacentNetwork(): Config
-/** Create a configuration for shared hardware attacker (0.6ns threshold). */
+/** Create a configuration for shared hardware attacker (0.4ns threshold). */
 export declare function configSharedHardware(): Config
 /** Create a configuration for remote network attacker (50us threshold). */
 export declare function configRemoteNetwork(): Config

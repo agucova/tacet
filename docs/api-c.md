@@ -139,23 +139,30 @@ Common values:
 
 ## Attacker Models
 
-Choose an attacker model based on your threat scenario:
+Choose an attacker model based on your threat scenario. Cycle-based thresholds use a conservative 5 GHz reference frequency (assumes fast attacker hardware).
 
-### Adjacent Network (100ns threshold)
+### Adjacent Network (100 ns threshold)
 For LAN attackers or HTTP/2 APIs. Use this for internal microservices or APIs with request multiplexing.
 
 ```c
 struct ToConfig config = to_config_adjacent_network();
 ```
 
-### Shared Hardware (0.6ns / ~2 cycles threshold)
+### Shared Hardware (0.4 ns / ~2 cycles @ 5 GHz threshold)
 For co-resident attackers with cycle-level timing access (SGX enclaves, containers, shared hosting).
 
 ```c
 struct ToConfig config = to_config_shared_hardware();
 ```
 
-### Remote Network (50μs threshold)
+### Post-Quantum (2.0 ns / ~10 cycles @ 5 GHz threshold)
+For lattice-based cryptography (ML-KEM, ML-DSA). Catches KyberSlash-class timing leaks.
+
+```c
+struct ToConfig config = to_config_post_quantum();
+```
+
+### Remote Network (50 μs threshold)
 For general internet exposure and legacy HTTP/1.1 services.
 
 ```c

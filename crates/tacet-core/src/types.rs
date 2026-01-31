@@ -44,6 +44,10 @@ pub struct TimingSample {
 /// There is no single correct threshold; your choice is a statement about who you're
 /// defending against.
 ///
+/// Cycle-based thresholds assume a 5 GHz reference frequency (conservative for modern
+/// high-performance CPUs like Apple M4 @ 4.4 GHz, Intel 14th gen @ 6 GHz, AMD 7800X3D
+/// @ 5 GHz). Using a fast reference means smaller θ = more sensitive = safer for security.
+///
 /// # Sources
 ///
 /// - **Crosby et al. (2009)**: "Opportunities and Limits of Remote Timing Attacks."
@@ -56,7 +60,7 @@ pub struct TimingSample {
 pub enum AttackerModel {
     /// Attacker shares physical hardware with the target.
     ///
-    /// θ = 2 cycles (~0.6ns @ 3GHz)
+    /// θ = 0.4 ns (~2 cycles @ 5 GHz)
     ///
     /// Use for: SGX enclaves, cross-VM on shared cache, co-located containers,
     /// hyperthreading neighbors, shared hosting.
@@ -66,7 +70,7 @@ pub enum AttackerModel {
 
     /// Catch KyberSlash-class timing leaks in post-quantum cryptography.
     ///
-    /// θ = 10 cycles (~3.3ns @ 3GHz)
+    /// θ = 2.0 ns (~10 cycles @ 5 GHz)
     ///
     /// Use for: ML-KEM (Kyber), ML-DSA (Dilithium), and other lattice-based
     /// cryptography where ~20 cycle leaks have been shown exploitable.
@@ -79,7 +83,7 @@ pub enum AttackerModel {
 
     /// Attacker on same local network, or using HTTP/2 concurrent requests.
     ///
-    /// θ = 100ns
+    /// θ = 100 ns
     ///
     /// Use for: Internal services, microservices, or any HTTP/2 endpoint.
     ///
@@ -93,7 +97,7 @@ pub enum AttackerModel {
 
     /// Attacker over the internet using traditional timing techniques.
     ///
-    /// θ = 50μs
+    /// θ = 50 μs
     ///
     /// Use for: Public APIs without HTTP/2, legacy services, high-jitter paths.
     ///
@@ -117,10 +121,15 @@ pub enum AttackerModel {
 
 impl AttackerModel {
     /// Convert attacker model to threshold in nanoseconds.
+    ///
+    /// Cycle-based models (SharedHardware, PostQuantumSentinel) use a 5 GHz
+    /// reference frequency. This is conservative (assumes fast attacker hardware).
     pub fn to_threshold_ns(&self) -> f64 {
         match self {
-            AttackerModel::SharedHardware => 0.6,      // ~2 cycles @ 3GHz
-            AttackerModel::PostQuantumSentinel => 3.3, // ~10 cycles @ 3GHz (catches 20+ cycle leaks)
+            // 5 GHz reference: 2 cycles / 5 = 0.4 ns
+            AttackerModel::SharedHardware => 0.4,
+            // 5 GHz reference: 10 cycles / 5 = 2.0 ns
+            AttackerModel::PostQuantumSentinel => 2.0,
             AttackerModel::AdjacentNetwork => 100.0,
             AttackerModel::RemoteNetwork => 50_000.0, // 50μs
             AttackerModel::Research => 0.0,           // Will be clamped to timer resolution

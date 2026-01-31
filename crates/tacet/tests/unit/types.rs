@@ -849,8 +849,8 @@ fn attacker_model_default_is_adjacent_network() {
 
 #[test]
 fn attacker_model_to_threshold_ns_presets() {
-    // SharedHardware: ~0.6ns (2 cycles @ 3GHz)
-    assert!((AttackerModel::SharedHardware.to_threshold_ns() - 0.6).abs() < 0.01);
+    // SharedHardware: 0.4ns (~2 cycles @ 5 GHz)
+    assert!((AttackerModel::SharedHardware.to_threshold_ns() - 0.4).abs() < 0.01);
 
     // AdjacentNetwork: 100ns
     assert_eq!(AttackerModel::AdjacentNetwork.to_threshold_ns(), 100.0);

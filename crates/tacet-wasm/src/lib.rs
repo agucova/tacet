@@ -48,7 +48,7 @@ mod tests {
         assert!((adjacent.theta_ns() - 100.0).abs() < 1e-10);
 
         let shared = config_shared_hardware();
-        assert!((shared.theta_ns() - 0.6).abs() < 1e-10);
+        assert!((shared.theta_ns() - 0.4).abs() < 1e-10);
 
         let remote = config_remote_network();
         assert!((remote.theta_ns() - 50000.0).abs() < 1e-10);

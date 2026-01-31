@@ -450,20 +450,7 @@ impl Config {
     ///
     /// If an attacker model is set, returns its threshold in nanoseconds.
     /// Otherwise, returns the manually configured `min_effect_of_concern_ns`.
-    ///
-    /// # Arguments
-    ///
-    /// * `_cpu_freq_ghz` - Deprecated, kept for API compatibility
-    /// * `_timer_resolution_ns` - Deprecated, kept for API compatibility
-    ///
-    /// # Returns
-    ///
-    /// The resolved threshold in nanoseconds.
-    pub fn resolve_min_effect_ns(
-        &self,
-        _cpu_freq_ghz: Option<f64>,
-        _timer_resolution_ns: Option<f64>,
-    ) -> f64 {
+    pub fn resolve_min_effect_ns(&self) -> f64 {
         if let Some(model) = &self.attacker_model {
             model.to_threshold_ns()
         } else {
