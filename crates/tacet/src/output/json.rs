@@ -24,19 +24,16 @@ pub fn to_json_pretty(outcome: &Outcome) -> Result<String, serde_json::Error> {
 mod tests {
     use super::*;
     use crate::result::{
-        Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
-        MeasurementQuality,
+        Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, MeasurementQuality,
     };
 
     fn make_pass_outcome() -> Outcome {
         Outcome::Pass {
             leak_probability: 0.02,
             effect: EffectEstimate {
-                shift_ns: 5.0,
-                tail_ns: 2.0,
+                max_effect_ns: 5.0,
                 credible_interval_ns: (0.0, 10.0),
-                pattern: EffectPattern::Indeterminate,
-                interpretation_caveat: None,
+                top_quantiles: Vec::new(),
             },
             samples_used: 10000,
             quality: MeasurementQuality::Good,
@@ -51,11 +48,9 @@ mod tests {
         Outcome::Fail {
             leak_probability: 0.98,
             effect: EffectEstimate {
-                shift_ns: 150.0,
-                tail_ns: 25.0,
+                max_effect_ns: 150.0,
                 credible_interval_ns: (100.0, 200.0),
-                pattern: EffectPattern::UniformShift,
-                interpretation_caveat: None,
+                top_quantiles: Vec::new(),
             },
             exploitability: Exploitability::Http2Multiplexing,
             samples_used: 10000,
@@ -107,7 +102,7 @@ mod tests {
         let json = to_json(&outcome).unwrap();
         assert!(json.contains("Fail"));
         assert!(json.contains("\"leak_probability\":0.98"));
-        assert!(json.contains("\"shift_ns\":150.0"));
+        assert!(json.contains("\"max_effect_ns\":150.0"));
     }
 
     #[test]

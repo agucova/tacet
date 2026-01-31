@@ -226,7 +226,7 @@ func TestKnownLeaky(t *testing.T) {
 	t.Logf("Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
-	t.Logf("  Effect: %.2f ns (shift) + %.2f ns (tail)", result.Effect.ShiftNs, result.Effect.TailNs)
+	t.Logf("  Effect: %.2f ns (CI: [%.2f, %.2f])", result.Effect.MaxEffectNs, result.Effect.CredibleIntervalNs[0], result.Effect.CredibleIntervalNs[1])
 	t.Logf("  Samples: %d", result.SamplesUsed)
 
 	if result.Outcome != Fail {
@@ -273,7 +273,7 @@ func TestKnownSafe(t *testing.T) {
 	t.Logf("Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 	t.Logf("  Samples: %d", result.SamplesUsed)
 
 	// Should pass or be inconclusive (not fail)
@@ -376,7 +376,7 @@ func TestAnalyzeWithLeak(t *testing.T) {
 	t.Logf("Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	// With a 100-tick difference, should detect a leak
 	if result.Outcome == Pass {
@@ -564,7 +564,7 @@ func TestExploitabilitySharedHardwareOnly(t *testing.T) {
 
 	t.Logf("Result: %s", result)
 	t.Logf("  Exploitability: %s", result.Exploitability)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	// Small effects should be SharedHardwareOnly
 	if result.Outcome == Fail && result.Exploitability != SharedHardwareOnly {
@@ -605,90 +605,12 @@ func TestExploitabilityObviousLeak(t *testing.T) {
 
 	t.Logf("Result: %s", result)
 	t.Logf("  Exploitability: %s", result.Exploitability)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	if result.Outcome == Fail {
 		// Large effects (>10us) should be ObviousLeak
-		if result.Effect.TotalNs() > 10000 && result.Exploitability != ObviousLeak {
+		if result.Effect.MaxEffectNs > 10000 && result.Exploitability != ObviousLeak {
 			t.Errorf("Expected ObviousLeak for >10us effect, got %s", result.Exploitability)
-		}
-	}
-}
-
-// =============================================================================
-// Effect Pattern Tests
-// =============================================================================
-
-// TestEffectPatternUniformShift verifies constant delays produce UniformShift.
-func TestEffectPatternUniformShift(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// Create timing data with a uniform shift (same offset for all samples)
-	baseline := make([]uint64, 5000)
-	sample := make([]uint64, 5000)
-	rng := newRandForTest(12345)
-
-	for i := range baseline {
-		noise := uint64(rng.IntN(5)) // Small noise
-		baseline[i] = 100 + noise
-		sample[i] = 200 + noise // Constant +100 tick shift
-	}
-
-	result, err := Analyze(baseline, sample, WithAttacker(AdjacentNetwork))
-	if err != nil {
-		t.Fatalf("Analyze failed: %v", err)
-	}
-
-	t.Logf("Result: %s", result)
-	t.Logf("  Effect Pattern: %s", result.Effect.Pattern)
-	t.Logf("  Shift: %.2f ns, Tail: %.2f ns", result.Effect.ShiftNs, result.Effect.TailNs)
-
-	// Uniform offset should produce UniformShift pattern
-	if result.Outcome == Fail || result.Outcome == Inconclusive {
-		if result.Effect.Pattern != UniformShift && result.Effect.Pattern != Mixed {
-			t.Logf("Expected UniformShift or Mixed for constant delay, got %s", result.Effect.Pattern)
-		}
-	}
-}
-
-// TestEffectPatternTailEffect verifies tail-only delays produce TailEffect.
-func TestEffectPatternTailEffect(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
-
-	// Create timing data where only ~10% of samples have extra delay (tail effect)
-	baseline := make([]uint64, 5000)
-	sample := make([]uint64, 5000)
-	rng := newRandForTest(12345)
-
-	for i := range baseline {
-		noise := uint64(rng.IntN(5))
-		baseline[i] = 100 + noise
-
-		// Only 10% of samples get the delay
-		if rng.Float64() < 0.1 {
-			sample[i] = 500 + noise // Large delay for tail
-		} else {
-			sample[i] = 100 + noise // Same as baseline
-		}
-	}
-
-	result, err := Analyze(baseline, sample, WithAttacker(AdjacentNetwork))
-	if err != nil {
-		t.Fatalf("Analyze failed: %v", err)
-	}
-
-	t.Logf("Result: %s", result)
-	t.Logf("  Effect Pattern: %s", result.Effect.Pattern)
-	t.Logf("  Shift: %.2f ns, Tail: %.2f ns", result.Effect.ShiftNs, result.Effect.TailNs)
-
-	// Tail-only effect should produce TailEffect or Mixed
-	if result.Outcome == Fail || result.Outcome == Inconclusive {
-		if result.Effect.Pattern != TailEffect && result.Effect.Pattern != Mixed {
-			t.Logf("Expected TailEffect or Mixed for tail-only delay, got %s", result.Effect.Pattern)
 		}
 	}
 }
@@ -733,7 +655,7 @@ func TestKnownLeakyEarlyExitComparison(t *testing.T) {
 	t.Logf("Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	if result.Outcome != Fail {
 		t.Errorf("Expected Fail for early-exit comparison, got %s", result.Outcome)
@@ -774,7 +696,7 @@ func TestKnownSafeXORFold(t *testing.T) {
 	t.Logf("Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
-	t.Logf("  Effect: %.2f ns", result.Effect.TotalNs())
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	if result.Outcome == Fail {
 		t.Errorf("Expected non-Fail for constant-time XOR fold, got Fail (false positive)")
@@ -872,8 +794,7 @@ func TestQualityExcellentOrGood(t *testing.T) {
 
 	t.Logf("Result: %s", result)
 	t.Logf("  Quality: %s", result.Quality)
-	t.Logf("  MDE Shift: %.2f ns", result.MDEShiftNs)
-	t.Logf("  MDE Tail: %.2f ns", result.MDETailNs)
+	t.Logf("  MDE: %.2f ns", result.MDENs)
 
 	// In a good environment, we should get Excellent or Good quality
 	if result.Quality != Excellent && result.Quality != Good && result.Quality != Poor {
@@ -921,17 +842,11 @@ func TestDiagnosticsPopulated(t *testing.T) {
 	t.Logf("  StationarityOK: %v", d.StationarityOK)
 	t.Logf("  DiscreteMode: %v", d.DiscreteMode)
 	t.Logf("  TimerResolutionNs: %.2f", d.TimerResolutionNs)
-	t.Logf("  GibbsItersTotal: %d", d.GibbsItersTotal)
-	t.Logf("  GibbsBurnin: %d", d.GibbsBurnin)
-	t.Logf("  GibbsRetained: %d", d.GibbsRetained)
 	t.Logf("  LambdaMean: %.4f", d.LambdaMean)
 	t.Logf("  LambdaESS: %.2f", d.LambdaESS)
 	t.Logf("  LambdaMixingOK: %v", d.LambdaMixingOK)
 
 	// Verify some basic fields are populated
-	if d.GibbsItersTotal == 0 {
-		t.Error("Expected GibbsItersTotal > 0")
-	}
 	if d.TimerResolutionNs <= 0 {
 		t.Error("Expected TimerResolutionNs > 0")
 	}

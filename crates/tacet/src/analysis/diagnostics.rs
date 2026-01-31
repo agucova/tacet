@@ -1,15 +1,13 @@
 //! Diagnostic checks for result reliability (spec §3.5.3).
 //!
-//! This module implements three diagnostic checks:
+//! This module implements diagnostic checks:
 //! 1. Non-stationarity: Compare variance between calibration and inference sets
-//! 2. Model fit: Chi-squared test for residuals from shift+tail model
-//! 3. Outlier asymmetry: Check if outlier rates differ between classes
+//! 2. Outlier asymmetry: Check if outlier rates differ between classes
 
-use crate::constants::{B_TAIL, ONES};
 use crate::measurement::OutlierStats;
 use crate::preflight::PreflightResult;
 use crate::result::Diagnostics;
-use crate::types::{Matrix9, Matrix9x2, Vector9};
+use crate::types::{Matrix9, Vector9};
 use nalgebra::Cholesky;
 
 /// Additional diagnostic information computed during analysis.
@@ -27,7 +25,7 @@ pub struct DiagnosticsExtra {
     pub duplicate_fraction: f64,
     /// Number of calibration samples used.
     pub calibration_samples: usize,
-    /// Bootstrap-calibrated model mismatch threshold (99th percentile of Q*).
+    /// Bootstrap-calibrated Q threshold (99th percentile).
     pub q_thresh: f64,
 }
 
@@ -36,8 +34,7 @@ pub struct DiagnosticsExtra {
 /// # Arguments
 ///
 /// * `calib_cov` - Covariance matrix from calibration set
-/// * `observed_diff` - Observed quantile differences
-/// * `posterior_mean` - Posterior mean of (shift, tail) effects
+/// * `observed_diff` - Observed quantile differences (9D vector)
 /// * `outlier_stats` - Statistics about outlier filtering
 /// * `preflight` - Preflight check results (sanity, generator, autocorrelation, system)
 /// * `interleaved_samples` - Raw timing samples in measurement order
@@ -45,13 +42,15 @@ pub struct DiagnosticsExtra {
 pub fn compute_diagnostics(
     calib_cov: &Matrix9,
     observed_diff: &Vector9,
-    posterior_mean: &[f64; 2],
     outlier_stats: &OutlierStats,
     preflight: &PreflightResult,
     interleaved_samples: &[crate::types::TimingSample],
     extra: &DiagnosticsExtra,
 ) -> Diagnostics {
     let mut warnings = Vec::new();
+
+    // Silence unused variable warning
+    let _ = (calib_cov, observed_diff);
 
     // Add preflight warnings first (most important)
     for warning in &preflight.warnings.sanity {
@@ -76,17 +75,7 @@ pub fn compute_diagnostics(
         );
     }
 
-    // 2. Projection mismatch check (spec §3.5.3)
-    let (projection_mismatch_q, projection_mismatch_ok) =
-        check_model_fit(observed_diff, calib_cov, posterior_mean);
-    if !projection_mismatch_ok {
-        warnings.push(format!(
-            "Projection mismatch: Q = {:.1} (expected < 18.5). Effect decomposition may be misleading.",
-            projection_mismatch_q
-        ));
-    }
-
-    // 3. Outlier asymmetry check (spec §4.4)
+    // 2. Outlier asymmetry check (spec §4.4)
     let outlier_rate_fixed = outlier_stats.rate_fixed();
     let outlier_rate_random = outlier_stats.rate_random();
     let outlier_asymmetry_ok = check_outlier_asymmetry(outlier_rate_fixed, outlier_rate_random);
@@ -105,7 +94,7 @@ pub fn compute_diagnostics(
         ));
     }
 
-    // 4. Per-class dependence estimation (spec §3.3.2)
+    // 3. Per-class dependence estimation (spec §3.3.2)
     let dependence_length = estimate_joint_dependence_length(interleaved_samples);
     let effective_sample_size = if dependence_length > 0 {
         extra.samples_per_class / dependence_length
@@ -118,14 +107,6 @@ pub fn compute_diagnostics(
         effective_sample_size,
         stationarity_ratio,
         stationarity_ok,
-        projection_mismatch_q,
-        projection_mismatch_ok,
-        projection_mismatch_threshold: if extra.q_thresh > 0.0 {
-            extra.q_thresh
-        } else {
-            18.48
-        },
-        top_quantiles: None,
         outlier_rate_baseline: outlier_rate_fixed,
         outlier_rate_sample: outlier_rate_random,
         outlier_asymmetry_ok,
@@ -267,49 +248,6 @@ fn estimate_joint_dependence_length(samples: &[crate::types::TimingSample]) -> u
     m_f.max(m_r)
 }
 
-/// Check model fit using chi-squared test on residuals.
-///
-/// Residual: r = Δ - X * β̂
-/// Chi-squared: r' Σ⁻¹ r ~ χ²₇ (9 dims - 2 params)
-///
-/// Returns (chi2, ok) where ok if chi2 ≤ 18.5 (p > 0.01 under χ²₇).
-fn check_model_fit(
-    observed_diff: &Vector9,
-    covariance: &Matrix9,
-    posterior_mean: &[f64; 2],
-) -> (f64, bool) {
-    // Build design matrix X = [ones | b_tail]
-    let mut x = Matrix9x2::zeros();
-    for i in 0..9 {
-        x[(i, 0)] = ONES[i];
-        x[(i, 1)] = B_TAIL[i];
-    }
-
-    // Compute predicted: X * β̂
-    let beta = nalgebra::Vector2::new(posterior_mean[0], posterior_mean[1]);
-    let predicted = x * beta;
-
-    // Residual: r = Δ - X * β̂
-    let residual = observed_diff - predicted;
-
-    // Compute chi-squared: r' Σ⁻¹ r
-    let chi2 = match safe_cholesky(covariance) {
-        Some(chol) => {
-            let z = chol.solve(&residual);
-            residual.dot(&z)
-        }
-        None => {
-            // If Cholesky fails, we can't compute chi2 reliably
-            0.0
-        }
-    };
-
-    // χ²₇ at p=0.01 is 18.48
-    let ok = chi2 <= 18.5;
-
-    (chi2, ok)
-}
-
 /// Check outlier asymmetry between classes.
 ///
 /// OK if:
@@ -340,6 +278,7 @@ fn check_outlier_asymmetry(rate_fixed: f64, rate_random: f64) -> bool {
 }
 
 /// Safe Cholesky decomposition with jitter.
+#[allow(dead_code)]
 fn safe_cholesky(matrix: &Matrix9) -> Option<Cholesky<f64, nalgebra::Const<9>>> {
     if let Some(chol) = Cholesky::new(*matrix) {
         return Some(chol);
@@ -401,16 +340,5 @@ mod tests {
 
         // Large difference - not OK
         assert!(!check_outlier_asymmetry(0.04, 0.01));
-    }
-
-    #[test]
-    fn test_model_fit_check() {
-        // With identity covariance and zero residual, chi2 should be 0
-        let observed = Vector9::zeros();
-        let cov = Matrix9::identity();
-        let posterior_mean = [0.0, 0.0];
-        let (chi2, ok) = check_model_fit(&observed, &cov, &posterior_mean);
-        assert!(chi2 < 0.01);
-        assert!(ok);
     }
 }

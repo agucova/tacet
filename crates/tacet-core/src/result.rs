@@ -222,7 +222,7 @@ pub enum InconclusiveReason {
     /// Detected by comparing calibration statistics with post-test statistics.
     /// This can indicate environmental interference (CPU frequency scaling,
     /// concurrent processes, etc.) that invalidates the covariance estimate.
-    /// See spec Section 2.6, Gate 6.
+    /// See spec §3.5.4, Gate 4 (Condition Drift).
     ConditionsChanged {
         /// Human-readable explanation.
         message: String,
@@ -260,115 +260,78 @@ pub enum InconclusiveReason {
 }
 
 // ============================================================================
-// EffectEstimate - Decomposed timing effect
+// EffectEstimate - Timing effect summary (spec §5.2)
 // ============================================================================
 
-/// Estimated timing effect decomposed into shift and tail components.
+/// Estimated timing effect with credible interval and top quantiles.
 ///
-/// The effect is decomposed using a 2-component linear model:
-/// - **Shift**: Uniform timing difference across all quantiles (e.g., different code path)
-/// - **Tail**: Upper quantiles shift more than lower (e.g., cache misses)
+/// This struct summarizes the timing difference between baseline and sample classes.
+/// The effect is characterized by the maximum absolute quantile difference across
+/// all 9 deciles, with a 95% credible interval and details about which quantiles
+/// contribute most to any detected leak.
 ///
-/// See spec Section 2.5 (Bayesian Inference).
+/// See spec Section 5.2 (Effect Reporting).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EffectEstimate {
-    /// Uniform shift in nanoseconds.
+    /// Posterior mean of max_k |δ_k| in nanoseconds.
     ///
-    /// Positive value means the sample class is slower (timing leak detected).
-    /// Negative value means the sample class is faster (no leak, or unusual).
-    /// This captures effects like branch timing where all operations
-    /// take a fixed additional time.
-    pub shift_ns: f64,
+    /// This is the maximum absolute timing difference across all 9 deciles,
+    /// averaged over posterior samples. Positive values indicate detectable
+    /// timing differences between the two input classes.
+    pub max_effect_ns: f64,
 
-    /// Tail effect in nanoseconds.
+    /// 95% credible interval for max|δ| in nanoseconds.
     ///
-    /// Positive value means the sample class has a heavier upper tail.
-    /// This captures effects like cache misses that occur probabilistically.
-    pub tail_ns: f64,
-
-    /// 95% credible interval for the total effect magnitude in nanoseconds.
-    ///
-    /// This is a Bayesian credible interval, not a frequentist confidence interval.
-    /// There is a 95% posterior probability that the true effect lies within this range.
+    /// This is a Bayesian credible interval: there is a 95% posterior probability
+    /// that the true maximum effect lies within this range.
     pub credible_interval_ns: (f64, f64),
 
-    /// Classification of the dominant effect pattern.
-    pub pattern: EffectPattern,
-
-    /// When Some, the (μ, τ) decomposition may be unreliable.
+    /// Top 2-3 quantiles by exceedance probability.
     ///
-    /// This is set when model fit is poor (Q > q_thresh), indicating that the
-    /// observed quantile pattern is not well-explained by the shift+tail basis.
-    /// The shift_ns and tail_ns values should be interpreted with caution.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub interpretation_caveat: Option<String>,
+    /// When a timing leak is detected, these are the specific quantiles that
+    /// contribute most to the leak detection. Each entry includes the quantile
+    /// probability (e.g., 0.9 for 90th percentile), the posterior mean effect,
+    /// the 95% marginal credible interval, and the exceedance probability.
+    ///
+    /// Empty when no leak is detected or effect is negligible.
+    pub top_quantiles: Vec<TopQuantile>,
 }
 
 impl EffectEstimate {
-    /// Compute the total effect magnitude (L2 norm of shift and tail).
-    #[cfg(feature = "std")]
-    pub fn total_effect_ns(&self) -> f64 {
-        (self.shift_ns.powi(2) + self.tail_ns.powi(2)).sqrt()
+    /// Create a new EffectEstimate with the given values.
+    pub fn new(
+        max_effect_ns: f64,
+        credible_interval_ns: (f64, f64),
+        top_quantiles: Vec<TopQuantile>,
+    ) -> Self {
+        Self {
+            max_effect_ns,
+            credible_interval_ns,
+            top_quantiles,
+        }
     }
 
-    /// Compute the total effect magnitude (L2 norm of shift and tail).
-    #[cfg(not(feature = "std"))]
-    pub fn total_effect_ns(&self) -> f64 {
-        libm::sqrt(self.shift_ns * self.shift_ns + self.tail_ns * self.tail_ns)
-    }
-
-    /// Check if the effect is negligible (both components near zero).
+    /// Check if the effect is negligible (max effect below threshold).
     pub fn is_negligible(&self, threshold_ns: f64) -> bool {
-        self.shift_ns.abs() < threshold_ns && self.tail_ns.abs() < threshold_ns
+        self.max_effect_ns.abs() < threshold_ns
+    }
+
+    /// Get the total effect magnitude (same as max_effect_ns for API compatibility).
+    pub fn total_effect_ns(&self) -> f64 {
+        self.max_effect_ns
     }
 }
 
 impl Default for EffectEstimate {
     fn default() -> Self {
         Self {
-            shift_ns: 0.0,
-            tail_ns: 0.0,
+            max_effect_ns: 0.0,
             credible_interval_ns: (0.0, 0.0),
-            pattern: EffectPattern::Indeterminate,
-            interpretation_caveat: None,
+            top_quantiles: Vec::new(),
         }
     }
 }
 
-// ============================================================================
-// EffectPattern - Classification of timing effect type
-// ============================================================================
-
-/// Pattern of timing difference.
-///
-/// Classifies the dominant type of timing difference based on the
-/// relative magnitudes of shift and tail components.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum EffectPattern {
-    /// Uniform shift across all quantiles.
-    ///
-    /// All quantiles shift by approximately the same amount.
-    /// Typical cause: branch on secret data, different code path.
-    UniformShift,
-
-    /// Primarily affects upper tail.
-    ///
-    /// Upper quantiles (e.g., 80th, 90th percentile) shift more than
-    /// lower quantiles. Typical cause: cache misses, memory access patterns.
-    TailEffect,
-
-    /// Mixed pattern with both shift and tail components.
-    ///
-    /// Both uniform shift and tail effect are significant.
-    Mixed,
-
-    /// Neither shift nor tail is statistically significant.
-    ///
-    /// The effect magnitude is below the detection threshold or
-    /// uncertainty is too high to classify.
-    #[default]
-    Indeterminate,
-}
 
 // ============================================================================
 // Exploitability - Risk assessment
@@ -653,18 +616,19 @@ impl fmt::Display for ResearchOutcome {
 }
 
 // ============================================================================
-// TopQuantile - Information about significant quantiles
+// TopQuantile - Information about significant quantiles (spec §5.2)
 // ============================================================================
 
-/// Information about a significant quantile (for projection mismatch reporting).
+/// Information about a quantile with high exceedance probability.
 ///
-/// When the 2D (shift, tail) projection doesn't fit the data well, this struct
-/// provides information about which individual quantiles are driving the leak
-/// detection. This helps diagnose effects that don't fit the shift+tail model
-/// (e.g., effects concentrated at a single quantile).
+/// When a timing leak is detected, this struct provides information about
+/// which specific quantiles (deciles) contribute most to the leak detection.
+/// The top 2-3 quantiles by exceedance probability are included in
+/// `EffectEstimate.top_quantiles` to help users understand where timing
+/// differences are concentrated.
 ///
-/// See spec Section 7.5 (Per-Quantile Exceedance).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// See spec Section 5.2 (Effect Reporting).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TopQuantile {
     /// Quantile probability (e.g., 0.9 for 90th percentile).
     pub quantile_p: f64,
@@ -695,12 +659,12 @@ impl TopQuantile {
 }
 
 // ============================================================================
-// Diagnostics - Detailed diagnostic information
+// Diagnostics - Detailed diagnostic information (spec §6)
 // ============================================================================
 
 /// Diagnostic information for debugging and analysis.
 ///
-/// See spec Section 4.1 (Result Types).
+/// See spec Section 6 (Quality Metrics).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Diagnostics {
     /// Block size used for bootstrap (Politis-White automatic selection).
@@ -715,32 +679,6 @@ pub struct Diagnostics {
 
     /// True if stationarity ratio is within acceptable bounds (0.5-2.0).
     pub stationarity_ok: bool,
-
-    /// Projection mismatch Q statistic.
-    ///
-    /// Measures how well the 2D (shift, tail) model fits the 9D quantile differences.
-    /// A high value indicates the effect is concentrated at specific quantiles
-    /// rather than following the shift+tail pattern.
-    pub projection_mismatch_q: f64,
-
-    /// Bootstrap-calibrated threshold for projection mismatch Q statistic.
-    /// Q > threshold indicates the 2D projection may be unreliable.
-    pub projection_mismatch_threshold: f64,
-
-    /// True if projection fits well (Q <= threshold).
-    ///
-    /// When false, the shift_ns and tail_ns estimates should be interpreted
-    /// with caution; use top_quantiles for more detailed information.
-    pub projection_mismatch_ok: bool,
-
-    /// Top quantiles by exceedance probability (when projection mismatch detected).
-    ///
-    /// When projection_mismatch_ok is false, this field contains detailed
-    /// information about which quantiles drive the leak detection. This helps
-    /// diagnose effects that don't fit the shift+tail model (e.g., effects
-    /// concentrated at a single quantile).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub top_quantiles: Option<Vec<TopQuantile>>,
 
     /// Outlier rate for baseline class (fraction trimmed).
     pub outlier_rate_baseline: f64,
@@ -867,10 +805,6 @@ impl Diagnostics {
             effective_sample_size: 0,
             stationarity_ratio: 1.0,
             stationarity_ok: true,
-            projection_mismatch_q: 0.0,
-            projection_mismatch_threshold: 18.48, // chi-squared(7, 0.99) as default
-            projection_mismatch_ok: true,
-            top_quantiles: None,
             outlier_rate_baseline: 0.0,
             outlier_rate_sample: 0.0,
             outlier_asymmetry_ok: true,
@@ -909,10 +843,7 @@ impl Diagnostics {
 
     /// Check if all diagnostics are OK.
     pub fn all_checks_passed(&self) -> bool {
-        self.stationarity_ok
-            && self.projection_mismatch_ok
-            && self.outlier_asymmetry_ok
-            && self.preflight_ok
+        self.stationarity_ok && self.outlier_asymmetry_ok && self.preflight_ok
     }
 }
 
@@ -940,69 +871,63 @@ pub struct QualityIssue {
 }
 
 /// Issue codes for programmatic handling of quality problems.
+///
+/// Consolidated to 8 categories per spec §6.1 (v6.0).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum IssueCode {
-    /// High autocorrelation reduces effective sample size.
-    HighDependence,
+    /// High temporal dependence reduces effective sample size.
+    ///
+    /// Covers: high autocorrelation, low effective sample size.
+    /// The block bootstrap accounts for this, but it means more samples
+    /// were needed to reach the same confidence level.
+    DependenceHigh,
 
-    /// Effective sample size is too low for reliable inference.
-    LowEffectiveSamples,
-
-    /// Timing distribution appears to drift during measurement.
-    StationaritySuspect,
+    /// Low measurement precision due to setup issues.
+    ///
+    /// Covers: small sample count for discrete mode, generator cost asymmetry,
+    /// low entropy in random inputs. These affect measurement quality but
+    /// results are still valid.
+    PrecisionLow,
 
     /// Timer has low resolution, using discrete mode.
-    DiscreteTimer,
-
-    /// Sample count is small for discrete mode bootstrap.
-    SmallSampleDiscrete,
-
-    /// Generator cost differs between classes.
-    HighGeneratorCost,
-
-    /// Low entropy in random inputs (possible API misuse).
-    LowUniqueInputs,
-
-    /// Some quantiles were filtered from analysis.
-    QuantilesFiltered,
-
-    /// Threshold was clamped to timer resolution.
-    ThresholdClamped,
-
-    /// High fraction of samples were winsorized.
-    HighWinsorRate,
-
-    /// User's threshold was elevated due to measurement floor.
-    ThresholdElevated,
-
-    /// Slab component dominates posterior (v5.2 mixture prior).
     ///
-    /// The wide "slab" prior component has higher posterior weight than the
-    /// narrow component, indicating evidence strongly favors a large effect
-    /// (well above the threshold). This is informational, not a problem.
-    ///
-    /// DEPRECATED: v5.4 uses Student's t prior with Gibbs sampling instead
-    /// of mixture prior. This code is kept for backwards compatibility.
-    SlabDominant,
+    /// The timer resolution is coarse enough that many samples have identical
+    /// values. The bootstrap handles this, but sensitivity is reduced.
+    DiscreteMode,
 
-    /// v5.4: Gibbs sampler's lambda chain did not mix well.
+    /// Threshold was adjusted due to measurement limitations.
     ///
-    /// The latent scale variable λ showed poor mixing (CV < 0.1 or ESS < 20),
-    /// indicating the posterior may be unreliable. This typically occurs with
-    /// very small or very large effects where the posterior is concentrated.
-    LambdaMixingPoor,
+    /// Covers: threshold elevated due to measurement floor, threshold clamped
+    /// to timer resolution. The effective threshold may differ from the
+    /// user-requested threshold.
+    ThresholdIssue,
 
-    /// v5.6: Gibbs sampler's kappa chain did not mix well.
+    /// Outlier filtering was applied to the data.
     ///
-    /// The likelihood precision variable κ showed poor mixing (CV < 0.1 or ESS < 20),
-    /// indicating the posterior may be unreliable.
-    KappaMixingPoor,
+    /// Covers: high winsorization rate, quantiles filtered from analysis.
+    /// Some data points were trimmed as outliers. This is normal but
+    /// excessive filtering may indicate environmental issues.
+    FilteringApplied,
 
-    /// v5.6: Likelihood covariance was inflated (kappa_mean < 0.3).
+    /// Stationarity of timing distribution is suspect.
+    ///
+    /// The timing distribution may have changed during measurement,
+    /// violating the i.i.d. assumption. This can occur due to CPU
+    /// frequency scaling, thermal throttling, or concurrent processes.
+    StationarityIssue,
+
+    /// Numerical issues in Gibbs sampler.
+    ///
+    /// Covers: lambda chain poor mixing, kappa chain poor mixing.
+    /// The MCMC chains showed poor convergence (CV < 0.1 or ESS < 20).
+    /// Results may be less reliable.
+    NumericalIssue,
+
+    /// Likelihood covariance was inflated for robustness.
     ///
     /// The robust t-likelihood inflated covariance by ~1/κ_mean to accommodate
     /// data that doesn't match the estimated Σₙ. Effect estimates remain valid
-    /// but uncertainty was increased for robustness.
+    /// but uncertainty was increased for robustness (kappa_mean < 0.3).
     LikelihoodInflated,
 }
 
@@ -1153,7 +1078,7 @@ impl PreflightWarningInfo {
 }
 
 // ============================================================================
-// MinDetectableEffect - Sensitivity information
+// MinDetectableEffect - Sensitivity information (spec §3.3)
 // ============================================================================
 
 /// Minimum detectable effect at current noise level.
@@ -1162,21 +1087,28 @@ impl PreflightWarningInfo {
 /// given the measurement noise. If MDE > threshold, a "pass" result means
 /// insufficient sensitivity, not necessarily safety.
 ///
-/// See spec Section 2.7 (Minimum Detectable Effect).
+/// See spec Section 3.3 (Minimum Detectable Effect).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MinDetectableEffect {
-    /// Minimum detectable uniform shift in nanoseconds.
-    pub shift_ns: f64,
+    /// Minimum detectable effect in nanoseconds.
+    ///
+    /// This is the smallest timing difference that could be reliably detected
+    /// at 50% power given the measurement noise. Computed from the covariance
+    /// of the quantile differences.
+    pub mde_ns: f64,
+}
 
-    /// Minimum detectable tail effect in nanoseconds.
-    pub tail_ns: f64,
+impl MinDetectableEffect {
+    /// Create a new MinDetectableEffect with the given value.
+    pub fn new(mde_ns: f64) -> Self {
+        Self { mde_ns }
+    }
 }
 
 impl Default for MinDetectableEffect {
     fn default() -> Self {
         Self {
-            shift_ns: f64::INFINITY,
-            tail_ns: f64::INFINITY,
+            mde_ns: f64::INFINITY,
         }
     }
 }
@@ -1527,17 +1459,6 @@ impl Outcome {
 impl fmt::Display for Outcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", crate::formatting::format_outcome_plain(self))
-    }
-}
-
-impl fmt::Display for EffectPattern {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            EffectPattern::UniformShift => write!(f, "uniform shift"),
-            EffectPattern::TailEffect => write!(f, "tail effect"),
-            EffectPattern::Mixed => write!(f, "mixed"),
-            EffectPattern::Indeterminate => write!(f, "indeterminate"),
-        }
     }
 }
 

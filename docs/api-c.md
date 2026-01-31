@@ -237,8 +237,9 @@ enum ToOutcome {
 struct ToResult {
     enum ToOutcome outcome;
     double leak_probability;          // 0.0 to 1.0
-    double shift_ns;                  // Uniform shift effect
-    double tail_ns;                   // Tail distribution effect
+    double max_effect_ns;             // Maximum effect size in nanoseconds
+    double ci_low_ns;                 // 95% credible interval lower bound
+    double ci_high_ns;                // 95% credible interval upper bound
     enum Exploitability exploitability;  // Negligible/LAN/Remote
     enum MeasurementQuality quality;     // Excellent/Good/Poor/TooNoisy
     char recommendation[256];         // Guidance for Unmeasurable
@@ -329,7 +330,7 @@ If tacet detects a leak you believe is false:
 1. Check for data-dependent branches or memory access
 2. Verify timer precision with `to_detect_timer_frequency()`
 3. Try a different attacker model (e.g., RemoteNetwork instead of SharedHardware)
-4. Review the effect size (`shift_ns`, `tail_ns`) - small effects may be acceptable
+4. Review the effect size (`max_effect_ns`) - small effects may be acceptable
 
 ## Further Reading
 

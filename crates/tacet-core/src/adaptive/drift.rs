@@ -1,4 +1,4 @@
-//! Condition drift detection for quality gate 6 (spec Section 2.6).
+//! Condition drift detection for Gate 4 (spec §3.5.4).
 //!
 //! Detects when measurement conditions change between calibration and the
 //! adaptive loop, which can invalidate the covariance estimate and cause

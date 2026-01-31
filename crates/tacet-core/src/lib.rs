@@ -48,7 +48,7 @@ pub use ffi_summary::{
     OutcomeType, PosteriorSummary,
 };
 pub use result::{
-    EffectEstimate, EffectPattern, Exploitability, MeasurementQuality, MinDetectableEffect,
-    Outcome, ResearchOutcome, ResearchStatus, UnreliablePolicy,
+    EffectEstimate, Exploitability, MeasurementQuality, MinDetectableEffect, Outcome,
+    ResearchOutcome, ResearchStatus, TopQuantile, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, Matrix9, TimingSample, Vector9};

@@ -10,7 +10,7 @@
 //! - Serialization round-trips
 
 use tacet::{
-    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason, IssueCode,
+    Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, IssueCode,
     MeasurementQuality, Outcome, QualityIssue, UnreliablePolicy,
 };
 
@@ -350,7 +350,6 @@ fn quality_special_values() {
 fn diagnostics_all_ok_constructor() {
     let diag = Diagnostics::all_ok();
     assert!(diag.stationarity_ok);
-    assert!(diag.projection_mismatch_ok);
     assert!(diag.outlier_asymmetry_ok);
     assert!(diag.preflight_ok);
     assert!(diag.warnings.is_empty());
@@ -364,8 +363,6 @@ fn diagnostics_all_checks_passed_all_true() {
         effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        projection_mismatch_q: 5.0,
-        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.001,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
@@ -391,8 +388,6 @@ fn diagnostics_all_checks_passed_one_false() {
         effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
-        projection_mismatch_q: 5.0,
-        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.001,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: true,
@@ -409,38 +404,12 @@ fn diagnostics_all_checks_passed_one_false() {
     };
     assert!(!diag1.all_checks_passed());
 
-    // projection_mismatch_ok = false
+    // outlier_asymmetry_ok = false
     let diag2 = Diagnostics {
         dependence_length: 1,
         effective_sample_size: 100,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        projection_mismatch_q: 50.0,
-        projection_mismatch_ok: false,
-        outlier_rate_baseline: 0.001,
-        outlier_rate_sample: 0.001,
-        outlier_asymmetry_ok: true,
-        discrete_mode: false,
-        timer_resolution_ns: 1.0,
-        duplicate_fraction: 0.0,
-        preflight_ok: true,
-        calibration_samples: 5000,
-        total_time_secs: 1.0,
-        warnings: vec![],
-        quality_issues: vec![],
-        preflight_warnings: vec![],
-        ..Diagnostics::all_ok()
-    };
-    assert!(!diag2.all_checks_passed());
-
-    // outlier_asymmetry_ok = false
-    let diag3 = Diagnostics {
-        dependence_length: 1,
-        effective_sample_size: 100,
-        stationarity_ratio: 1.0,
-        stationarity_ok: true,
-        projection_mismatch_q: 5.0,
-        projection_mismatch_ok: true,
         outlier_rate_baseline: 0.1,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,
@@ -455,7 +424,7 @@ fn diagnostics_all_checks_passed_one_false() {
         preflight_warnings: vec![],
         ..Diagnostics::all_ok()
     };
-    assert!(!diag3.all_checks_passed());
+    assert!(!diag2.all_checks_passed());
 }
 
 #[test]
@@ -465,8 +434,6 @@ fn diagnostics_all_checks_passed_all_false() {
         effective_sample_size: 100,
         stationarity_ratio: 10.0,
         stationarity_ok: false,
-        projection_mismatch_q: 50.0,
-        projection_mismatch_ok: false,
         outlier_rate_baseline: 0.1,
         outlier_rate_sample: 0.001,
         outlier_asymmetry_ok: false,
@@ -491,36 +458,30 @@ fn diagnostics_all_checks_passed_all_false() {
 #[test]
 fn effect_estimate_total_effect() {
     let effect = EffectEstimate {
-        shift_ns: 3.0,
-        tail_ns: 4.0,
+        max_effect_ns: 5.0,
         credible_interval_ns: (0.0, 10.0),
-        pattern: EffectPattern::Mixed,
-        interpretation_caveat: None,
+        top_quantiles: Vec::new(),
     };
-    // sqrt(3^2 + 4^2) = 5
     assert!((effect.total_effect_ns() - 5.0).abs() < 0.001);
 }
 
 #[test]
 fn effect_estimate_is_negligible() {
     let effect = EffectEstimate {
-        shift_ns: 5.0,
-        tail_ns: 5.0,
+        max_effect_ns: 7.0,
         credible_interval_ns: (0.0, 15.0),
-        pattern: EffectPattern::Mixed,
-        interpretation_caveat: None,
+        top_quantiles: Vec::new(),
     };
 
-    assert!(!effect.is_negligible(4.0)); // Both components > 4
-    assert!(effect.is_negligible(10.0)); // Both components < 10
+    assert!(!effect.is_negligible(4.0)); // max_effect > 4
+    assert!(effect.is_negligible(10.0)); // max_effect < 10
 }
 
 #[test]
 fn effect_estimate_default() {
     let effect = EffectEstimate::default();
-    assert_eq!(effect.shift_ns, 0.0);
-    assert_eq!(effect.tail_ns, 0.0);
-    assert_eq!(effect.pattern, EffectPattern::Indeterminate);
+    assert_eq!(effect.max_effect_ns, 0.0);
+    assert!(effect.top_quantiles.is_empty());
 }
 
 // ============================================================================
@@ -699,18 +660,15 @@ fn unreliable_policy_from_env_empty() {
 #[test]
 fn effect_estimate_json_roundtrip() {
     let effect = EffectEstimate {
-        shift_ns: 15.5,
-        tail_ns: 3.2,
+        max_effect_ns: 15.5,
         credible_interval_ns: (10.0, 20.0),
-        pattern: EffectPattern::UniformShift,
-        interpretation_caveat: None,
+        top_quantiles: Vec::new(),
     };
     let json = serde_json::to_string(&effect).unwrap();
     let deserialized: EffectEstimate = serde_json::from_str(&json).unwrap();
 
-    assert_eq!(effect.shift_ns, deserialized.shift_ns);
-    assert_eq!(effect.tail_ns, deserialized.tail_ns);
-    assert_eq!(effect.pattern, deserialized.pattern);
+    assert_eq!(effect.max_effect_ns, deserialized.max_effect_ns);
+    assert_eq!(effect.credible_interval_ns, deserialized.credible_interval_ns);
 }
 
 #[test]
@@ -741,19 +699,6 @@ fn measurement_quality_json_roundtrip() {
     }
 }
 
-#[test]
-fn effect_pattern_json_roundtrip() {
-    for variant in [
-        EffectPattern::UniformShift,
-        EffectPattern::TailEffect,
-        EffectPattern::Mixed,
-        EffectPattern::Indeterminate,
-    ] {
-        let json = serde_json::to_string(&variant).unwrap();
-        let deserialized: EffectPattern = serde_json::from_str(&json).unwrap();
-        assert_eq!(variant, deserialized);
-    }
-}
 
 #[test]
 fn outcome_pass_json_roundtrip() {
@@ -897,28 +842,28 @@ fn attacker_model_description() {
 }
 
 // ============================================================================
-// IssueCode tests (v5.6)
+// IssueCode tests
 // ============================================================================
 
 #[test]
-fn issue_code_kappa_mixing_poor_exists() {
-    // v5.6: Verify the new IssueCode variant exists and serializes correctly
+fn issue_code_numerical_issue_exists() {
+    // Verify NumericalIssue variant exists and serializes correctly
     let issue = QualityIssue {
-        code: IssueCode::KappaMixingPoor,
-        message: "κ chain mixing poor (CV=0.05, ESS=10)".to_string(),
+        code: IssueCode::NumericalIssue,
+        message: "MCMC chain mixing poor (CV=0.05, ESS=10)".to_string(),
         guidance: "Posterior may be unreliable; consider longer time budget.".to_string(),
     };
 
     let json = serde_json::to_string(&issue).unwrap();
-    assert!(json.contains("KappaMixingPoor"));
+    assert!(json.contains("NumericalIssue"));
 
     let deserialized: QualityIssue = serde_json::from_str(&json).unwrap();
-    assert_eq!(deserialized.code, IssueCode::KappaMixingPoor);
+    assert_eq!(deserialized.code, IssueCode::NumericalIssue);
 }
 
 #[test]
 fn issue_code_likelihood_inflated_exists() {
-    // v5.6: Verify the new IssueCode variant exists and serializes correctly
+    // Verify LikelihoodInflated variant exists and serializes correctly
     let issue = QualityIssue {
         code: IssueCode::LikelihoodInflated,
         message: "Likelihood covariance inflated ~5.0x due to data/model mismatch".to_string(),
@@ -937,9 +882,13 @@ fn issue_code_likelihood_inflated_exists() {
 fn issue_code_json_roundtrip_all_variants() {
     // Test all IssueCode variants serialize and deserialize correctly
     let variants = vec![
-        IssueCode::ThresholdElevated,
-        IssueCode::LambdaMixingPoor,
-        IssueCode::KappaMixingPoor,
+        IssueCode::DependenceHigh,
+        IssueCode::PrecisionLow,
+        IssueCode::DiscreteMode,
+        IssueCode::ThresholdIssue,
+        IssueCode::FilteringApplied,
+        IssueCode::StationarityIssue,
+        IssueCode::NumericalIssue,
         IssueCode::LikelihoodInflated,
     ];
 

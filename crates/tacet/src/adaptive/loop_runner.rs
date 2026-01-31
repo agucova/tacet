@@ -4,7 +4,7 @@
 //! batches of measurements until a definitive decision is reached or
 //! a quality gate triggers.
 //!
-//! The loop follows this pattern (spec Section 2.5):
+//! The loop follows this pattern (spec §3.5):
 //! 1. Collect a batch of samples
 //! 2. Compute the posterior distribution
 //! 3. Check if P(leak > theta) > fail_threshold -> Fail
@@ -294,11 +294,7 @@ pub fn run_adaptive(
         current_stats_snapshot: current_stats.as_ref(),
         c_floor: calibration.c_floor,
         theta_tick: calibration.theta_tick,
-        projection_mismatch_q: if posterior.projection_mismatch_q.is_nan() {
-            None
-        } else {
-            Some(posterior.projection_mismatch_q)
-        },
+        projection_mismatch_q: None, // Removed in v6.0 - no longer computed
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
         lambda_mixing_ok: posterior.lambda_mixing_ok,
     };
@@ -432,15 +428,12 @@ fn compute_posterior_from_state(
     Some(Posterior::new_with_gibbs(
         bayes_result.delta_post,
         bayes_result.lambda_post,
-        bayes_result.beta_proj,
-        bayes_result.beta_proj_cov,
-        bayes_result.beta_draws,
+        bayes_result.delta_draws.clone(),
         bayes_result.leak_probability,
-        bayes_result.projection_mismatch_q,
+        calibration.theta_eff,
         n,
         bayes_result.lambda_mean,
         bayes_result.lambda_mixing_ok,
-        // v5.6: kappa diagnostics
         bayes_result.kappa_mean,
         bayes_result.kappa_cv,
         bayes_result.kappa_ess,
@@ -504,11 +497,7 @@ pub fn adaptive_step(
         current_stats_snapshot: current_stats.as_ref(),
         c_floor: calibration.c_floor,
         theta_tick: calibration.theta_tick,
-        projection_mismatch_q: if posterior.projection_mismatch_q.is_nan() {
-            None
-        } else {
-            Some(posterior.projection_mismatch_q)
-        },
+        projection_mismatch_q: None, // Removed in v6.0 - no longer computed
         projection_mismatch_thresh: calibration.projection_mismatch_thresh,
         lambda_mixing_ok: posterior.lambda_mixing_ok,
     };
@@ -584,7 +573,7 @@ pub fn adaptive_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
+    use crate::types::{Matrix9, Vector9};
 
     fn make_calibration() -> Calibration {
         use crate::adaptive::CalibrationSnapshot;
@@ -613,8 +602,7 @@ mod tests {
             discrete_mode: false,
             theta_ns: 100.0,
             calibration_samples: 5000,
-            mde_shift_ns: 5.0,
-            mde_tail_ns: 10.0,
+            mde_ns: 5.0,
             preflight_result: tacet_core::preflight::PreflightResult::new(),
             calibration_snapshot,
             c_floor: 3535.5, // ~50 * sqrt(5000) - conservative floor-rate constant
@@ -645,14 +633,12 @@ mod tests {
     #[test]
     fn test_adaptive_outcome_accessors() {
         let posterior = Posterior::new(
-            Vector9::zeros(),                 // delta_post (dummy 9D)
-            Matrix9::identity(),              // lambda_post (dummy 9D)
-            Vector2::new(10.0, 5.0),          // beta_proj
-            Matrix2::new(1.0, 0.0, 0.0, 1.0), // beta_proj_cov
-            Vec::new(),                       // beta_draws
-            0.95,                             // leak_probability
-            5.0,                              // projection_mismatch_q
-            1000,                             // n
+            Vector9::zeros(),    // delta_post (dummy 9D)
+            Matrix9::identity(), // lambda_post (dummy 9D)
+            Vec::new(),          // delta_draws
+            0.95,                // leak_probability
+            100.0,               // theta
+            1000,                // n
         );
 
         let outcome = AdaptiveOutcome::LeakDetected {

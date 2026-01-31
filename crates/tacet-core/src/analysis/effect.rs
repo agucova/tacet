@@ -1,275 +1,234 @@
-//! Effect decomposition using Bayesian linear regression (spec §3.4.6).
+//! Effect estimation from posterior samples (spec §5.2).
 //!
-//! This module decomposes timing differences into interpretable components:
+//! This module computes effect estimates from the 9D posterior over quantile
+//! differences. The primary metric is max_k |δ_k| - the maximum absolute
+//! effect across all deciles.
 //!
-//! - **Uniform shift (μ)**: All quantiles move equally (e.g., branch timing)
-//! - **Tail effect (τ)**: Upper quantiles shift more than lower (e.g., cache misses)
+//! ## Effect Reporting (spec §5.2)
 //!
-//! ## Design Matrix (spec §3.4.6)
-//!
-//! X = [1 | b_tail] where:
-//! - Column 0: ones = [1, 1, ..., 1] - uniform shift affects all quantiles equally
-//! - Column 1: b_tail = [-0.5, -0.375, ..., 0.5] - tail effect is antisymmetric
-//!
-//! The tail basis is centered (sums to zero) so μ and τ are orthogonal.
-//!
-//! ## Model
-//!
-//! Δ = Xβ + ε,  ε ~ N(0, Σ_n)
-//!
-//! With the same conjugate Gaussian model as the Bayesian layer (spec §3.4.6).
-//!
-//! ## Effect Pattern Classification (spec §3.4.6)
-//!
-//! An effect component is "significant" if |effect| > 2×SE:
-//! - UniformShift: Only μ is significant
-//! - TailEffect: Only τ is significant
-//! - Mixed: Both are significant
-//! - Indeterminate: Neither is significant (classify by relative magnitude)
+//! - `max_effect_ns`: Posterior mean of max_k |δ_k|
+//! - `credible_interval_ns`: 95% CI for max|δ|
+//! - `top_quantiles`: Top 2-3 quantiles by exceedance probability
 
-use nalgebra::Cholesky;
+extern crate alloc;
 
+use alloc::vec::Vec;
+
+use crate::constants::DECILES;
 use crate::math;
-use crate::result::EffectPattern;
-use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
+use crate::result::{EffectEstimate, TopQuantile};
+use crate::types::{Matrix9, Vector9};
 
-/// Result of effect decomposition (internal, detailed).
+/// Per-quantile statistics: (index, quantile_p, mean_ns, ci95_ns, exceed_prob).
+type QuantileStats = (usize, f64, f64, (f64, f64), f64);
+
+/// Compute effect estimate from delta draws (spec §5.2).
 ///
-/// Contains the full posterior distribution for diagnostic purposes.
-/// For the simplified public API, use `EffectEstimate`.
-#[derive(Debug, Clone)]
-pub struct EffectDecomposition {
-    /// Posterior mean of (shift, tail) effects in nanoseconds.
-    /// - β[0] = μ (uniform shift)
-    /// - β[1] = τ (tail effect)
-    pub posterior_mean: Vector2,
-
-    /// Posterior covariance of (shift, tail) effects.
-    /// Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-    pub posterior_cov: Matrix2,
-
-    /// 95% credible interval for shift effect (μ).
-    pub shift_ci: (f64, f64),
-
-    /// 95% credible interval for tail effect (τ).
-    pub tail_ci: (f64, f64),
-
-    /// Classified effect pattern (spec §3.4.6).
-    pub pattern: EffectPattern,
-}
-
-/// Simplified effect estimate for public API.
-///
-/// This is the format used by the adaptive architecture to report
-/// effect sizes to callers.
-#[derive(Debug, Clone)]
-pub struct EffectEstimate {
-    /// Uniform shift in nanoseconds (positive = baseline slower).
-    ///
-    /// All quantiles shift by approximately this amount.
-    /// Example: A branch that adds constant overhead.
-    pub shift_ns: f64,
-
-    /// Tail effect in nanoseconds (positive = baseline has heavier upper tail).
-    ///
-    /// Upper quantiles shift more than lower quantiles.
-    /// Example: Cache misses that occur probabilistically.
-    pub tail_ns: f64,
-
-    /// 95% credible interval for total effect magnitude in nanoseconds.
-    ///
-    /// Computed from ||β||₂ samples from the posterior distribution.
-    /// Note: May not contain point estimate when β ≈ 0.
-    pub credible_interval_ns: (f64, f64),
-
-    /// Dominant effect pattern (spec §3.4.6).
-    pub pattern: EffectPattern,
-}
-
-impl EffectDecomposition {
-    /// Convert to simplified effect estimate.
-    ///
-    /// Uses the magnitude CI from the posterior samples rather than
-    /// computing it from the marginal CIs (which would be incorrect
-    /// for non-independent components).
-    pub fn to_estimate(&self, magnitude_ci: (f64, f64)) -> EffectEstimate {
-        EffectEstimate {
-            shift_ns: self.posterior_mean[0],
-            tail_ns: self.posterior_mean[1],
-            credible_interval_ns: magnitude_ci,
-            pattern: self.pattern,
-        }
-    }
-}
-
-/// Decompose timing differences into shift and tail effects (spec §3.4.6).
-///
-/// Uses Bayesian linear regression with the same model as the Bayesian layer:
-/// - Design matrix X = [ones | b_tail] (9×2)
-/// - Gaussian prior on β: N(0, Λ₀), Λ₀ = diag(σ_μ², σ_τ²)
-/// - Likelihood: Δ | β ~ N(Xβ, Σ_n)
+/// Takes posterior samples of the 9D effect vector δ and computes:
+/// - max_effect_ns: posterior mean of max_k |δ_k|
+/// - credible_interval_ns: 95% CI for max|δ|
+/// - top_quantiles: top 2-3 quantiles by exceedance probability
 ///
 /// # Arguments
 ///
-/// * `delta` - Observed quantile differences (9-vector, baseline - sample)
-/// * `sigma_n` - Covariance matrix (already scaled for inference sample size)
-/// * `prior_sigmas` - Prior standard deviations (σ_μ, σ_τ) in nanoseconds
+/// * `delta_draws` - Posterior samples of δ ∈ ℝ⁹
+/// * `theta` - Threshold for exceedance probability computation
 ///
 /// # Returns
 ///
-/// An `EffectDecomposition` with posterior estimates and credible intervals.
-///
-/// # Note
-///
-/// This function duplicates some computation with `compute_bayes_gibbs`.
-/// In the adaptive architecture, prefer using `BayesResult.beta_mean` and
-/// `BayesResult.beta_cov` directly, then calling `classify_pattern` for
-/// the pattern classification.
-pub fn decompose_effect(
-    delta: &Vector9,
-    sigma_n: &Matrix9,
-    prior_sigmas: (f64, f64),
-) -> EffectDecomposition {
-    // Build design matrix X = [ones | b_tail]
-    let design_matrix = crate::analysis::bayes::build_design_matrix();
+/// An `EffectEstimate` with max effect and top quantiles.
+pub fn compute_effect_estimate(delta_draws: &[Vector9], theta: f64) -> EffectEstimate {
+    if delta_draws.is_empty() {
+        return EffectEstimate::default();
+    }
 
-    // Compute posterior using Bayesian linear regression
-    let (posterior_mean, posterior_cov) =
-        bayesian_linear_regression(&design_matrix, delta, sigma_n, prior_sigmas);
+    let n = delta_draws.len();
 
-    // Compute 95% credible intervals (marginal, for each component)
-    let shift_ci = compute_credible_interval(posterior_mean[0], posterior_cov[(0, 0)]);
-    let tail_ci = compute_credible_interval(posterior_mean[1], posterior_cov[(1, 1)]);
+    // Compute max|δ| for each draw
+    let mut max_effects: Vec<f64> = Vec::with_capacity(n);
+    for delta in delta_draws {
+        let max_abs = delta.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
+        max_effects.push(max_abs);
+    }
 
-    // Classify the effect pattern (spec §3.4.6)
-    let pattern = classify_pattern(&posterior_mean, &posterior_cov);
+    // Posterior mean of max|δ|
+    let max_effect_ns = max_effects.iter().sum::<f64>() / n as f64;
 
-    EffectDecomposition {
-        posterior_mean,
-        posterior_cov,
-        shift_ci,
-        tail_ci,
-        pattern,
+    // 95% credible interval (2.5th and 97.5th percentiles)
+    max_effects.sort_by(|a, b| a.total_cmp(b));
+    let lo_idx = ((n as f64 * 0.025).round() as usize).min(n - 1);
+    let hi_idx = ((n as f64 * 0.975).round() as usize).min(n - 1);
+    let credible_interval_ns = (max_effects[lo_idx], max_effects[hi_idx]);
+
+    // Compute top quantiles by exceedance probability
+    let top_quantiles = compute_top_quantiles(delta_draws, theta);
+
+    EffectEstimate {
+        max_effect_ns,
+        credible_interval_ns,
+        top_quantiles,
     }
 }
 
-/// Bayesian linear regression with Gaussian prior (spec §3.4.6).
+/// Compute top 2-3 quantiles by exceedance probability.
 ///
-/// Prior: β ~ N(0, Λ₀), Λ₀ = diag(σ_μ², σ_τ²)
-/// Likelihood: Δ | β ~ N(Xβ, Σ_n)
+/// For each quantile k, computes:
+/// - mean_ns: posterior mean δ_k
+/// - ci95_ns: 95% marginal CI for δ_k
+/// - exceed_prob: P(|δ_k| > θ | data)
 ///
-/// Posterior: β | Δ ~ N(β_post, Λ_post)
-/// where:
-///   Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-///   β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
-fn bayesian_linear_regression(
-    design: &Matrix9x2,
-    delta: &Vector9,
-    sigma_n: &Matrix9,
-    prior_sigmas: (f64, f64),
-) -> (Vector2, Matrix2) {
-    // Apply variance floor regularization (spec §3.3.2)
-    // This prevents near-zero variance quantiles from dominating the regression
-    let regularized = regularize_covariance(sigma_n);
+/// Returns the top quantiles (up to 3) with exceed_prob > 0.5.
+pub fn compute_top_quantiles(delta_draws: &[Vector9], theta: f64) -> Vec<TopQuantile> {
+    if delta_draws.is_empty() {
+        return Vec::new();
+    }
 
-    let chol = match Cholesky::new(regularized) {
-        Some(c) => c,
-        None => {
-            // Fallback: add more jitter if still failing
-            let extra_reg = regularized + Matrix9::identity() * 1e-6;
-            Cholesky::new(extra_reg).expect("Regularized covariance should be positive definite")
-        }
-    };
+    let n = delta_draws.len();
 
-    // Σ_n⁻¹ via Cholesky
-    let sigma_n_inv = chol.inverse();
+    // Compute per-quantile statistics
+    let mut quantile_stats: Vec<QuantileStats> = Vec::with_capacity(9);
 
-    // Compute sufficient statistics
-    let xt_sigma_n_inv = design.transpose() * sigma_n_inv;
-    let xt_sigma_n_inv_x = xt_sigma_n_inv * design; // Xᵀ Σ_n⁻¹ X (data precision)
-    let xt_sigma_n_inv_delta = xt_sigma_n_inv * delta; // Xᵀ Σ_n⁻¹ Δ (data contribution)
+    for k in 0..9 {
+        // Extract draws for quantile k
+        let mut values: Vec<f64> = delta_draws.iter().map(|d| d[k]).collect();
 
-    // Prior precision: Λ₀⁻¹ = diag(1/σ_μ², 1/σ_τ²)
-    let (sigma_mu, sigma_tau) = prior_sigmas;
-    let mut prior_precision = Matrix2::zeros();
-    prior_precision[(0, 0)] = 1.0 / math::sq(sigma_mu.max(1e-12));
-    prior_precision[(1, 1)] = 1.0 / math::sq(sigma_tau.max(1e-12));
+        // Mean
+        let mean = values.iter().sum::<f64>() / n as f64;
 
-    // Posterior precision: Λ_post⁻¹ = Xᵀ Σ_n⁻¹ X + Λ₀⁻¹
-    let posterior_precision = xt_sigma_n_inv_x + prior_precision;
+        // 95% CI
+        values.sort_by(|a, b| a.total_cmp(b));
+        let lo_idx = ((n as f64 * 0.025).round() as usize).min(n - 1);
+        let hi_idx = ((n as f64 * 0.975).round() as usize).min(n - 1);
+        let ci = (values[lo_idx], values[hi_idx]);
 
-    // Posterior covariance: Λ_post = (Xᵀ Σ_n⁻¹ X + Λ₀⁻¹)⁻¹
-    let posterior_cov = match Cholesky::new(posterior_precision) {
-        Some(c) => c.inverse(),
-        None => Matrix2::identity() * 1e6, // Very wide prior if inversion fails
-    };
+        // Exceedance probability: P(|δ_k| > θ | data)
+        let exceed_count = delta_draws.iter().filter(|d| d[k].abs() > theta).count();
+        let exceed_prob = exceed_count as f64 / n as f64;
 
-    // Posterior mean: β_post = Λ_post Xᵀ Σ_n⁻¹ Δ
-    let posterior_mean = posterior_cov * xt_sigma_n_inv_delta;
+        quantile_stats.push((k, DECILES[k], mean, ci, exceed_prob));
+    }
 
-    (posterior_mean, posterior_cov)
+    // Sort by exceedance probability (descending)
+    quantile_stats.sort_by(|a, b| b.4.total_cmp(&a.4));
+
+    // Take top 2-3 with exceed_prob > 0.5
+    quantile_stats
+        .into_iter()
+        .filter(|(_, _, _, _, exceed_prob)| *exceed_prob > 0.5)
+        .take(3)
+        .map(|(_, quantile_p, mean_ns, ci95_ns, exceed_prob)| TopQuantile {
+            quantile_p,
+            mean_ns,
+            ci95_ns,
+            exceed_prob,
+        })
+        .collect()
 }
 
-/// Compute 95% credible interval assuming normal posterior.
+/// Compute effect estimate from posterior mean and covariance (analytical).
 ///
-/// For a Gaussian posterior with given mean and variance, the 95% CI is:
-///   [mean - 1.96×σ, mean + 1.96×σ]
-fn compute_credible_interval(mean: f64, variance: f64) -> (f64, f64) {
-    let std = math::sqrt(variance);
-    let z = 1.96; // 97.5th percentile of standard normal
-    (mean - z * std, mean + z * std)
-}
-
-/// Classify the effect pattern based on posterior estimates (spec §3.4.6).
-///
-/// An effect component is "significant" if its magnitude exceeds twice
-/// its posterior standard error: |effect| > 2×SE
-///
-/// Classification rules:
-/// - UniformShift: |μ| > 2σ_μ, |τ| ≤ 2σ_τ
-/// - TailEffect: |τ| > 2σ_τ, |μ| ≤ 2σ_μ
-/// - Mixed: Both significant
-/// - Indeterminate: Neither significant
+/// This is a faster alternative to `compute_effect_estimate` when only the
+/// posterior mean and covariance are available (no draws).
 ///
 /// # Arguments
 ///
-/// * `beta_mean` - Posterior mean β = (μ, τ)
-/// * `beta_cov` - Posterior covariance Λ_post
-pub fn classify_pattern(beta_mean: &Vector2, beta_cov: &Matrix2) -> EffectPattern {
-    let shift = beta_mean[0]; // μ
-    let tail = beta_mean[1]; // τ
+/// * `delta_post` - Posterior mean δ_post
+/// * `lambda_post` - Posterior covariance Λ_post
+/// * `theta` - Threshold for exceedance probability
+///
+/// # Returns
+///
+/// An `EffectEstimate` with approximate max effect (uses mean of |δ_post|).
+pub fn compute_effect_estimate_analytical(
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
+    theta: f64,
+) -> EffectEstimate {
+    // Max absolute effect from posterior mean
+    let max_effect_ns = delta_post.iter().map(|x| x.abs()).fold(0.0_f64, f64::max);
 
-    // Posterior standard errors
-    let shift_se = math::sqrt(beta_cov[(0, 0)]);
-    let tail_se = math::sqrt(beta_cov[(1, 1)]);
+    // Approximate CI using marginal variances
+    // This is a rough approximation - the true CI requires sampling
+    let max_k = delta_post
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.abs().total_cmp(&b.abs()))
+        .map(|(k, _)| k)
+        .unwrap_or(0);
 
-    // Check if effects are "significant" (|effect| > 2×SE)
-    let shift_significant = shift.abs() > 2.0 * shift_se;
-    let tail_significant = tail.abs() > 2.0 * tail_se;
+    let se = math::sqrt(lambda_post[(max_k, max_k)].max(1e-12));
+    let ci_low = (max_effect_ns - 1.96 * se).max(0.0);
+    let ci_high = max_effect_ns + 1.96 * se;
 
-    match (shift_significant, tail_significant) {
-        (true, false) => EffectPattern::UniformShift,
-        (false, true) => EffectPattern::TailEffect,
-        (true, true) => EffectPattern::Mixed,
-        // When neither effect is statistically significant, return Indeterminate
-        (false, false) => EffectPattern::Indeterminate,
+    // Compute top quantiles analytically
+    let top_quantiles = compute_top_quantiles_analytical(delta_post, lambda_post, theta);
+
+    EffectEstimate {
+        max_effect_ns,
+        credible_interval_ns: (ci_low, ci_high),
+        top_quantiles,
     }
+}
+
+/// Compute top quantiles analytically from posterior mean and covariance.
+fn compute_top_quantiles_analytical(
+    delta_post: &Vector9,
+    lambda_post: &Matrix9,
+    theta: f64,
+) -> Vec<TopQuantile> {
+    let mut quantile_stats: Vec<QuantileStats> = Vec::with_capacity(9);
+
+    for k in 0..9 {
+        let mean = delta_post[k];
+        let se = math::sqrt(lambda_post[(k, k)].max(1e-12));
+
+        // 95% CI
+        let ci = (mean - 1.96 * se, mean + 1.96 * se);
+
+        // Exceedance probability: P(|δ_k| > θ)
+        // For Gaussian N(μ, σ²): P(|X| > θ) = 1 - Φ((θ-μ)/σ) + Φ((-θ-μ)/σ)
+        let exceed_prob = compute_exceedance_prob(mean, se, theta);
+
+        quantile_stats.push((k, DECILES[k], mean, ci, exceed_prob));
+    }
+
+    // Sort by exceedance probability (descending)
+    quantile_stats.sort_by(|a, b| b.4.total_cmp(&a.4));
+
+    // Take top 2-3 with exceed_prob > 0.5
+    quantile_stats
+        .into_iter()
+        .filter(|(_, _, _, _, exceed_prob)| *exceed_prob > 0.5)
+        .take(3)
+        .map(|(_, quantile_p, mean_ns, ci95_ns, exceed_prob)| TopQuantile {
+            quantile_p,
+            mean_ns,
+            ci95_ns,
+            exceed_prob,
+        })
+        .collect()
+}
+
+/// Compute P(|X| > θ) for X ~ N(μ, σ²).
+fn compute_exceedance_prob(mu: f64, sigma: f64, theta: f64) -> f64 {
+    if sigma < 1e-12 {
+        // Degenerate case
+        return if mu.abs() > theta { 1.0 } else { 0.0 };
+    }
+    let phi_upper = math::normal_cdf((theta - mu) / sigma);
+    let phi_lower = math::normal_cdf((-theta - mu) / sigma);
+    1.0 - (phi_upper - phi_lower)
 }
 
 /// Apply variance floor regularization for numerical stability (spec §3.3.2).
 ///
 /// When some quantiles have zero or near-zero variance (common in discrete mode
-/// with ties), the covariance matrix becomes ill-conditioned. Even if Cholesky
-/// succeeds, the inverse has huge values for near-zero variance elements,
-/// causing them to dominate the Bayesian regression incorrectly.
-///
-/// We regularize by ensuring a minimum diagonal value of 1% of mean variance.
-/// This bounds the condition number to ~100, preventing numerical instability.
+/// with ties), the covariance matrix becomes ill-conditioned.
 ///
 /// Formula (spec §3.3.2):
 ///   σ²ᵢ ← max(σ²ᵢ, 0.01 × σ̄²) + ε
 /// where σ̄² = tr(Σ)/9 and ε = 10⁻¹⁰ + σ̄² × 10⁻⁸
-fn regularize_covariance(sigma: &Matrix9) -> Matrix9 {
+pub fn regularize_covariance(sigma: &Matrix9) -> Matrix9 {
     let trace: f64 = (0..9).map(|i| sigma[(i, i)]).sum();
     let mean_var = trace / 9.0;
 
@@ -289,57 +248,87 @@ fn regularize_covariance(sigma: &Matrix9) -> Matrix9 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::bayes::build_design_matrix;
-    use crate::constants::B_TAIL;
 
     #[test]
-    fn test_design_matrix_structure() {
-        let x = build_design_matrix();
+    fn test_effect_estimate_basic() {
+        // Create some sample draws
+        let draws: Vec<Vector9> = (0..100)
+            .map(|i| {
+                let val = (i as f64) * 0.1;
+                Vector9::from_row_slice(&[val, val, val, val, val, val, val, val, val])
+            })
+            .collect();
 
-        // First column should be all ones
-        for i in 0..9 {
-            assert!((x[(i, 0)] - 1.0).abs() < 1e-10);
-        }
+        let estimate = compute_effect_estimate(&draws, 5.0);
 
-        // Second column should match B_TAIL
-        for i in 0..9 {
-            assert!((x[(i, 1)] - B_TAIL[i]).abs() < 1e-10);
-        }
-    }
-
-    #[test]
-    fn test_credible_interval_symmetry() {
-        let (low, high) = compute_credible_interval(0.0, 1.0);
+        // Max effect should be around 9.9 (max draw is 99 * 0.1 = 9.9)
+        assert!(estimate.max_effect_ns > 4.0, "max effect should be significant");
         assert!(
-            (low + high).abs() < 0.01,
-            "CI should be symmetric around zero"
+            estimate.credible_interval_ns.0 < estimate.max_effect_ns,
+            "CI lower should be below mean"
+        );
+        assert!(
+            estimate.credible_interval_ns.1 > estimate.max_effect_ns,
+            "CI upper should be above mean"
         );
     }
 
     #[test]
-    fn test_classify_uniform_shift() {
-        // Large shift, no tail effect
-        let mean = Vector2::new(10.0, 0.1);
-        let cov = Matrix2::identity();
-        let pattern = classify_pattern(&mean, &cov);
-        assert_eq!(pattern, EffectPattern::UniformShift);
+    fn test_effect_estimate_empty() {
+        let estimate = compute_effect_estimate(&[], 5.0);
+        assert_eq!(estimate.max_effect_ns, 0.0);
+        assert!(estimate.top_quantiles.is_empty());
     }
 
     #[test]
-    fn test_classify_tail_effect() {
-        // No shift, large tail effect
-        let mean = Vector2::new(0.1, 10.0);
-        let cov = Matrix2::identity();
-        let pattern = classify_pattern(&mean, &cov);
-        assert_eq!(pattern, EffectPattern::TailEffect);
+    fn test_top_quantiles_threshold() {
+        // Create draws where only the 90th percentile exceeds threshold
+        let draws: Vec<Vector9> = (0..100)
+            .map(|_| Vector9::from_row_slice(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 10.0]))
+            .collect();
+
+        let top = compute_top_quantiles(&draws, 5.0);
+
+        // Should have the 90th percentile (index 8, quantile_p = 0.9)
+        assert!(!top.is_empty());
+        assert!((top[0].quantile_p - 0.9).abs() < 0.01);
+        assert!(top[0].exceed_prob > 0.99);
     }
 
     #[test]
-    fn test_classify_indeterminate() {
-        // Neither shift nor tail significant (both small relative to SE)
-        let mean = Vector2::new(0.5, 0.5);
-        let cov = Matrix2::identity();
-        let pattern = classify_pattern(&mean, &cov);
-        assert_eq!(pattern, EffectPattern::Indeterminate);
+    fn test_regularize_covariance() {
+        let mut sigma = Matrix9::zeros();
+        for i in 0..9 {
+            sigma[(i, i)] = if i == 0 { 0.0 } else { 1.0 }; // First diagonal is zero
+        }
+
+        let regularized = regularize_covariance(&sigma);
+
+        // All diagonal elements should be positive
+        for i in 0..9 {
+            assert!(
+                regularized[(i, i)] > 0.0,
+                "diagonal {} should be positive",
+                i
+            );
+        }
+    }
+
+    #[test]
+    fn test_exceedance_prob() {
+        // Large mean should have high exceedance
+        let prob_high = compute_exceedance_prob(100.0, 10.0, 50.0);
+        assert!(prob_high > 0.99, "large mean should exceed threshold");
+
+        // Small mean should have low exceedance for high threshold
+        let prob_low = compute_exceedance_prob(1.0, 1.0, 50.0);
+        assert!(prob_low < 0.01, "small mean should not exceed threshold");
+
+        // Zero mean, threshold equals 2σ -> ~5% exceedance
+        let prob_2sigma = compute_exceedance_prob(0.0, 1.0, 2.0);
+        assert!(
+            (prob_2sigma - 0.0455).abs() < 0.01,
+            "2σ threshold should have ~4.5% exceedance"
+        );
     }
 }

@@ -72,17 +72,6 @@ export enum InconclusiveReason {
   /** Threshold was elevated due to measurement noise. */
   ThresholdElevated = 7
 }
-/** Pattern of timing effect. */
-export enum EffectPattern {
-  /** Uniform shift across all quantiles. */
-  UniformShift = 0,
-  /** Effect concentrated in tails (upper quantiles). */
-  TailEffect = 1,
-  /** Both shift and tail components present. */
-  Mixed = 2,
-  /** Cannot determine pattern. */
-  Indeterminate = 3
-}
 /** Exploitability assessment. */
 export enum Exploitability {
   /** < 10 ns - Requires shared hardware to exploit. */
@@ -107,18 +96,12 @@ export enum MeasurementQuality {
 }
 /** Effect size estimate. */
 export interface EffectEstimate {
-  /** Uniform shift component in nanoseconds. */
-  shiftNs: number
-  /** Tail effect component in nanoseconds. */
-  tailNs: number
-  /** Lower bound of 95% credible interval for total effect. */
-  credibleIntervalLow: number
-  /** Upper bound of 95% credible interval for total effect. */
-  credibleIntervalHigh: number
-  /** Pattern of the effect. */
-  pattern: EffectPattern
-  /** Interpretation caveat if model fit is poor. */
-  interpretationCaveat?: string
+  /** Maximum effect in nanoseconds: max_k |delta_k|. */
+  maxEffectNs: number
+  /** Lower bound of 95% credible interval for max effect. */
+  ciLowNs: number
+  /** Upper bound of 95% credible interval for max effect. */
+  ciHighNs: number
 }
 /** Diagnostics information for debugging and quality assessment. */
 export interface Diagnostics {
@@ -130,10 +113,6 @@ export interface Diagnostics {
   stationarityRatio: number
   /** Whether stationarity check passed. */
   stationarityOk: boolean
-  /** Projection mismatch Q statistic. */
-  projectionMismatchQ: number
-  /** Whether projection mismatch is acceptable. */
-  projectionMismatchOk: boolean
   /** Whether discrete mode was used (low timer resolution). */
   discreteMode: boolean
   /** Timer resolution in nanoseconds. */
@@ -142,6 +121,14 @@ export interface Diagnostics {
   lambdaMean: number
   /** Whether lambda chain mixed well. */
   lambdaMixingOk: boolean
+  /** Posterior mean of likelihood precision kappa. */
+  kappaMean: number
+  /** Coefficient of variation of kappa. */
+  kappaCv: number
+  /** Effective sample size of kappa chain. */
+  kappaEss: number
+  /** Whether kappa chain mixed well. */
+  kappaMixingOk: boolean
 }
 /** Configuration for the timing analysis. */
 export interface Config {
@@ -164,7 +151,7 @@ export interface Config {
 export interface AnalysisResult {
   /** Test outcome. */
   outcome: Outcome
-  /** Leak probability: P(max_k |(X*beta)_k| > theta | data). */
+  /** Leak probability: P(max_k |delta_k| > theta | data). */
   leakProbability: number
   /** Effect size estimate. */
   effect: EffectEstimate
@@ -178,10 +165,8 @@ export interface AnalysisResult {
   exploitability: Exploitability
   /** Inconclusive reason (only valid if outcome == Inconclusive). */
   inconclusiveReason: InconclusiveReason
-  /** Minimum detectable effect (shift) in nanoseconds. */
-  mdeShiftNs: number
-  /** Minimum detectable effect (tail) in nanoseconds. */
-  mdeTailNs: number
+  /** Minimum detectable effect in nanoseconds. */
+  mdeNs: number
   /** Timer resolution in nanoseconds. */
   timerResolutionNs: number
   /** User's requested threshold (theta) in nanoseconds. */

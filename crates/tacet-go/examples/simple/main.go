@@ -119,8 +119,10 @@ func main() {
 		fmt.Printf("  P(leak): %.2f%%\n", delayResult.LeakProbability*100)
 		if delayResult.Outcome == tacet.Fail {
 			fmt.Printf("  Exploitability: %s\n", delayResult.Exploitability)
-			fmt.Printf("  Effect: %.2f ns (shift) + %.2f ns (tail)\n",
-				delayResult.Effect.ShiftNs, delayResult.Effect.TailNs)
+			fmt.Printf("  Effect: %.2f ns (CI: [%.2f, %.2f])\n",
+				delayResult.Effect.MaxEffectNs,
+				delayResult.Effect.CredibleIntervalNs[0],
+				delayResult.Effect.CredibleIntervalNs[1])
 		}
 		fmt.Printf("  Samples: %d\n", delayResult.SamplesUsed)
 		fmt.Printf("  Time: %v\n", delayResult.ElapsedTime)

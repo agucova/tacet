@@ -1,4 +1,4 @@
-//! Minimum Detectable Effect (MDE) estimation (spec §3.3.4).
+//! Minimum Detectable Effect (MDE) estimation (spec §3.3).
 //!
 //! The MDE answers: "given the noise level in this measurement, what's the
 //! smallest effect I could reliably detect?"
@@ -7,54 +7,38 @@
 //! concerned about 10ns effects, a passing test doesn't mean the code is safe—
 //! it means the measurement wasn't sensitive enough.
 //!
-//! Formula with 50% power:
+//! Formula with 50% power (spec §3.3):
 //! ```text
-//! MDE_μ = z_{1-α/2} × sqrt((1ᵀ Σ₀⁻¹ 1)⁻¹)
-//! MDE_τ = z_{1-α/2} × sqrt((bᵀ Σ₀⁻¹ b)⁻¹)
+//! MDE = z_{1-α/2} × max_k sqrt(Σ₀[k,k])
 //! ```
 //! where z_{1-α/2} is the (1-α/2) percentile of the standard normal.
 
 extern crate alloc;
 
-use alloc::vec::Vec;
-
-use rand::SeedableRng;
-use rand_distr::{Distribution, StandardNormal};
-use rand_xoshiro::Xoshiro256PlusPlus;
-
-use crate::constants::{B_TAIL, ONES};
 use crate::math;
 use crate::result::MinDetectableEffect;
-use crate::types::{Matrix9, Vector9};
-
-use super::effect::decompose_effect;
+use crate::types::Matrix9;
 
 /// Result from MDE estimation.
 #[derive(Debug, Clone)]
 pub struct MdeEstimate {
-    /// Minimum detectable uniform shift in nanoseconds.
-    pub shift_ns: f64,
-    /// Minimum detectable tail effect in nanoseconds.
-    pub tail_ns: f64,
-    /// Number of null simulations used.
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
+    /// Number of simulations used (0 for analytical method).
     pub n_simulations: usize,
 }
 
 impl From<MdeEstimate> for MinDetectableEffect {
     fn from(mde: MdeEstimate) -> Self {
-        MinDetectableEffect {
-            shift_ns: mde.shift_ns,
-            tail_ns: mde.tail_ns,
-        }
+        MinDetectableEffect { mde_ns: mde.mde_ns }
     }
 }
 
-/// Compute MDE analytically using single-effect projection formulas (spec §3.3.4).
+/// Compute MDE analytically (spec §3.3).
 ///
-/// Formula:
+/// For max|δ| detection, MDE is determined by the largest marginal variance:
 /// ```text
-/// MDE_μ = z_{1-α/2} × sqrt((1ᵀ Σ₀⁻¹ 1)⁻¹)
-/// MDE_τ = z_{1-α/2} × sqrt((bᵀ Σ₀⁻¹ b)⁻¹)
+/// MDE = z_{1-α/2} × max_k sqrt(Σ₀[k,k])
 /// ```
 ///
 /// # Arguments
@@ -64,38 +48,16 @@ impl From<MdeEstimate> for MinDetectableEffect {
 ///
 /// # Returns
 ///
-/// A tuple `(mde_shift, mde_tail)` with minimum detectable effects in nanoseconds.
-pub fn analytical_mde(covariance: &Matrix9, alpha: f64) -> (f64, f64) {
-    // Use Cholesky decomposition for numerically stable solve of Σ₀⁻¹ v
-    let chol = safe_cholesky(covariance);
+/// The minimum detectable effect in nanoseconds.
+pub fn analytical_mde(covariance: &Matrix9, alpha: f64) -> f64 {
+    // Find maximum marginal variance
+    let max_var = (0..9)
+        .map(|i| covariance[(i, i)])
+        .fold(0.0_f64, f64::max);
 
-    // For shift MDE: Var(μ̂) = (1ᵀ Σ₀⁻¹ 1)⁻¹
-    let ones_vec = Vector9::from_iterator(ONES.iter().cloned());
-    let sigma_inv_ones = chol.solve(&ones_vec);
-    let precision_shift = ones_vec.dot(&sigma_inv_ones);
-    let var_shift = if precision_shift.abs() > 1e-12 {
-        1.0 / precision_shift
-    } else {
-        // Near-singular: return huge MDE (conservative fallback)
-        1e12
-    };
-
-    // For tail MDE: Var(τ̂) = (bᵀ Σ₀⁻¹ b)⁻¹
-    let b_tail_vec = Vector9::from_iterator(B_TAIL.iter().cloned());
-    let sigma_inv_b = chol.solve(&b_tail_vec);
-    let precision_tail = b_tail_vec.dot(&sigma_inv_b);
-    let var_tail = if precision_tail.abs() > 1e-12 {
-        1.0 / precision_tail
-    } else {
-        1e12
-    };
-
-    // MDE with 50% power: z_{1-α/2} × SE (spec §3.3.4)
+    // MDE with 50% power: z_{1-α/2} × sqrt(max variance)
     let z = probit(1.0 - alpha / 2.0);
-    let mde_shift = z * math::sqrt(var_shift);
-    let mde_tail = z * math::sqrt(var_tail);
-
-    (mde_shift, mde_tail)
+    z * math::sqrt(max_var)
 }
 
 /// Inverse normal CDF (probit function).
@@ -127,58 +89,7 @@ fn probit(p: f64) -> f64 {
     sign * z
 }
 
-/// Monte Carlo MDE estimation (kept for benchmarking).
-///
-/// This is the original implementation using Monte Carlo sampling.
-/// Kept as a separate function for comparison and validation purposes.
-#[allow(dead_code)]
-pub fn estimate_mde_monte_carlo(
-    covariance: &Matrix9,
-    n_simulations: usize,
-    prior_sigmas: (f64, f64),
-) -> MdeEstimate {
-    let mut rng = Xoshiro256PlusPlus::seed_from_u64(42);
-
-    // Cache Cholesky decomposition (compute once, reuse for all samples)
-    let chol = match nalgebra::Cholesky::new(*covariance) {
-        Some(c) => c,
-        None => {
-            // Regularize if not positive definite
-            let regularized = covariance + Matrix9::identity() * 1e-10;
-            nalgebra::Cholesky::new(regularized)
-                .expect("Regularized covariance should be positive definite")
-        }
-    };
-
-    // Collect effect estimates from null samples
-    let mut shift_effects = Vec::with_capacity(n_simulations);
-    let mut tail_effects = Vec::with_capacity(n_simulations);
-
-    for _ in 0..n_simulations {
-        // Sample from null distribution using cached Cholesky
-        let z: Vector9 = Vector9::from_fn(|_, _| StandardNormal.sample(&mut rng));
-        let null_sample = chol.l() * z;
-
-        // Fit effect model
-        let decomp = decompose_effect(&null_sample, covariance, prior_sigmas);
-
-        // Collect absolute effects
-        shift_effects.push(decomp.posterior_mean[0].abs());
-        tail_effects.push(decomp.posterior_mean[1].abs());
-    }
-
-    // Compute 95th percentiles
-    let shift_mde = percentile(&mut shift_effects, 0.95);
-    let tail_mde = percentile(&mut tail_effects, 0.95);
-
-    MdeEstimate {
-        shift_ns: shift_mde,
-        tail_ns: tail_mde,
-        n_simulations,
-    }
-}
-
-/// Estimate the minimum detectable effect (spec §3.3.4).
+/// Estimate the minimum detectable effect (spec §3.3).
 ///
 /// # Arguments
 ///
@@ -187,36 +98,20 @@ pub fn estimate_mde_monte_carlo(
 ///
 /// # Returns
 ///
-/// An `MdeEstimate` with shift and tail MDE in nanoseconds.
+/// An `MdeEstimate` with MDE in nanoseconds.
 pub fn estimate_mde(covariance: &Matrix9, alpha: f64) -> MdeEstimate {
-    let (shift_ns, tail_ns) = analytical_mde(covariance, alpha);
+    let mde_ns = analytical_mde(covariance, alpha);
 
     MdeEstimate {
-        shift_ns,
-        tail_ns,
+        mde_ns,
         n_simulations: 0, // Analytical method doesn't use simulations
     }
-}
-
-/// Compute the p-th percentile of a vector.
-///
-/// Modifies the input vector by sorting it.
-fn percentile(values: &mut [f64], p: f64) -> f64 {
-    if values.is_empty() {
-        return 0.0;
-    }
-
-    values.sort_by(|a, b| a.total_cmp(b));
-
-    let idx = math::round(p * (values.len() - 1) as f64) as usize;
-    let idx = idx.min(values.len() - 1);
-
-    values[idx]
 }
 
 /// Safe Cholesky decomposition with adaptive jitter for near-singular matrices.
 ///
 /// Uses the same regularization strategy as covariance estimation.
+#[allow(dead_code)]
 fn safe_cholesky(matrix: &Matrix9) -> nalgebra::Cholesky<f64, nalgebra::Const<9>> {
     // Try decomposition first
     if let Some(chol) = nalgebra::Cholesky::new(*matrix) {
@@ -242,26 +137,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_percentile_basic() {
-        let mut values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
-        assert!((percentile(&mut values, 0.5) - 3.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_percentile_95() {
-        let mut values: Vec<f64> = (1..=100).map(|x| x as f64).collect();
-        let p95 = percentile(&mut values, 0.95);
-        assert!((p95 - 95.0).abs() < 1.0);
-    }
-
-    #[test]
     fn test_mde_positive() {
         // With identity covariance, MDE should be positive
         let cov = Matrix9::identity();
         let mde = estimate_mde(&cov, 0.05);
 
-        assert!(mde.shift_ns > 0.0, "MDE shift should be positive");
-        assert!(mde.tail_ns > 0.0, "MDE tail should be positive");
+        assert!(mde.mde_ns > 0.0, "MDE should be positive");
     }
 
     #[test]
@@ -283,33 +164,21 @@ mod tests {
     }
 
     #[test]
-    fn test_analytical_mde_iid_sanity_check() {
-        // For i.i.d. quantiles with Σ₀ = σ² I (σ = 1) and α = 0.05, with 50% power:
+    fn test_analytical_mde_sanity_check() {
+        // For i.i.d. quantiles with Σ₀ = σ² I (σ = 1) and α = 0.05:
         // - z_{0.975} ≈ 1.96
-        // - 1ᵀ Σ⁻¹ 1 = 9, Var(μ̂) = 1/9
-        // - MDE_μ = 1.96 / 3 ≈ 0.653
-        //
-        // - bᵀ Σ⁻¹ b = 0.9375, Var(τ̂) = 1/0.9375
-        // - MDE_τ = 1.96 * sqrt(1/0.9375) ≈ 2.02
+        // - max variance = 1.0
+        // - MDE = 1.96 * sqrt(1.0) = 1.96
 
         let cov = Matrix9::identity();
-        let (mde_shift, mde_tail) = analytical_mde(&cov, 0.05);
+        let mde = analytical_mde(&cov, 0.05);
 
-        let z = 1.96; // z_alpha for 50% power
-        let expected_shift = z / 3.0;
-        let expected_tail = z * (1.0 / 0.9375_f64).sqrt();
-
+        let expected = 1.96;
         assert!(
-            (mde_shift - expected_shift).abs() < 0.05,
-            "shift MDE should be ~{:.3}, got {:.3}",
-            expected_shift,
-            mde_shift
-        );
-        assert!(
-            (mde_tail - expected_tail).abs() < 0.1,
-            "tail MDE should be ~{:.3}, got {:.3}",
-            expected_tail,
-            mde_tail
+            (mde - expected).abs() < 0.05,
+            "MDE should be ~{:.3}, got {:.3}",
+            expected,
+            mde
         );
     }
 
@@ -317,8 +186,8 @@ mod tests {
     fn test_analytical_mde_alpha_scaling() {
         // MDE should increase with stricter alpha (smaller α → larger z → larger MDE)
         let cov = Matrix9::identity();
-        let (mde_05, _) = analytical_mde(&cov, 0.05); // z ≈ 1.96
-        let (mde_01, _) = analytical_mde(&cov, 0.01); // z ≈ 2.58
+        let mde_05 = analytical_mde(&cov, 0.05); // z ≈ 1.96
+        let mde_01 = analytical_mde(&cov, 0.01); // z ≈ 2.58
 
         assert!(
             mde_01 > mde_05,
@@ -330,64 +199,21 @@ mod tests {
 
     #[test]
     fn test_analytical_mde_diagonal_covariance() {
-        // Diagonal covariance (uncorrelated quantiles)
+        // Diagonal covariance with varying variances
         let mut cov = Matrix9::zeros();
         for i in 0..9 {
             cov[(i, i)] = (i + 1) as f64;
         }
 
-        let (mde_shift, mde_tail) = analytical_mde(&cov, 0.05);
+        let mde = analytical_mde(&cov, 0.05);
 
+        // MDE should be based on max variance (9.0)
+        let expected = 1.96 * math::sqrt(9.0);
         assert!(
-            mde_shift.is_finite() && mde_shift > 0.0,
-            "shift MDE not finite or positive: {}",
-            mde_shift
-        );
-        assert!(
-            mde_tail.is_finite() && mde_tail > 0.0,
-            "tail MDE not finite or positive: {}",
-            mde_tail
+            (mde - expected).abs() < 0.1,
+            "MDE should be ~{:.3}, got {:.3}",
+            expected,
+            mde
         );
     }
-
-    #[test]
-    fn test_analytical_mde_near_singular() {
-        // Nearly rank-deficient covariance
-        let mut cov = Matrix9::identity() * 1e-6;
-        cov[(0, 0)] = 1.0;
-
-        let (mde_shift, mde_tail) = analytical_mde(&cov, 0.05);
-
-        assert!(mde_shift.is_finite(), "shift MDE not finite: {}", mde_shift);
-        assert!(mde_tail.is_finite(), "tail MDE not finite: {}", mde_tail);
-    }
-
-    #[test]
-    #[cfg(feature = "std")]
-    #[cfg_attr(debug_assertions, ignore)] // Run in release mode for accurate timing
-    fn test_analytical_mde_performance() {
-        let mut cov = Matrix9::identity();
-        for i in 0..9 {
-            for j in 0..9 {
-                let dist = (i as f64 - j as f64).abs();
-                cov[(i, j)] = (-dist / 2.0).exp();
-            }
-        }
-
-        let start = std::time::Instant::now();
-        for _ in 0..1000 {
-            let _ = analytical_mde(&cov, 0.05);
-        }
-        let analytical_time = start.elapsed();
-
-        // Threshold of 3µs per call accounts for CPU variance while still
-        // ensuring Cholesky + 2 solves on 9×9 remains fast
-        assert!(
-            analytical_time.as_micros() < 3000,
-            "analytical MDE too slow: {:.1}µs per call (threshold: 3µs)",
-            analytical_time.as_micros() as f64 / 1000.0
-        );
-    }
-
-    // Sample-size scaling is handled by the covariance estimate; no direct test here.
 }

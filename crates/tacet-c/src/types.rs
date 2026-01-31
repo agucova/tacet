@@ -178,19 +178,6 @@ impl From<MeasurementQuality> for ToMeasurementQuality {
     }
 }
 
-/// Effect pattern.
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToEffectPattern {
-    /// Constant timing difference across all quantiles.
-    UniformShift = 0,
-    /// Timing difference concentrated in upper quantiles.
-    TailEffect = 1,
-    /// Both shift and tail components present.
-    Mixed = 2,
-    /// Pattern cannot be determined.
-    Indeterminate = 3,
-}
 
 // ============================================================================
 // Diagnostics
@@ -210,10 +197,6 @@ pub struct ToDiagnostics {
     pub stationarity_ratio: f64,
     /// Whether stationarity check passed.
     pub stationarity_ok: bool,
-    /// Projection mismatch Q statistic.
-    pub projection_mismatch_q: f64,
-    /// Whether projection mismatch is acceptable.
-    pub projection_mismatch_ok: bool,
     /// Whether discrete mode was used (low timer resolution).
     pub discrete_mode: bool,
     /// Timer resolution in nanoseconds.
@@ -243,8 +226,6 @@ impl Default for ToDiagnostics {
             effective_sample_size: 0,
             stationarity_ratio: 1.0,
             stationarity_ok: true,
-            projection_mismatch_q: 0.0,
-            projection_mismatch_ok: true,
             discrete_mode: false,
             timer_resolution_ns: 0.0,
             lambda_mean: 1.0,
@@ -267,26 +248,20 @@ impl Default for ToDiagnostics {
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct ToEffect {
-    /// Uniform shift component in nanoseconds.
-    pub shift_ns: f64,
-    /// Tail effect component in nanoseconds.
-    pub tail_ns: f64,
+    /// Maximum effect in nanoseconds: max_k |delta_k|.
+    pub max_effect_ns: f64,
     /// 95% credible interval lower bound.
     pub ci_low_ns: f64,
     /// 95% credible interval upper bound.
     pub ci_high_ns: f64,
-    /// Effect pattern.
-    pub pattern: ToEffectPattern,
 }
 
 impl Default for ToEffect {
     fn default() -> Self {
         Self {
-            shift_ns: 0.0,
-            tail_ns: 0.0,
+            max_effect_ns: 0.0,
             ci_low_ns: 0.0,
             ci_high_ns: 0.0,
-            pattern: ToEffectPattern::Indeterminate,
         }
     }
 }
@@ -315,10 +290,8 @@ pub struct ToResult {
     pub exploitability: ToExploitability,
     /// Inconclusive reason (only meaningful if outcome == Inconclusive).
     pub inconclusive_reason: ToInconclusiveReason,
-    /// Minimum detectable effect (shift) in nanoseconds.
-    pub mde_shift_ns: f64,
-    /// Minimum detectable effect (tail) in nanoseconds.
-    pub mde_tail_ns: f64,
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
     /// User's requested threshold in nanoseconds.
     pub theta_user_ns: f64,
     /// Effective threshold after floor adjustment.
@@ -344,8 +317,7 @@ impl Default for ToResult {
             elapsed_secs: 0.0,
             exploitability: ToExploitability::SharedHardwareOnly,
             inconclusive_reason: ToInconclusiveReason::None,
-            mde_shift_ns: 0.0,
-            mde_tail_ns: 0.0,
+            mde_ns: 0.0,
             theta_user_ns: 0.0,
             theta_eff_ns: 0.0,
             theta_floor_ns: 0.0,

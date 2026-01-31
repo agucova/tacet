@@ -932,8 +932,7 @@ pub struct TrialRecord {
     pub attacker_model: String,
     pub decision: String, // "pass", "fail", "inconclusive", "unmeasurable"
     pub leak_probability: Option<f64>,
-    pub shift_ns: Option<f64>,
-    pub tail_ns: Option<f64>,
+    pub max_effect_ns: Option<f64>,
     pub ci_low_ns: Option<f64>,
     pub ci_high_ns: Option<f64>,
     pub samples_per_class: Option<usize>,
@@ -950,7 +949,7 @@ impl TrialRecord {
         attacker_model: &str,
         outcome: &Outcome,
     ) -> Self {
-        let (decision, leak_probability, shift_ns, tail_ns, ci_low_ns, ci_high_ns, samples_used) =
+        let (decision, leak_probability, max_effect_ns, ci_low_ns, ci_high_ns, samples_used) =
             match outcome {
                 Outcome::Pass {
                     leak_probability,
@@ -960,8 +959,7 @@ impl TrialRecord {
                 } => (
                     "pass",
                     Some(*leak_probability),
-                    Some(effect.shift_ns),
-                    Some(effect.tail_ns),
+                    Some(effect.max_effect_ns),
                     Some(effect.credible_interval_ns.0),
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
@@ -974,8 +972,7 @@ impl TrialRecord {
                 } => (
                     "fail",
                     Some(*leak_probability),
-                    Some(effect.shift_ns),
-                    Some(effect.tail_ns),
+                    Some(effect.max_effect_ns),
                     Some(effect.credible_interval_ns.0),
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
@@ -988,16 +985,13 @@ impl TrialRecord {
                 } => (
                     "inconclusive",
                     Some(*leak_probability),
-                    Some(effect.shift_ns),
-                    Some(effect.tail_ns),
+                    Some(effect.max_effect_ns),
                     Some(effect.credible_interval_ns.0),
                     Some(effect.credible_interval_ns.1),
                     Some(*samples_used),
                 ),
-                Outcome::Unmeasurable { .. } => {
-                    ("unmeasurable", None, None, None, None, None, None)
-                }
-                Outcome::Research(_) => ("research", None, None, None, None, None, None),
+                Outcome::Unmeasurable { .. } => ("unmeasurable", None, None, None, None, None),
+                Outcome::Research(_) => ("research", None, None, None, None, None),
             };
 
         Self {
@@ -1008,8 +1002,7 @@ impl TrialRecord {
             attacker_model: attacker_model.to_string(),
             decision: decision.to_string(),
             leak_probability,
-            shift_ns,
-            tail_ns,
+            max_effect_ns,
             ci_low_ns,
             ci_high_ns,
             samples_per_class: samples_used,
@@ -1019,13 +1012,13 @@ impl TrialRecord {
 
     /// CSV header line.
     pub fn csv_header() -> &'static str {
-        "trial,test_name,test_type,injected_effect_ns,attacker_model,decision,leak_probability,shift_ns,tail_ns,ci_low_ns,ci_high_ns,samples_per_class,elapsed_ms"
+        "trial,test_name,test_type,injected_effect_ns,attacker_model,decision,leak_probability,max_effect_ns,ci_low_ns,ci_high_ns,samples_per_class,elapsed_ms"
     }
 
     /// Format as CSV line.
     pub fn to_csv(&self) -> String {
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{},{},{}",
             self.trial,
             self.test_name,
             self.test_type,
@@ -1034,9 +1027,8 @@ impl TrialRecord {
             self.decision,
             self.leak_probability
                 .map_or("".to_string(), |v| format!("{:.6}", v)),
-            self.shift_ns
+            self.max_effect_ns
                 .map_or("".to_string(), |v| format!("{:.2}", v)),
-            self.tail_ns.map_or("".to_string(), |v| format!("{:.2}", v)),
             self.ci_low_ns
                 .map_or("".to_string(), |v| format!("{:.2}", v)),
             self.ci_high_ns

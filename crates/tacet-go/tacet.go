@@ -266,19 +266,16 @@ func resultFromFFI(r *ffi.Result) *Result {
 		Outcome:         outcomeFromFFI(r.Outcome),
 		LeakProbability: r.LeakProbability,
 		Effect: Effect{
-			ShiftNs: r.Effect.ShiftNs,
-			TailNs:  r.Effect.TailNs,
-			CILow:   r.Effect.CILow,
-			CIHigh:  r.Effect.CIHigh,
-			Pattern: effectPatternFromFFI(r.Effect.Pattern),
+			MaxEffectNs:        r.Effect.MaxEffectNs,
+			CredibleIntervalNs: [2]float64{r.Effect.CILow, r.Effect.CIHigh},
+			TopQuantiles:       nil, // TODO: populate from C API when available
 		},
 		Quality:            qualityFromFFI(r.Quality),
 		SamplesUsed:        r.SamplesUsed,
 		ElapsedTime:        r.ElapsedTime,
 		Exploitability:     exploitabilityFromFFI(r.Exploitability),
 		InconclusiveReason: inconclusiveReasonFromFFI(r.InconclusiveReason),
-		MDEShiftNs:         r.MDEShiftNs,
-		MDETailNs:          r.MDETailNs,
+		MDENs:              r.MDENs,
 		ThetaUserNs:        r.ThetaUserNs,
 		ThetaEffNs:         r.ThetaEffNs,
 		ThetaFloorNs:       r.ThetaFloorNs,
@@ -287,24 +284,20 @@ func resultFromFFI(r *ffi.Result) *Result {
 	// Convert diagnostics if available
 	if r.Diagnostics != nil {
 		result.Diagnostics = &Diagnostics{
-			DependenceLength:     r.Diagnostics.DependenceLength,
-			EffectiveSampleSize:  r.Diagnostics.EffectiveSampleSize,
-			StationarityRatio:    r.Diagnostics.StationarityRatio,
-			StationarityOK:       r.Diagnostics.StationarityOK,
-			ProjectionMismatchQ:  r.Diagnostics.ProjectionMismatchQ,
-			ProjectionMismatchOK: r.Diagnostics.ProjectionMismatchOK,
-			DiscreteMode:         r.Diagnostics.DiscreteMode,
-			TimerResolutionNs:    r.Diagnostics.TimerResolutionNs,
-			LambdaMean:           r.Diagnostics.LambdaMean,
-			LambdaSD:             r.Diagnostics.LambdaSD,
-			LambdaCV:             0, // Not in C API, compute if needed
-			LambdaESS:            r.Diagnostics.LambdaESS,
-			LambdaMixingOK:       r.Diagnostics.LambdaMixingOK,
-			KappaMean:            r.Diagnostics.KappaMean,
-			KappaSD:              0, // Not in C API
-			KappaCV:              r.Diagnostics.KappaCV,
-			KappaESS:             r.Diagnostics.KappaESS,
-			KappaMixingOK:        r.Diagnostics.KappaMixingOK,
+			DependenceLength:    r.Diagnostics.DependenceLength,
+			EffectiveSampleSize: r.Diagnostics.EffectiveSampleSize,
+			StationarityRatio:   r.Diagnostics.StationarityRatio,
+			StationarityOK:      r.Diagnostics.StationarityOK,
+			DiscreteMode:        r.Diagnostics.DiscreteMode,
+			TimerResolutionNs:   r.Diagnostics.TimerResolutionNs,
+			LambdaMean:          r.Diagnostics.LambdaMean,
+			LambdaSD:            r.Diagnostics.LambdaSD,
+			LambdaESS:           r.Diagnostics.LambdaESS,
+			LambdaMixingOK:      r.Diagnostics.LambdaMixingOK,
+			KappaMean:           r.Diagnostics.KappaMean,
+			KappaCV:             r.Diagnostics.KappaCV,
+			KappaESS:            r.Diagnostics.KappaESS,
+			KappaMixingOK:       r.Diagnostics.KappaMixingOK,
 		}
 	}
 
@@ -355,21 +348,6 @@ func exploitabilityFromFFI(e ffi.Exploitability) Exploitability {
 		return ObviousLeak
 	default:
 		return SharedHardwareOnly
-	}
-}
-
-func effectPatternFromFFI(p ffi.EffectPattern) EffectPattern {
-	switch p {
-	case ffi.UniformShift:
-		return UniformShift
-	case ffi.TailEffect:
-		return TailEffect
-	case ffi.Mixed:
-		return Mixed
-	case ffi.Indeterminate:
-		return Indeterminate
-	default:
-		return Indeterminate
 	}
 }
 

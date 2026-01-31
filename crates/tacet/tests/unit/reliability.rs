@@ -1,8 +1,8 @@
 //! Tests for the reliability handling API (Outcome, UnreliablePolicy, skip_if_unreliable!).
 
 use tacet::{
-    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
-    MeasurementQuality, Outcome, UnreliablePolicy,
+    Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, MeasurementQuality, Outcome,
+    UnreliablePolicy,
 };
 
 /// Create a Pass outcome with the given parameters.
@@ -10,11 +10,9 @@ fn make_pass(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
     Outcome::Pass {
         leak_probability,
         effect: EffectEstimate {
-            shift_ns: 5.0,
-            tail_ns: 2.0,
+            max_effect_ns: 7.0,
             credible_interval_ns: (0.0, 10.0),
-            pattern: EffectPattern::Indeterminate,
-            interpretation_caveat: None,
+            top_quantiles: Vec::new(),
         },
         samples_used: 10000,
         quality,
@@ -30,11 +28,9 @@ fn make_fail(leak_probability: f64, quality: MeasurementQuality) -> Outcome {
     Outcome::Fail {
         leak_probability,
         effect: EffectEstimate {
-            shift_ns: 100.0,
-            tail_ns: 50.0,
+            max_effect_ns: 150.0,
             credible_interval_ns: (80.0, 120.0),
-            pattern: EffectPattern::Mixed,
-            interpretation_caveat: None,
+            top_quantiles: Vec::new(),
         },
         exploitability: Exploitability::Http2Multiplexing,
         samples_used: 10000,

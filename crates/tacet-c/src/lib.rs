@@ -386,8 +386,7 @@ pub unsafe extern "C" fn to_calibrate(
     let calibration_snapshot = CalibrationSnapshot::new(baseline_stats, sample_stats);
 
     // Placeholder MDE (would need proper computation)
-    let mde_shift_ns = theta_floor_stat;
-    let mde_tail_ns = theta_floor_stat * 1.5;
+    let mde_ns = theta_floor_stat;
 
     // Projection mismatch threshold (chi-squared 99th percentile for 7 DoF)
     let projection_mismatch_thresh = 18.48;
@@ -403,8 +402,7 @@ pub unsafe extern "C" fn to_calibrate(
         theta_ns,
         count,
         discrete_mode,
-        mde_shift_ns,
-        mde_tail_ns,
+        mde_ns,
         calibration_snapshot,
         ns_per_tick, // timer_resolution_ns
         samples_per_second,
@@ -574,14 +572,12 @@ pub unsafe extern "C" fn to_step(
 }
 
 /// Convert an AdaptiveOutcome to a ToResult using FFI summary types.
-/// This uses the canonical effect pattern classification from core (spec §3.4.6).
 fn convert_adaptive_outcome(
     outcome: &tacet_core::adaptive::AdaptiveOutcome,
     cal: &Calibration,
     _cfg: &ToConfig,
 ) -> ToResult {
     use tacet_core::ffi_summary::{InconclusiveReasonKind, OutcomeType};
-    use tacet_core::result::EffectPattern;
 
     let summary = outcome.to_summary(cal);
 
@@ -604,31 +600,20 @@ fn convert_adaptive_outcome(
         InconclusiveReasonKind::ThresholdElevated => ToInconclusiveReason::ThresholdElevated,
     };
 
-    // Map EffectPattern to C ToEffectPattern
-    let pattern = match summary.effect.pattern {
-        EffectPattern::UniformShift => ToEffectPattern::UniformShift,
-        EffectPattern::TailEffect => ToEffectPattern::TailEffect,
-        EffectPattern::Mixed => ToEffectPattern::Mixed,
-        EffectPattern::Indeterminate => ToEffectPattern::Indeterminate,
-    };
-
     ToResult {
         outcome: to_outcome,
         leak_probability: summary.leak_probability,
         effect: ToEffect {
-            shift_ns: summary.effect.shift_ns,
-            tail_ns: summary.effect.tail_ns,
+            max_effect_ns: summary.effect.max_effect_ns,
             ci_low_ns: summary.effect.ci_low_ns,
             ci_high_ns: summary.effect.ci_high_ns,
-            pattern,
         },
         quality: summary.quality.into(),
         samples_used: summary.samples_per_class as u64,
         elapsed_secs: summary.elapsed_secs,
         exploitability: summary.exploitability.into(),
         inconclusive_reason,
-        mde_shift_ns: summary.mde_shift_ns,
-        mde_tail_ns: summary.mde_tail_ns,
+        mde_ns: summary.mde_ns,
         theta_user_ns: summary.theta_user,
         theta_eff_ns: summary.theta_eff,
         theta_floor_ns: summary.theta_floor,
@@ -639,8 +624,6 @@ fn convert_adaptive_outcome(
             effective_sample_size: summary.diagnostics.effective_sample_size as u64,
             stationarity_ratio: summary.diagnostics.stationarity_ratio,
             stationarity_ok: summary.diagnostics.stationarity_ok,
-            projection_mismatch_q: summary.diagnostics.projection_mismatch_q,
-            projection_mismatch_ok: summary.diagnostics.projection_mismatch_ok,
             discrete_mode: summary.diagnostics.discrete_mode,
             timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
             lambda_mean: summary.diagnostics.lambda_mean,
@@ -969,33 +952,15 @@ pub unsafe extern "C" fn to_analyze(
         Some(seed),
     );
 
-    // Extract effect estimate
-    let shift_ns = bayes_result.beta_proj[0];
-    let tail_ns = bayes_result.beta_proj[1];
+    // Extract max effect from posterior mean
+    let max_effect_ns = bayes_result
+        .delta_post
+        .iter()
+        .map(|x| x.abs())
+        .fold(0.0_f64, f64::max);
 
-    // Compute CIs from posterior covariance (simplified)
-    let shift_sd = bayes_result.beta_proj_cov[(0, 0)].sqrt();
-    let tail_sd = bayes_result.beta_proj_cov[(1, 1)].sqrt();
-    let total_effect = (shift_ns.powi(2) + tail_ns.powi(2)).sqrt();
-    let total_sd = (shift_sd.powi(2) + tail_sd.powi(2)).sqrt();
-
-    // Simple 95% CI approximation
-    let ci_low = (total_effect - 1.96 * total_sd).max(0.0);
-    let ci_high = total_effect + 1.96 * total_sd;
-
-    // Classify pattern using canonical classification from core
-    // For one-shot analysis without posterior draws, we use a simplified heuristic
-    // based on effect magnitudes relative to their standard errors (2×SE threshold)
-    let pattern = {
-        let shift_significant = shift_ns.abs() > 2.0 * shift_sd;
-        let tail_significant = tail_ns.abs() > 2.0 * tail_sd;
-        match (shift_significant, tail_significant) {
-            (true, false) => ToEffectPattern::UniformShift,
-            (false, true) => ToEffectPattern::TailEffect,
-            (true, true) => ToEffectPattern::Mixed,
-            (false, false) => ToEffectPattern::Indeterminate,
-        }
-    };
+    // Use effect magnitude CI from Gibbs sampler
+    let (ci_low, ci_high) = bayes_result.effect_magnitude_ci;
 
     // Determine outcome
     let leak_prob = bayes_result.leak_probability;
@@ -1008,7 +973,7 @@ pub unsafe extern "C" fn to_analyze(
     };
 
     // Compute exploitability (delegate to core)
-    let exploitability: ToExploitability = Exploitability::from_effect_ns(total_effect).into();
+    let exploitability: ToExploitability = Exploitability::from_effect_ns(max_effect_ns).into();
 
     // Determine quality (delegate to core)
     let mde_ns = theta_floor;
@@ -1020,8 +985,6 @@ pub unsafe extern "C" fn to_analyze(
         effective_sample_size: n_eff as u64,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        projection_mismatch_q: bayes_result.projection_mismatch_q,
-        projection_mismatch_ok: true, // Would need threshold from calibration
         discrete_mode,
         timer_resolution_ns: ns_per_tick,
         lambda_mean: bayes_result.lambda_mean,
@@ -1039,19 +1002,16 @@ pub unsafe extern "C" fn to_analyze(
         outcome,
         leak_probability: leak_prob,
         effect: ToEffect {
-            shift_ns,
-            tail_ns,
+            max_effect_ns,
             ci_low_ns: ci_low,
             ci_high_ns: ci_high,
-            pattern,
         },
         quality,
         samples_used: count as u64,
         elapsed_secs: 0.0,
         exploitability,
         inconclusive_reason,
-        mde_shift_ns: mde_ns,
-        mde_tail_ns: mde_ns * 1.5,
+        mde_ns,
         theta_user_ns: theta_ns,
         theta_eff_ns: theta_eff,
         theta_floor_ns: theta_floor,

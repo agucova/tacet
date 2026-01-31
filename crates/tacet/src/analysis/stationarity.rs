@@ -1,4 +1,4 @@
-//! Stationarity tracking for drift detection (spec Section 3.2.1).
+//! Stationarity tracking for drift detection (implementation-guide §2.3).
 //!
 //! Uses reservoir sampling to maintain approximate quantiles per time window,
 //! enabling detection of timing distribution drift during measurement.
@@ -139,7 +139,7 @@ impl StationarityTracker {
             sum / window_medians.len() as f64
         };
 
-        // Check 1: Median drift (spec Section 3.2.1)
+        // Check 1: Median drift (implementation-guide §2.3)
         let max_median = window_medians
             .iter()
             .cloned()

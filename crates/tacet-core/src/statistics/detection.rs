@@ -10,7 +10,7 @@ use hashbrown::HashSet;
 /// Returns the minimum of (unique_baseline/n, unique_sample/n).
 /// Values are quantized to 0.001ns buckets before counting.
 ///
-/// Discrete mode should be triggered when this returns < 0.10 (spec §3.7).
+/// Discrete mode should be triggered when this returns < 0.10 (spec §3.6).
 ///
 /// # Arguments
 ///
@@ -36,7 +36,7 @@ pub fn compute_min_uniqueness_ratio(baseline: &[f64], sample: &[f64]) -> f64 {
     ratio_baseline.min(ratio_sample)
 }
 
-/// Discrete mode threshold (spec §3.7).
+/// Discrete mode threshold (spec §3.6).
 ///
 /// When the minimum uniqueness ratio falls below this threshold,
 /// implementations SHOULD use discrete mode (m-out-of-n bootstrap,

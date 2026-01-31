@@ -4,25 +4,20 @@
 //! - δ ∈ ℝ⁹ is the per-decile timing difference vector
 //! - Δ is the observed quantile difference vector
 //!
-//! For interpretability, the 9D posterior is projected to 2D (shift, tail)
-//! using GLS: β_proj = (X'Σ_n⁻¹X)⁻¹ X'Σ_n⁻¹ δ_post
+//! Effect estimation uses max_k |δ_k| as the primary metric (spec §5.2).
 
 extern crate alloc;
 use alloc::vec::Vec;
 
+use crate::analysis::{compute_effect_estimate, compute_effect_estimate_analytical};
 use crate::math::sqrt;
-use crate::result::{EffectEstimate, EffectPattern, MeasurementQuality};
-use crate::types::{Matrix2, Matrix9, Vector2, Vector9};
-
-// Note: classify_pattern from analysis::effect is no longer used here.
-// We now use classify_pattern_from_draws() which uses β draws directly.
+use crate::result::{EffectEstimate, MeasurementQuality};
+use crate::types::{Matrix9, Vector9};
 
 /// Posterior distribution parameters for the 9D effect vector δ.
 ///
 /// The posterior is Gaussian: δ | Δ ~ N(δ_post, Λ_post) where each δ_k
 /// represents the timing difference at decile k.
-///
-/// The 2D projection β_proj = (μ, τ) provides shift/tail decomposition.
 ///
 /// Uses Student's t prior (ν=4) via Gibbs sampling for robust inference.
 #[derive(Clone, Debug)]
@@ -33,26 +28,16 @@ pub struct Posterior {
     /// 9D posterior covariance Λ_post.
     pub lambda_post: Matrix9,
 
-    /// 2D GLS projection β = (μ, τ) for interpretability.
-    /// - β[0] = μ (uniform shift)
-    /// - β[1] = τ (tail effect)
-    pub beta_proj: Vector2,
-
-    /// 2D projection covariance (empirical, from draws).
-    pub beta_proj_cov: Matrix2,
-
-    /// Retained β draws for dominance-based classification (spec §3.4.6).
-    /// Each draw is β^(s) = A·δ^(s) where A is the GLS projection matrix.
-    pub beta_draws: Vec<Vector2>,
+    /// Retained δ draws from the Gibbs sampler.
+    /// Used for effect estimation via `compute_effect_estimate`.
+    pub delta_draws: Vec<Vector9>,
 
     /// Leak probability: P(max_k |δ_k| > θ | Δ).
     /// Computed via Monte Carlo integration over the 9D posterior.
     pub leak_probability: f64,
 
-    /// Projection mismatch Q statistic.
-    /// Q = r'Σ_n⁻¹r where r = δ_post - X β_proj.
-    /// High values indicate the 2D summary is approximate.
-    pub projection_mismatch_q: f64,
+    /// Effect threshold used for leak probability computation.
+    pub theta: f64,
 
     /// Number of samples used in this posterior computation.
     pub n: usize,
@@ -90,21 +75,17 @@ impl Posterior {
     pub fn new(
         delta_post: Vector9,
         lambda_post: Matrix9,
-        beta_proj: Vector2,
-        beta_proj_cov: Matrix2,
-        beta_draws: Vec<Vector2>,
+        delta_draws: Vec<Vector9>,
         leak_probability: f64,
-        projection_mismatch_q: f64,
+        theta: f64,
         n: usize,
     ) -> Self {
         Self {
             delta_post,
             lambda_post,
-            beta_proj,
-            beta_proj_cov,
-            beta_draws,
+            delta_draws,
             leak_probability,
-            projection_mismatch_q,
+            theta,
             n,
             lambda_mean: None,      // v5.4: no Gibbs sampler
             lambda_mixing_ok: None, // v5.4: no Gibbs sampler
@@ -120,11 +101,9 @@ impl Posterior {
     pub fn new_with_gibbs(
         delta_post: Vector9,
         lambda_post: Matrix9,
-        beta_proj: Vector2,
-        beta_proj_cov: Matrix2,
-        beta_draws: Vec<Vector2>,
+        delta_draws: Vec<Vector9>,
         leak_probability: f64,
-        projection_mismatch_q: f64,
+        theta: f64,
         n: usize,
         lambda_mean: f64,
         lambda_mixing_ok: bool,
@@ -136,11 +115,9 @@ impl Posterior {
         Self {
             delta_post,
             lambda_post,
-            beta_proj,
-            beta_proj_cov,
-            beta_draws,
+            delta_draws,
             leak_probability,
-            projection_mismatch_q,
+            theta,
             n,
             lambda_mean: Some(lambda_mean),
             lambda_mixing_ok: Some(lambda_mixing_ok),
@@ -151,31 +128,7 @@ impl Posterior {
         }
     }
 
-    /// Get the shift component (μ) from the 2D projection.
-    #[inline]
-    pub fn shift_ns(&self) -> f64 {
-        self.beta_proj[0]
-    }
-
-    /// Get the tail component (τ) from the 2D projection.
-    #[inline]
-    pub fn tail_ns(&self) -> f64 {
-        self.beta_proj[1]
-    }
-
-    /// Get the standard error of the shift component.
-    #[inline]
-    pub fn shift_se(&self) -> f64 {
-        sqrt(self.beta_proj_cov[(0, 0)])
-    }
-
-    /// Get the standard error of the tail component.
-    #[inline]
-    pub fn tail_se(&self) -> f64 {
-        sqrt(self.beta_proj_cov[(1, 1)])
-    }
-
-    /// Get the max absolute effect across all deciles.
+    /// Get the max absolute effect across all deciles from posterior mean.
     pub fn max_effect_ns(&self) -> f64 {
         self.delta_post
             .iter()
@@ -185,161 +138,36 @@ impl Posterior {
 
     /// Build an EffectEstimate from this posterior.
     ///
-    /// This computes the credible interval and classifies the effect pattern
-    /// using dominance-based classification from the β draws (spec §3.4.6).
+    /// Uses delta draws if available, otherwise uses analytical approximation.
     pub fn to_effect_estimate(&self) -> EffectEstimate {
-        // Classify pattern using dominance-based approach from draws
-        let pattern = self.classify_pattern_from_draws();
-
-        // Compute credible interval from posterior covariance
-        let shift_std = self.shift_se();
-        let tail_std = self.tail_se();
-        let total_effect =
-            sqrt(self.shift_ns() * self.shift_ns() + self.tail_ns() * self.tail_ns());
-        let total_std = sqrt((shift_std * shift_std + tail_std * tail_std) / 2.0);
-
-        let ci_low = (total_effect - 1.96 * total_std).max(0.0);
-        let ci_high = total_effect + 1.96 * total_std;
-
-        EffectEstimate {
-            shift_ns: self.shift_ns(),
-            tail_ns: self.tail_ns(),
-            credible_interval_ns: (ci_low, ci_high),
-            pattern,
-            interpretation_caveat: None,
-        }
-    }
-
-    /// Classify effect pattern using dominance-based approach from β draws (spec §3.4.6).
-    ///
-    /// Uses posterior draws to compute dominance probabilities rather than
-    /// relying on "statistical significance" (|effect| > 2×SE), which is
-    /// brittle under covariance regularization.
-    ///
-    /// Classification rules (dominance is primary):
-    /// - UniformShift: shift dominates tail (|μ| ≥ 5|τ| with ≥80% probability)
-    /// - TailEffect: tail dominates shift (|τ| ≥ 5|μ| with ≥80% probability)
-    /// - Mixed: both practically significant and neither dominates
-    /// - Indeterminate: effect too small or uncertain to classify
-    fn classify_pattern_from_draws(&self) -> EffectPattern {
-        // Dominance ratio threshold: one effect must be 5x larger to dominate
-        const DOMINANCE_RATIO: f64 = 5.0;
-        // Probability threshold for dominance classification
-        const DOMINANCE_PROB: f64 = 0.80;
-        // Threshold for effect to be "practically significant" (absolute, in ns)
-        // Effects smaller than this are considered noise
-        const MIN_SIGNIFICANT_NS: f64 = 10.0;
-
-        if self.beta_draws.is_empty() {
-            // Fallback to point estimate if no draws available
-            return self.classify_pattern_point_estimate();
-        }
-
-        let n = self.beta_draws.len() as f64;
-
-        // Count draws where each condition holds
-        let mut shift_significant_count = 0;
-        let mut tail_significant_count = 0;
-        let mut shift_dominates_count = 0;
-        let mut tail_dominates_count = 0;
-
-        for beta in &self.beta_draws {
-            let shift_abs = beta[0].abs();
-            let tail_abs = beta[1].abs();
-
-            // Check if components are practically significant (absolute threshold)
-            if shift_abs > MIN_SIGNIFICANT_NS {
-                shift_significant_count += 1;
-            }
-            if tail_abs > MIN_SIGNIFICANT_NS {
-                tail_significant_count += 1;
-            }
-
-            // Check dominance (with safety for near-zero values)
-            if tail_abs < 1e-12 || shift_abs >= DOMINANCE_RATIO * tail_abs {
-                shift_dominates_count += 1;
-            }
-            if shift_abs < 1e-12 || tail_abs >= DOMINANCE_RATIO * shift_abs {
-                tail_dominates_count += 1;
-            }
-        }
-
-        // Compute probabilities
-        let p_shift_significant = shift_significant_count as f64 / n;
-        let p_tail_significant = tail_significant_count as f64 / n;
-        let p_shift_dominates = shift_dominates_count as f64 / n;
-        let p_tail_dominates = tail_dominates_count as f64 / n;
-
-        // Classification: dominance is the primary criterion
-        // If one component dominates in most draws, that determines the pattern
-        if p_shift_dominates >= DOMINANCE_PROB {
-            EffectPattern::UniformShift
-        } else if p_tail_dominates >= DOMINANCE_PROB {
-            EffectPattern::TailEffect
-        } else if p_shift_significant >= DOMINANCE_PROB && p_tail_significant >= DOMINANCE_PROB {
-            // Neither dominates but both are significant -> Mixed
-            EffectPattern::Mixed
+        if !self.delta_draws.is_empty() {
+            compute_effect_estimate(&self.delta_draws, self.theta)
         } else {
-            EffectPattern::Indeterminate
+            compute_effect_estimate_analytical(&self.delta_post, &self.lambda_post, self.theta)
         }
     }
 
-    /// Fallback classification using point estimates when no draws available.
-    fn classify_pattern_point_estimate(&self) -> EffectPattern {
-        const DOMINANCE_RATIO: f64 = 5.0;
-
-        let shift_abs = self.shift_ns().abs();
-        let tail_abs = self.tail_ns().abs();
-        let shift_se = self.shift_se();
-        let tail_se = self.tail_se();
-
-        // Check statistical significance (|effect| > 2×SE)
-        let shift_significant = shift_abs > 2.0 * shift_se;
-        let tail_significant = tail_abs > 2.0 * tail_se;
-
-        match (shift_significant, tail_significant) {
-            (true, false) => EffectPattern::UniformShift,
-            (false, true) => EffectPattern::TailEffect,
-            (true, true) => {
-                // Both significant - check dominance
-                if shift_abs > tail_abs * DOMINANCE_RATIO {
-                    EffectPattern::UniformShift
-                } else if tail_abs > shift_abs * DOMINANCE_RATIO {
-                    EffectPattern::TailEffect
-                } else {
-                    EffectPattern::Mixed
-                }
-            }
-            (false, false) => EffectPattern::Indeterminate,
-        }
-    }
-
-    /// Get measurement quality based on the effect standard error.
+    /// Get measurement quality based on the posterior uncertainty.
     ///
     /// Quality is determined by the minimum detectable effect (MDE),
-    /// which is approximately 2x the effect standard error.
+    /// which is approximately the maximum marginal standard deviation.
     pub fn measurement_quality(&self) -> MeasurementQuality {
-        let effect_se = self.shift_se();
-        MeasurementQuality::from_mde_ns(effect_se * 2.0)
+        // MDE is approximately max_k sqrt(λ_post[k,k])
+        let max_se = (0..9)
+            .map(|k| sqrt(self.lambda_post[(k, k)].max(1e-12)))
+            .fold(0.0_f64, f64::max);
+        MeasurementQuality::from_mde_ns(max_se * 2.0)
     }
 
     /// Convert to an FFI-friendly summary containing only scalar fields.
-    ///
-    /// This uses the canonical effect pattern classification from draws (spec §3.4.6)
-    /// rather than the simpler heuristics that were previously duplicated in bindings.
     pub fn to_summary(&self) -> crate::ffi_summary::PosteriorSummary {
         let effect = self.to_effect_estimate();
 
         crate::ffi_summary::PosteriorSummary {
-            shift_ns: self.shift_ns(),
-            tail_ns: self.tail_ns(),
-            shift_se: self.shift_se(),
-            tail_se: self.tail_se(),
+            max_effect_ns: effect.max_effect_ns,
             ci_low_ns: effect.credible_interval_ns.0,
             ci_high_ns: effect.credible_interval_ns.1,
-            pattern: effect.pattern,
             leak_probability: self.leak_probability,
-            projection_mismatch_q: self.projection_mismatch_q,
             n: self.n,
             lambda_mean: self.lambda_mean.unwrap_or(1.0),
             lambda_mixing_ok: self.lambda_mixing_ok.unwrap_or(true),
@@ -360,24 +188,16 @@ mod tests {
         let delta_post =
             Vector9::from_row_slice(&[10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]);
         let lambda_post = Matrix9::identity();
-        let beta_proj = Vector2::new(10.0, 0.0);
-        let beta_proj_cov = Matrix2::new(4.0, 0.0, 0.0, 1.0);
 
         let posterior = Posterior::new(
             delta_post,
             lambda_post,
-            beta_proj,
-            beta_proj_cov,
-            Vec::new(), // beta_draws
+            Vec::new(), // delta_draws
             0.75,
-            0.5,
+            5.0, // theta
             1000,
         );
 
-        assert_eq!(posterior.shift_ns(), 10.0);
-        assert_eq!(posterior.tail_ns(), 0.0);
-        assert_eq!(posterior.shift_se(), 2.0); // sqrt(4.0)
-        assert_eq!(posterior.tail_se(), 1.0); // sqrt(1.0)
         assert_eq!(posterior.leak_probability, 0.75);
         assert_eq!(posterior.n, 1000);
         assert!((posterior.max_effect_ns() - 10.0).abs() < 1e-10);
@@ -387,23 +207,34 @@ mod tests {
     fn test_posterior_clone() {
         let delta_post = Vector9::from_row_slice(&[5.0; 9]);
         let lambda_post = Matrix9::identity();
-        let beta_proj = Vector2::new(5.0, 3.0);
-        let beta_proj_cov = Matrix2::identity();
 
         let posterior = Posterior::new(
             delta_post,
             lambda_post,
-            beta_proj,
-            beta_proj_cov,
-            Vec::new(), // beta_draws
+            Vec::new(), // delta_draws
             0.5,
-            1.0,
+            5.0, // theta
             500,
         );
 
         let cloned = posterior.clone();
-        assert_eq!(cloned.shift_ns(), posterior.shift_ns());
-        assert_eq!(cloned.tail_ns(), posterior.tail_ns());
         assert_eq!(cloned.leak_probability, posterior.leak_probability);
+        assert_eq!(cloned.max_effect_ns(), posterior.max_effect_ns());
+    }
+
+    #[test]
+    fn test_effect_estimate_from_draws() {
+        let delta_post = Vector9::from_row_slice(&[10.0; 9]);
+        let lambda_post = Matrix9::identity();
+
+        // Create some sample draws
+        let delta_draws: Vec<Vector9> = (0..100)
+            .map(|_| Vector9::from_row_slice(&[10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0]))
+            .collect();
+
+        let posterior = Posterior::new(delta_post, lambda_post, delta_draws, 0.99, 5.0, 1000);
+
+        let effect = posterior.to_effect_estimate();
+        assert!(effect.max_effect_ns > 9.0, "max effect should be around 10");
     }
 }

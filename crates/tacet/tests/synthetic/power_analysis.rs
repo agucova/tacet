@@ -3,7 +3,7 @@
 //! These tests verify the statistical power properties of the timing oracle
 //! with rigorous trial counts for tight confidence intervals:
 //!
-//! - Threshold-relative power curve: Tests power at multiples of θ per spec §3.8
+//! - Threshold-relative power curve: Tests power at multiples of θ
 //! - Large effect detection: Confirms high power for obvious timing differences
 //! - Negligible effect FPR: Confirms low detection rate for sub-resolution effects
 //!
@@ -205,7 +205,7 @@ fn threshold_boundary_test() {
 }
 
 // =============================================================================
-// POWER CURVE AT DETECTION LIMIT (Spec §3.8)
+// POWER CURVE AT DETECTION LIMIT
 // =============================================================================
 
 /// Find the effect size at which the oracle has ~50% power (empirical MDE).
@@ -258,7 +258,7 @@ fn find_empirical_mde(theta_ns: f64, trials_per_probe: usize) -> f64 {
 
 /// Test power curve at the empirically-determined detection limit.
 ///
-/// This validates the spec §3.8 power expectations by:
+/// This validates the power expectations by:
 /// 1. Finding the effect size where power ≈ 50% (empirical MDE)
 /// 2. Testing power at 0, 0.5×, 1×, 2×, 3× that MDE
 ///

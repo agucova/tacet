@@ -592,8 +592,8 @@ fn extrapolate_samples_to_decision(
         return usize::MAX; // Already at threshold
     }
 
-    // Posterior std (use trace of 2D projection as proxy for overall uncertainty)
-    let current_std = libm::sqrt(inputs.posterior.beta_proj_cov.trace());
+    // Posterior std: use trace of 9D posterior covariance as proxy for overall uncertainty
+    let current_std = libm::sqrt(inputs.posterior.lambda_post.trace() / 9.0);
 
     if current_std < 1e-9 {
         return inputs.n_total; // Already very certain
@@ -623,7 +623,7 @@ fn extrapolate_samples_to_decision(
 /// scaling, concurrent processes, etc.) that would invalidate the covariance
 /// estimate.
 ///
-/// See spec Section 2.6, Gate 6.
+/// See spec §3.5.4, Gate 4 (Condition Drift).
 fn check_condition_drift(
     inputs: &QualityGateCheckInputs,
     config: &QualityGateConfig,
@@ -659,17 +659,15 @@ fn check_condition_drift(
 mod tests {
     use super::*;
     use crate::statistics::StatsSnapshot;
-    use crate::types::{Matrix2, Vector2, Vector9};
+    use crate::types::Vector9;
 
     fn make_posterior(leak_prob: f64, variance: f64) -> Posterior {
         Posterior::new(
             Vector9::zeros(),
             Matrix9::identity() * variance,
-            Vector2::new(5.0, 3.0),
-            Matrix2::new(variance, 0.0, 0.0, variance),
-            Vec::new(), // beta_draws
+            Vec::new(), // delta_draws
             leak_prob,
-            1.0, // projection_mismatch_q
+            1.0, // theta
             1000,
         )
     }

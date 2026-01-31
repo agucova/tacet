@@ -36,9 +36,8 @@ use rand::SeedableRng;
 use rand_distr::Gamma;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::constants::{B_TAIL, ONES};
 use crate::math;
-use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
+use crate::types::{Matrix9, Vector9};
 
 /// Degrees of freedom for the Student's t prior (ν = 4).
 pub const NU: f64 = 4.0;
@@ -86,6 +85,10 @@ pub struct GibbsResult {
     /// 95% credible interval for max effect magnitude.
     pub effect_magnitude_ci: (f64, f64),
 
+    /// Retained δ draws from the Gibbs sampler.
+    /// Used for effect estimation via `compute_effect_estimate`.
+    pub delta_draws: Vec<Vector9>,
+
     /// Posterior mean of latent scale λ.
     pub lambda_mean: f64,
 
@@ -118,19 +121,6 @@ pub struct GibbsResult {
 
     /// v5.6: Whether κ mixing diagnostics pass: CV ≥ 0.1 AND ESS ≥ 20.
     pub kappa_mixing_ok: bool,
-
-    /// 2D GLS projection β = (μ, τ) for interpretability.
-    pub beta_proj: Vector2,
-
-    /// 2D projection covariance (empirical, from draws).
-    pub beta_proj_cov: Matrix2,
-
-    /// Retained β draws for dominance-based classification (spec §3.4.6).
-    /// Each draw is β^(s) = A·δ^(s) where A is the GLS projection matrix.
-    pub beta_draws: Vec<Vector2>,
-
-    /// Projection mismatch Q statistic.
-    pub projection_mismatch_q: f64,
 }
 
 /// Gibbs sampler for Student's t prior inference.
@@ -357,7 +347,7 @@ impl GibbsSampler {
         retained_deltas: &[Vector9],
         retained_lambdas: &[f64],
         retained_kappas: &[f64],
-        sigma_n: &Matrix9,
+        _sigma_n: &Matrix9,
         theta: f64,
     ) -> GibbsResult {
         let n = retained_deltas.len() as f64;
@@ -430,15 +420,15 @@ impl GibbsSampler {
         let kappa_ess = compute_ess(retained_kappas);
         let kappa_mixing_ok = kappa_cv >= 0.1 && kappa_ess >= 20.0;
 
-        // 2D projection using posterior-driven approach (spec §3.4.6)
-        let (beta_proj, beta_proj_cov, beta_draws, projection_mismatch_q) =
-            self.compute_2d_projection(retained_deltas, &delta_post, sigma_n);
+        // Store delta draws for effect estimation
+        let delta_draws = retained_deltas.to_vec();
 
         GibbsResult {
             delta_post,
             lambda_post,
             leak_probability,
             effect_magnitude_ci: (ci_low, ci_high),
+            delta_draws,
             lambda_mean,
             lambda_sd,
             lambda_cv,
@@ -449,99 +439,7 @@ impl GibbsSampler {
             kappa_cv,
             kappa_ess,
             kappa_mixing_ok,
-            beta_proj,
-            beta_proj_cov,
-            beta_draws,
-            projection_mismatch_q,
         }
-    }
-
-    /// Compute 2D GLS projection for interpretability (spec §3.4.6).
-    ///
-    /// Uses posterior-driven projection: projects each retained Gibbs draw δ^(s)
-    /// through the GLS projection matrix A, then computes empirical mean and
-    /// covariance from the β^(s) draws. This eliminates fragile analytic
-    /// covariance estimation that breaks down under Σ_n regularization.
-    ///
-    /// Returns (β_mean, β_cov, β_draws, Q_proj).
-    fn compute_2d_projection(
-        &self,
-        retained_deltas: &[Vector9],
-        delta_post: &Vector9,
-        sigma_n: &Matrix9,
-    ) -> (Vector2, Matrix2, Vec<Vector2>, f64) {
-        // Design matrix X: [1, decile_weights]
-        let x = build_design_matrix();
-
-        // Apply condition-number-based regularization to sigma_n (§3.3.5).
-        // This prevents GLS instability when sigma_n is ill-conditioned,
-        // which occurs in discrete timer mode with high quantization.
-        let sigma_n_reg = regularize_sigma_n(sigma_n);
-
-        // GLS projection matrix: A = (X'Σ⁻¹X)⁻¹ X'Σ⁻¹
-        // Use regularized sigma_n as the weighting matrix
-        let sigma_n_chol =
-            Cholesky::new(sigma_n_reg).expect("regularize_sigma_n should ensure SPD");
-
-        // Compute Σ⁻¹X
-        let sigma_inv_x = {
-            let mut result = Matrix9x2::zeros();
-            for j in 0..2 {
-                let col = x.column(j).into_owned();
-                let solved = sigma_n_chol.solve(&col);
-                for i in 0..9 {
-                    result[(i, j)] = solved[i];
-                }
-            }
-            result
-        };
-
-        // Compute X'Σ⁻¹X
-        let xtsx = x.transpose() * sigma_inv_x;
-
-        // Invert 2x2 matrix
-        let det = xtsx[(0, 0)] * xtsx[(1, 1)] - xtsx[(0, 1)] * xtsx[(1, 0)];
-        if det.abs() < 1e-12 {
-            // Degenerate case
-            return (Vector2::zeros(), Matrix2::identity(), Vec::new(), 0.0);
-        }
-        let xtsx_inv = Matrix2::new(
-            xtsx[(1, 1)] / det,
-            -xtsx[(0, 1)] / det,
-            -xtsx[(1, 0)] / det,
-            xtsx[(0, 0)] / det,
-        );
-
-        // Projection matrix A = (X'Σ⁻¹X)⁻¹ X'Σ⁻¹ (2×9)
-        // A = xtsx_inv × (X'Σ⁻¹)ᵀ = xtsx_inv × (Σ⁻¹X)ᵀ
-        let projection_matrix = xtsx_inv * sigma_inv_x.transpose();
-
-        // Project each retained δ^(s) to get β^(s) = A·δ^(s)
-        let beta_draws: Vec<Vector2> = retained_deltas
-            .iter()
-            .map(|delta| projection_matrix * delta)
-            .collect();
-
-        // Compute empirical mean: β_post = mean_s(β^(s))
-        let n = beta_draws.len() as f64;
-        let beta_sum: Vector2 = beta_draws.iter().fold(Vector2::zeros(), |acc, b| acc + b);
-        let beta_proj = beta_sum / n;
-
-        // Compute empirical covariance: Cov(β) = sample_cov(β^(s))
-        let mut beta_cov = Matrix2::zeros();
-        for beta in &beta_draws {
-            let diff = beta - beta_proj;
-            beta_cov += diff * diff.transpose();
-        }
-        let beta_proj_cov = beta_cov / (n - 1.0); // Unbiased estimator
-
-        // Projection mismatch Q = ||δ_post - Xβ_post||²_Σ⁻¹
-        // Computed from posterior mean for diagnostic purposes
-        let residual = delta_post - x * beta_proj;
-        let sigma_inv_residual = sigma_n_chol.solve(&residual);
-        let projection_mismatch_q = residual.dot(&sigma_inv_residual);
-
-        (beta_proj, beta_proj_cov, beta_draws, projection_mismatch_q)
     }
 
     /// Sample a 9D standard normal vector.
@@ -670,20 +568,6 @@ fn regularize_sigma_n(sigma_n: &Matrix9) -> Matrix9 {
 
     // Final fallback: use diagonal only
     diag_sigma + Matrix9::identity() * 1e-6
-}
-
-/// Build the design matrix X for 2D projection.
-///
-/// X[:,0] = 1 (shift component) - uniform effect across all quantiles
-/// X[:,1] = b_tail (tail component) - centered tail weights per spec §3.4.6:
-///          (−0.5, −0.375, −0.25, −0.125, 0, 0.125, 0.25, 0.375, 0.5)ᵀ
-fn build_design_matrix() -> Matrix9x2 {
-    let mut x = Matrix9x2::zeros();
-    for i in 0..9 {
-        x[(i, 0)] = ONES[i]; // Shift
-        x[(i, 1)] = B_TAIL[i]; // Tail (spec §3.4.6)
-    }
-    x
 }
 
 /// Compute effective sample size of a chain accounting for autocorrelation.

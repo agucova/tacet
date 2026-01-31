@@ -13,7 +13,7 @@
 extern crate alloc;
 use alloc::string::String;
 
-use crate::result::{EffectPattern, Exploitability, MeasurementQuality};
+use crate::result::{Exploitability, MeasurementQuality};
 
 // ============================================================================
 // Outcome Type Enum
@@ -70,24 +70,14 @@ pub enum InconclusiveReasonKind {
 /// exposing nalgebra matrices.
 #[derive(Debug, Clone)]
 pub struct PosteriorSummary {
-    /// Uniform shift component in nanoseconds (β[0]).
-    pub shift_ns: f64,
-    /// Tail effect component in nanoseconds (β[1]).
-    pub tail_ns: f64,
-    /// Standard error of the shift component.
-    pub shift_se: f64,
-    /// Standard error of the tail component.
-    pub tail_se: f64,
-    /// 95% credible interval lower bound for total effect.
+    /// Maximum effect across all deciles: max_k |δ_k| in nanoseconds.
+    pub max_effect_ns: f64,
+    /// 95% credible interval lower bound for max effect.
     pub ci_low_ns: f64,
-    /// 95% credible interval upper bound for total effect.
+    /// 95% credible interval upper bound for max effect.
     pub ci_high_ns: f64,
-    /// Canonical effect pattern classification (from draws).
-    pub pattern: EffectPattern,
     /// Posterior probability of timing leak: P(max_k |δ_k| > θ | data).
     pub leak_probability: f64,
-    /// Projection mismatch Q statistic.
-    pub projection_mismatch_q: f64,
     /// Number of samples used in this posterior computation.
     pub n: usize,
     /// Posterior mean of latent scale λ.
@@ -105,20 +95,21 @@ pub struct PosteriorSummary {
 }
 
 impl PosteriorSummary {
-    /// Compute the total effect magnitude (L2 norm of shift and tail).
+    /// Get the maximum effect magnitude.
     pub fn total_effect_ns(&self) -> f64 {
-        crate::math::sqrt(self.shift_ns * self.shift_ns + self.tail_ns * self.tail_ns)
+        self.max_effect_ns
     }
 
-    /// Determine measurement quality from the effect standard error.
+    /// Determine measurement quality from the credible interval width.
     pub fn measurement_quality(&self) -> MeasurementQuality {
-        // MDE is approximately 2x the effect standard error
-        MeasurementQuality::from_mde_ns(self.shift_se * 2.0)
+        // MDE is approximately half the CI width
+        let ci_width = self.ci_high_ns - self.ci_low_ns;
+        MeasurementQuality::from_mde_ns(ci_width / 2.0)
     }
 
-    /// Determine exploitability from the total effect magnitude.
+    /// Determine exploitability from the maximum effect magnitude.
     pub fn exploitability(&self) -> Exploitability {
-        Exploitability::from_effect_ns(self.total_effect_ns())
+        Exploitability::from_effect_ns(self.max_effect_ns)
     }
 }
 
@@ -147,12 +138,8 @@ pub struct CalibrationSummary {
     pub theta_floor_initial: f64,
     /// Timer tick floor component.
     pub theta_tick: f64,
-    /// Minimum detectable effect (shift) in nanoseconds.
-    pub mde_shift_ns: f64,
-    /// Minimum detectable effect (tail) in nanoseconds.
-    pub mde_tail_ns: f64,
-    /// Bootstrap-calibrated threshold for projection mismatch Q.
-    pub projection_mismatch_thresh: f64,
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
     /// Measured throughput (samples per second).
     pub samples_per_second: f64,
 }
@@ -163,39 +150,30 @@ pub struct CalibrationSummary {
 
 /// FFI-friendly effect estimate.
 ///
-/// Contains the decomposed timing effect with credible interval and pattern.
+/// Contains the timing effect with credible interval.
 #[derive(Debug, Clone)]
 pub struct EffectSummary {
-    /// Uniform shift component in nanoseconds.
-    pub shift_ns: f64,
-    /// Tail effect component in nanoseconds.
-    pub tail_ns: f64,
-    /// 95% credible interval lower bound for total effect.
+    /// Maximum effect in nanoseconds: max_k |δ_k|.
+    pub max_effect_ns: f64,
+    /// 95% credible interval lower bound for max effect.
     pub ci_low_ns: f64,
-    /// 95% credible interval upper bound for total effect.
+    /// 95% credible interval upper bound for max effect.
     pub ci_high_ns: f64,
-    /// Canonical effect pattern classification.
-    pub pattern: EffectPattern,
-    /// Interpretation caveat if model fit is poor.
-    pub interpretation_caveat: Option<String>,
 }
 
 impl EffectSummary {
-    /// Compute the total effect magnitude.
+    /// Get the maximum effect magnitude.
     pub fn total_effect_ns(&self) -> f64 {
-        crate::math::sqrt(self.shift_ns * self.shift_ns + self.tail_ns * self.tail_ns)
+        self.max_effect_ns
     }
 }
 
 impl Default for EffectSummary {
     fn default() -> Self {
         Self {
-            shift_ns: 0.0,
-            tail_ns: 0.0,
+            max_effect_ns: 0.0,
             ci_low_ns: 0.0,
             ci_high_ns: 0.0,
-            pattern: EffectPattern::Indeterminate,
-            interpretation_caveat: None,
         }
     }
 }
@@ -217,10 +195,6 @@ pub struct DiagnosticsSummary {
     pub stationarity_ratio: f64,
     /// Whether stationarity check passed.
     pub stationarity_ok: bool,
-    /// Projection mismatch Q statistic.
-    pub projection_mismatch_q: f64,
-    /// Whether projection mismatch is acceptable.
-    pub projection_mismatch_ok: bool,
     /// Whether discrete mode was used (low timer resolution).
     pub discrete_mode: bool,
     /// Timer resolution in nanoseconds.
@@ -246,8 +220,6 @@ impl Default for DiagnosticsSummary {
             effective_sample_size: 0,
             stationarity_ratio: 1.0,
             stationarity_ok: true,
-            projection_mismatch_q: 0.0,
-            projection_mismatch_ok: true,
             discrete_mode: false,
             timer_resolution_ns: 0.0,
             lambda_mean: 1.0,
@@ -299,10 +271,8 @@ pub struct OutcomeSummary {
     pub achievable_at_max: bool,
     /// Diagnostics information.
     pub diagnostics: DiagnosticsSummary,
-    /// Minimum detectable effect (shift) in nanoseconds.
-    pub mde_shift_ns: f64,
-    /// Minimum detectable effect (tail) in nanoseconds.
-    pub mde_tail_ns: f64,
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
 }
 
 impl OutcomeSummary {

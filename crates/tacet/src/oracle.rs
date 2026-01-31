@@ -1199,7 +1199,7 @@ impl TimingOracle {
         stationarity: Option<crate::analysis::StationarityResult>,
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns, calibration.batch_k);
-        let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
+        let quality = MeasurementQuality::from_mde_ns(calibration.mde_ns);
         let diagnostics = build_diagnostics(
             calibration,
             timer,
@@ -1207,7 +1207,6 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            posterior.projection_mismatch_q,
             stationarity,
         );
 
@@ -1238,7 +1237,7 @@ impl TimingOracle {
     ) -> Outcome {
         let effect = build_effect_estimate(posterior, theta_ns, calibration.batch_k);
         let exploitability = Exploitability::from_effect_ns(effect.total_effect_ns());
-        let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
+        let quality = MeasurementQuality::from_mde_ns(calibration.mde_ns);
         let diagnostics = build_diagnostics(
             calibration,
             timer,
@@ -1246,7 +1245,6 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            posterior.projection_mismatch_q,
             stationarity,
         );
 
@@ -1281,8 +1279,7 @@ impl TimingOracle {
         let effect = posterior
             .map(|p| build_effect_estimate(p, theta_ns, calibration.batch_k))
             .unwrap_or_default();
-        let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
+        let quality = MeasurementQuality::from_mde_ns(calibration.mde_ns);
         let diagnostics = build_diagnostics(
             calibration,
             timer,
@@ -1290,7 +1287,6 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            projection_mismatch_q,
             stationarity,
         );
 
@@ -1567,18 +1563,15 @@ impl TimingOracle {
             (0.0, (0.0, 0.0), false)
         };
 
-        // Check model mismatch (non-blocking in research mode)
-        let model_mismatch = posterior
-            .map(|p| p.projection_mismatch_q > calibration.projection_mismatch_thresh)
-            .unwrap_or(false);
+        // Model mismatch check removed in v6.0
+        let model_mismatch = false;
 
         // Build effect estimate
         let effect = posterior
             .map(|p| build_effect_estimate(p, theta_ns, calibration.batch_k))
             .unwrap_or_default();
 
-        let quality = MeasurementQuality::from_mde_ns(calibration.mde_shift_ns);
-        let projection_mismatch_q = posterior.map(|p| p.projection_mismatch_q).unwrap_or(0.0);
+        let quality = MeasurementQuality::from_mde_ns(calibration.mde_ns);
         // Research mode doesn't track stationarity separately (would need refactoring)
         let diagnostics = build_diagnostics(
             calibration,
@@ -1587,7 +1580,6 @@ impl TimingOracle {
             start_time,
             &self.config,
             theta_ns,
-            projection_mismatch_q,
             None,
         );
 
@@ -1702,28 +1694,25 @@ use crate::adaptive::Posterior;
 /// When batching is enabled (batch_k > 1), the posterior contains batch totals.
 /// This function divides by batch_k to report per-call effect sizes.
 fn build_effect_estimate(posterior: &Posterior, _theta_ns: f64, batch_k: u32) -> EffectEstimate {
-    // Use the posterior's draw-based classification for robustness
-    let pattern = posterior.to_effect_estimate().pattern;
     let k = batch_k.max(1) as f64; // Prevent division by zero
 
-    // Compute credible interval from posterior covariance
-    // Divide by K to convert from batch totals to per-call effects
-    let shift_std = posterior.shift_se() / k;
-    let tail_std = posterior.tail_se() / k;
-    let shift_ns = posterior.shift_ns() / k;
-    let tail_ns = posterior.tail_ns() / k;
-    let total_effect = (shift_ns.powi(2) + tail_ns.powi(2)).sqrt();
-    let total_std = ((shift_std.powi(2) + tail_std.powi(2)) / 2.0).sqrt();
+    // Get the effect estimate from posterior (already computed from draws)
+    let effect = posterior.to_effect_estimate();
 
-    let ci_low = (total_effect - 1.96 * total_std).max(0.0);
-    let ci_high = total_effect + 1.96 * total_std;
-
+    // Scale by 1/K to convert from batch totals to per-call effects
     EffectEstimate {
-        shift_ns,
-        tail_ns,
-        credible_interval_ns: (ci_low, ci_high),
-        pattern,
-        interpretation_caveat: None, // Set when model fit is poor
+        max_effect_ns: effect.max_effect_ns / k,
+        credible_interval_ns: (effect.credible_interval_ns.0 / k, effect.credible_interval_ns.1 / k),
+        top_quantiles: effect
+            .top_quantiles
+            .into_iter()
+            .map(|tq| crate::result::TopQuantile {
+                quantile_p: tq.quantile_p,
+                mean_ns: tq.mean_ns / k,
+                ci95_ns: (tq.ci95_ns.0 / k, tq.ci95_ns.1 / k),
+                exceed_prob: tq.exceed_prob,
+            })
+            .collect(),
     }
 }
 
@@ -1736,7 +1725,6 @@ fn build_diagnostics(
     start_time: Instant,
     config: &Config,
     theta_ns: f64,
-    projection_mismatch_q: f64,
     stationarity: Option<crate::analysis::StationarityResult>,
 ) -> Diagnostics {
     // Convert preflight warnings to PreflightWarningInfo
@@ -1761,12 +1749,12 @@ fn build_diagnostics(
     // Build platform string
     let platform = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
 
-    // Check for ThresholdElevated: user requested threshold lower than measurement floor
+    // Check for ThresholdIssue: user requested threshold lower than measurement floor
     let mut quality_issues = Vec::new();
     if calibration.theta_ns > 0.0 && calibration.theta_eff > calibration.theta_ns {
         let guidance = generate_threshold_elevated_guidance(fallback_reason);
         quality_issues.push(QualityIssue {
-            code: IssueCode::ThresholdElevated,
+            code: IssueCode::ThresholdIssue,
             message: format!(
                 "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
                 calibration.theta_ns, calibration.theta_eff
@@ -1781,10 +1769,6 @@ fn build_diagnostics(
         // Use stationarity result if available, otherwise assume no drift
         stationarity_ratio: stationarity.map(|s| s.ratio).unwrap_or(1.0),
         stationarity_ok: stationarity.map(|s| s.ok).unwrap_or(true),
-        projection_mismatch_q,
-        projection_mismatch_threshold: calibration.projection_mismatch_thresh,
-        projection_mismatch_ok: projection_mismatch_q <= calibration.projection_mismatch_thresh,
-        top_quantiles: None,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,

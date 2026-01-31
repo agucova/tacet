@@ -411,8 +411,7 @@ pub fn analyze(
 
         if let StepResult::Decision(outcome) = step {
             let mut result = build_result_from_outcome(&outcome, &config, Some(&core_cal));
-            result.mde_shift_ns = core_cal.mde_shift_ns;
-            result.mde_tail_ns = core_cal.mde_tail_ns;
+            result.mde_ns = core_cal.mde_ns;
             result.theta_user_ns = theta_ns;
             result.theta_eff_ns = core_cal.theta_eff;
             return Ok(result);
@@ -434,8 +433,7 @@ pub fn analyze(
     };
 
     let mut result = build_result_from_outcome(&outcome, &config, Some(&core_cal));
-    result.mde_shift_ns = core_cal.mde_shift_ns;
-    result.mde_tail_ns = core_cal.mde_tail_ns;
+    result.mde_ns = core_cal.mde_ns;
     result.theta_user_ns = theta_ns;
     result.theta_eff_ns = core_cal.theta_eff;
     Ok(result)
@@ -476,20 +474,16 @@ fn build_result_from_outcome(
         outcome: outcome_enum,
         leak_probability: summary.leak_probability,
         effect: EffectEstimate {
-            shift_ns: summary.effect.shift_ns,
-            tail_ns: summary.effect.tail_ns,
-            credible_interval_low: summary.effect.ci_low_ns,
-            credible_interval_high: summary.effect.ci_high_ns,
-            pattern: summary.effect.pattern.into(),
-            interpretation_caveat: summary.effect.interpretation_caveat,
+            max_effect_ns: summary.effect.max_effect_ns,
+            ci_low_ns: summary.effect.ci_low_ns,
+            ci_high_ns: summary.effect.ci_high_ns,
         },
         quality: summary.quality.into(),
         samples_used: summary.samples_per_class as u32,
         elapsed_secs: summary.elapsed_secs,
         exploitability: summary.exploitability.into(),
         inconclusive_reason,
-        mde_shift_ns: summary.mde_shift_ns,
-        mde_tail_ns: summary.mde_tail_ns,
+        mde_ns: summary.mde_ns,
         timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
         theta_user_ns: summary.theta_user,
         theta_eff_ns: summary.theta_eff,
@@ -499,12 +493,14 @@ fn build_result_from_outcome(
             effective_sample_size: summary.diagnostics.effective_sample_size as u32,
             stationarity_ratio: summary.diagnostics.stationarity_ratio,
             stationarity_ok: summary.diagnostics.stationarity_ok,
-            projection_mismatch_q: summary.diagnostics.projection_mismatch_q,
-            projection_mismatch_ok: summary.diagnostics.projection_mismatch_ok,
             discrete_mode: summary.diagnostics.discrete_mode,
             timer_resolution_ns: summary.diagnostics.timer_resolution_ns,
             lambda_mean: summary.diagnostics.lambda_mean,
             lambda_mixing_ok: summary.diagnostics.lambda_mixing_ok,
+            kappa_mean: summary.diagnostics.kappa_mean,
+            kappa_cv: summary.diagnostics.kappa_cv,
+            kappa_ess: summary.diagnostics.kappa_ess,
+            kappa_mixing_ok: summary.diagnostics.kappa_mixing_ok,
         },
     }
 }

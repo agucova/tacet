@@ -6,7 +6,7 @@
 //! - Closed-form posterior (no MCMC required)
 //! - Monte Carlo integration for leak probability
 //!
-//! ## Model
+//! ## Model (spec §3)
 //!
 //! Likelihood: Δ | δ ~ N(δ, Σ_n)
 //!
@@ -31,10 +31,6 @@
 //! P(leak | Δ) = P(max_k |δ_k| > θ_eff | Δ)
 //!
 //! Computed via Monte Carlo: draw samples from posterior, count exceedances.
-//!
-//! ## 2D Projection for Reporting
-//!
-//! The 9D posterior is projected to 2D (shift, tail) using GLS for interpretability.
 
 extern crate alloc;
 
@@ -46,9 +42,8 @@ use rand::prelude::*;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::constants::{B_TAIL, ONES};
 use crate::math;
-use crate::types::{Matrix2, Matrix9, Matrix9x2, Vector2, Vector9};
+use crate::types::{Matrix9, Vector9};
 
 /// Number of Monte Carlo samples for leak probability estimation.
 const N_MONTE_CARLO: usize = 1000;
@@ -68,21 +63,9 @@ pub struct BayesResult {
     /// 9D posterior covariance Λ_post.
     pub lambda_post: Matrix9,
 
-    /// 2D GLS projection β = (μ, τ) in nanoseconds.
-    /// - β[0] = μ (uniform shift): All quantiles move equally
-    /// - β[1] = τ (tail effect): Upper quantiles shift more than lower
-    pub beta_proj: Vector2,
-
-    /// 2D projection covariance (empirical, from draws).
-    pub beta_proj_cov: Matrix2,
-
-    /// Retained β draws for dominance-based classification (spec §3.4.6).
-    /// Each draw is β^(s) = A·δ^(s) where A is the GLS projection matrix.
-    pub beta_draws: Vec<Vector2>,
-
-    /// Projection mismatch Q statistic: r'Σ_n⁻¹r where r = δ_post - Xβ_proj.
-    /// High values indicate the 2D model doesn't capture the full pattern.
-    pub projection_mismatch_q: f64,
+    /// Retained δ draws from the Gibbs sampler.
+    /// Used for effect estimation via `compute_effect_estimate`.
+    pub delta_draws: Vec<Vector9>,
 
     /// 95% credible interval for max effect magnitude: (2.5th, 97.5th) percentiles.
     pub effect_magnitude_ci: (f64, f64),
@@ -166,10 +149,7 @@ pub fn compute_bayes_gibbs(
         leak_probability: gibbs_result.leak_probability,
         delta_post: gibbs_result.delta_post,
         lambda_post: gibbs_result.lambda_post,
-        beta_proj: gibbs_result.beta_proj,
-        beta_proj_cov: gibbs_result.beta_proj_cov,
-        beta_draws: gibbs_result.beta_draws,
-        projection_mismatch_q: gibbs_result.projection_mismatch_q,
+        delta_draws: gibbs_result.delta_draws,
         effect_magnitude_ci: gibbs_result.effect_magnitude_ci,
         is_clamped: false,
         sigma_n: regularized,
@@ -186,72 +166,6 @@ pub fn compute_bayes_gibbs(
         kappa_ess: gibbs_result.kappa_ess,
         kappa_mixing_ok: gibbs_result.kappa_mixing_ok,
     }
-}
-
-/// Compute 2D GLS projection of 9D posterior.
-///
-/// Projects δ_post onto the shift+tail basis X = [1 | b_tail] using
-/// generalized least squares: β = (X'Σ_n⁻¹X)⁻¹ X'Σ_n⁻¹ δ_post
-///
-/// Returns (β_proj, β_proj_cov, Q_proj) where Q_proj is the projection mismatch statistic.
-pub fn compute_2d_projection(
-    delta_post: &Vector9,
-    lambda_post: &Matrix9,
-    sigma_n: &Matrix9,
-) -> (Vector2, Matrix2, f64) {
-    let design = build_design_matrix();
-
-    // Cholesky of Σ_n for stable solves
-    let sigma_n_chol = match Cholesky::new(*sigma_n) {
-        Some(c) => c,
-        None => {
-            // Fallback: zero projection
-            return (Vector2::zeros(), Matrix2::identity() * 1e6, 0.0);
-        }
-    };
-
-    // Σ_n⁻¹ X via solve
-    let mut sigma_n_inv_x = Matrix9x2::zeros();
-    for j in 0..2 {
-        let col = design.column(j).into_owned();
-        let solved = sigma_n_chol.solve(&col);
-        for i in 0..9 {
-            sigma_n_inv_x[(i, j)] = solved[i];
-        }
-    }
-
-    // X' Σ_n⁻¹ X (2×2)
-    let xt_sigma_n_inv_x = design.transpose() * sigma_n_inv_x;
-
-    let xt_chol = match Cholesky::new(xt_sigma_n_inv_x) {
-        Some(c) => c,
-        None => {
-            return (Vector2::zeros(), Matrix2::identity() * 1e6, 0.0);
-        }
-    };
-
-    // X' Σ_n⁻¹ δ_post
-    let sigma_n_inv_delta = sigma_n_chol.solve(delta_post);
-    let xt_sigma_n_inv_delta = design.transpose() * sigma_n_inv_delta;
-
-    // β_proj = (X' Σ_n⁻¹ X)⁻¹ X' Σ_n⁻¹ δ_post
-    let beta_proj = xt_chol.solve(&xt_sigma_n_inv_delta);
-
-    // Projection covariance: Cov(β_proj | Δ) = A Λ_post A'
-    // where A = (X' Σ_n⁻¹ X)⁻¹ X' Σ_n⁻¹
-    //
-    // Note: X' Σ_n⁻¹ = (Σ_n⁻¹ X)' = sigma_n_inv_x' (since Σ_n is symmetric)
-    // We already computed sigma_n_inv_x = Σ_n⁻¹ X correctly via Cholesky solve.
-    let a_matrix = xt_chol.inverse() * sigma_n_inv_x.transpose();
-    let beta_proj_cov = a_matrix * lambda_post * a_matrix.transpose();
-
-    // Projection mismatch: Q = r' Σ_n⁻¹ r where r = δ_post - X β_proj
-    let delta_proj = design * beta_proj;
-    let r_proj = delta_post - delta_proj;
-    let sigma_n_inv_r = sigma_n_chol.solve(&r_proj);
-    let q_proj = r_proj.dot(&sigma_n_inv_r);
-
-    (beta_proj, beta_proj_cov, q_proj)
 }
 
 /// Sample from standard normal using Box-Muller transform.
@@ -273,11 +187,7 @@ pub struct MaxEffectCI {
 /// Compute 95% CI for max effect: max_k |δ_k|.
 ///
 /// Used by Research mode for stopping conditions.
-pub fn compute_max_effect_ci(
-    delta_post: &Vector9,
-    lambda_post: &Matrix9,
-    seed: u64,
-) -> MaxEffectCI {
+pub fn compute_max_effect_ci(delta_post: &Vector9, lambda_post: &Matrix9, seed: u64) -> MaxEffectCI {
     let chol = match Cholesky::new(*lambda_post) {
         Some(c) => c,
         None => {
@@ -324,52 +234,10 @@ pub fn compute_max_effect_ci(
     MaxEffectCI { mean, ci }
 }
 
-/// Compute per-quantile exceedance probability P(|δ_k| > θ | Δ).
-///
-/// Returns a vector of 9 exceedance probabilities, one per decile.
-pub fn compute_quantile_exceedances(
-    delta_post: &Vector9,
-    lambda_post: &Matrix9,
-    theta: f64,
-) -> [f64; 9] {
-    let mut exceedances = [0.0; 9];
-    for k in 0..9 {
-        let mu = delta_post[k];
-        let sigma = math::sqrt(lambda_post[(k, k)].max(1e-12));
-        exceedances[k] = compute_single_quantile_exceedance(mu, sigma, theta);
-    }
-    exceedances
-}
-
-/// Compute P(|δ| > θ) for a single Gaussian marginal N(μ, σ²).
-fn compute_single_quantile_exceedance(mu: f64, sigma: f64, theta: f64) -> f64 {
-    if sigma < 1e-12 {
-        // Degenerate case: point mass
-        return if mu.abs() > theta { 1.0 } else { 0.0 };
-    }
-    let phi_upper = math::normal_cdf((theta - mu) / sigma);
-    let phi_lower = math::normal_cdf((-theta - mu) / sigma);
-    1.0 - (phi_upper - phi_lower)
-}
-
-/// Build design matrix for 2D projection (shift + tail).
-///
-/// X = [1 | b_tail] where:
-/// - Column 0 (ones): Uniform shift - all quantiles move equally
-/// - Column 1 (b_tail): Tail effect - upper quantiles shift more than lower
-pub fn build_design_matrix() -> Matrix9x2 {
-    let mut x = Matrix9x2::zeros();
-    for i in 0..9 {
-        x[(i, 0)] = ONES[i];
-        x[(i, 1)] = B_TAIL[i];
-    }
-    x
-}
-
 /// Apply variance floor regularization for numerical stability.
 ///
 /// Ensures minimum diagonal value of 1% of mean variance.
-fn add_jitter(mut sigma: Matrix9) -> Matrix9 {
+pub fn add_jitter(mut sigma: Matrix9) -> Matrix9 {
     let trace: f64 = (0..9).map(|i| sigma[(i, i)]).sum();
     let mean_var = trace / 9.0;
 
@@ -387,66 +255,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_2d_projection_uniform_shift() {
-        // Create a uniform shift pattern (all quantiles equal)
-        let mut delta_post = Vector9::zeros();
-        for i in 0..9 {
-            delta_post[i] = 50.0;
-        }
-        let lambda_post = Matrix9::identity();
-        let sigma_n = Matrix9::identity();
+    fn test_max_effect_ci_basic() {
+        let delta_post = Vector9::from_row_slice(&[10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let lambda_post = Matrix9::identity() * 1.0;
 
-        let (beta_proj, _, q_proj) = compute_2d_projection(&delta_post, &lambda_post, &sigma_n);
+        let ci = compute_max_effect_ci(&delta_post, &lambda_post, 42);
 
-        // Should project to pure shift with low mismatch
-        assert!(
-            (beta_proj[0] - 50.0).abs() < 1.0,
-            "Shift should be ~50, got {}",
-            beta_proj[0]
-        );
-        assert!(
-            beta_proj[1].abs() < 5.0,
-            "Tail should be ~0, got {}",
-            beta_proj[1]
-        );
-        assert!(
-            q_proj < 1.0,
-            "Uniform shift should have low Q, got {}",
-            q_proj
-        );
-    }
-
-    #[test]
-    fn test_quantile_exceedance_computation() {
-        let mu = 100.0;
-        let sigma = 10.0;
-        let theta = 50.0;
-
-        let exceedance = compute_single_quantile_exceedance(mu, sigma, theta);
-
-        // μ = 100, θ = 50: almost certainly |δ| > θ
-        assert!(
-            exceedance > 0.99,
-            "With μ=100, θ=50, exceedance should be ~1.0, got {}",
-            exceedance
-        );
-    }
-
-    #[test]
-    fn test_quantile_exceedance_symmetric() {
-        let sigma = 10.0;
-        let theta = 50.0;
-
-        let exc_pos = compute_single_quantile_exceedance(30.0, sigma, theta);
-        let exc_neg = compute_single_quantile_exceedance(-30.0, sigma, theta);
-
-        // Should be symmetric
-        assert!(
-            (exc_pos - exc_neg).abs() < 0.01,
-            "Exceedance should be symmetric, got {} vs {}",
-            exc_pos,
-            exc_neg
-        );
+        // Max effect should be around 10ns (the first quantile has mean 10)
+        assert!(ci.mean > 8.0, "mean should be around 10, got {}", ci.mean);
+        assert!(ci.ci.0 < ci.mean, "CI lower should be below mean");
+        assert!(ci.ci.1 > ci.mean, "CI upper should be above mean");
     }
 
     #[test]

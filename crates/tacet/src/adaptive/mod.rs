@@ -2,11 +2,11 @@
 //!
 //! Implements a two-phase approach for efficient timing analysis:
 //!
-//! 1. **Calibration** (spec Section 2.3, Section 2.6): Collect initial samples to estimate covariance
+//! 1. **Calibration** (spec §3.3, §3.5.4): Collect initial samples to estimate covariance
 //!    and set Bayesian priors. This establishes the "sigma rate" - covariance scaled by sample
 //!    count - which allows efficient scaling as more samples are collected.
 //!
-//! 2. **Adaptive loop** (spec Section 2.5): Collect batches until decision thresholds are reached:
+//! 2. **Adaptive loop** (spec §3.5): Collect batches until decision thresholds are reached:
 //!    - If P(leak > theta) > fail_threshold: Fail (timing leak detected)
 //!    - If P(leak > theta) < pass_threshold: Pass (no significant leak)
 //!    - If quality gates trigger: Inconclusive (measurement issues)

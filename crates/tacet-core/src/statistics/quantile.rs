@@ -416,7 +416,7 @@ pub fn compute_deciles_sorted(sorted: &[f64]) -> Vector9 {
     result
 }
 
-/// Compute mid-distribution quantiles for discrete data (spec §3.7).
+/// Compute mid-distribution quantiles for discrete data (spec §3.6).
 ///
 /// Mid-distribution quantiles handle ties correctly by using:
 /// ```text

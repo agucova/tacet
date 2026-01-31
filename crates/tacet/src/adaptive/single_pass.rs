@@ -28,12 +28,12 @@ use tacet_core::adaptive::{
     calibrate_t_prior_scale, compute_achievable_at_max, compute_c_floor_9d, compute_prior_cov_9d,
     is_threshold_elevated,
 };
-use tacet_core::analysis::{classify_pattern, compute_bayes_gibbs, estimate_mde};
+use tacet_core::analysis::{compute_bayes_gibbs, compute_effect_estimate, estimate_mde};
 use tacet_core::constants::{
     DEFAULT_BOOTSTRAP_ITERATIONS, DEFAULT_FAIL_THRESHOLD, DEFAULT_PASS_THRESHOLD,
 };
 use tacet_core::result::{
-    Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason, IssueCode,
+    Diagnostics, EffectEstimate, Exploitability, InconclusiveReason, IssueCode,
     MeasurementQuality, Outcome, QualityIssue,
 };
 use tacet_core::statistics::{
@@ -156,13 +156,7 @@ pub fn analyze_single_pass(
     // Validate minimum samples
     const MIN_SAMPLES: usize = 100;
     if n < MIN_SAMPLES {
-        let effect = EffectEstimate {
-            shift_ns: 0.0,
-            tail_ns: 0.0,
-            credible_interval_ns: (0.0, 0.0),
-            pattern: EffectPattern::Indeterminate,
-            interpretation_caveat: None,
-        };
+        let effect = EffectEstimate::default();
         return SinglePassResult {
             outcome: Outcome::Inconclusive {
                 reason: InconclusiveReason::DataTooNoisy {
@@ -235,13 +229,7 @@ pub fn analyze_single_pass(
 
     // Check covariance validity
     if !cov_estimate.is_stable() {
-        let effect = EffectEstimate {
-            shift_ns: 0.0,
-            tail_ns: 0.0,
-            credible_interval_ns: (0.0, 0.0),
-            pattern: EffectPattern::Indeterminate,
-            interpretation_caveat: Some("Covariance matrix is not positive definite".to_string()),
-        };
+        let effect = EffectEstimate::default();
         return SinglePassResult {
             outcome: Outcome::Inconclusive {
                 reason: InconclusiveReason::DataTooNoisy {
@@ -304,7 +292,7 @@ pub fn analyze_single_pass(
 
     // Step 6: Compute MDE for quality assessment (spec §3.4.6)
     let mde = estimate_mde(&sigma, 0.05); // α = 0.05
-    let quality = MeasurementQuality::from_mde_ns(mde.shift_ns);
+    let quality = MeasurementQuality::from_mde_ns(mde.mde_ns);
 
     // Debug output for investigation
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
@@ -316,8 +304,8 @@ pub fn analyze_single_pass(
             config.theta_ns, theta_floor_stat, theta_tick, theta_floor, theta_eff);
         eprintln!("[DEBUG] c_floor = {:.2} ns·√n", c_floor);
         eprintln!(
-            "[DEBUG] MDE: shift = {:.2} ns, tail = {:.2} ns",
-            mde.shift_ns, mde.tail_ns
+            "[DEBUG] MDE: {:.2} ns",
+            mde.mde_ns
         );
         eprintln!("[DEBUG] delta_hat = {:?}", delta_hat.as_slice());
         eprintln!(
@@ -364,18 +352,7 @@ pub fn analyze_single_pass(
     }
 
     // Step 8: Compute effect estimate from Bayesian result
-    let pattern = classify_pattern(&bayes_result.beta_proj, &bayes_result.beta_proj_cov);
-    let effect_estimate = EffectEstimate {
-        shift_ns: bayes_result.beta_proj[0],
-        tail_ns: bayes_result.beta_proj[1],
-        credible_interval_ns: bayes_result.effect_magnitude_ci,
-        pattern,
-        interpretation_caveat: if bayes_result.projection_mismatch_q > cov_estimate.q_thresh {
-            Some("Model fit is poor; effect decomposition may be unreliable".to_string())
-        } else {
-            None
-        },
-    };
+    let effect_estimate = compute_effect_estimate(&bayes_result.delta_draws, theta_eff);
 
     // Step 9: Check variance ratio quality gate (spec §3.5.2)
     // Compute variance ratio: posterior_var / prior_var
@@ -393,7 +370,7 @@ pub fn analyze_single_pass(
     let mut quality_issues = Vec::new();
     if theta_eff > config.theta_ns && config.theta_ns > 0.0 {
         quality_issues.push(QualityIssue {
-            code: IssueCode::ThresholdElevated,
+            code: IssueCode::ThresholdIssue,
             message: format!(
                 "Threshold elevated from {:.0} ns to {:.1} ns (measurement floor)",
                 config.theta_ns, theta_eff
@@ -403,10 +380,10 @@ pub fn analyze_single_pass(
         });
     }
 
-    // v5.6: Emit KappaMixingPoor when kappa chain mixing is bad
+    // v5.6: Emit NumericalIssue when kappa chain mixing is bad
     if !bayes_result.kappa_mixing_ok {
         quality_issues.push(QualityIssue {
-            code: IssueCode::KappaMixingPoor,
+            code: IssueCode::NumericalIssue,
             message: format!(
                 "κ chain mixing poor (CV={:.2}, ESS={:.0})",
                 bayes_result.kappa_cv, bayes_result.kappa_ess
@@ -436,10 +413,6 @@ pub fn analyze_single_pass(
         effective_sample_size: n / block_length.max(1),
         stationarity_ratio: 1.0, // Assume stationary for pre-collected data
         stationarity_ok: true,
-        projection_mismatch_q: bayes_result.projection_mismatch_q,
-        projection_mismatch_threshold: cov_estimate.q_thresh,
-        projection_mismatch_ok: bayes_result.projection_mismatch_q <= cov_estimate.q_thresh,
-        top_quantiles: None,
         outlier_rate_baseline: 0.0, // Not computed for pre-collected data
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,
@@ -498,7 +471,7 @@ pub fn analyze_single_pass(
         }
     } else if leak_probability > config.fail_threshold {
         // Fail propagates regardless of threshold elevation (v5.5)
-        let exploitability = Exploitability::from_effect_ns(effect_estimate.shift_ns.abs());
+        let exploitability = Exploitability::from_effect_ns(effect_estimate.max_effect_ns.abs());
         Outcome::Fail {
             leak_probability,
             effect: effect_estimate.clone(),
@@ -609,10 +582,6 @@ fn make_default_diagnostics(timer_resolution_ns: f64) -> Diagnostics {
         effective_sample_size: 0,
         stationarity_ratio: 1.0,
         stationarity_ok: true,
-        projection_mismatch_q: 0.0,
-        projection_mismatch_threshold: f64::INFINITY,
-        projection_mismatch_ok: true,
-        top_quantiles: None,
         outlier_rate_baseline: 0.0,
         outlier_rate_sample: 0.0,
         outlier_asymmetry_ok: true,

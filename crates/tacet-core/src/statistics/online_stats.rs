@@ -3,7 +3,7 @@
 //! This module provides incremental computation of mean, variance, and lag-1
 //! autocorrelation with O(1) memory and O(1) per-sample overhead.
 //!
-//! Used for condition drift detection (spec Section 2.6, Gate 6) to compare
+//! Used for condition drift detection (spec §3.5.4, Gate 4) to compare
 //! measurement statistics from calibration vs the full test run.
 
 use crate::math::sqrt;

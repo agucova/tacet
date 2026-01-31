@@ -1,6 +1,6 @@
 //! Configuration for adaptive Bayesian timing analysis.
 //!
-//! See spec Section 4.2 (Configuration) for the full specification.
+//! See spec §6 (Configuration Parameters) for the full specification.
 
 use std::time::Duration;
 
@@ -15,7 +15,7 @@ use crate::types::AttackerModel;
 /// The adaptive Bayesian oracle uses these settings to control the
 /// analysis behavior, thresholds, and resource limits.
 ///
-/// See spec Section 4.2 (Configuration).
+/// See spec §6 (Configuration Parameters).
 #[derive(Debug, Clone)]
 pub struct Config {
     // =========================================================================
@@ -221,7 +221,7 @@ pub struct Config {
     /// testing the discrete mode code path on machines with high-resolution timers.
     ///
     /// In production, discrete mode is triggered automatically when the
-    /// minimum uniqueness ratio < 10% (per spec Section 2.4).
+    /// minimum uniqueness ratio < 10% (per spec §3.6).
     ///
     /// Default: false.
     pub force_discrete_mode: bool,

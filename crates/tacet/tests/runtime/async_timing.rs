@@ -371,17 +371,16 @@ fn concurrent_tasks_no_crosstalk() {
             ..
         } => {
             // Only panic if the effect is catastrophically large (>10μs)
-            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
-            if total_effect > 10_000.0 {
+            if effect.max_effect_ns > 10_000.0 {
                 panic!(
                     "Catastrophic timing difference with background tasks: {:.1}μs ({:?})",
-                    total_effect / 1000.0,
+                    effect.max_effect_ns / 1000.0,
                     exploitability
                 );
             }
             eprintln!(
                 "Note: Detected timing difference (P={:.1}%, {:.1}ns) - expected in concurrent tests",
-                leak_probability * 100.0, total_effect
+                leak_probability * 100.0, effect.max_effect_ns
             );
         }
         Outcome::Inconclusive {

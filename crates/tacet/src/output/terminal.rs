@@ -66,17 +66,6 @@ pub fn format_diagnostics_section(diagnostics: &Diagnostics) -> String {
         diagnostics.calibration_samples
     ));
 
-    // Projection fit
-    let projection_status = if diagnostics.projection_mismatch_ok {
-        "OK".green().to_string()
-    } else {
-        "Mismatch".red().to_string()
-    };
-    out.push_str(&format!(
-        "    Projection:   Q = {:.1} ({})\n",
-        diagnostics.projection_mismatch_q, projection_status
-    ));
-
     // Outliers
     out.push_str(&format!(
         "    Outliers:     baseline {:.2}%, sample {:.2}%",
@@ -149,20 +138,13 @@ pub fn is_debug() -> bool {
 /// Format IssueCode for display.
 fn format_issue_code(code: IssueCode) -> &'static str {
     match code {
-        IssueCode::HighDependence => "HighDependence",
-        IssueCode::LowEffectiveSamples => "LowEffectiveSamples",
-        IssueCode::StationaritySuspect => "StationaritySuspect",
-        IssueCode::DiscreteTimer => "DiscreteTimer",
-        IssueCode::SmallSampleDiscrete => "SmallSampleDiscrete",
-        IssueCode::HighGeneratorCost => "HighGeneratorCost",
-        IssueCode::LowUniqueInputs => "LowUniqueInputs",
-        IssueCode::QuantilesFiltered => "QuantilesFiltered",
-        IssueCode::ThresholdClamped => "ThresholdClamped",
-        IssueCode::HighWinsorRate => "HighWinsorRate",
-        IssueCode::ThresholdElevated => "ThresholdElevated",
-        IssueCode::SlabDominant => "SlabDominant",
-        IssueCode::LambdaMixingPoor => "LambdaMixingPoor",
-        IssueCode::KappaMixingPoor => "KappaMixingPoor",
+        IssueCode::DependenceHigh => "DependenceHigh",
+        IssueCode::PrecisionLow => "PrecisionLow",
+        IssueCode::DiscreteMode => "DiscreteMode",
+        IssueCode::ThresholdIssue => "ThresholdIssue",
+        IssueCode::FilteringApplied => "FilteringApplied",
+        IssueCode::StationarityIssue => "StationarityIssue",
+        IssueCode::NumericalIssue => "NumericalIssue",
         IssueCode::LikelihoodInflated => "LikelihoodInflated",
     }
 }
@@ -170,19 +152,15 @@ fn format_issue_code(code: IssueCode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::result::{
-        Diagnostics, EffectEstimate, EffectPattern, Exploitability, MeasurementQuality,
-    };
+    use crate::result::{Diagnostics, EffectEstimate, Exploitability, MeasurementQuality};
 
     fn make_pass_outcome() -> Outcome {
         Outcome::Pass {
             leak_probability: 0.02,
             effect: EffectEstimate {
-                shift_ns: 5.0,
-                tail_ns: 2.0,
+                max_effect_ns: 5.0,
                 credible_interval_ns: (0.0, 10.0),
-                pattern: EffectPattern::Indeterminate,
-                interpretation_caveat: None,
+                top_quantiles: Vec::new(),
             },
             samples_used: 10000,
             quality: MeasurementQuality::Good,
@@ -197,11 +175,9 @@ mod tests {
         Outcome::Fail {
             leak_probability: 0.98,
             effect: EffectEstimate {
-                shift_ns: 150.0,
-                tail_ns: 25.0,
+                max_effect_ns: 150.0,
                 credible_interval_ns: (100.0, 200.0),
-                pattern: EffectPattern::UniformShift,
-                interpretation_caveat: None,
+                top_quantiles: Vec::new(),
             },
             exploitability: Exploitability::Http2Multiplexing,
             samples_used: 10000,
@@ -228,7 +204,7 @@ mod tests {
         let output = format_outcome(&outcome);
         assert!(output.contains("Timing leak detected"));
         assert!(output.contains("98.0%")); // 0.98 * 100
-        assert!(output.contains("Effect:"));
+        assert!(output.contains("Max effect:"));
         assert!(output.contains("Exploitability"));
     }
 

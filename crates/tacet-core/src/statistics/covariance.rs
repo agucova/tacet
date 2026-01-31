@@ -13,9 +13,8 @@ use rand::Rng;
 use rand::SeedableRng;
 use rand_xoshiro::Xoshiro256PlusPlus;
 
-use crate::analysis::build_design_matrix;
 use crate::math;
-use crate::types::{Class, Matrix2, Matrix9, Matrix9x2, TimingSample, Vector9};
+use crate::types::{Class, Matrix9, TimingSample, Vector9};
 
 use super::block_length::{optimal_block_length, paired_optimal_block_length};
 use super::bootstrap::{
@@ -538,7 +537,7 @@ pub fn bootstrap_difference_covariance(
 /// Estimate covariance matrix of quantile differences Δ* = q_F* - q_R* in discrete mode.
 ///
 /// Uses m-out-of-n paired block bootstrap on per-class sequences with mid-distribution
-/// quantiles, then rescales by m/n (spec §3.7).
+/// quantiles, then rescales by m/n (spec §3.6).
 pub fn bootstrap_difference_covariance_discrete(
     baseline: &[f64],
     sample: &[f64],
@@ -720,14 +719,11 @@ fn add_diagonal_jitter(mut matrix: Matrix9) -> (Matrix9, f64) {
     (matrix, epsilon)
 }
 
-/// Compute Q* statistic for model fit check.
+/// Compute goodness-of-fit statistic for the 9D model.
 ///
-/// Q* = r^T Σ^{-1} r where r = Δ - X β is the residual from GLS fit.
-/// This measures how well the 2D (shift + tail) model explains the quantile pattern.
-///
-/// Under the null model (correctly specified), Q* follows approximately χ²(7).
-///
-/// See spec Section 2.3.3 (Model Mismatch Threshold Calibration).
+/// With the removal of 2D projection, we no longer compute model mismatch Q*.
+/// This function returns a simple Mahalanobis distance which can be used
+/// for detecting extreme bootstrap samples.
 ///
 /// # Arguments
 ///
@@ -736,29 +732,11 @@ fn add_diagonal_jitter(mut matrix: Matrix9) -> (Matrix9, f64) {
 ///
 /// # Returns
 ///
-/// The Q* statistic (non-negative scalar).
+/// The Mahalanobis distance δ' Σ^{-1} δ (non-negative scalar).
 fn compute_q_statistic(delta: &Vector9, sigma_inv: &Matrix9) -> f64 {
-    // Get design matrix X: 9x2 for [uniform_shift, tail_effect]
-    let x: Matrix9x2 = build_design_matrix();
-
-    // 1. Compute GLS estimate: β = (X' Σ^{-1} X)^{-1} X' Σ^{-1} δ
-    let xt_sigma_inv = x.transpose() * sigma_inv;
-    let xt_sigma_inv_x: Matrix2 = xt_sigma_inv * x;
-    let beta = match xt_sigma_inv_x.try_inverse() {
-        Some(inv) => inv * xt_sigma_inv * delta,
-        None => {
-            // Singular matrix - return infinity to indicate numerical issues
-            return f64::INFINITY;
-        }
-    };
-
-    // 2. Compute residual: r = δ - X β
-    let predicted = x * beta;
-    let residual = delta - predicted;
-
-    // 3. Compute Q = r^T Σ^{-1} r
-    let q = residual.transpose() * sigma_inv * residual;
-    q[(0, 0)].max(0.0) // Ensure non-negative
+    // Compute Mahalanobis distance: δ' Σ^{-1} δ
+    let q = delta.transpose() * sigma_inv * delta;
+    q[(0, 0)].max(0.0)
 }
 
 /// Compute bootstrap Q* distribution and return 99th percentile.
@@ -1380,55 +1358,44 @@ mod tests {
     // ========== Q* Statistic Tests ==========
 
     #[test]
-    fn test_q_statistic_computation() {
-        // With a delta that perfectly fits the shift+tail model, Q* should be ~0
-        // delta = mu * ones + tau * b_tail where ones = [1,...,1], b_tail = [-0.5,...,0.5]
-        let mu = 10.0;
-        let tau = 5.0;
-        let delta = Vector9::from_fn(|i, _| {
-            let b_tail = (i as f64 - 4.0) / 8.0; // -0.5 to 0.5
-            mu + tau * b_tail
-        });
-
-        // Use identity covariance for simplicity
+    fn test_q_statistic_mahalanobis() {
+        // Test Mahalanobis distance computation with identity covariance
+        let delta = Vector9::from_fn(|i, _| (i as f64) * 2.0);
         let sigma_inv = Matrix9::identity();
         let q = compute_q_statistic(&delta, &sigma_inv);
 
-        // Q should be very small since delta perfectly fits the model
+        // With identity covariance, Q = δ'δ = sum of squares
+        let expected: f64 = (0..9).map(|i| ((i as f64) * 2.0).powi(2)).sum();
+        assert!(
+            (q - expected).abs() < 1e-10,
+            "Q should equal sum of squares with identity cov, got {} expected {}",
+            q,
+            expected
+        );
+    }
+
+    #[test]
+    fn test_q_statistic_zero_delta() {
+        // Q should be 0 for zero delta
+        let delta = Vector9::zeros();
+        let sigma_inv = Matrix9::identity();
+        let q = compute_q_statistic(&delta, &sigma_inv);
+
         assert!(
             q < 1e-10,
-            "Q* should be ~0 for perfect model fit, got {}",
+            "Q should be ~0 for zero delta, got {}",
             q
         );
     }
 
     #[test]
-    fn test_q_statistic_with_residual() {
-        // Add a component that doesn't fit the shift+tail model
-        // This should produce a non-zero Q*
-        let mu = 10.0;
-        let tau = 5.0;
-        let delta = Vector9::from_fn(|i, _| {
-            let b_tail = (i as f64 - 4.0) / 8.0;
-            let residual = if i == 4 { 100.0 } else { 0.0 }; // Spike at median
-            mu + tau * b_tail + residual
-        });
-
-        let sigma_inv = Matrix9::identity();
-        let q = compute_q_statistic(&delta, &sigma_inv);
-
-        // Q should be significant since we added a residual
-        assert!(q > 1.0, "Q* should be > 1 with residual, got {}", q);
-    }
-
-    #[test]
     fn test_q_statistic_is_non_negative() {
-        // Q* should always be non-negative (it's a quadratic form)
+        // Q should always be non-negative (it's a quadratic form)
         for seed in 0..10u64 {
             let delta = Vector9::from_fn(|i, _| ((seed * 7 + i as u64 * 13) % 100) as f64 - 50.0);
             let sigma_inv = Matrix9::identity();
             let q = compute_q_statistic(&delta, &sigma_inv);
-            assert!(q >= 0.0, "Q* should be non-negative, got {}", q);
+            assert!(q >= 0.0, "Q should be non-negative, got {}", q);
         }
     }
 

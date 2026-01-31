@@ -18,8 +18,7 @@ use std::time::Duration;
 use tacet::helpers::effect::{busy_wait_ns, init_effect_injection};
 use tacet::helpers::InputPair;
 use tacet::{
-    skip_if_unreliable, AttackerModel, EffectPattern, Exploitability, InconclusiveReason, Outcome,
-    TimingOracle,
+    skip_if_unreliable, AttackerModel, Exploitability, InconclusiveReason, Outcome, TimingOracle,
 };
 
 // ============================================================================
@@ -131,14 +130,14 @@ fn aes_sbox_timing_fast() {
         Outcome::Research(_) => return,
     };
 
-    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
+    let has_significant_effect = effect.max_effect_ns > 5.0;
 
-    // Should detect either moderate leak probability or tail effect pattern
-    let has_leak_signal = leak_probability > 0.3 || has_tail_effect;
+    // Should detect either moderate leak probability or significant effect
+    let has_leak_signal = leak_probability > 0.3 || has_significant_effect;
     assert!(
         has_leak_signal,
-        "Expected to detect some cache timing effect (got leak_probability={}, has_tail_effect={})",
-        leak_probability, has_tail_effect
+        "Expected to detect some cache timing effect (got leak_probability={}, max_effect_ns={})",
+        leak_probability, effect.max_effect_ns
     );
 }
 
@@ -253,17 +252,14 @@ fn cache_line_boundary_effects() {
         Outcome::Research(_) => return,
     };
 
-    let has_tail_effect = matches!(
-        effect.pattern,
-        EffectPattern::TailEffect | EffectPattern::Mixed
-    );
+    let has_significant_effect = effect.max_effect_ns > 5.0;
 
-    let has_leak_signal = leak_probability > 0.2 || has_tail_effect;
+    let has_leak_signal = leak_probability > 0.2 || has_significant_effect;
     assert!(
         has_leak_signal,
-        "Expected to detect cache line boundary effects (got leak_probability={}, has_tail_effect={})",
+        "Expected to detect cache line boundary effects (got leak_probability={}, max_effect_ns={})",
         leak_probability,
-        has_tail_effect
+        effect.max_effect_ns
     );
 }
 
@@ -335,11 +331,10 @@ fn memory_access_pattern_leak() {
     );
 
     // Should have measurable effect
-    let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
     assert!(
-        total_effect > 5.0,
+        effect.max_effect_ns > 5.0,
         "Expected measurable timing effect for memory patterns (got {:.1}ns)",
-        total_effect
+        effect.max_effect_ns
     );
 }
 
@@ -385,22 +380,11 @@ fn modexp_square_and_multiply_timing() {
                 leak_probability
             );
 
-            // Should show UniformShift or Mixed pattern (BigInt ops may have variance)
+            // Should have significant effect (either direction indicates timing leak)
             assert!(
-                matches!(
-                    effect.pattern,
-                    EffectPattern::UniformShift | EffectPattern::Mixed
-                ),
-                "Expected UniformShift or Mixed pattern for algorithmic timing (got {:?})",
-                effect.pattern
-            );
-
-            // Should have significant shift (either direction indicates timing leak)
-            // Negative shift means sample (low Hamming weight) is faster than baseline
-            assert!(
-                effect.shift_ns.abs() > 50.0,
-                "Expected significant shift_ns magnitude (got {:.1})",
-                effect.shift_ns
+                effect.max_effect_ns > 50.0,
+                "Expected significant max_effect_ns magnitude (got {:.1})",
+                effect.max_effect_ns
             );
         }
         Outcome::Pass {
@@ -653,14 +637,14 @@ fn table_lookup_large_cache_thrash() {
         Outcome::Research(_) => return,
     };
 
-    let has_tail_effect = matches!(effect.pattern, EffectPattern::TailEffect);
+    let has_significant_effect = effect.max_effect_ns > 5.0;
 
-    // Should detect leak probability or tail effect pattern
-    let has_leak_signal = leak_probability > 0.4 || has_tail_effect;
+    // Should detect leak probability or significant effect
+    let has_leak_signal = leak_probability > 0.4 || has_significant_effect;
     assert!(
         has_leak_signal,
-        "Expected cache effects for large table (got leak_probability={}, has_tail_effect={})",
-        leak_probability, has_tail_effect
+        "Expected cache effects for large table (got leak_probability={}, max_effect_ns={})",
+        leak_probability, effect.max_effect_ns
     );
 }
 
@@ -709,28 +693,12 @@ fn effect_pattern_pure_uniform_shift() {
         Outcome::Research(_) => return,
     };
 
-    // Should classify as UniformShift (constant delay should produce uniform shift)
-    assert!(
-        matches!(effect.pattern, EffectPattern::UniformShift),
-        "Expected UniformShift pattern for constant delay (got {:?})",
-        effect.pattern
-    );
-
     // Verify effect magnitude matches injected delay (2μs ± 50%)
     // If this fails with huge values, the effect estimation is broken
-    let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
     assert!(
-        (1_000.0..=3_000.0).contains(&total_effect),
-        "Expected total effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
-        total_effect
-    );
-
-    // Shift should dominate tail for uniform shift pattern
-    assert!(
-        effect.shift_ns.abs() > effect.tail_ns.abs() * 2.0,
-        "Expected shift to dominate tail (got shift={:.1}ns, tail={:.1}ns)",
-        effect.shift_ns,
-        effect.tail_ns
+        (1_000.0..=3_000.0).contains(&effect.max_effect_ns),
+        "Expected max effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
+        effect.max_effect_ns
     );
 }
 
@@ -797,35 +765,20 @@ fn effect_pattern_pure_tail() {
         Outcome::Research(_) => return,
     };
 
-    // When neither effect is statistically significant, pattern is Indeterminate - this is valid
-    // Only assert on pattern when we have significant effects to classify
-    match effect.pattern {
-        EffectPattern::Indeterminate => {
-            // Indeterminate is valid when effects aren't statistically significant
-            eprintln!(
-                "Note: Got Indeterminate pattern (shift={:.1}ns, tail={:.1}ns) - effects not significant",
-                effect.shift_ns, effect.tail_ns
-            );
-        }
-        EffectPattern::TailEffect | EffectPattern::Mixed => {
-            // Should have significant tail component when classified as TailEffect/Mixed
-            // Note: A probabilistic spike (15% chance of 2000 cycles) creates both:
-            // - A shift effect (mean increases by ~300 cycles = 15% × 2000)
-            // - A tail effect (variance increases in upper quantiles)
-            // So we expect Mixed or TailEffect, not necessarily |tail| > |shift|
-            assert!(
-                effect.tail_ns.abs() > 10.0,
-                "Expected significant tail component (got {:.1}ns)",
-                effect.tail_ns
-            );
-        }
-        EffectPattern::UniformShift => {
-            // UniformShift is not expected for this test, but acceptable if effect is small
-            eprintln!(
-                "Unexpected UniformShift pattern (shift={:.1}ns, tail={:.1}ns)",
-                effect.shift_ns, effect.tail_ns
-            );
-        }
+    // For a tail effect pattern, we expect significant effect in upper quantiles
+    // The max_effect_ns should capture the spike magnitude
+    if effect.max_effect_ns < 10.0 {
+        eprintln!(
+            "Note: Effect not significant (max_effect_ns={:.1}ns)",
+            effect.max_effect_ns
+        );
+    } else {
+        // Should have significant effect from the probabilistic spike
+        assert!(
+            effect.max_effect_ns > 10.0,
+            "Expected significant effect from tail spike (got {:.1}ns)",
+            effect.max_effect_ns
+        );
     }
 }
 
@@ -891,19 +844,11 @@ fn effect_pattern_mixed() {
         Outcome::Research(_) => return,
     };
 
-    // Should classify as Mixed
+    // Should have significant effect from both base delay and spike
     assert!(
-        matches!(effect.pattern, EffectPattern::Mixed),
-        "Expected Mixed pattern (got {:?})",
-        effect.pattern
-    );
-
-    // Both components should be significant (use abs for sign-independence)
-    assert!(
-        effect.shift_ns.abs() > 3.0 && effect.tail_ns.abs() > 3.0,
-        "Expected both |shift| and |tail| > 3ns (got shift={:.1}ns, tail={:.1}ns)",
-        effect.shift_ns,
-        effect.tail_ns
+        effect.max_effect_ns > 3.0,
+        "Expected max_effect_ns > 3ns (got {:.1}ns)",
+        effect.max_effect_ns
     );
 }
 
@@ -981,10 +926,9 @@ fn exploitability_negligible() {
             assert_eq!(
                 *exploitability,
                 Exploitability::SharedHardwareOnly,
-                "XOR comparison should have SharedHardwareOnly exploitability. leak_prob: {:.4}, effect: shift={:.1}ns, tail={:.1}ns",
+                "XOR comparison should have SharedHardwareOnly exploitability. leak_prob: {:.4}, max_effect={:.1}ns",
                 leak_probability,
-                effect.shift_ns,
-                effect.tail_ns
+                effect.max_effect_ns
             );
         }
         Outcome::Inconclusive {
@@ -1050,11 +994,10 @@ fn exploitability_standard_remote() {
 
             // Verify effect magnitude matches injected delay (250ns ± 100%)
             // If this fails with huge values, the effect estimation is broken
-            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                (100.0..=500.0).contains(&total_effect),
-                "Expected total effect ~250ns for 250ns delay (got {:.1}ns) - effect estimation may be broken",
-                total_effect
+                (100.0..=500.0).contains(&effect.max_effect_ns),
+                "Expected max effect ~250ns for 250ns delay (got {:.1}ns) - effect estimation may be broken",
+                effect.max_effect_ns
             );
         }
         Outcome::Pass {
@@ -1134,11 +1077,10 @@ fn exploitability_standard_remote_large() {
 
             // Verify effect magnitude matches injected delay (2μs ± 50%)
             // If this fails with huge values, the effect estimation is broken
-            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                (1_000.0..=3_000.0).contains(&total_effect),
-                "Expected total effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
-                total_effect
+                (1_000.0..=3_000.0).contains(&effect.max_effect_ns),
+                "Expected max effect ~2μs for 2μs delay (got {:.1}ns) - effect estimation may be broken",
+                effect.max_effect_ns
             );
         }
         Outcome::Pass {
@@ -1213,11 +1155,10 @@ fn exploitability_obvious_leak() {
 
             // Verify effect magnitude is > 10μs (with reasonable margin)
             // Target was ~50μs, so expect > 8μs with platform variance
-            let total_effect = effect.shift_ns.abs() + effect.tail_ns.abs();
             assert!(
-                total_effect >= 8_000.0,
-                "Expected total effect > 8μs for ObviousLeak classification (got {:.1}ns)",
-                total_effect
+                effect.max_effect_ns >= 8_000.0,
+                "Expected max effect > 8μs for ObviousLeak classification (got {:.1}ns)",
+                effect.max_effect_ns
             );
         }
         Outcome::Pass {

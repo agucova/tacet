@@ -76,36 +76,6 @@ func (r InconclusiveReason) String() string {
 	}
 }
 
-// EffectPattern describes the pattern of timing difference.
-type EffectPattern int
-
-const (
-	// UniformShift indicates a constant timing difference across all quantiles.
-	UniformShift EffectPattern = iota
-	// TailEffect indicates timing difference concentrated in upper quantiles.
-	TailEffect
-	// Mixed indicates both shift and tail components present.
-	Mixed
-	// Indeterminate indicates the pattern cannot be determined.
-	Indeterminate
-)
-
-// String returns the string representation of the pattern.
-func (p EffectPattern) String() string {
-	switch p {
-	case UniformShift:
-		return "UniformShift"
-	case TailEffect:
-		return "TailEffect"
-	case Mixed:
-		return "Mixed"
-	case Indeterminate:
-		return "Indeterminate"
-	default:
-		return "Unknown"
-	}
-}
-
 // Exploitability assesses the practical exploitability of a detected leak.
 type Exploitability int
 
@@ -168,16 +138,24 @@ func (q Quality) String() string {
 
 // Effect holds the effect size estimate.
 type Effect struct {
-	// ShiftNs is the uniform shift component in nanoseconds.
-	ShiftNs float64
-	// TailNs is the tail effect component in nanoseconds.
-	TailNs float64
-	// CILow is the 95% credible interval lower bound.
-	CILow float64
-	// CIHigh is the 95% credible interval upper bound.
-	CIHigh float64
-	// Pattern describes the effect pattern.
-	Pattern EffectPattern
+	// MaxEffectNs is the maximum effect in nanoseconds: max_k |delta_k|.
+	MaxEffectNs float64
+	// CredibleIntervalNs is the 95% credible interval (lower, upper).
+	CredibleIntervalNs [2]float64
+	// TopQuantiles contains the top 2-3 quantiles by exceedance probability.
+	TopQuantiles []TopQuantile
+}
+
+// TopQuantile represents a quantile with exceedance information.
+type TopQuantile struct {
+	// QuantileP is the quantile level (e.g., 0.9 for 90th percentile).
+	QuantileP float64
+	// MeanNs is the posterior mean delta_k in nanoseconds.
+	MeanNs float64
+	// CI95Ns is the 95% marginal credible interval (lower, upper).
+	CI95Ns [2]float64
+	// ExceedProb is P(|delta_k| > theta_eff | data).
+	ExceedProb float64
 }
 
 // Diagnostics holds detailed diagnostic information from the analysis.
@@ -192,28 +170,16 @@ type Diagnostics struct {
 	StationarityRatio float64
 	// StationarityOK indicates whether the stationarity check passed.
 	StationarityOK bool
-	// ProjectionMismatchQ is the projection mismatch Q statistic.
-	ProjectionMismatchQ float64
-	// ProjectionMismatchOK indicates whether projection mismatch is acceptable.
-	ProjectionMismatchOK bool
 
 	// DiscreteMode indicates whether discrete mode was used (low timer resolution).
 	DiscreteMode bool
 	// TimerResolutionNs is the timer resolution in nanoseconds.
 	TimerResolutionNs float64
 
-	// GibbsItersTotal is the total number of Gibbs sampler iterations.
-	GibbsItersTotal int
-	// GibbsBurnin is the number of burn-in iterations discarded.
-	GibbsBurnin int
-	// GibbsRetained is the number of samples retained after burn-in.
-	GibbsRetained int
 	// LambdaMean is the posterior mean of the latent scale parameter lambda.
 	LambdaMean float64
 	// LambdaSD is the posterior standard deviation of lambda.
 	LambdaSD float64
-	// LambdaCV is the coefficient of variation of lambda (SD/mean).
-	LambdaCV float64
 	// LambdaESS is the effective sample size of the lambda chain.
 	LambdaESS float64
 	// LambdaMixingOK indicates whether the lambda chain mixed well.
@@ -221,8 +187,6 @@ type Diagnostics struct {
 
 	// KappaMean is the posterior mean of the likelihood precision kappa.
 	KappaMean float64
-	// KappaSD is the posterior standard deviation of kappa.
-	KappaSD float64
 	// KappaCV is the coefficient of variation of kappa.
 	KappaCV float64
 	// KappaESS is the effective sample size of the kappa chain.
@@ -231,10 +195,6 @@ type Diagnostics struct {
 	KappaMixingOK bool
 }
 
-// TotalNs returns the total effect magnitude in nanoseconds.
-func (e Effect) TotalNs() float64 {
-	return e.ShiftNs + e.TailNs
-}
 
 // Result holds the complete analysis result.
 type Result struct {
@@ -263,11 +223,8 @@ type Result struct {
 	// InconclusiveReason explains why the test was inconclusive (if applicable).
 	InconclusiveReason InconclusiveReason
 
-	// MDEShiftNs is the minimum detectable shift effect in nanoseconds.
-	MDEShiftNs float64
-
-	// MDETailNs is the minimum detectable tail effect in nanoseconds.
-	MDETailNs float64
+	// MDENs is the minimum detectable effect in nanoseconds.
+	MDENs float64
 
 	// TimerResolutionNs is the timer resolution in nanoseconds.
 	TimerResolutionNs float64
@@ -305,11 +262,11 @@ func (r *Result) IsMeasurable() bool {
 func (r *Result) String() string {
 	switch r.Outcome {
 	case Pass:
-		return fmt.Sprintf("Pass: P(leak)=%.1f%%, effect=%.2fns, quality=%s, samples=%d",
-			r.LeakProbability*100, r.Effect.TotalNs(), r.Quality, r.SamplesUsed)
+		return fmt.Sprintf("Pass: P(leak)=%.1f%%, max_effect=%.2fns, quality=%s, samples=%d",
+			r.LeakProbability*100, r.Effect.MaxEffectNs, r.Quality, r.SamplesUsed)
 	case Fail:
-		return fmt.Sprintf("FAIL: P(leak)=%.1f%%, effect=%.2fns, exploitability=%s, samples=%d",
-			r.LeakProbability*100, r.Effect.TotalNs(), r.Exploitability, r.SamplesUsed)
+		return fmt.Sprintf("FAIL: P(leak)=%.1f%%, max_effect=%.2fns, exploitability=%s, samples=%d",
+			r.LeakProbability*100, r.Effect.MaxEffectNs, r.Exploitability, r.SamplesUsed)
 	case Inconclusive:
 		return fmt.Sprintf("Inconclusive (%s): P(leak)=%.1f%%, samples=%d",
 			r.InconclusiveReason, r.LeakProbability*100, r.SamplesUsed)

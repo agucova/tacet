@@ -69,14 +69,13 @@ impl CoverageRunner {
                 // Debug: print first few results
                 if self.completed <= 3 {
                     eprintln!(
-                        "[DEBUG] Trial {}: shift={:.1}ns, tail={:.1}ns, CI=[{:.1}, {:.1}], true={:.1}ns",
-                        self.completed, effect.shift_ns, effect.tail_ns, ci_low, ci_high, true_effect
+                        "[DEBUG] Trial {}: max_effect={:.1}ns, CI=[{:.1}, {:.1}], true={:.1}ns",
+                        self.completed, effect.max_effect_ns, ci_low, ci_high, true_effect
                     );
                 }
 
                 // The CI is for total effect magnitude
                 // Check if the true injected effect falls within the CI
-                let _detected_shift = effect.shift_ns.abs();
                 if ci_low <= true_effect && true_effect <= ci_high {
                     self.covered += 1;
                 } else {

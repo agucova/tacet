@@ -86,13 +86,13 @@ pub mod power;
 
 // Re-exports for public API
 pub use config::{Config, IterationsPerSample};
-pub use constants::{B_TAIL, DECILES, LOG_2PI, ONES};
+pub use constants::{DECILES, LOG_2PI};
 pub use measurement::{BoxedTimer, Timer, TimerError, TimerSpec};
 pub use oracle::{compute_min_uniqueness_ratio, TimingOracle};
 pub use result::{
-    BatchingInfo, Diagnostics, EffectEstimate, EffectPattern, Exploitability, InconclusiveReason,
+    BatchingInfo, Diagnostics, EffectEstimate, Exploitability, InconclusiveReason,
     IssueCode, MeasurementQuality, Metadata, MinDetectableEffect, Outcome, QualityIssue,
-    UnmeasurableInfo, UnreliablePolicy,
+    TopQuantile, UnmeasurableInfo, UnreliablePolicy,
 };
 pub use types::{AttackerModel, Class, TimingSample};
 

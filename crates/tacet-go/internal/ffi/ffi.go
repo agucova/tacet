@@ -106,16 +106,6 @@ const (
 	ObviousLeak
 )
 
-// EffectPattern describes the timing effect pattern
-type EffectPattern int
-
-const (
-	UniformShift EffectPattern = iota
-	TailEffect
-	Mixed
-	Indeterminate
-)
-
 // InconclusiveReason explains why a test was inconclusive
 type InconclusiveReason int
 
@@ -132,31 +122,27 @@ const (
 
 // Effect holds the effect size estimate
 type Effect struct {
-	ShiftNs float64
-	TailNs  float64
-	CILow   float64
-	CIHigh  float64
-	Pattern EffectPattern
+	MaxEffectNs float64
+	CILow       float64
+	CIHigh      float64
 }
 
 // Diagnostics holds detailed diagnostic information from the analysis
 type Diagnostics struct {
-	DependenceLength     int
-	EffectiveSampleSize  int
-	StationarityRatio    float64
-	StationarityOK       bool
-	ProjectionMismatchQ  float64
-	ProjectionMismatchOK bool
-	DiscreteMode         bool
-	TimerResolutionNs    float64
-	LambdaMean           float64
-	LambdaSD             float64
-	LambdaESS            float64
-	LambdaMixingOK       bool
-	KappaMean            float64
-	KappaCV              float64
-	KappaESS             float64
-	KappaMixingOK        bool
+	DependenceLength    int
+	EffectiveSampleSize int
+	StationarityRatio   float64
+	StationarityOK      bool
+	DiscreteMode        bool
+	TimerResolutionNs   float64
+	LambdaMean          float64
+	LambdaSD            float64
+	LambdaESS           float64
+	LambdaMixingOK      bool
+	KappaMean           float64
+	KappaCV             float64
+	KappaESS            float64
+	KappaMixingOK       bool
 }
 
 // Result holds the complete analysis result
@@ -169,8 +155,7 @@ type Result struct {
 	ElapsedTime        time.Duration
 	Exploitability     Exploitability
 	InconclusiveReason InconclusiveReason
-	MDEShiftNs         float64
-	MDETailNs          float64
+	MDENs float64
 	ThetaUserNs        float64
 	ThetaEffNs         float64
 	ThetaFloorNs       float64
@@ -424,41 +409,36 @@ func resultFromC(r *C.struct_ToResult) *Result {
 	// Convert diagnostics
 	d := r.diagnostics
 	diagnostics := &Diagnostics{
-		DependenceLength:     int(d.dependence_length),
-		EffectiveSampleSize:  int(d.effective_sample_size),
-		StationarityRatio:    float64(d.stationarity_ratio),
-		StationarityOK:       bool(d.stationarity_ok),
-		ProjectionMismatchQ:  float64(d.projection_mismatch_q),
-		ProjectionMismatchOK: bool(d.projection_mismatch_ok),
-		DiscreteMode:         bool(d.discrete_mode),
-		TimerResolutionNs:    float64(d.timer_resolution_ns),
-		LambdaMean:           float64(d.lambda_mean),
-		LambdaSD:             float64(d.lambda_sd),
-		LambdaESS:            float64(d.lambda_ess),
-		LambdaMixingOK:       bool(d.lambda_mixing_ok),
-		KappaMean:            float64(d.kappa_mean),
-		KappaCV:              float64(d.kappa_cv),
-		KappaESS:             float64(d.kappa_ess),
-		KappaMixingOK:        bool(d.kappa_mixing_ok),
+		DependenceLength:    int(d.dependence_length),
+		EffectiveSampleSize: int(d.effective_sample_size),
+		StationarityRatio:   float64(d.stationarity_ratio),
+		StationarityOK:      bool(d.stationarity_ok),
+		DiscreteMode:        bool(d.discrete_mode),
+		TimerResolutionNs:   float64(d.timer_resolution_ns),
+		LambdaMean:          float64(d.lambda_mean),
+		LambdaSD:            float64(d.lambda_sd),
+		LambdaESS:           float64(d.lambda_ess),
+		LambdaMixingOK:      bool(d.lambda_mixing_ok),
+		KappaMean:           float64(d.kappa_mean),
+		KappaCV:             float64(d.kappa_cv),
+		KappaESS:            float64(d.kappa_ess),
+		KappaMixingOK:       bool(d.kappa_mixing_ok),
 	}
 
 	return &Result{
-		Outcome:            outcomeFromC(r.outcome),
-		LeakProbability:    float64(r.leak_probability),
+		Outcome:         outcomeFromC(r.outcome),
+		LeakProbability: float64(r.leak_probability),
 		Effect: Effect{
-			ShiftNs: float64(r.effect.shift_ns),
-			TailNs:  float64(r.effect.tail_ns),
-			CILow:   float64(r.effect.ci_low_ns),
-			CIHigh:  float64(r.effect.ci_high_ns),
-			Pattern: effectPatternFromC(r.effect.pattern),
+			MaxEffectNs: float64(r.effect.max_effect_ns),
+			CILow:       float64(r.effect.ci_low_ns),
+			CIHigh:      float64(r.effect.ci_high_ns),
 		},
 		Quality:            qualityFromC(r.quality),
 		SamplesUsed:        int(r.samples_used),
 		ElapsedTime:        time.Duration(float64(r.elapsed_secs) * float64(time.Second)),
 		Exploitability:     exploitabilityFromC(r.exploitability),
 		InconclusiveReason: inconclusiveReasonFromC(r.inconclusive_reason),
-		MDEShiftNs:         float64(r.mde_shift_ns),
-		MDETailNs:          float64(r.mde_tail_ns),
+		MDENs:              float64(r.mde_ns),
 		ThetaUserNs:        float64(r.theta_user_ns),
 		ThetaEffNs:         float64(r.theta_eff_ns),
 		ThetaFloorNs:       float64(r.theta_floor_ns),
@@ -508,21 +488,6 @@ func exploitabilityFromC(e C.enum_ToExploitability) Exploitability {
 		return ObviousLeak
 	default:
 		return SharedHardwareOnly
-	}
-}
-
-func effectPatternFromC(p C.enum_ToEffectPattern) EffectPattern {
-	switch p {
-	case C.UniformShift:
-		return UniformShift
-	case C.TailEffect:
-		return TailEffect
-	case C.Mixed:
-		return Mixed
-	case C.Indeterminate:
-		return Indeterminate
-	default:
-		return Indeterminate
 	}
 }
 

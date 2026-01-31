@@ -269,16 +269,29 @@ fn format_fail_body(
     )
     .unwrap();
 
-    let magnitude = effect.total_effect_ns();
-    writeln!(out, "    Effect: {:.1} ns ({})", magnitude, effect.pattern).unwrap();
-    writeln!(out, "      Shift: {:.1} ns", effect.shift_ns).unwrap();
-    writeln!(out, "      Tail:  {:.1} ns", effect.tail_ns).unwrap();
     writeln!(
         out,
-        "      95% CI: {:.1}\u{2013}{:.1} ns",
-        effect.credible_interval_ns.0, effect.credible_interval_ns.1
+        "    Max effect: {:.1} ns [CI: {:.1}\u{2013}{:.1}]",
+        effect.max_effect_ns,
+        effect.credible_interval_ns.0,
+        effect.credible_interval_ns.1
     )
     .unwrap();
+
+    // Show top quantiles if available
+    if !effect.top_quantiles.is_empty() {
+        writeln!(out, "      Hotspots:").unwrap();
+        for tq in &effect.top_quantiles {
+            writeln!(
+                out,
+                "        \u{2192} p{:.0} ({:.1}ns, {:.0}% confident)",
+                tq.quantile_p * 100.0,
+                tq.mean_ns,
+                tq.exceed_prob * 100.0
+            )
+            .unwrap();
+        }
+    }
 
     writeln!(out).unwrap();
     writeln!(out, "    Exploitability (heuristic):").unwrap();
@@ -295,11 +308,12 @@ fn format_inconclusive_body(out: &mut String, leak_probability: f64, effect: &Ef
     )
     .unwrap();
 
-    let magnitude = effect.total_effect_ns();
     writeln!(
         out,
-        "    Effect estimate: {:.1} ns ({})",
-        magnitude, effect.pattern
+        "    Max effect estimate: {:.1} ns [CI: {:.1}\u{2013}{:.1}]",
+        effect.max_effect_ns,
+        effect.credible_interval_ns.0,
+        effect.credible_interval_ns.1
     )
     .unwrap();
 }
@@ -342,13 +356,27 @@ fn format_research_outcome(out: &mut String, research: &ResearchOutcome) {
     writeln!(out).unwrap();
     writeln!(
         out,
-        "    Effect: {:.1} ns ({})",
-        research.effect.total_effect_ns(),
-        research.effect.pattern
+        "    Max effect: {:.1} ns [CI: {:.1}\u{2013}{:.1}]",
+        research.effect.max_effect_ns,
+        research.effect.credible_interval_ns.0,
+        research.effect.credible_interval_ns.1
     )
     .unwrap();
-    writeln!(out, "      Shift: {:.1} ns", research.effect.shift_ns).unwrap();
-    writeln!(out, "      Tail:  {:.1} ns", research.effect.tail_ns).unwrap();
+
+    // Show top quantiles if available
+    if !research.effect.top_quantiles.is_empty() {
+        writeln!(out, "      Hotspots:").unwrap();
+        for tq in &research.effect.top_quantiles {
+            writeln!(
+                out,
+                "        \u{2192} p{:.0} ({:.1}ns, {:.0}% confident)",
+                tq.quantile_p * 100.0,
+                tq.mean_ns,
+                tq.exceed_prob * 100.0
+            )
+            .unwrap();
+        }
+    }
 
     if research.model_mismatch {
         writeln!(out).unwrap();
@@ -358,9 +386,6 @@ fn format_research_outcome(out: &mut String, research: &ResearchOutcome) {
             yellow("\u{26A0}")
         )
         .unwrap();
-        if let Some(ref caveat) = research.effect.interpretation_caveat {
-            writeln!(out, "      {}", caveat).unwrap();
-        }
     }
 
     // Include diagnostics
@@ -390,15 +415,15 @@ pub fn format_diagnostics_section(out: &mut String, diagnostics: &Diagnostics) {
     )
     .unwrap();
 
-    let projection_status = if diagnostics.projection_mismatch_ok {
+    let stationarity_status = if diagnostics.stationarity_ok {
         green("OK")
     } else {
-        red("Mismatch")
+        red("Suspect")
     };
     writeln!(
         out,
-        "    Projection:   Q = {:.1} ({})",
-        diagnostics.projection_mismatch_q, projection_status
+        "    Stationarity: {:.2}x ({})",
+        diagnostics.stationarity_ratio, stationarity_status
     )
     .unwrap();
 
@@ -562,18 +587,6 @@ pub fn format_debug_environment(out: &mut String, diagnostics: &Diagnostics) {
         }
     )
     .unwrap();
-    writeln!(
-        out,
-        "      Projection:     Q={:.1} {}",
-        diagnostics.projection_mismatch_q,
-        if diagnostics.projection_mismatch_ok {
-            "OK"
-        } else {
-            "Mismatch"
-        }
-    )
-    .unwrap();
-
     writeln!(out).unwrap();
     writeln!(
         out,
@@ -839,8 +852,8 @@ fn format_debug_core_metrics(
     writeln!(out, "\u{2502} P(leak) = {:.1}%", leak_probability * 100.0).unwrap();
     writeln!(
         out,
-        "\u{2502} Effect  = {:.1}ns shift + {:.1}ns tail ({})",
-        effect.shift_ns, effect.tail_ns, effect.pattern
+        "\u{2502} Effect  = {:.1}ns (CI: [{:.1}, {:.1}])",
+        effect.max_effect_ns, effect.credible_interval_ns.0, effect.credible_interval_ns.1
     )
     .unwrap();
 
@@ -904,18 +917,6 @@ fn format_debug_diagnostics(out: &mut String, diagnostics: &Diagnostics) {
     )
     .unwrap();
 
-    let projection_status = if diagnostics.projection_mismatch_ok {
-        green("OK")
-    } else {
-        red("MISMATCH")
-    };
-    writeln!(
-        out,
-        "\u{2502}   Projection: Q = {:.1} ({})",
-        diagnostics.projection_mismatch_q, projection_status
-    )
-    .unwrap();
-
     let stationarity_status = if diagnostics.stationarity_ok {
         format!("{:.1}x", diagnostics.stationarity_ratio)
     } else {
@@ -970,8 +971,10 @@ fn format_debug_research(out: &mut String, research: &ResearchOutcome) {
     .unwrap();
     writeln!(
         out,
-        "\u{2502} Effect = {:.1}ns shift + {:.1}ns tail ({})",
-        research.effect.shift_ns, research.effect.tail_ns, research.effect.pattern
+        "\u{2502} Effect = {:.1}ns (CI: [{:.1}, {:.1}])",
+        research.effect.max_effect_ns,
+        research.effect.credible_interval_ns.0,
+        research.effect.credible_interval_ns.1
     )
     .unwrap();
 

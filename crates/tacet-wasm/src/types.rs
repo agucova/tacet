@@ -7,10 +7,7 @@ use serde::{Deserialize, Serialize};
 use tacet_core::constants::{
     DEFAULT_FAIL_THRESHOLD, DEFAULT_MAX_SAMPLES, DEFAULT_PASS_THRESHOLD, DEFAULT_TIME_BUDGET_SECS,
 };
-use tacet_core::result::{
-    EffectPattern as CoreEffectPattern, Exploitability as CoreExploitability,
-    MeasurementQuality as CoreMeasurementQuality,
-};
+use tacet_core::result::{Exploitability as CoreExploitability, MeasurementQuality as CoreMeasurementQuality};
 use tacet_core::types::AttackerModel as CoreAttackerModel;
 use tsify::Tsify;
 
@@ -90,31 +87,6 @@ pub enum InconclusiveReason {
     ThresholdElevated = 7,
 }
 
-/// Pattern of timing effect.
-#[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
-#[serde(rename_all = "camelCase")]
-pub enum EffectPattern {
-    /// Uniform shift across all quantiles.
-    UniformShift = 0,
-    /// Effect concentrated in tails (upper quantiles).
-    TailEffect = 1,
-    /// Both shift and tail components present.
-    Mixed = 2,
-    /// Cannot determine pattern.
-    Indeterminate = 3,
-}
-
-impl From<CoreEffectPattern> for EffectPattern {
-    fn from(p: CoreEffectPattern) -> Self {
-        match p {
-            CoreEffectPattern::UniformShift => EffectPattern::UniformShift,
-            CoreEffectPattern::TailEffect => EffectPattern::TailEffect,
-            CoreEffectPattern::Mixed => EffectPattern::Mixed,
-            CoreEffectPattern::Indeterminate => EffectPattern::Indeterminate,
-        }
-    }
-}
 
 /// Exploitability assessment.
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,24 +152,18 @@ impl From<CoreMeasurementQuality> for MeasurementQuality {
 #[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectEstimate {
-    /// Uniform shift component in nanoseconds.
-    pub shift_ns: f64,
-    /// Tail effect component in nanoseconds.
-    pub tail_ns: f64,
-    /// Lower bound of 95% credible interval for total effect.
-    pub credible_interval_low: f64,
-    /// Upper bound of 95% credible interval for total effect.
-    pub credible_interval_high: f64,
-    /// Pattern of the effect.
-    pub pattern: EffectPattern,
-    /// Interpretation caveat if model fit is poor.
-    pub interpretation_caveat: Option<String>,
+    /// Maximum effect across all deciles in nanoseconds: max_k |delta_k|.
+    pub max_effect_ns: f64,
+    /// Lower bound of 95% credible interval for max effect.
+    pub ci_low_ns: f64,
+    /// Upper bound of 95% credible interval for max effect.
+    pub ci_high_ns: f64,
 }
 
 impl EffectEstimate {
-    /// Compute the total effect magnitude (L2 norm of shift and tail).
+    /// Get the maximum effect magnitude.
     pub fn total_effect_ns(&self) -> f64 {
-        (self.shift_ns * self.shift_ns + self.tail_ns * self.tail_ns).sqrt()
+        self.max_effect_ns
     }
 }
 
@@ -214,10 +180,6 @@ pub struct Diagnostics {
     pub stationarity_ratio: f64,
     /// Whether stationarity check passed.
     pub stationarity_ok: bool,
-    /// Projection mismatch Q statistic.
-    pub projection_mismatch_q: f64,
-    /// Whether projection mismatch is acceptable.
-    pub projection_mismatch_ok: bool,
     /// Whether discrete mode was used (low timer resolution).
     pub discrete_mode: bool,
     /// Timer resolution in nanoseconds.
@@ -226,6 +188,14 @@ pub struct Diagnostics {
     pub lambda_mean: f64,
     /// Whether lambda chain mixed well.
     pub lambda_mixing_ok: bool,
+    /// Posterior mean of likelihood precision kappa.
+    pub kappa_mean: f64,
+    /// Coefficient of variation of kappa.
+    pub kappa_cv: f64,
+    /// Effective sample size of kappa chain.
+    pub kappa_ess: f64,
+    /// Whether kappa chain mixed well.
+    pub kappa_mixing_ok: bool,
 }
 
 impl Default for Diagnostics {
@@ -235,12 +205,14 @@ impl Default for Diagnostics {
             effective_sample_size: 0,
             stationarity_ratio: 1.0,
             stationarity_ok: true,
-            projection_mismatch_q: 0.0,
-            projection_mismatch_ok: true,
             discrete_mode: false,
             timer_resolution_ns: 0.0,
             lambda_mean: 1.0,
             lambda_mixing_ok: true,
+            kappa_mean: 1.0,
+            kappa_cv: 0.0,
+            kappa_ess: 0.0,
+            kappa_mixing_ok: true,
         }
     }
 }
@@ -314,10 +286,8 @@ pub struct AnalysisResult {
     pub exploitability: Exploitability,
     /// Inconclusive reason (only valid if outcome == Inconclusive).
     pub inconclusive_reason: InconclusiveReason,
-    /// Minimum detectable effect (shift) in nanoseconds.
-    pub mde_shift_ns: f64,
-    /// Minimum detectable effect (tail) in nanoseconds.
-    pub mde_tail_ns: f64,
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
     /// Timer resolution in nanoseconds.
     pub timer_resolution_ns: f64,
     /// User's requested threshold (theta) in nanoseconds.

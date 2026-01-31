@@ -120,11 +120,8 @@ pub struct Calibration {
     /// When true, use mid-quantile estimators and m-out-of-n bootstrap.
     pub discrete_mode: bool,
 
-    /// Minimum detectable effect (shift component) from calibration.
-    pub mde_shift_ns: f64,
-
-    /// Minimum detectable effect (tail component) from calibration.
-    pub mde_tail_ns: f64,
+    /// Minimum detectable effect in nanoseconds.
+    pub mde_ns: f64,
 
     /// Statistics snapshot from calibration phase for drift detection.
     pub calibration_snapshot: CalibrationSnapshot,
@@ -181,8 +178,7 @@ impl Calibration {
         theta_ns: f64,
         calibration_samples: usize,
         discrete_mode: bool,
-        mde_shift_ns: f64,
-        mde_tail_ns: f64,
+        mde_ns: f64,
         calibration_snapshot: CalibrationSnapshot,
         timer_resolution_ns: f64,
         samples_per_second: f64,
@@ -208,8 +204,7 @@ impl Calibration {
             theta_ns,
             calibration_samples,
             discrete_mode,
-            mde_shift_ns,
-            mde_tail_ns,
+            mde_ns,
             calibration_snapshot,
             timer_resolution_ns,
             samples_per_second,
@@ -234,8 +229,7 @@ impl Calibration {
         theta_ns: f64,
         calibration_samples: usize,
         discrete_mode: bool,
-        mde_shift_ns: f64,
-        mde_tail_ns: f64,
+        mde_ns: f64,
         calibration_snapshot: CalibrationSnapshot,
         timer_resolution_ns: f64,
         samples_per_second: f64,
@@ -262,8 +256,7 @@ impl Calibration {
             theta_ns,
             calibration_samples,
             discrete_mode,
-            mde_shift_ns,
-            mde_tail_ns,
+            mde_ns,
             calibration_snapshot,
             timer_resolution_ns,
             samples_per_second,
@@ -340,9 +333,7 @@ impl Calibration {
             theta_eff: self.theta_eff,
             theta_floor_initial: self.theta_floor_initial,
             theta_tick: self.theta_tick,
-            mde_shift_ns: self.mde_shift_ns,
-            mde_tail_ns: self.mde_tail_ns,
-            projection_mismatch_thresh: self.projection_mismatch_thresh,
+            mde_ns: self.mde_ns,
             samples_per_second: self.samples_per_second,
         }
     }
@@ -502,7 +493,7 @@ pub fn calibrate(
         .map(|&t| t as f64 * ns_per_tick)
         .collect();
 
-    // Check discrete mode (spec Section 2.4): < 10% unique values
+    // Check discrete mode (spec §3.6): < 10% unique values
     let unique_baseline = count_unique(&baseline_ns);
     let unique_sample = count_unique(&sample_ns);
     let min_uniqueness = (unique_baseline as f64 / n as f64).min(unique_sample as f64 / n as f64);
@@ -540,7 +531,7 @@ pub fn calibrate(
     // Compute sigma rate: Sigma_rate = Sigma_cal * n_cal
     let sigma_rate = cov_estimate.matrix * (n as f64);
 
-    // Compute MDE for prior setting (spec Section 2.7)
+    // Compute MDE for prior setting (spec §3.3)
     let mde = estimate_mde(&cov_estimate.matrix, config.alpha);
 
     // Run preflight checks (unless skipped)
@@ -586,8 +577,7 @@ pub fn calibrate(
         config.theta_ns,
         n,
         discrete_mode,
-        mde.shift_ns,
-        mde.tail_ns,
+        mde.mde_ns,
         calibration_snapshot,
         config.timer_resolution_ns,
         samples_per_second,
@@ -1007,8 +997,7 @@ mod tests {
             theta_eff,           // theta_ns
             5000,                // calibration_samples
             false,               // discrete_mode
-            5.0,                 // mde_shift_ns
-            10.0,                // mde_tail_ns
+            5.0,                 // mde_ns
             snapshot,            // calibration_snapshot
             1.0,                 // timer_resolution_ns
             10000.0,             // samples_per_second
@@ -1018,7 +1007,7 @@ mod tests {
             theta_eff,           // theta_eff
             0.1,                 // theta_floor_initial
             42,                  // rng_seed
-            1,                   // batch_k (no batching in tests)
+            1,                   // batch_k
         )
     }
 

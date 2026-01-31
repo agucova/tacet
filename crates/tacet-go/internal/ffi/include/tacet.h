@@ -107,28 +107,6 @@ typedef enum ToOutcome {
 } ToOutcome;
 
 /**
- * Effect pattern.
- */
-typedef enum ToEffectPattern {
-  /**
-   * Constant timing difference across all quantiles.
-   */
-  UniformShift = 0,
-  /**
-   * Timing difference concentrated in upper quantiles.
-   */
-  TailEffect = 1,
-  /**
-   * Both shift and tail components present.
-   */
-  Mixed = 2,
-  /**
-   * Pattern cannot be determined.
-   */
-  Indeterminate = 3,
-} ToEffectPattern;
-
-/**
  * Measurement quality assessment.
  */
 typedef enum ToMeasurementQuality {
@@ -243,13 +221,9 @@ typedef struct ToConfig {
  */
 typedef struct ToEffect {
   /**
-   * Uniform shift component in nanoseconds.
+   * Maximum effect in nanoseconds: max_k |delta_k|.
    */
-  double shift_ns;
-  /**
-   * Tail effect component in nanoseconds.
-   */
-  double tail_ns;
+  double max_effect_ns;
   /**
    * 95% credible interval lower bound.
    */
@@ -258,10 +232,6 @@ typedef struct ToEffect {
    * 95% credible interval upper bound.
    */
   double ci_high_ns;
-  /**
-   * Effect pattern.
-   */
-  enum ToEffectPattern pattern;
 } ToEffect;
 
 /**
@@ -286,14 +256,6 @@ typedef struct ToDiagnostics {
    * Whether stationarity check passed.
    */
   bool stationarity_ok;
-  /**
-   * Projection mismatch Q statistic.
-   */
-  double projection_mismatch_q;
-  /**
-   * Whether projection mismatch is acceptable.
-   */
-  bool projection_mismatch_ok;
   /**
    * Whether discrete mode was used (low timer resolution).
    */
@@ -373,13 +335,9 @@ typedef struct ToResult {
    */
   enum ToInconclusiveReason inconclusive_reason;
   /**
-   * Minimum detectable effect (shift) in nanoseconds.
+   * Minimum detectable effect in nanoseconds.
    */
-  double mde_shift_ns;
-  /**
-   * Minimum detectable effect (tail) in nanoseconds.
-   */
-  double mde_tail_ns;
+  double mde_ns;
   /**
    * User's requested threshold in nanoseconds.
    */
