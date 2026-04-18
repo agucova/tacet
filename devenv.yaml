@@ -7,6 +7,9 @@ inputs:
       nixpkgs:
         follows: nixpkgs
 
-# Allow insecure ecdsa package required by tlsfuzzer
+# Allow insecure python3-ecdsa-0.19.1 (CVE-2024-23342), required by tlsfuzzer.
+# Note: devenv 2.0.6's predicate for NIXPKGS_CONFIG is inconsistent with
+# nixpkgs' default check (getName vs getNameWithVersion), so this list alone
+# isn't sufficient — .envrc sets NIXPKGS_ALLOW_INSECURE=1 as a backstop.
 permittedInsecurePackages:
   - "python3.13-ecdsa-0.19.1"

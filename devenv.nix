@@ -50,13 +50,13 @@ let
   # tlslite-ng - TLS library required by tlsfuzzer
   tlslite-ng = pkgs.python3Packages.buildPythonPackage {
     pname = "tlslite-ng";
-    version = "unstable-2024-01-19";
+    version = "unstable-2026-04-18";
     format = "setuptools";
 
     src = pkgs.fetchFromGitHub {
       owner = "tlsfuzzer";
       repo = "tlslite-ng";
-      rev = "master";
+      rev = "02d1506badb16473faf50ebc3a413c6d789fe31f";
       hash = "sha256-Z0nVC6XcnA3I4H8s0KkKd5gkJ1kfWd4d/2/2eJyo7lQ=";
     };
 
@@ -76,14 +76,14 @@ let
   # tlsfuzzer - TLS timing analysis tool
   tlsfuzzer = pkgs.python3Packages.buildPythonApplication {
     pname = "tlsfuzzer";
-    version = "unstable-2024-01-19";
+    version = "unstable-2026-04-18";
     format = "setuptools";
 
     src = pkgs.fetchFromGitHub {
       owner = "tlsfuzzer";
       repo = "tlsfuzzer";
-      rev = "master";
-      hash = "sha256-8Bcgyvnyaxy7a9x4prx56lzbHjsSJfDfywp/HdpjqFw=";
+      rev = "bf7f579dc0e65498cfb21b60e9b152f6bd84a3bf";
+      hash = "sha256-y8tTUxCU18NiCMqznXChIc5fPs7rwWS2PcnGUgbbJMA=";
     };
 
     propagatedBuildInputs = [
@@ -189,7 +189,7 @@ in
 
     # Documentation website (Starlight + CF Workers)
     bun
-    nodePackages.wrangler
+    wrangler
 
     # WASM development
     wasmtime
