@@ -973,7 +973,7 @@ pub unsafe extern "C" fn to_analyze(
     let var_n = var_rate / n_blocks as f64;
 
     // Run Bayesian inference
-    let bayes_result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta_eff, seed, 4.0);
+    let bayes_result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta_eff, seed, 4.0, 4.0);
 
     // Extract max effect from posterior mean (for 1D, this is just the absolute value)
     let max_effect_ns = bayes_result.w1_post.abs();

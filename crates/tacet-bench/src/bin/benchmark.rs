@@ -146,6 +146,41 @@ fn main() {
         _ => tacet::BootstrapMethod::Joint,
     };
 
+    // Parse hyperparameter ablation overrides from env vars (rebuttal-only).
+    // All are optional; when unset the library default is used end-to-end.
+    let ablation_pi0: Option<f64> = std::env::var("TACET_ABLATION_PI0")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let ablation_alpha: Option<f64> = std::env::var("TACET_ABLATION_ALPHA")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let ablation_beta: Option<f64> = std::env::var("TACET_ABLATION_BETA")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let ablation_kl_min: Option<f64> = std::env::var("TACET_ABLATION_KL_MIN")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let ablation_nu: Option<f64> = std::env::var("TACET_ABLATION_NU_LIKELIHOOD")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    let ablation_nu_prior: Option<f64> = std::env::var("TACET_ABLATION_NU_PRIOR")
+        .ok()
+        .and_then(|s| s.parse().ok());
+    if ablation_pi0.is_some()
+        || ablation_alpha.is_some()
+        || ablation_beta.is_some()
+        || ablation_kl_min.is_some()
+        || ablation_nu.is_some()
+        || ablation_nu_prior.is_some()
+    {
+        eprintln!(
+            "[ablation] overrides: pi0={:?} alpha={:?} beta={:?} kl_min={:?} nu_ℓ={:?} nu_prior={:?}",
+            ablation_pi0, ablation_alpha, ablation_beta, ablation_kl_min, ablation_nu, ablation_nu_prior
+        );
+    }
+
+    let make_tacet = || build_tacet_adapter(bootstrap_method);
+
     // Parse preset
     let mut config = match args.preset.to_lowercase().as_str() {
         "quick" => SweepConfig::quick(),
@@ -230,7 +265,7 @@ fn main() {
             // All tools for paper comparison
             // Uses R-based RTLF/SILENT (reference implementations) via persistent pools
             vec![
-                Box::new(TimingOracleAdapter::default().bootstrap_method(bootstrap_method)),
+                Box::new(make_tacet()),
                 Box::new(DudectAdapter::default()),
                 Box::new(TimingTvlaAdapter::default()),
                 Box::new(KsTestAdapter::default()),
@@ -243,7 +278,7 @@ fn main() {
         } else if tool_list.to_lowercase() == "native" {
             // All native Rust tools (no external dependencies)
             vec![
-                Box::new(TimingOracleAdapter::default().bootstrap_method(bootstrap_method)),
+                Box::new(make_tacet()),
                 Box::new(DudectAdapter::default()),
                 Box::new(TimingTvlaAdapter::default()),
                 Box::new(KsTestAdapter::default()),
@@ -261,7 +296,7 @@ fn main() {
     } else {
         // Default: all tools (same as --tools all)
         vec![
-            Box::new(TimingOracleAdapter::default().bootstrap_method(bootstrap_method)),
+            Box::new(make_tacet()),
             Box::new(DudectAdapter::default()),
             Box::new(TimingTvlaAdapter::default()),
             Box::new(KsTestAdapter::default()),
@@ -532,6 +567,48 @@ fn parse_noise(s: &str) -> Option<NoiseModel> {
     None
 }
 
+/// Parse an optional f64-valued ablation env var. Returns `None` if the var is
+/// unset; panics with a clear diagnostic if it is set but unparseable.
+fn parse_ablation_f64(key: &str) -> Option<f64> {
+    match std::env::var(key) {
+        Ok(s) => match s.parse::<f64>() {
+            Ok(v) => Some(v),
+            Err(e) => panic!(
+                "invalid value for ablation env var {key}={s:?}: {e}. \
+                 Expected a finite floating-point number (or leave the var unset)."
+            ),
+        },
+        Err(_) => None,
+    }
+}
+
+/// Build a `TimingOracleAdapter` honoring both the bootstrap-method and
+/// hyperparameter-ablation env vars. Every call site that creates a tacet
+/// adapter in this binary MUST go through this helper so ablation overrides
+/// are applied consistently.
+fn build_tacet_adapter(bootstrap_method: tacet::BootstrapMethod) -> TimingOracleAdapter {
+    let mut adapter = TimingOracleAdapter::default().bootstrap_method(bootstrap_method);
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_PI0") {
+        adapter = adapter.target_exceedance(v);
+    }
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_ALPHA") {
+        adapter = adapter.pass_threshold(v);
+    }
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_BETA") {
+        adapter = adapter.fail_threshold(v);
+    }
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_KL_MIN") {
+        adapter = adapter.kl_min(v);
+    }
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_NU_LIKELIHOOD") {
+        adapter = adapter.nu_likelihood(v);
+    }
+    if let Some(v) = parse_ablation_f64("TACET_ABLATION_NU_PRIOR") {
+        adapter = adapter.nu_prior(v);
+    }
+    adapter
+}
+
 fn create_tool(
     name: &str,
     r_pool: &Arc<ProcessPool>,
@@ -540,9 +617,7 @@ fn create_tool(
 ) -> Option<Box<dyn ToolAdapter>> {
     match name.to_lowercase().as_str() {
         // Native adapters (always available)
-        "tacet" | "to" => Some(Box::new(
-            TimingOracleAdapter::default().bootstrap_method(bootstrap_method),
-        )),
+        "tacet" | "to" => Some(Box::new(build_tacet_adapter(bootstrap_method))),
         "dudect" => Some(Box::new(DudectAdapter::default())),
         "timing-tvla" | "tvla" => Some(Box::new(TimingTvlaAdapter::default())),
         "ks-test" | "ks" => Some(Box::new(KsTestAdapter::default())),

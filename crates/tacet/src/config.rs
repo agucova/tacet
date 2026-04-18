@@ -243,6 +243,30 @@ pub struct Config {
     ///
     /// Default: false.
     pub force_discrete_mode: bool,
+
+    /// Target exceedance probability π₀ for half-t prior calibration (spec §3.4.3).
+    ///
+    /// Exposed for hyperparameter-sensitivity ablation studies only.
+    /// Production code should use the default (0.62).
+    pub target_exceedance: f64,
+
+    /// Minimum KL divergence (nats) for the S1 DataTooNoisy quality gate (spec §3.5.2).
+    ///
+    /// Exposed for hyperparameter-sensitivity ablation studies only.
+    /// Production code should use the default (0.7).
+    pub kl_min: f64,
+
+    /// Student-t likelihood degrees of freedom ν_ℓ (spec §A.1).
+    ///
+    /// Exposed for hyperparameter-sensitivity ablation studies only.
+    /// Production code should use the default (8.0).
+    pub nu_likelihood: f64,
+
+    /// Half-t prior degrees of freedom ν (spec §A.1).
+    ///
+    /// Exposed for hyperparameter-sensitivity ablation studies only.
+    /// Production code should use the default (4.0).
+    pub nu_prior: f64,
 }
 
 impl Default for Config {
@@ -285,6 +309,10 @@ impl Default for Config {
             bootstrap_method: tacet_core::statistics::BootstrapMethod::default(),
             measurement_seed: None,
             force_discrete_mode: false,
+            target_exceedance: 0.62,
+            kl_min: 0.7,
+            nu_likelihood: 8.0,
+            nu_prior: 4.0,
         }
     }
 }
@@ -468,6 +496,45 @@ impl Config {
     /// Force discrete mode for testing.
     pub fn force_discrete_mode(mut self, force: bool) -> Self {
         self.force_discrete_mode = force;
+        self
+    }
+
+    /// Override target exceedance probability π₀ (ablation studies only).
+    ///
+    /// See [`Config::target_exceedance`]. Panics if not in (0, 1).
+    pub fn target_exceedance(mut self, pi0: f64) -> Self {
+        assert!(
+            pi0 > 0.0 && pi0 < 1.0,
+            "target_exceedance must be in (0, 1)"
+        );
+        self.target_exceedance = pi0;
+        self
+    }
+
+    /// Override the KL quality-gate threshold (ablation studies only).
+    ///
+    /// See [`Config::kl_min`]. Panics if non-positive.
+    pub fn kl_min(mut self, kl: f64) -> Self {
+        assert!(kl > 0.0, "kl_min must be positive");
+        self.kl_min = kl;
+        self
+    }
+
+    /// Override Student-t likelihood degrees of freedom ν_ℓ (ablation studies only).
+    ///
+    /// See [`Config::nu_likelihood`]. Panics if ≤ 2 (Student-t variance diverges).
+    pub fn nu_likelihood(mut self, nu: f64) -> Self {
+        assert!(nu > 2.0, "nu_likelihood must be > 2 (variance must be finite)");
+        self.nu_likelihood = nu;
+        self
+    }
+
+    /// Override half-t prior degrees of freedom ν (ablation studies only).
+    ///
+    /// See [`Config::nu_prior`]. Panics if ≤ 2 (prior variance diverges).
+    pub fn nu_prior(mut self, nu: f64) -> Self {
+        assert!(nu > 2.0, "nu_prior must be > 2 (prior variance must be finite)");
+        self.nu_prior = nu;
         self
     }
 

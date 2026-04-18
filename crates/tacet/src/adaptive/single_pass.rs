@@ -25,8 +25,8 @@
 use std::time::{Duration, Instant};
 
 use tacet_core::adaptive::{
-    calibrate_floor_from_null, calibrate_halft_prior_scale_1d, compute_achievable_at_max,
-    is_threshold_elevated,
+    calibrate_floor_from_null, calibrate_halft_prior_scale_1d_with_target,
+    compute_achievable_at_max, is_threshold_elevated,
 };
 use tacet_core::analysis::{compute_effect_estimate, estimate_mde};
 use tacet_core::constants::{
@@ -67,6 +67,18 @@ pub struct SinglePassConfig {
 
     /// Bootstrap resampling method (Joint or Stratified).
     pub bootstrap_method: tacet_core::statistics::BootstrapMethod,
+
+    /// Target exceedance probability π₀ for half-t prior calibration (default 0.62, per spec §3.4.3).
+    /// Exposed for hyperparameter ablation studies; should stay at default for production.
+    pub target_exceedance: f64,
+
+    /// Student-t likelihood degrees of freedom ν_ℓ (default 8.0, per spec §A.1).
+    /// Exposed for hyperparameter ablation studies; should stay at default for production.
+    pub nu_likelihood: f64,
+
+    /// Half-t prior degrees of freedom ν (default 4.0, per spec §A.1).
+    /// Exposed for hyperparameter ablation studies; should stay at default for production.
+    pub nu_prior: f64,
 }
 
 impl Default for SinglePassConfig {
@@ -80,6 +92,9 @@ impl Default for SinglePassConfig {
             seed: 0xDEADBEEF,
             kl_min: 0.7,
             bootstrap_method: tacet_core::statistics::BootstrapMethod::default(),
+            target_exceedance: 0.62,
+            nu_likelihood: 8.0,
+            nu_prior: 4.0,
         }
     }
 }
@@ -271,7 +286,14 @@ pub fn analyze_single_pass(
     };
 
     // Step 5: half-t prior calibration for 1D (spec §3.3.5)
-    let sigma_t = calibrate_halft_prior_scale_1d(var_rate, config.theta_ns, n, config.seed);
+    let sigma_t = calibrate_halft_prior_scale_1d_with_target(
+        var_rate,
+        config.theta_ns,
+        n,
+        config.seed,
+        config.target_exceedance,
+        config.nu_prior,
+    );
 
     // Compute marginal prior variance for variance ratio check (spec §3.5.2)
     // For half-t_4: Var(|δ|) ≈ 2σ_t² (using half-normal approximation)
@@ -319,7 +341,8 @@ pub fn analyze_single_pass(
         sigma_t,
         theta_eff,
         config.seed,
-        8.0, // nu_likelihood: Student-t df (§A.1: ν_ℓ = 8)
+        config.nu_likelihood, // Student-t df (§A.1 default: ν_ℓ = 8)
+        config.nu_prior,      // half-t prior df (§A.1 default: ν = 4)
     );
     let leak_probability = bayes_result.leak_probability;
 

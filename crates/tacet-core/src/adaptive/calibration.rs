@@ -724,16 +724,29 @@ fn compute_calibration_snapshot(baseline_ns: &[f64], sample_ns: &[f64]) -> Calib
 /// assert!(sigma_t > 0.0);
 /// ```
 pub fn calibrate_halft_prior_scale_1d(
+    var_rate: f64,
+    theta_user: f64,
+    n_cal: usize,
+    seed: u64,
+) -> f64 {
+    calibrate_halft_prior_scale_1d_with_target(var_rate, theta_user, n_cal, seed, 0.62, NU)
+}
+
+/// Variant of `calibrate_halft_prior_scale_1d` that accepts `target_exceedance`
+/// and `nu_prior` as parameters, for hyperparameter-sensitivity ablation studies.
+/// The default values (0.62, 4.0) match the spec; deviations should only be used
+/// for research.
+pub fn calibrate_halft_prior_scale_1d_with_target(
     _var_rate: f64,
     theta_user: f64,
     _n_cal: usize,
     seed: u64,
+    target_exceedance: f64,
+    nu_prior: f64,
 ) -> f64 {
-    // Target exceedance probability
-    const TARGET_EXCEEDANCE: f64 = 0.62;
     const TOLERANCE: f64 = 0.02;
     const N_SAMPLES: usize = 10_000;
-    const NU: f64 = 4.0;
+    let nu = nu_prior;
 
     // Binary search bounds
     let mut sigma_low = theta_user / 10.0;
@@ -751,7 +764,7 @@ pub fn calibrate_halft_prior_scale_1d(
         //   λ ~ Gamma(ν/2, ν/2), z ~ N(0,1), δ = |σ/√λ · z|
         let mut exceed_count = 0;
         for _ in 0..N_SAMPLES {
-            let lambda = sample_gamma(&mut rng, NU / 2.0, NU / 2.0);
+            let lambda = sample_gamma(&mut rng, nu / 2.0, nu / 2.0);
             let z = sample_standard_normal(&mut rng);
             let delta = (sigma_mid / lambda.sqrt() * z).abs();
 
@@ -763,12 +776,12 @@ pub fn calibrate_halft_prior_scale_1d(
         let exceedance_prob = exceed_count as f64 / N_SAMPLES as f64;
 
         // Check convergence
-        if (exceedance_prob - TARGET_EXCEEDANCE).abs() < TOLERANCE {
+        if (exceedance_prob - target_exceedance).abs() < TOLERANCE {
             return sigma_mid;
         }
 
         // Adjust bounds
-        if exceedance_prob < TARGET_EXCEEDANCE {
+        if exceedance_prob < target_exceedance {
             sigma_low = sigma_mid;
         } else {
             sigma_high = sigma_mid;

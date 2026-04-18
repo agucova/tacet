@@ -720,7 +720,8 @@ fn compute_posterior(
         calibration.sigma_t,
         config.theta_ns,
         config.seed,
-        4.0, // nu_likelihood: Student-t df for robustness
+        4.0, // nu_likelihood: Student-t df for robustness (FFI path)
+        4.0, // nu_prior: half-t prior df (§A.1 default)
     );
 
     Some(Posterior::new(

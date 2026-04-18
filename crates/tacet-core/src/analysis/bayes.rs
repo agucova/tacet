@@ -112,7 +112,8 @@ pub struct BayesW1Result {
 /// * `sigma_t` - Prior scale parameter
 /// * `theta` - Minimum effect of concern (threshold)
 /// * `seed` - Random seed for reproducibility
-/// * `nu_likelihood` - Degrees of freedom for Student-t likelihood (default 4.0)
+/// * `nu_likelihood` - Degrees of freedom for Student-t likelihood (default 8.0)
+/// * `nu_prior` - Degrees of freedom for half-t prior (default 4.0)
 ///
 /// # Returns
 ///
@@ -124,10 +125,11 @@ pub fn compute_bayes_1d(
     theta: f64,
     seed: u64,
     nu_likelihood: f64,
+    nu_prior: f64,
 ) -> BayesW1Result {
     const N_ITER: usize = 5000;
     const BURN_IN: usize = 1000;
-    const NU: f64 = 4.0; // Prior degrees of freedom (half-t prior)
+    let nu = nu_prior; // Prior degrees of freedom (half-t prior)
 
     let mut rng = Xoshiro256PlusPlus::seed_from_u64(seed);
 
@@ -150,8 +152,8 @@ pub fn compute_bayes_1d(
 
         // Step 2: Sample λ ~ Gamma(ν/2 + 1/2, ν/2 + δ²/(2σ_t²))
         // This gives half-t prior when marginalized
-        let shape_lambda = NU / 2.0 + 0.5;
-        let rate_lambda = NU / 2.0 + (delta * delta) / (2.0 * sigma_t * sigma_t);
+        let shape_lambda = nu / 2.0 + 0.5;
+        let rate_lambda = nu / 2.0 + (delta * delta) / (2.0 * sigma_t * sigma_t);
         let lambda = sample_gamma(&mut rng, shape_lambda, rate_lambda);
 
         // Step 3: Sample δ | λ, κ ~ TruncatedNormal(μ_post, σ²_post, lower=0)
@@ -263,8 +265,8 @@ mod tests {
         let sigma_t = 20.0;
         let theta = 3.0;
 
-        let result1 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0);
-        let result2 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0);
+        let result1 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0, 4.0);
+        let result2 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0, 4.0);
 
         assert_eq!(
             result1.leak_probability, result2.leak_probability,
@@ -285,7 +287,7 @@ mod tests {
         let sigma_t = 10.0;
         let theta = 2.0;
 
-        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0);
+        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0, 4.0);
 
         // δ draws are constrained to [0, ∞) so posterior mean must be ≥ 0
         assert!(
@@ -318,10 +320,10 @@ mod tests {
         let seed = 42;
 
         // Small threshold should give high leak probability
-        let result_small_theta = compute_bayes_1d(w1_obs, var_n, sigma_t, 1.0, seed, 4.0);
+        let result_small_theta = compute_bayes_1d(w1_obs, var_n, sigma_t, 1.0, seed, 4.0, 4.0);
 
         // Large threshold should give low leak probability
-        let result_large_theta = compute_bayes_1d(w1_obs, var_n, sigma_t, 20.0, seed, 4.0);
+        let result_large_theta = compute_bayes_1d(w1_obs, var_n, sigma_t, 20.0, seed, 4.0, 4.0);
 
         assert!(
             result_small_theta.leak_probability > result_large_theta.leak_probability,
@@ -336,7 +338,7 @@ mod tests {
         let sigma_t = 20.0;
         let theta = 3.0;
 
-        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0);
+        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, 42, 4.0, 4.0);
 
         let (lo, hi) = result.credible_interval;
 
@@ -361,10 +363,10 @@ mod tests {
         let seed = 42;
 
         // Student-t with df=4 (robust)
-        let result_t4 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 4.0);
+        let result_t4 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 4.0, 4.0);
 
         // Student-t with df=100 (approximately Normal)
-        let result_t100 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 100.0);
+        let result_t100 = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 100.0, 4.0);
 
         // Both should give valid probabilities
         assert!(
@@ -396,7 +398,7 @@ mod tests {
         let theta = 8.0;
         let seed = 123;
 
-        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 4.0);
+        let result = compute_bayes_1d(w1_obs, var_n, sigma_t, theta, seed, 4.0, 4.0);
 
         // Should produce reasonable posterior estimate
         assert!(

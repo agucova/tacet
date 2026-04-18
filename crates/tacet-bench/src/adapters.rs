@@ -156,6 +156,18 @@ pub struct TimingOracleAdapter {
     pub max_samples: Option<usize>,
     /// Bootstrap resampling method (Joint or Stratified).
     pub bootstrap_method: tacet::BootstrapMethod,
+    /// Decision threshold α (P(leak) below this ⇒ Pass). Ablation only.
+    pub pass_threshold: Option<f64>,
+    /// Decision threshold 1-β (P(leak) above this ⇒ Fail). Ablation only.
+    pub fail_threshold: Option<f64>,
+    /// Target exceedance probability π₀ for prior calibration. Ablation only.
+    pub target_exceedance: Option<f64>,
+    /// Minimum KL divergence (nats) for S1 quality gate. Ablation only.
+    pub kl_min: Option<f64>,
+    /// Student-t likelihood degrees of freedom ν_ℓ. Ablation only.
+    pub nu_likelihood: Option<f64>,
+    /// Half-t prior degrees of freedom ν. Ablation only.
+    pub nu_prior: Option<f64>,
 }
 
 impl Default for TimingOracleAdapter {
@@ -165,6 +177,12 @@ impl Default for TimingOracleAdapter {
             time_budget: Some(Duration::from_secs(60)),
             max_samples: None,
             bootstrap_method: tacet::BootstrapMethod::Joint,
+            pass_threshold: None,
+            fail_threshold: None,
+            target_exceedance: None,
+            kl_min: None,
+            nu_likelihood: None,
+            nu_prior: None,
         }
     }
 }
@@ -195,6 +213,72 @@ impl TimingOracleAdapter {
         self.max_samples = Some(n);
         self
     }
+
+    /// Override decision threshold α (ablation).
+    pub fn pass_threshold(mut self, alpha: f64) -> Self {
+        self.pass_threshold = Some(alpha);
+        self
+    }
+
+    /// Override decision threshold 1-β (ablation).
+    pub fn fail_threshold(mut self, beta: f64) -> Self {
+        self.fail_threshold = Some(beta);
+        self
+    }
+
+    /// Override prior target exceedance probability π₀ (ablation).
+    pub fn target_exceedance(mut self, pi0: f64) -> Self {
+        self.target_exceedance = Some(pi0);
+        self
+    }
+
+    /// Override KL quality-gate threshold (ablation).
+    pub fn kl_min(mut self, kl: f64) -> Self {
+        self.kl_min = Some(kl);
+        self
+    }
+
+    /// Override Student-t likelihood degrees of freedom (ablation).
+    pub fn nu_likelihood(mut self, nu: f64) -> Self {
+        self.nu_likelihood = Some(nu);
+        self
+    }
+
+    /// Override half-t prior degrees of freedom (ablation).
+    pub fn nu_prior(mut self, nu: f64) -> Self {
+        self.nu_prior = Some(nu);
+        self
+    }
+
+    /// Apply all ablation knobs to a `TimingOracle`.
+    fn apply_knobs(&self, mut oracle: TimingOracle) -> TimingOracle {
+        oracle = oracle.bootstrap_method(self.bootstrap_method);
+        if let Some(budget) = self.time_budget {
+            oracle = oracle.time_budget(budget);
+        }
+        if let Some(max) = self.max_samples {
+            oracle = oracle.max_samples(max);
+        }
+        if let Some(a) = self.pass_threshold {
+            oracle = oracle.pass_threshold(a);
+        }
+        if let Some(b) = self.fail_threshold {
+            oracle = oracle.fail_threshold(b);
+        }
+        if let Some(p) = self.target_exceedance {
+            oracle = oracle.target_exceedance(p);
+        }
+        if let Some(k) = self.kl_min {
+            oracle = oracle.kl_min(k);
+        }
+        if let Some(n) = self.nu_likelihood {
+            oracle = oracle.nu_likelihood(n);
+        }
+        if let Some(n) = self.nu_prior {
+            oracle = oracle.nu_prior(n);
+        }
+        oracle
+    }
 }
 
 impl ToolAdapter for TimingOracleAdapter {
@@ -211,15 +295,7 @@ impl ToolAdapter for TimingOracleAdapter {
         let baseline_ns: Vec<f64> = data.baseline.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
         let test_ns: Vec<f64> = data.test.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
 
-        let mut oracle = TimingOracle::for_attacker(self.attacker_model)
-            .bootstrap_method(self.bootstrap_method);
-
-        if let Some(budget) = self.time_budget {
-            oracle = oracle.time_budget(budget);
-        }
-        if let Some(max) = self.max_samples {
-            oracle = oracle.max_samples(max);
-        }
+        let oracle = self.apply_knobs(TimingOracle::for_attacker(self.attacker_model));
 
         // Synthetic data has no timer quantisation floor
         let outcome = oracle.analyze_raw_samples_with_resolution(&baseline_ns, &test_ns, 0.0);
@@ -328,14 +404,7 @@ impl ToolAdapter for TimingOracleAdapter {
         let baseline_ns: Vec<f64> = dataset.blocked.baseline.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
         let test_ns: Vec<f64> = dataset.blocked.test.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
 
-        let mut oracle = TimingOracle::for_attacker(actual_model);
-
-        if let Some(budget) = self.time_budget {
-            oracle = oracle.time_budget(budget);
-        }
-        if let Some(max) = self.max_samples {
-            oracle = oracle.max_samples(max);
-        }
+        let oracle = self.apply_knobs(TimingOracle::for_attacker(actual_model));
 
         // Synthetic data has no timer quantisation floor
         let outcome = oracle.analyze_raw_samples_with_resolution(&baseline_ns, &test_ns, 0.0);

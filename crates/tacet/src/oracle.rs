@@ -431,6 +431,34 @@ impl TimingOracle {
         self
     }
 
+    /// Override target exceedance probability π₀ for prior calibration.
+    /// Ablation studies only; default is 0.62.
+    pub fn target_exceedance(mut self, pi0: f64) -> Self {
+        self.config = self.config.target_exceedance(pi0);
+        self
+    }
+
+    /// Override KL quality-gate threshold (nats).
+    /// Ablation studies only; default is 0.7.
+    pub fn kl_min(mut self, kl: f64) -> Self {
+        self.config = self.config.kl_min(kl);
+        self
+    }
+
+    /// Override Student-t likelihood degrees of freedom ν_ℓ.
+    /// Ablation studies only; default is 8.0.
+    pub fn nu_likelihood(mut self, nu: f64) -> Self {
+        self.config = self.config.nu_likelihood(nu);
+        self
+    }
+
+    /// Override half-t prior degrees of freedom ν.
+    /// Ablation studies only; default is 4.0.
+    pub fn nu_prior(mut self, nu: f64) -> Self {
+        self.config = self.config.nu_prior(nu);
+        self
+    }
+
     /// Enable or disable CPU affinity pinning.
     ///
     /// When enabled (default), the measurement thread is pinned to its
@@ -1699,8 +1727,11 @@ impl TimingOracle {
             bootstrap_iterations: 2000,
             timer_resolution_ns,
             seed: self.config.measurement_seed.unwrap_or(DEFAULT_SEED),
-            kl_min: 0.7,
+            kl_min: self.config.kl_min,
             bootstrap_method: self.config.bootstrap_method,
+            target_exceedance: self.config.target_exceedance,
+            nu_likelihood: self.config.nu_likelihood,
+            nu_prior: self.config.nu_prior,
         };
 
         let result = analyze_single_pass(baseline_ns, test_ns, &config);

@@ -414,6 +414,7 @@ fn compute_posterior_from_state(
         calibration.theta_eff,
         config.seed,
         8.0, // nu_likelihood: Student-t df (§A.1: ν_ℓ = 8)
+        4.0, // nu_prior: half-t prior df (§A.1: ν = 4)
     );
 
     // Note: v6.0 uses simplified 1D posterior without kappa/lambda diagnostics
