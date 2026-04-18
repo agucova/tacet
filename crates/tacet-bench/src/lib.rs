@@ -64,6 +64,8 @@
 
 pub mod adapters;
 pub mod checkpoint;
+pub mod crypto_collect;
+pub mod crypto_registry;
 pub mod dudect_stats;
 pub mod output;
 pub mod process_pool;

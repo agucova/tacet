@@ -44,36 +44,41 @@ echo "[setup] Using binary: $BENCHMARK_BIN"
 echo "[setup] Output root:  $OUTPUT_ROOT"
 mkdir -p "$OUTPUT_ROOT"
 
-# 13 configurations. Format: "LABEL PI0 ALPHA BETA KL_MIN NU_LIKELIHOOD NU_PRIOR"
+# 16 configurations. Format: "LABEL PI0 ALPHA BETA KL_MIN NU_LIKELIHOOD NU_PRIOR"
 # A value of "default" means: do NOT set the env var, use library default.
-# The `*_extreme` rows are stress-tests near the boundaries of each knob's
-# legitimate operating range; if they break, that's an honest disclosure of
-# where the mechanism starts to degrade (stronger than "everything was fine").
+# The `*_extreme`, `*_cauchy`, and `combo_stress_*` rows are stress-tests near
+# the boundaries of each knob's legitimate operating range; if they break,
+# that's an honest disclosure of where the mechanism starts to degrade
+# (stronger than "everything was fine").
 CONFIGS=(
-    "baseline        default  default  default  default  default  default"
-    "pi0_low         0.50     default  default  default  default  default"
-    "pi0_high        0.75     default  default  default  default  default"
-    "pi0_extreme     0.85     default  default  default  default  default"
-    "alpha_tight     default  0.01     0.99     default  default  default"
-    "alpha_loose     default  0.10     0.90     default  default  default"
-    "kl_loose        default  default  default  0.3      default  default"
-    "kl_strict       default  default  default  1.5      default  default"
-    "nu_low          default  default  default  default  4        default"
-    "nu_high         default  default  default  default  16       default"
-    "nu_ell_extreme  default  default  default  default  2.5      default"
-    "nu_prior_low    default  default  default  default  default  2.5"
-    "nu_prior_high   default  default  default  default  default  16"
+    "baseline            default  default  default  default  default  default"
+    "pi0_low             0.50     default  default  default  default  default"
+    "pi0_high            0.75     default  default  default  default  default"
+    "pi0_extreme         0.85     default  default  default  default  default"
+    "alpha_tight         default  0.01     0.99     default  default  default"
+    "alpha_loose         default  0.10     0.90     default  default  default"
+    "kl_loose            default  default  default  0.3      default  default"
+    "kl_strict           default  default  default  1.5      default  default"
+    "nu_low              default  default  default  default  4        default"
+    "nu_high             default  default  default  default  16       default"
+    "nu_ell_extreme      default  default  default  default  2.5      default"
+    "nu_ell_cauchy       default  default  default  default  2.01     default"
+    "nu_prior_low        default  default  default  default  default  2.5"
+    "nu_prior_high       default  default  default  default  default  16"
+    "combo_stress_heavy  0.85     0.01     0.99     1.5      2.5      2.5"
+    "combo_stress_light  0.50     0.10     0.90     0.3      16       16"
 )
 
 # Grid shared across all configs; preset=medium iterates BOTH attacker models
 # (AdjacentNetwork θ=100ns, SharedHardware θ≈0.4ns) and adds a sigma sweep at
 # null+IID for Heatmap 3. Filtered at aggregation time (see analyze_ablation.py).
-# 6 effects × 2 patterns × 4 noise × 2 attackers × 60 datasets ≈ 5,760 non-null
-# + ~480 null trials per config (bumped from 30 → 60 datasets; halves Wilson CI).
+# 6 effects × 2 patterns × 4 noise × 2 attackers × 120 datasets ≈ 11,520 non-null
+# + ~960 null trials per config. Datasets bumped 60 → 120 to halve Wilson CI
+# widths (e.g., FPR upper bound 0.9% → 0.44% at n=880 null per (cfg, attacker)).
 PATTERNS="shift,tail"
 NOISE="iid,ar1-0.3,ar1-0.6,ar1-0.8"
 EFFECTS="0,0.2,1.0,2.0,4.0,20.0"
-DATASETS=60
+DATASETS=120
 
 run_config() {
     local label=$1 pi0=$2 alpha=$3 beta=$4 kl=$5 nu=$6 nu_prior=$7
