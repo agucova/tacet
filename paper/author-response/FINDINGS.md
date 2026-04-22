@@ -1201,12 +1201,41 @@ Bootstrap 95 % CI around median across `70 cells = 7 primitives × 10 iter`:
     --primary-n 50000
   ```
 
-### Status (as of 22:40 UTC Wed Apr 22)
+### Table D — MARVIN end-to-end wall-clock (Tier 2, N=50 000, 20 iter)
 
-🟢 **Tier 1 complete** — numbers above are final. Tier 2 MARVIN
-end-to-end runtime (N=50 k, 20 iter) is running now on the same box;
-will append an "End-to-end on a real CVE" Table D once it lands. The
-paste-ready paragraphs don't depend on it.
+Real CVE detection budget: one collection + one decision per iteration on
+RustCrypto `rsa-0.9.9` PKCS#1 v1.5 decrypt (CVE-2023-49092).
+
+| Tool      | Collection | Decision | End-to-end | Fail (detect) | Pass (miss) | Inconclusive |
+|-----------|-----------:|---------:|-----------:|--------------:|------------:|-------------:|
+| tvla      | 18.56 s    |    0 ms  |  18.56 s   |        1 / 20 |      19 / 20 |          0   |
+| dudect    | 18.56 s    |   47 ms  |  18.61 s   |       10 / 20 |      10 / 20 |          0   |
+| tlsfuzzer | 18.56 s    |  352 ms  |  18.93 s   |       13 / 20 |       7 / 20 |          0   |
+| SILENT    | 18.56 s    |  2.22 s  |  20.75 s   |       12 / 20 |       8 / 20 |          0   |
+| **tacet** | 18.56 s    |  2.53 s  |  **21.08 s** | **0 / 20** | 15 / 20    |  **5 / 20**  |
+| RTLF      | 18.56 s    | 124.2 s  | **143.0 s**|       12 / 20 |       8 / 20 |          0   |
+
+**Runtime reading.** End-to-end is collection-dominated for every tool
+except RTLF; tacet's 21 s is on par with dudect/tlsfuzzer/SILENT and
+~7× faster than RTLF. Decision time reproduces the Tier-1 ordering.
+
+**Detection reading (detection-quality, not runtime).** Tacet at 50 k
+fixed-n produces 5 Inconclusive + 15 Pass + 0 Fail on this testbed.
+Pass here is a miss, not a production use case — see §5 (addendum) where
+**adaptive-50 k on the same RunPod box** gives 9/10 Inconclusive with
+median effect 146 ns, and §8 on clean c8a hardware where **12/20 Fail**
+at 62 k. The 0/20 Detect here is a property of fixed-n single-pass
+mode at a budget chosen for cross-tool **runtime** fairness, not of
+tacet's production (adaptive) pipeline. Competitors' higher Fail rates
+on MARVIN co-exist with their 28–94 % Tier-1 FPR (§5); the
+calibration-for-specificity trade documented in §5 stands.
+
+### Status (as of 23:25 UTC Wed Apr 22)
+
+🟢 **All phases complete.** Tier 1 (3 × N values × 10 iter) + Tier 2
+MARVIN (20 iter at N=50 k) = 1 378 decision-time rows. Server results
+preserved; primary artifacts rsynced to
+`paper/author-response/crypto-cross-tool-runtime/`.
 
 ---
 

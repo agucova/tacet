@@ -1,0 +1,2638 @@
+=== START 2026-04-22T19:20:23+00:00 ===
+--- devenv shell prebuild + deps ---
+Configuring shell
+Configuring shell in 1.65ms
+Loading tasks
+Loading tasks in 590µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.73ms)
+Succeeded         devenv:python:virtualenv (21.80ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.42ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 30.6ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.11ms
++ which cargo rustc rtlf silent python3
+/nix/store/380pvjfpwl9ncch85s4i03lbykpc1ir3-rust-stable-1.95.0-1.95.0/bin/cargo
+/nix/store/380pvjfpwl9ncch85s4i03lbykpc1ir3-rust-stable-1.95.0-1.95.0/bin/rustc
+/nix/store/6zj3qqsw179i534ms2plhpz1kdmg5dv6-rtlf-unstable-2024-01-19/bin/rtlf
+/nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/bin/silent
+/root/tacet/.devenv/state/venv/bin/python3
++ cargo --version
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
++ rustc --version
+rustc 1.95.0 (59807616e 2026-04-14)
+--- pin tlsfuzzer + tlslite-ng into the venv (idempotent) ---
+Configuring shell
+Configuring shell in 1.53ms
+Loading tasks
+Loading tasks in 466µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:files:cleanup
+Running           devenv:python:virtualenv
+Succeeded         devenv:files:cleanup (6.44ms)
+Succeeded         devenv:python:virtualenv (21.41ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.08ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 29.9ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.28ms
+tlsfuzzer-already-ok
+tlsfuzzer-ok: /root/tacet/.devenv/state/venv/lib/python3.13/site-packages/tlslite/__init__.py
+--- cargo build --release ---
+Configuring shell
+Configuring shell in 1.58ms
+Loading tasks
+Loading tasks in 597µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:files:cleanup
+Running           devenv:python:virtualenv
+Succeeded         devenv:files:cleanup (6.57ms)
+Succeeded         devenv:python:virtualenv (20.65ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.00ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 29.0ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.46ms
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.09s
+--- smoke test: N=10000, TIER=1, 2 iterations ---
+Configuring shell
+Configuring shell in 1.87ms
+Loading tasks
+Loading tasks in 470µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.44ms)
+Succeeded         devenv:python:virtualenv (21.54ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (7.91ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 29.9ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.43ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     2
+Tier:           1
+Tools:          all
+Samples/class:  10000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/smoke
+
+crypto_benchmark: tier=One, tests=7, iterations=2, tools=all
+  dither configs (ns): [0.0]
+[1/14] rustcrypto::aes::aes128_encrypt iter 1/2 (seed=6154005188474195364)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 201ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1222ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 16733ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 999ms)
+[2/14] rustcrypto::aes::aes128_encrypt iter 2/2 (seed=4911217489519324707)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 214ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=28.6987608921237 threshold=94.930400559096 adjusted=-66.2316396669723
+    dither=0.00 silent → pass (leak=false, P=None, 789ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18431ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 271ms)
+[3/14] ring::aes_gcm::aes256gcm_seal iter 1/2 (seed=17060210546773182904)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 184ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1405ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17516ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9726898900411594), 279ms)
+[4/14] ring::aes_gcm::aes256gcm_seal iter 2/2 (seed=1523560160233803684)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 186ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1391ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17458ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.7949916966541334), 282ms)
+[5/14] rustcrypto::chacha20poly1305::encrypt iter 1/2 (seed=12225731234541680140)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 180ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.638253429284575 threshold=3.28030089576719 adjusted=-3.91855432505176
+    dither=0.00 silent → pass (leak=false, P=None, 745ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17507ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 283ms)
+[6/14] rustcrypto::chacha20poly1305::encrypt iter 2/2 (seed=13155455818830233774)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 205ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0617598628145265 threshold=2.59643361684225 adjusted=-2.65819347965677
+    dither=0.00 silent → pass (leak=false, P=None, 781ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18567ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999997536638288), 285ms)
+[7/14] rustcrypto::sha3::sha3_256 iter 1/2 (seed=8503959229306082541)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 217ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=35.8221811140217 threshold=2.06186384524557 adjusted=33.7603172687761
+    dither=0.00 silent → fail (leak=true, P=None, 782ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 20442ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 291ms)
+[8/14] rustcrypto::sha3::sha3_256 iter 2/2 (seed=15197022792547380515)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 218ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=40.0195796284537 threshold=4.1375382676029 adjusted=35.8820413608508
+    dither=0.00 silent → fail (leak=true, P=None, 778ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 20028ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 290ms)
+[9/14] dalek::x25519::scalar_mult iter 1/2 (seed=10836228825329631233)
+  collected 10000 baseline + 10000 test samples in 844 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0145), 353ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.45311950388712 threshold=4.27462920840537 adjusted=-1.82150970451825
+    dither=0.00 silent → pass (leak=false, P=None, 877ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 25000ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9996003389616978), 283ms)
+[10/14] dalek::x25519::scalar_mult iter 2/2 (seed=3001517157359332171)
+  collected 10000 baseline + 10000 test samples in 856 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 324ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=614.630494368639 threshold=14.7272425808004 adjusted=599.903251787838
+    dither=0.00 silent → fail (leak=true, P=None, 818ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 24515ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999998), 279ms)
+[11/14] c_libraries::libsodium::ed25519_sign iter 1/2 (seed=7970434012246635665)
+  collected 10000 baseline + 10000 test samples in 347 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 278ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.240716719556357 threshold=5.40618252279619 adjusted=-5.16546580323984
+    dither=0.00 silent → pass (leak=false, P=None, 869ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 22705ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9998340360510783), 287ms)
+[12/14] c_libraries::libsodium::ed25519_sign iter 2/2 (seed=32891279060181905)
+  collected 10000 baseline + 10000 test samples in 347 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 270ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.90217714823289 threshold=6.05756540015485 adjusted=2.84461174807805
+    dither=0.00 silent → fail (leak=true, P=None, 959ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21508ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9883630416811865), 279ms)
+[13/14] pqcrypto::kyber::kyber768_decapsulate iter 1/2 (seed=5407073028699858624)
+  collected 10000 baseline + 10000 test samples in 334 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → fail (leak=true, P=Some(0.98275), 276ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=15.9157916830038 threshold=3.95176760426885 adjusted=11.9640240787349
+    dither=0.00 silent → fail (leak=true, P=None, 981ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22588ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[14/14] pqcrypto::kyber::kyber768_decapsulate iter 2/2 (seed=16486602942224098378)
+  collected 10000 baseline + 10000 test samples in 342 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.442), 293ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=9.73422017921679 threshold=4.63313495937573 adjusted=5.10108521984106
+    dither=0.00 silent → fail (leak=true, P=None, 868ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23603ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 287ms)
+Done. Wrote 84 units to /root/bench-results/smoke/results.csv.
+Python persistent worker shutting down
+R persistent worker shutting down
+--- smoke CSV summary ---
+ecosystem,library,primitive,test_id,expected,attacker_model,iteration,seed,samples_per_class,timer_resolution_ns,timer_name,dither_ns,tool,outcome,detected_leak,leak_probability,samples_used,decision_time_ms,status,collection_time_ms,timestamp
+97 /root/bench-results/smoke/results.csv
+Tools present and outcome counts:
+     13 tvla/pass
+     13 tlsfuzzer/fail
+     12 tacet/pass
+     12 /
+     10 rtlf/pass
+      8 dudect/fail
+      6 silent/fail
+      6 dudect/pass
+      5 silent/pass
+      4 rtlf/fail
+      3 silent/error
+      1 tvla/fail
+      1 tlsfuzzer/pass
+      1 tacet/inconclusive
+      1 tacet/fail
+Error rows (if any):
+      3 silent
+
+=== SMOKE DONE 2026-04-22T19:25:42+00:00 ===
+--- Tier 1 sweep: N in {10k, 50k, 200k}, 10 iters each ---
+=== Tier 1 N=10000 start 2026-04-22T19:25:42+00:00 ===
+Configuring shell
+Configuring shell in 1.57ms
+Loading tasks
+Loading tasks in 545µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.66ms)
+Succeeded         devenv:python:virtualenv (20.92ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (7.66ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 28.9ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.28ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     10
+Tier:           1
+Tools:          all
+Samples/class:  10000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/runtime-tier1-N10000
+
+crypto_benchmark: tier=One, tests=7, iterations=10, tools=all
+  dither configs (ns): [0.0]
+[1/70] rustcrypto::aes::aes128_encrypt iter 1/10 (seed=6154005188474195364)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 198ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+SILENT result: test_stat=22.8750660297363 threshold=3.20610678349477 adjusted=19.6689592462415
+    dither=0.00 silent → fail (leak=true, P=None, 2149ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17418ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 1015ms)
+[2/70] rustcrypto::aes::aes128_encrypt iter 2/10 (seed=4911217489519324707)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 197ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.36870789199344 threshold=4.55819192779366 adjusted=-4.9268998197871
+    dither=0.00 silent → pass (leak=false, P=None, 911ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17531ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 278ms)
+[3/70] rustcrypto::aes::aes128_encrypt iter 3/10 (seed=13926325517549521148)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 194ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1238ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 16821ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 282ms)
+[4/70] rustcrypto::aes::aes128_encrypt iter 4/10 (seed=3050750541046227730)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 195ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 5ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.0129686807253112 threshold=3.17371003813041 adjusted=-3.16074135740509
+    dither=0.00 silent → pass (leak=false, P=None, 839ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17262ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 279ms)
+[5/70] rustcrypto::aes::aes128_encrypt iter 5/10 (seed=15221301424657966275)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 212ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=8.07855817723611 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 904ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 18359ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 274ms)
+[6/70] rustcrypto::aes::aes128_encrypt iter 6/10 (seed=10417274980379140357)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 190ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1260ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17245ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[7/70] rustcrypto::aes::aes128_encrypt iter 7/10 (seed=10731120142020192295)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 205ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=133.176736336847 threshold=5.10629990317819 adjusted=128.070436433669
+    dither=0.00 silent → fail (leak=true, P=None, 922ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 18711ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 282ms)
+[8/70] rustcrypto::aes::aes128_encrypt iter 8/10 (seed=13574334748152275081)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 198ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1293ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17325ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[9/70] rustcrypto::aes::aes128_encrypt iter 9/10 (seed=5117884842499753759)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 196ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1239ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 16802ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 282ms)
+[10/70] rustcrypto::aes::aes128_encrypt iter 10/10 (seed=79716518764929837)
+  collected 10000 baseline + 10000 test samples in 106 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 190ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 4ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1258ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17128ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 301ms)
+[11/70] ring::aes_gcm::aes256gcm_seal iter 1/10 (seed=17060210546773182904)
+  collected 10000 baseline + 10000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 195ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1282ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18524ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999991136027), 271ms)
+[12/70] ring::aes_gcm::aes256gcm_seal iter 2/10 (seed=1523560160233803684)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 177ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1270ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17524ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9715342703776924), 282ms)
+[13/70] ring::aes_gcm::aes256gcm_seal iter 3/10 (seed=1930566291513391757)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 178ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1265ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18062ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.999999583553578), 290ms)
+[14/70] ring::aes_gcm::aes256gcm_seal iter 4/10 (seed=4145745450567302931)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 202ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=37.7056623051686 threshold=3.89116869913058 adjusted=33.8144936060381
+    dither=0.00 silent → fail (leak=true, P=None, 775ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 18781ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 286ms)
+[15/70] ring::aes_gcm::aes256gcm_seal iter 5/10 (seed=8651195473369840465)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 179ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1249ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17482ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.999999999999989), 325ms)
+[16/70] ring::aes_gcm::aes256gcm_seal iter 6/10 (seed=4116686169460871686)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 188ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=153.925218494592 threshold=9.12327985246563 adjusted=144.801938642127
+    dither=0.00 silent → fail (leak=true, P=None, 910ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18651ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 292ms)
+[17/70] ring::aes_gcm::aes256gcm_seal iter 7/10 (seed=16850055734939791794)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 181ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1264ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18088ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9573855285944521), 277ms)
+[18/70] ring::aes_gcm::aes256gcm_seal iter 8/10 (seed=10790199796676464696)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 185ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1253ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 18080ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 275ms)
+[19/70] ring::aes_gcm::aes256gcm_seal iter 9/10 (seed=13498536771536337217)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 201ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=49.542194179217 threshold=18.3905272168055 adjusted=31.1516669624115
+    dither=0.00 silent → fail (leak=true, P=None, 764ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18969ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 270ms)
+[20/70] ring::aes_gcm::aes256gcm_seal iter 10/10 (seed=16911135875195564548)
+  collected 10000 baseline + 10000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 177ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 6ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1290ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17834ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 276ms)
+[21/70] rustcrypto::chacha20poly1305::encrypt iter 1/10 (seed=12225731234541680140)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 183ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.2294171503125 threshold=3.49220942500965 adjusted=9.73720772530284
+    dither=0.00 silent → fail (leak=true, P=None, 780ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18192ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 281ms)
+[22/70] rustcrypto::chacha20poly1305::encrypt iter 2/10 (seed=13155455818830233774)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 191ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=5.07091218494734 threshold=3.58219643835012 adjusted=1.48871574659722
+    dither=0.00 silent → fail (leak=true, P=None, 773ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 18587ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 286ms)
+[23/70] rustcrypto::chacha20poly1305::encrypt iter 3/10 (seed=18200040664651102085)
+  collected 10000 baseline + 10000 test samples in 131 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 178ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.135278705413073 threshold=7.42251546762673 adjusted=-7.28723676221365
+    dither=0.00 silent → pass (leak=false, P=None, 755ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 17216ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 283ms)
+[24/70] rustcrypto::chacha20poly1305::encrypt iter 4/10 (seed=4209452279132210978)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 191ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=40.3017566966849 threshold=1.84410054845848 adjusted=38.4576561482265
+    dither=0.00 silent → fail (leak=true, P=None, 914ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17834ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 283ms)
+[25/70] rustcrypto::chacha20poly1305::encrypt iter 5/10 (seed=10244123941916501375)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 180ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=19.2510346650329 threshold=-0.000368267369383425 adjusted=19.2514029324023
+    dither=0.00 silent → fail (leak=true, P=None, 749ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17171ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 278ms)
+[26/70] rustcrypto::chacha20poly1305::encrypt iter 6/10 (seed=17491518929099190204)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 179ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1461ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17594ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 280ms)
+[27/70] rustcrypto::chacha20poly1305::encrypt iter 7/10 (seed=2870593724497938596)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 187ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=29.9975357333382 threshold=2.16704200726467 adjusted=27.8304937260735
+    dither=0.00 silent → fail (leak=true, P=None, 913ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17190ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 285ms)
+[28/70] rustcrypto::chacha20poly1305::encrypt iter 8/10 (seed=1875397544879785010)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 194ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.40621758773959 threshold=1.69901766421747 adjusted=1.70719992352213
+    dither=0.00 silent → fail (leak=true, P=None, 753ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17648ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 280ms)
+[29/70] rustcrypto::chacha20poly1305::encrypt iter 9/10 (seed=10936341685045074701)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 188ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=10.3636525205769 threshold=2.68309677929666 adjusted=7.68055574128028
+    dither=0.00 silent → fail (leak=true, P=None, 766ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 17555ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 280ms)
+[30/70] rustcrypto::chacha20poly1305::encrypt iter 10/10 (seed=6273507221916027710)
+  collected 10000 baseline + 10000 test samples in 128 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 196ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.0915740327506 threshold=3.48644052624467 adjusted=0.605133506505931
+    dither=0.00 silent → fail (leak=true, P=None, 767ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18533ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 278ms)
+[31/70] rustcrypto::sha3::sha3_256 iter 1/10 (seed=8503959229306082541)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 223ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=74.0456823834769 threshold=19.6611555008361 adjusted=54.3845268826408
+    dither=0.00 silent → fail (leak=true, P=None, 783ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 20659ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 290ms)
+[32/70] rustcrypto::sha3::sha3_256 iter 2/10 (seed=15197022792547380515)
+  collected 10000 baseline + 10000 test samples in 112 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 237ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=508.3848356858 threshold=8.23418833482685 adjusted=500.150647350973
+    dither=0.00 silent → fail (leak=true, P=None, 835ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 20072ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[33/70] rustcrypto::sha3::sha3_256 iter 3/10 (seed=4083549850804976962)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 229ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=221.775438659185 threshold=161.358734757026 adjusted=60.4167039021585
+    dither=0.00 silent → fail (leak=true, P=None, 936ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 20767ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 276ms)
+[34/70] rustcrypto::sha3::sha3_256 iter 4/10 (seed=15505625688943421174)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 219ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.2006409625255 threshold=3.30372786926514 adjusted=-1.10308690673964
+    dither=0.00 silent → pass (leak=false, P=None, 940ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 19968ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 278ms)
+[35/70] rustcrypto::sha3::sha3_256 iter 5/10 (seed=5739521062736212996)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 210ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=53.5284626616306 threshold=74.8889351200296 adjusted=-21.360472458399
+    dither=0.00 silent → pass (leak=false, P=None, 1061ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 19166ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[36/70] rustcrypto::sha3::sha3_256 iter 6/10 (seed=3800147945491650744)
+  collected 10000 baseline + 10000 test samples in 110 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 189ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1226ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18034ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 279ms)
+[37/70] rustcrypto::sha3::sha3_256 iter 7/10 (seed=5685374411341844523)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 211ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=48.1776312297668 threshold=106.77816666628 adjusted=-58.600535436513
+    dither=0.00 silent → pass (leak=false, P=None, 755ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 19341ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 283ms)
+[38/70] rustcrypto::sha3::sha3_256 iter 8/10 (seed=6380062987332878367)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 200ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 8ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=20.401665141864 threshold=2.26853603090621 adjusted=18.1331291109578
+    dither=0.00 silent → fail (leak=true, P=None, 767ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 19419ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 290ms)
+[39/70] rustcrypto::sha3::sha3_256 iter 9/10 (seed=12792246672741076588)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 198ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 7ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=9.2052828915201 threshold=5.21190860700669 adjusted=3.99337428451341
+    dither=0.00 silent → fail (leak=true, P=None, 938ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 18062ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 277ms)
+[40/70] rustcrypto::sha3::sha3_256 iter 10/10 (seed=9147022077598547721)
+  collected 10000 baseline + 10000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 217ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.41493500495343 threshold=4.64861048234046 adjusted=-2.23367547738703
+    dither=0.00 silent → pass (leak=false, P=None, 785ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 20377ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 282ms)
+[41/70] dalek::x25519::scalar_mult iter 1/10 (seed=10836228825329631233)
+  collected 10000 baseline + 10000 test samples in 858 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 324ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=395.185342200986 threshold=7.33391134552859 adjusted=387.851430855458
+    dither=0.00 silent → fail (leak=true, P=None, 819ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 24305ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999992), 288ms)
+[42/70] dalek::x25519::scalar_mult iter 2/10 (seed=3001517157359332171)
+  collected 10000 baseline + 10000 test samples in 832 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 296ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=183.074890033014 threshold=4.18578139117189 adjusted=178.889108641843
+    dither=0.00 silent → fail (leak=true, P=None, 851ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 23050ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 292ms)
+[43/70] dalek::x25519::scalar_mult iter 3/10 (seed=10442373143697980568)
+  collected 10000 baseline + 10000 test samples in 827 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.02425), 314ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=153.48961793549 threshold=67.4770090546758 adjusted=86.0126088808141
+    dither=0.00 silent → fail (leak=true, P=None, 796ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 23586ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.999999999977516), 283ms)
+[44/70] dalek::x25519::scalar_mult iter 4/10 (seed=254640812419664096)
+  collected 10000 baseline + 10000 test samples in 838 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 339ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.294637028571 threshold=5.90784550029643 adjusted=7.38679152827455
+    dither=0.00 silent → fail (leak=true, P=None, 831ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 24436ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999998), 280ms)
+[45/70] dalek::x25519::scalar_mult iter 5/10 (seed=2784417049637337928)
+  collected 10000 baseline + 10000 test samples in 856 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0395), 319ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=344.648533865783 threshold=5.74560405253816 adjusted=338.902929813245
+    dither=0.00 silent → fail (leak=true, P=None, 954ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 24091ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999994602), 277ms)
+[46/70] dalek::x25519::scalar_mult iter 6/10 (seed=2899094717620558662)
+  collected 10000 baseline + 10000 test samples in 853 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 300ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.8061464957019 threshold=11.4154433902278 adjusted=2.39070310547407
+    dither=0.00 silent → fail (leak=true, P=None, 871ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 23703ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999653), 282ms)
+[47/70] dalek::x25519::scalar_mult iter 7/10 (seed=592374285312858385)
+  collected 10000 baseline + 10000 test samples in 856 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 293ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=50.0131346643487 threshold=4.03327302563348 adjusted=45.9798616387152
+    dither=0.00 silent → fail (leak=true, P=None, 860ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23356ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999948), 280ms)
+[48/70] dalek::x25519::scalar_mult iter 8/10 (seed=3454088062200130132)
+  collected 10000 baseline + 10000 test samples in 856 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 351ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.05768894190756 threshold=4.56031292840777 adjusted=-1.50262398650021
+    dither=0.00 silent → pass (leak=false, P=None, 902ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 25102ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9942319315160957), 283ms)
+[49/70] dalek::x25519::scalar_mult iter 9/10 (seed=13910157344041706971)
+  collected 10000 baseline + 10000 test samples in 833 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 292ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=216.418459356231 threshold=4.65094350691733 adjusted=211.767515849314
+    dither=0.00 silent → fail (leak=true, P=None, 1031ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 22811ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.9176872227614254), 278ms)
+[50/70] dalek::x25519::scalar_mult iter 10/10 (seed=9531589991746876306)
+  collected 10000 baseline + 10000 test samples in 827 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 321ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=71.849617620472 threshold=4.20338647349714 adjusted=67.6462311469749
+    dither=0.00 silent → fail (leak=true, P=None, 895ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23800ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999731454314), 280ms)
+[51/70] c_libraries::libsodium::ed25519_sign iter 1/10 (seed=7970434012246635665)
+  collected 10000 baseline + 10000 test samples in 339 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 258ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.469484974005758 threshold=6.42245025778064 adjusted=-5.95296528377488
+    dither=0.00 silent → pass (leak=false, P=None, 960ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21484ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 280ms)
+[52/70] c_libraries::libsodium::ed25519_sign iter 2/10 (seed=32891279060181905)
+  collected 10000 baseline + 10000 test samples in 348 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 265ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.389402086926021 threshold=6.36292731189576 adjusted=-5.97352522496973
+    dither=0.00 silent → pass (leak=false, P=None, 1153ms)
+=== START 2026-04-22T19:44:35+00:00 ===
+--- devenv shell prebuild + deps ---
+Configuring shell
+Configuring shell in 1.58ms
+Loading tasks
+Loading tasks in 621µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (5.96ms)
+Succeeded         devenv:python:virtualenv (20.48ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (9.05ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 29.9ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 991µs
++ which cargo rustc rtlf silent python3
+/nix/store/380pvjfpwl9ncch85s4i03lbykpc1ir3-rust-stable-1.95.0-1.95.0/bin/cargo
+/nix/store/380pvjfpwl9ncch85s4i03lbykpc1ir3-rust-stable-1.95.0-1.95.0/bin/rustc
+/nix/store/6zj3qqsw179i534ms2plhpz1kdmg5dv6-rtlf-unstable-2024-01-19/bin/rtlf
+/nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/bin/silent
+/root/tacet/.devenv/state/venv/bin/python3
++ cargo --version
+cargo 1.95.0 (f2d3ce0bd 2026-03-21)
++ rustc --version
+rustc 1.95.0 (59807616e 2026-04-14)
+--- pin tlsfuzzer + tlslite-ng into the venv (idempotent) ---
+Configuring shell
+Configuring shell in 1.56ms
+Loading tasks
+Loading tasks in 493µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:files:cleanup
+Running           devenv:python:virtualenv
+Succeeded         devenv:files:cleanup (6.60ms)
+Succeeded         devenv:python:virtualenv (21.34ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.29ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 30.0ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.23ms
+tlsfuzzer-already-ok
+tlsfuzzer-ok: /root/tacet/.devenv/state/venv/lib/python3.13/site-packages/tlslite/__init__.py
+--- cargo build --release ---
+Configuring shell
+Configuring shell in 1.59ms
+Loading tasks
+Loading tasks in 506µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:files:cleanup
+Running           devenv:python:virtualenv
+Succeeded         devenv:files:cleanup (6.47ms)
+Succeeded         devenv:python:virtualenv (20.80ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.80ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 30.1ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.09ms
+    Finished `release` profile [optimized + debuginfo] target(s) in 0.08s
+--- Tier 1 sweep: N in {10k, 30k, 50k}, 10 iters each ---
+=== Tier 1 N=10000 start 2026-04-22T19:44:37+00:00 ===
+Configuring shell
+Configuring shell in 1.53ms
+Loading tasks
+Loading tasks in 503µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:files:cleanup
+Running           devenv:python:virtualenv
+Succeeded         devenv:files:cleanup (7.00ms)
+Succeeded         devenv:python:virtualenv (21.65ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.09ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 30.2ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.06ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     10
+Tier:           1
+Tools:          all
+Samples/class:  10000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/runtime-tier1-N10000
+
+crypto_benchmark: tier=One, tests=7, iterations=10, tools=all
+  dither configs (ns): [0.0]
+[52/70] c_libraries::libsodium::ed25519_sign iter 2/10 (seed=32891279060181905)
+  collected 10000 baseline + 10000 test samples in 339 ms (timer=rdtsc, resolution=0.223 ns)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 23376ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999625065), 1014ms)
+[53/70] c_libraries::libsodium::ed25519_sign iter 3/10 (seed=6463052652355296689)
+  collected 10000 baseline + 10000 test samples in 339 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 257ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.28737340930795 threshold=10.539507377961 adjusted=-2.25213396865303
+    dither=0.00 silent → pass (leak=false, P=None, 885ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21440ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 276ms)
+[54/70] c_libraries::libsodium::ed25519_sign iter 4/10 (seed=13791190684930009006)
+  collected 10000 baseline + 10000 test samples in 340 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 268ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.759802226821051 threshold=6.25139276463707 adjusted=-5.49159053781602
+    dither=0.00 silent → pass (leak=false, P=None, 950ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21897ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999804775250476), 280ms)
+[55/70] c_libraries::libsodium::ed25519_sign iter 5/10 (seed=9329310494821122244)
+  collected 10000 baseline + 10000 test samples in 340 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 265ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.8642128457512 threshold=6.51431377362123 adjusted=7.34989907212994
+    dither=0.00 silent → fail (leak=true, P=None, 994ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21858ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.3544544492680275), 276ms)
+[56/70] c_libraries::libsodium::ed25519_sign iter 6/10 (seed=6348657202958305343)
+  collected 10000 baseline + 10000 test samples in 339 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 265ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.858333093852565 threshold=6.41346517386749 adjusted=-5.55513208001492
+    dither=0.00 silent → pass (leak=false, P=None, 847ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21860ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.8360050788786434), 281ms)
+[57/70] c_libraries::libsodium::ed25519_sign iter 7/10 (seed=5140504885099625482)
+  collected 10000 baseline + 10000 test samples in 346 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 255ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.01640787070589 threshold=5.90006201729178 adjusted=-4.88365414658588
+    dither=0.00 silent → pass (leak=false, P=None, 1024ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 21711ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.6203466931231145), 318ms)
+[58/70] c_libraries::libsodium::ed25519_sign iter 8/10 (seed=12709504465293182615)
+  collected 10000 baseline + 10000 test samples in 346 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 269ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.22944128727574 threshold=4.95874471003907 adjusted=-3.72930342276333
+    dither=0.00 silent → pass (leak=false, P=None, 856ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 22462ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999972346693438), 288ms)
+[59/70] c_libraries::libsodium::ed25519_sign iter 9/10 (seed=14002040616935439461)
+  collected 10000 baseline + 10000 test samples in 347 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 278ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.23785882472629 threshold=7.01807738977237 adjusted=-5.78021856504608
+    dither=0.00 silent → pass (leak=false, P=None, 944ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 22591ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9941522061537541), 287ms)
+[60/70] c_libraries::libsodium::ed25519_sign iter 10/10 (seed=3335784747518990472)
+  collected 10000 baseline + 10000 test samples in 347 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 270ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.271576208020403 threshold=7.19036621985161 adjusted=-6.91879001183121
+    dither=0.00 silent → pass (leak=false, P=None, 901ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 22296ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.957295935551421), 282ms)
+[61/70] pqcrypto::kyber::kyber768_decapsulate iter 1/10 (seed=5407073028699858624)
+  collected 10000 baseline + 10000 test samples in 334 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.2195), 282ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=12.6245064769731 threshold=4.14004728032468 adjusted=8.48445919664842
+    dither=0.00 silent → fail (leak=true, P=None, 846ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22851ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 274ms)
+[62/70] pqcrypto::kyber::kyber768_decapsulate iter 2/10 (seed=16486602942224098378)
+  collected 10000 baseline + 10000 test samples in 335 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.40825), 285ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=9.81475876976507 threshold=3.6601300901816 adjusted=6.15462867958347
+    dither=0.00 silent → fail (leak=true, P=None, 874ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23180ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 280ms)
+[63/70] pqcrypto::kyber::kyber768_decapsulate iter 3/10 (seed=47689242042048377)
+  collected 10000 baseline + 10000 test samples in 342 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.17075), 301ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=20.1102543703481 threshold=4.33279125026998 adjusted=15.7774631200781
+    dither=0.00 silent → fail (leak=true, P=None, 979ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23825ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999628), 291ms)
+[64/70] pqcrypto::kyber::kyber768_decapsulate iter 4/10 (seed=1609967460387453248)
+  collected 10000 baseline + 10000 test samples in 352 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.754), 301ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=27.7726095241221 threshold=5.59799693824021 adjusted=22.1746125858819
+    dither=0.00 silent → fail (leak=true, P=None, 1196ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23920ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 281ms)
+[65/70] pqcrypto::kyber::kyber768_decapsulate iter 5/10 (seed=7374443985686313794)
+  collected 10000 baseline + 10000 test samples in 341 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.85825), 292ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=10.3100883745172 threshold=6.02894941850409 adjusted=4.28113895601312
+    dither=0.00 silent → fail (leak=true, P=None, 895ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 23702ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 294ms)
+[66/70] pqcrypto::kyber::kyber768_decapsulate iter 6/10 (seed=6305068527935083372)
+  collected 10000 baseline + 10000 test samples in 342 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.0135), 303ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.596041308000735 threshold=4.27180377452796 adjusted=-3.67576246652722
+    dither=0.00 silent → pass (leak=false, P=None, 917ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 24014ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999610915801), 328ms)
+[67/70] pqcrypto::kyber::kyber768_decapsulate iter 7/10 (seed=9890119370013277476)
+  collected 10000 baseline + 10000 test samples in 333 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.36375), 274ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=27.9814232909601 threshold=3.69181954916997 adjusted=24.2896037417901
+    dither=0.00 silent → fail (leak=true, P=None, 838ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22846ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 284ms)
+[68/70] pqcrypto::kyber::kyber768_decapsulate iter 8/10 (seed=176755103601538197)
+  collected 10000 baseline + 10000 test samples in 334 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.24775), 282ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=6.7676607463359 threshold=4.63216784742809 adjusted=2.13549289890781
+    dither=0.00 silent → fail (leak=true, P=None, 849ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22995ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999952009312), 293ms)
+[69/70] pqcrypto::kyber::kyber768_decapsulate iter 9/10 (seed=12310112850682059155)
+  collected 10000 baseline + 10000 test samples in 334 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.48125), 285ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.6281222204188 threshold=4.30193741937218 adjusted=-1.67381519895339
+    dither=0.00 silent → pass (leak=false, P=None, 859ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22995ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999997219702), 292ms)
+[70/70] pqcrypto::kyber::kyber768_decapsulate iter 10/10 (seed=8189053803202916190)
+  collected 10000 baseline + 10000 test samples in 338 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.1655), 282ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 9ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=7.04774424184345 threshold=4.41209500844503 adjusted=2.63564923339842
+    dither=0.00 silent → fail (leak=true, P=None, 862ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 22669ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 286ms)
+Done. Wrote 420 units to /root/bench-results/runtime-tier1-N10000/results.csv.
+Python persistent worker shutting down
+R persistent worker shutting down
+=== Tier 1 N=10000 done 2026-04-22T19:52:24+00:00 ===
+=== Tier 1 N=30000 start 2026-04-22T19:52:24+00:00 ===
+Configuring shell
+Configuring shell in 3.22ms
+Loading tasks
+Loading tasks in 711µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.61ms)
+Succeeded         devenv:python:virtualenv (19.24ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.31ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 28.0ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.09ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     10
+Tier:           1
+Tools:          all
+Samples/class:  30000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/runtime-tier1-N30000
+
+crypto_benchmark: tier=One, tests=7, iterations=10, tools=all
+  dither configs (ns): [0.0]
+[1/70] rustcrypto::aes::aes128_encrypt iter 1/10 (seed=6154005188474195364)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 720ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 13ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1489ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35095ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 1024ms)
+[2/70] rustcrypto::aes::aes128_encrypt iter 2/10 (seed=4911217489519324707)
+  collected 30000 baseline + 30000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 720ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 15ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1465ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35202ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[3/70] rustcrypto::aes::aes128_encrypt iter 3/10 (seed=13926325517549521148)
+  collected 30000 baseline + 30000 test samples in 107 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 723ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 14ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1468ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 34089ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 298ms)
+[4/70] rustcrypto::aes::aes128_encrypt iter 4/10 (seed=3050750541046227730)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 690ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 14ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1497ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35281ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 318ms)
+[5/70] rustcrypto::aes::aes128_encrypt iter 5/10 (seed=15221301424657966275)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 711ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 16ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1814ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 34137ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 304ms)
+[6/70] rustcrypto::aes::aes128_encrypt iter 6/10 (seed=10417274980379140357)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 715ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 18ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.45977418301619 threshold=6.30254237670226 adjusted=-3.84276819368607
+    dither=0.00 silent → pass (leak=false, P=None, 1377ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35613ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 305ms)
+[7/70] rustcrypto::aes::aes128_encrypt iter 7/10 (seed=10731120142020192295)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 712ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=6.78779213273283 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 1200ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36586ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[8/70] rustcrypto::aes::aes128_encrypt iter 8/10 (seed=13574334748152275081)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 701ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 17ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=5.63504982688916 threshold=4.45897196751959 adjusted=1.17607785936957
+    dither=0.00 silent → fail (leak=true, P=None, 1451ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 34309ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 300ms)
+[9/70] rustcrypto::aes::aes128_encrypt iter 9/10 (seed=5117884842499753759)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 716ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1445ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36535ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 309ms)
+[10/70] rustcrypto::aes::aes128_encrypt iter 10/10 (seed=79716518764929837)
+  collected 30000 baseline + 30000 test samples in 108 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 712ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1494ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 36831ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 305ms)
+[11/70] ring::aes_gcm::aes256gcm_seal iter 1/10 (seed=17060210546773182904)
+  collected 30000 baseline + 30000 test samples in 112 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 696ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 25ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.83738098726092 threshold=14.5042657601562 adjusted=-9.66688477289532
+    dither=0.00 silent → pass (leak=false, P=None, 1562ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37777ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 302ms)
+[12/70] ring::aes_gcm::aes256gcm_seal iter 2/10 (seed=1523560160233803684)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 687ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1535ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 37472ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 319ms)
+[13/70] ring::aes_gcm::aes256gcm_seal iter 3/10 (seed=1930566291513391757)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 688ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 20ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1608ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 35834ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[14/70] ring::aes_gcm::aes256gcm_seal iter 4/10 (seed=4145745450567302931)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 687ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 21ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1725ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37211ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999258827365652), 301ms)
+[15/70] ring::aes_gcm::aes256gcm_seal iter 5/10 (seed=8651195473369840465)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 684ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1461ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37498ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 358ms)
+[16/70] ring::aes_gcm::aes256gcm_seal iter 6/10 (seed=4116686169460871686)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 689ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-1.18065108243468 threshold=5.2123333194082 adjusted=-6.39298440184288
+    dither=0.00 silent → pass (leak=false, P=None, 1526ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37887ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9817575461982707), 311ms)
+[17/70] ring::aes_gcm::aes256gcm_seal iter 7/10 (seed=16850055734939791794)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 693ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1463ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36349ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999467), 309ms)
+[18/70] ring::aes_gcm::aes256gcm_seal iter 8/10 (seed=10790199796676464696)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 675ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-1.14202619059031 threshold=8.54424189042657 adjusted=-9.68626808101688
+    dither=0.00 silent → pass (leak=false, P=None, 1505ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36808ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 302ms)
+[19/70] ring::aes_gcm::aes256gcm_seal iter 9/10 (seed=13498536771536337217)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 682ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 21ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1459ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35960ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[20/70] ring::aes_gcm::aes256gcm_seal iter 10/10 (seed=16911135875195564548)
+  collected 30000 baseline + 30000 test samples in 111 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 684ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-16.9387054624507 threshold=19.0792037557292 adjusted=-36.01790921818
+    dither=0.00 silent → pass (leak=false, P=None, 1211ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37343ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999998228504883), 300ms)
+[21/70] rustcrypto::chacha20poly1305::encrypt iter 1/10 (seed=12225731234541680140)
+  collected 30000 baseline + 30000 test samples in 171 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 710ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0119729502058491 threshold=2.79519503137193 adjusted=-2.80716798157778
+    dither=0.00 silent → pass (leak=false, P=None, 1195ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36078ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 329ms)
+[22/70] rustcrypto::chacha20poly1305::encrypt iter 2/10 (seed=13155455818830233774)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 718ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.642671924428977 threshold=2.11889289474137 adjusted=-2.76156481917035
+    dither=0.00 silent → pass (leak=false, P=None, 1191ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36978ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 319ms)
+[23/70] rustcrypto::chacha20poly1305::encrypt iter 3/10 (seed=18200040664651102085)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 732ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-3.80083890069348 threshold=4.78542484229725 adjusted=-8.58626374299073
+    dither=0.00 silent → pass (leak=false, P=None, 1237ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 36780ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 318ms)
+[24/70] rustcrypto::chacha20poly1305::encrypt iter 4/10 (seed=4209452279132210978)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 703ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 21ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.0123159374610989 threshold=3.28818681370615 adjusted=-3.27587087624505
+    dither=0.00 silent → pass (leak=false, P=None, 1559ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 35486ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 304ms)
+[25/70] rustcrypto::chacha20poly1305::encrypt iter 5/10 (seed=10244123941916501375)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 723ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 21ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=12.7953752000587 threshold=-0.497342594656978 adjusted=13.2927177947157
+    dither=0.00 silent → fail (leak=true, P=None, 1330ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 36304ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[26/70] rustcrypto::chacha20poly1305::encrypt iter 6/10 (seed=17491518929099190204)
+  collected 30000 baseline + 30000 test samples in 171 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 687ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0386436796350804 threshold=2.12319335535731 adjusted=-2.16183703499239
+    dither=0.00 silent → pass (leak=false, P=None, 1187ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 35657ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 316ms)
+[27/70] rustcrypto::chacha20poly1305::encrypt iter 7/10 (seed=2870593724497938596)
+  collected 30000 baseline + 30000 test samples in 173 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 718ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 20ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.57635694813296 threshold=0.543414345911364 adjusted=8.03294260222159
+    dither=0.00 silent → fail (leak=true, P=None, 1226ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37343ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 311ms)
+[28/70] rustcrypto::chacha20poly1305::encrypt iter 8/10 (seed=1875397544879785010)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 744ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 20ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0457355479125234 threshold=2.57867399879125 adjusted=-2.62440954670378
+    dither=0.00 silent → pass (leak=false, P=None, 1233ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37995ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 310ms)
+[29/70] rustcrypto::chacha20poly1305::encrypt iter 9/10 (seed=10936341685045074701)
+  collected 30000 baseline + 30000 test samples in 172 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 739ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.474500114339904 threshold=2.52797288831009 adjusted=-2.05347277397018
+    dither=0.00 silent → pass (leak=false, P=None, 1220ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37087ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 305ms)
+[30/70] rustcrypto::chacha20poly1305::encrypt iter 10/10 (seed=6273507221916027710)
+  collected 30000 baseline + 30000 test samples in 171 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 687ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.287660888520943 threshold=3.16126799930865 adjusted=-3.4489288878296
+    dither=0.00 silent → pass (leak=false, P=None, 1205ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 35286ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 301ms)
+[31/70] rustcrypto::sha3::sha3_256 iter 1/10 (seed=8503959229306082541)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 760ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 26ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-30.5132030870239 threshold=4.05275207484082 adjusted=-34.5659551618648
+    dither=0.00 silent → pass (leak=false, P=None, 1226ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 41442ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9998642569418946), 314ms)
+[32/70] rustcrypto::sha3::sha3_256 iter 2/10 (seed=15197022792547380515)
+  collected 30000 baseline + 30000 test samples in 121 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 696ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 22ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-13.8639580432711 threshold=3.98712553248181 adjusted=-17.8510835757529
+    dither=0.00 silent → pass (leak=false, P=None, 1192ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 35685ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 303ms)
+[33/70] rustcrypto::sha3::sha3_256 iter 3/10 (seed=4083549850804976962)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 715ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 24ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.275639770173296 threshold=7.69110281543498 adjusted=-7.96674258560828
+    dither=0.00 silent → pass (leak=false, P=None, 1217ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37537ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999930407671016), 309ms)
+[34/70] rustcrypto::sha3::sha3_256 iter 4/10 (seed=15505625688943421174)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 715ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 24ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-28.418269720076 threshold=4.8333225024786 adjusted=-33.2515922225545
+    dither=0.00 silent → pass (leak=false, P=None, 1203ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37035ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.996614088229057), 303ms)
+[35/70] rustcrypto::sha3::sha3_256 iter 5/10 (seed=5739521062736212996)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 724ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 24ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.397128389992285 threshold=7.49466060834308 adjusted=-7.89178899833536
+    dither=0.00 silent → pass (leak=false, P=None, 1466ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 39170ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9947498855340361), 312ms)
+[36/70] rustcrypto::sha3::sha3_256 iter 6/10 (seed=3800147945491650744)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 755ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 26ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-11.3044186790743 threshold=6.66444717339004 adjusted=-17.9688658524643
+    dither=0.00 silent → pass (leak=false, P=None, 1576ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 40732ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999829), 305ms)
+[37/70] rustcrypto::sha3::sha3_256 iter 7/10 (seed=5685374411341844523)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 688ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 24ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=14.1363383963963 threshold=4.35504897721881 adjusted=9.78128941917754
+    dither=0.00 silent → fail (leak=true, P=None, 1211ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 38085ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9901906935385987), 313ms)
+[38/70] rustcrypto::sha3::sha3_256 iter 8/10 (seed=6380062987332878367)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 749ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 25ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=74.2980313587281 threshold=13.0361172254215 adjusted=61.2619141333066
+    dither=0.00 silent → fail (leak=true, P=None, 1181ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 39061ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999998), 312ms)
+[39/70] rustcrypto::sha3::sha3_256 iter 9/10 (seed=12792246672741076588)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 682ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 24ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.262119140072702 threshold=3.33131978253637 adjusted=-3.06920064246367
+    dither=0.00 silent → pass (leak=false, P=None, 1220ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 38122ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999685241203242), 304ms)
+[40/70] rustcrypto::sha3::sha3_256 iter 10/10 (seed=9147022077598547721)
+  collected 30000 baseline + 30000 test samples in 122 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 669ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=20.8969053243078 threshold=7.18807090908954 adjusted=13.7088344152183
+    dither=0.00 silent → fail (leak=true, P=None, 1210ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 37092ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999998918622491), 302ms)
+[41/70] dalek::x25519::scalar_mult iter 1/10 (seed=10836228825329631233)
+  collected 30000 baseline + 30000 test samples in 2216 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 1140ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=507.200486570656 threshold=4.9833141519941 adjusted=502.217172418662
+    dither=0.00 silent → fail (leak=true, P=None, 1518ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 57064ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9990047762366328), 318ms)
+[42/70] dalek::x25519::scalar_mult iter 2/10 (seed=3001517157359332171)
+  collected 30000 baseline + 30000 test samples in 2272 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1156ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=70.0735964872087 threshold=4.54960938821266 adjusted=65.523987098996
+    dither=0.00 silent → fail (leak=true, P=None, 1609ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 56694ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999636419654631), 324ms)
+[43/70] dalek::x25519::scalar_mult iter 3/10 (seed=10442373143697980568)
+  collected 30000 baseline + 30000 test samples in 2289 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1168ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=47.8690925571531 threshold=3.66922323154249 adjusted=44.1998693256106
+    dither=0.00 silent → fail (leak=true, P=None, 1458ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 59144ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999998581184), 314ms)
+[44/70] dalek::x25519::scalar_mult iter 4/10 (seed=254640812419664096)
+  collected 30000 baseline + 30000 test samples in 2277 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1056ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=313.130620184745 threshold=4.15511111418045 adjusted=308.975509070564
+    dither=0.00 silent → fail (leak=true, P=None, 1455ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 53610ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 311ms)
+[45/70] dalek::x25519::scalar_mult iter 5/10 (seed=2784417049637337928)
+  collected 30000 baseline + 30000 test samples in 2220 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 997ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=6.0820224149322 threshold=11.7767442141719 adjusted=-5.69472179923966
+    dither=0.00 silent → pass (leak=false, P=None, 1653ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 51477ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 317ms)
+[46/70] dalek::x25519::scalar_mult iter 6/10 (seed=2899094717620558662)
+  collected 30000 baseline + 30000 test samples in 2216 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1082ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=424.860939906709 threshold=162.311156740078 adjusted=262.549783166632
+    dither=0.00 silent → fail (leak=true, P=None, 1392ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 56281ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 314ms)
+[47/70] dalek::x25519::scalar_mult iter 7/10 (seed=592374285312858385)
+  collected 30000 baseline + 30000 test samples in 2267 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1040ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=510.124060798779 threshold=6.58619731079484 adjusted=503.537863487984
+    dither=0.00 silent → fail (leak=true, P=None, 1628ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 54308ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 322ms)
+[48/70] dalek::x25519::scalar_mult iter 8/10 (seed=3454088062200130132)
+  collected 30000 baseline + 30000 test samples in 2289 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1138ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.12593914523758 threshold=5.43371914574355 adjusted=-1.30778000050598
+    dither=0.00 silent → pass (leak=false, P=None, 1379ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 58076ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999997111414451), 324ms)
+[49/70] dalek::x25519::scalar_mult iter 9/10 (seed=13910157344041706971)
+  collected 30000 baseline + 30000 test samples in 2226 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1086ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=75.5903812244611 threshold=7.00837197315801 adjusted=68.5820092513031
+    dither=0.00 silent → fail (leak=true, P=None, 1655ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 55593ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999984303183), 318ms)
+[50/70] dalek::x25519::scalar_mult iter 10/10 (seed=9531589991746876306)
+  collected 30000 baseline + 30000 test samples in 2274 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1129ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1186.52520745423 threshold=205.934048293797 adjusted=980.59115916043
+    dither=0.00 silent → fail (leak=true, P=None, 1488ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 58173ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 322ms)
+[51/70] c_libraries::libsodium::ed25519_sign iter 1/10 (seed=7970434012246635665)
+  collected 30000 baseline + 30000 test samples in 817 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 844ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.258131596516929 threshold=5.58235416860391 adjusted=-5.32422257208698
+    dither=0.00 silent → pass (leak=false, P=None, 1350ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 46060ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999578), 315ms)
+[52/70] c_libraries::libsodium::ed25519_sign iter 2/10 (seed=32891279060181905)
+  collected 30000 baseline + 30000 test samples in 831 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 913ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.0760629018000877 threshold=5.1851249475585 adjusted=-5.10906204575842
+    dither=0.00 silent → pass (leak=false, P=None, 1542ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 48992ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999997443), 317ms)
+[53/70] c_libraries::libsodium::ed25519_sign iter 3/10 (seed=6463052652355296689)
+  collected 30000 baseline + 30000 test samples in 829 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 905ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.470184384012512 threshold=5.39381378854718 adjusted=-4.92362940453466
+    dither=0.00 silent → pass (leak=false, P=None, 1450ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 49380ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999968), 319ms)
+[54/70] c_libraries::libsodium::ed25519_sign iter 4/10 (seed=13791190684930009006)
+  collected 30000 baseline + 30000 test samples in 830 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 895ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.45270665330138 threshold=5.12022530042544 adjusted=-3.66751864712406
+    dither=0.00 silent → pass (leak=false, P=None, 1363ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 48777ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 323ms)
+[55/70] c_libraries::libsodium::ed25519_sign iter 5/10 (seed=9329310494821122244)
+  collected 30000 baseline + 30000 test samples in 830 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 910ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.173131813946388 threshold=4.9851730733782 adjusted=-4.81204125943181
+    dither=0.00 silent → pass (leak=false, P=None, 1479ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 49353ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999995254130631), 319ms)
+[56/70] c_libraries::libsodium::ed25519_sign iter 6/10 (seed=6348657202958305343)
+  collected 30000 baseline + 30000 test samples in 830 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 911ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.795813705310546 threshold=4.85887701177271 adjusted=-4.06306330646216
+    dither=0.00 silent → pass (leak=false, P=None, 1590ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 49384ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 317ms)
+[57/70] c_libraries::libsodium::ed25519_sign iter 7/10 (seed=5140504885099625482)
+  collected 30000 baseline + 30000 test samples in 834 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 927ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.96205904771128 threshold=5.10689631650583 adjusted=-2.14483726879455
+    dither=0.00 silent → pass (leak=false, P=None, 1396ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 49567ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 322ms)
+[58/70] c_libraries::libsodium::ed25519_sign iter 8/10 (seed=12709504465293182615)
+  collected 30000 baseline + 30000 test samples in 951 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1105ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=372.983837314077 threshold=4.28310073641369 adjusted=368.700736577663
+    dither=0.00 silent → fail (leak=true, P=None, 1465ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 55231ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999992696870204), 317ms)
+[59/70] c_libraries::libsodium::ed25519_sign iter 9/10 (seed=14002040616935439461)
+  collected 30000 baseline + 30000 test samples in 831 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 938ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.946911579098611 threshold=6.95338216517158 adjusted=-6.00647058607297
+    dither=0.00 silent → pass (leak=false, P=None, 1620ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 50234ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999967586527152), 317ms)
+[60/70] c_libraries::libsodium::ed25519_sign iter 10/10 (seed=3335784747518990472)
+  collected 30000 baseline + 30000 test samples in 831 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 922ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.15362726517129 threshold=6.22913379027588 adjusted=-6.07550652510459
+    dither=0.00 silent → pass (leak=false, P=None, 1367ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 48359ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999822829457573), 324ms)
+[61/70] pqcrypto::kyber::kyber768_decapsulate iter 1/10 (seed=5407073028699858624)
+  collected 30000 baseline + 30000 test samples in 801 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.01325), 994ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.114207779321372 threshold=6.56847873735762 adjusted=-6.45427095803625
+    dither=0.00 silent → pass (leak=false, P=None, 1572ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 52290ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.3429611370322544), 307ms)
+[62/70] pqcrypto::kyber::kyber768_decapsulate iter 2/10 (seed=16486602942224098378)
+  collected 30000 baseline + 30000 test samples in 789 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.2285), 945ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.15445554033062 threshold=5.36109618226266 adjusted=-3.20664064193205
+    dither=0.00 silent → pass (leak=false, P=None, 1303ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 50166ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999979861706341), 325ms)
+[63/70] pqcrypto::kyber::kyber768_decapsulate iter 3/10 (seed=47689242042048377)
+  collected 30000 baseline + 30000 test samples in 790 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.27225), 951ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=5.0352183170922 threshold=4.03212732089675 adjusted=1.00309099619545
+    dither=0.00 silent → fail (leak=true, P=None, 1299ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 50693ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999806418838), 315ms)
+[64/70] pqcrypto::kyber::kyber768_decapsulate iter 4/10 (seed=1609967460387453248)
+  collected 30000 baseline + 30000 test samples in 790 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.3325), 937ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.03460538283977 threshold=4.21730589745002 adjusted=3.81729948538976
+    dither=0.00 silent → fail (leak=true, P=None, 1299ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 51318ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.9230802903477945), 314ms)
+[65/70] pqcrypto::kyber::kyber768_decapsulate iter 5/10 (seed=7374443985686313794)
+  collected 30000 baseline + 30000 test samples in 814 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.34575), 1018ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=16.2988867990941 threshold=4.26651440151912 adjusted=12.0323723975749
+    dither=0.00 silent → fail (leak=true, P=None, 1618ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 53254ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999909352865333), 311ms)
+[66/70] pqcrypto::kyber::kyber768_decapsulate iter 6/10 (seed=6305068527935083372)
+  collected 30000 baseline + 30000 test samples in 846 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.5045), 993ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.42435872293422 threshold=4.58686338035011 adjusted=-1.16250465741588
+    dither=0.00 silent → pass (leak=false, P=None, 1368ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 51227ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999971815900148), 305ms)
+[67/70] pqcrypto::kyber::kyber768_decapsulate iter 7/10 (seed=9890119370013277476)
+  collected 30000 baseline + 30000 test samples in 791 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.5725), 949ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.92499086501429 threshold=4.30586649550776 adjusted=0.619124369506527
+    dither=0.00 silent → fail (leak=true, P=None, 1418ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 51384ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999584687), 314ms)
+[68/70] pqcrypto::kyber::kyber768_decapsulate iter 8/10 (seed=176755103601538197)
+  collected 30000 baseline + 30000 test samples in 846 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.3345), 994ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.0406007379082 threshold=4.44853530273471 adjusted=-1.4079345648265
+    dither=0.00 silent → pass (leak=false, P=None, 1523ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 51934ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999960328244), 312ms)
+[69/70] pqcrypto::kyber::kyber768_decapsulate iter 9/10 (seed=12310112850682059155)
+  collected 30000 baseline + 30000 test samples in 812 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.56175), 974ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.36544024311425 threshold=4.40410052318762 adjusted=3.96133971992662
+    dither=0.00 silent → fail (leak=true, P=None, 1372ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 51947ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999980849), 313ms)
+[70/70] pqcrypto::kyber::kyber768_decapsulate iter 10/10 (seed=8189053803202916190)
+  collected 30000 baseline + 30000 test samples in 812 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.3615), 994ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 28ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.25599640572077 threshold=4.59991590440467 adjusted=-0.343919498683905
+    dither=0.00 silent → pass (leak=false, P=None, 1499ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 52369ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999518018707169), 314ms)
+Done. Wrote 420 units to /root/bench-results/runtime-tier1-N30000/results.csv.
+Python persistent worker shutting down
+R persistent worker shutting down
+=== Tier 1 N=30000 done 2026-04-22T20:47:14+00:00 ===
+=== Tier 1 N=50000 start 2026-04-22T20:47:14+00:00 ===
+Configuring shell
+Configuring shell in 1.64ms
+Loading tasks
+Loading tasks in 638µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.82ms)
+Succeeded         devenv:python:virtualenv (21.82ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (8.78ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 31.0ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.27ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     10
+Tier:           1
+Tools:          all
+Samples/class:  50000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/runtime-tier1-N50000
+
+crypto_benchmark: tier=One, tests=7, iterations=10, tools=all
+  dither configs (ns): [0.0]
+[1/70] rustcrypto::aes::aes128_encrypt iter 1/10 (seed=6154005188474195364)
+  collected 50000 baseline + 50000 test samples in 110 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1408ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 26ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1702ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 75054ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 1047ms)
+[2/70] rustcrypto::aes::aes128_encrypt iter 2/10 (seed=4911217489519324707)
+  collected 50000 baseline + 50000 test samples in 110 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1429ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 36ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1746ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 76481ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 322ms)
+[3/70] rustcrypto::aes::aes128_encrypt iter 3/10 (seed=13926325517549521148)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1409ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 24ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1774ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 74388ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 329ms)
+[4/70] rustcrypto::aes::aes128_encrypt iter 4/10 (seed=3050750541046227730)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1415ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 23ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1724ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 76629ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 332ms)
+[5/70] rustcrypto::aes::aes128_encrypt iter 5/10 (seed=15221301424657966275)
+  collected 50000 baseline + 50000 test samples in 110 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1428ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 36ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1749ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 77960ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 328ms)
+[6/70] rustcrypto::aes::aes128_encrypt iter 6/10 (seed=10417274980379140357)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1424ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 26ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1832ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 75205ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 332ms)
+[7/70] rustcrypto::aes::aes128_encrypt iter 7/10 (seed=10731120142020192295)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1428ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 27ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1846ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 75427ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 329ms)
+[8/70] rustcrypto::aes::aes128_encrypt iter 8/10 (seed=13574334748152275081)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1390ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 24ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1885ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 76943ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 327ms)
+[9/70] rustcrypto::aes::aes128_encrypt iter 9/10 (seed=5117884842499753759)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1379ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 24ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1690ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 75957ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 327ms)
+[10/70] rustcrypto::aes::aes128_encrypt iter 10/10 (seed=79716518764929837)
+  collected 50000 baseline + 50000 test samples in 109 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1409ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 24ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT pool failed, falling back to subprocess: SILENT analysis failed: missing values and NaN's not allowed if 'na.rm' is FALSE
+    dither=0.00 silent → error (leak=false, P=None, 1876ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 76595ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 329ms)
+[11/70] ring::aes_gcm::aes256gcm_seal iter 1/10 (seed=17060210546773182904)
+  collected 50000 baseline + 50000 test samples in 117 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1397ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 35ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=6.13110891257915 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 2261ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 78779ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 342ms)
+[12/70] ring::aes_gcm::aes256gcm_seal iter 2/10 (seed=1523560160233803684)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1448ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 39ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=36.1070383200002 threshold=7.18734891074118 adjusted=28.919689409259
+    dither=0.00 silent → fail (leak=true, P=None, 1564ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 79851ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 327ms)
+[13/70] ring::aes_gcm::aes256gcm_seal iter 3/10 (seed=1930566291513391757)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1435ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 38ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=42.8323818426016 threshold=30.909231330429 adjusted=11.9231505121726
+    dither=0.00 silent → fail (leak=true, P=None, 2208ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 81198ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 339ms)
+[14/70] ring::aes_gcm::aes256gcm_seal iter 4/10 (seed=4145745450567302931)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1402ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 37ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.43249451367319 threshold=7.93245827897357 adjusted=-3.49996376530038
+    dither=0.00 silent → pass (leak=false, P=None, 2051ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79226ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 336ms)
+[15/70] ring::aes_gcm::aes256gcm_seal iter 5/10 (seed=8651195473369840465)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1445ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 40ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=45.7303121006414 threshold=2.16982927466126 adjusted=43.5604828259801
+    dither=0.00 silent → fail (leak=true, P=None, 2062ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 79620ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 375ms)
+[16/70] ring::aes_gcm::aes256gcm_seal iter 6/10 (seed=4116686169460871686)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1466ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 36ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=28.4828360874943 threshold=10.0536732991731 adjusted=18.4291627883212
+    dither=0.00 silent → fail (leak=true, P=None, 1758ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 78593ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 325ms)
+[17/70] ring::aes_gcm::aes256gcm_seal iter 7/10 (seed=16850055734939791794)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1451ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 37ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=29.6756473333925 threshold=4.39034218426094 adjusted=25.2853051491315
+    dither=0.00 silent → fail (leak=true, P=None, 2107ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 78786ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 334ms)
+[18/70] ring::aes_gcm::aes256gcm_seal iter 8/10 (seed=10790199796676464696)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1420ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 37ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=5.06314983706286 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 1559ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 80082ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 323ms)
+[19/70] ring::aes_gcm::aes256gcm_seal iter 9/10 (seed=13498536771536337217)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1411ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 30ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=0.750706342023601 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 2040ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 75235ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 329ms)
+[20/70] ring::aes_gcm::aes256gcm_seal iter 10/10 (seed=16911135875195564548)
+  collected 50000 baseline + 50000 test samples in 116 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1419ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 40ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=4.25600744784281 threshold=7.28155451765029 adjusted=-3.02554706980749
+    dither=0.00 silent → pass (leak=false, P=None, 2278ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 81624ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 333ms)
+[21/70] rustcrypto::chacha20poly1305::encrypt iter 1/10 (seed=12225731234541680140)
+  collected 50000 baseline + 50000 test samples in 217 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1468ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 39ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.350511621132523 threshold=2.79316210740594 adjusted=-3.14367372853847
+    dither=0.00 silent → pass (leak=false, P=None, 1742ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 81210ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 354ms)
+[22/70] rustcrypto::chacha20poly1305::encrypt iter 2/10 (seed=13155455818830233774)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1476ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 35ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0554372610730027 threshold=1.20489390798869 adjusted=-1.26033116906169
+    dither=0.00 silent → pass (leak=false, P=None, 1544ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 78299ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 332ms)
+[23/70] rustcrypto::chacha20poly1305::encrypt iter 3/10 (seed=18200040664651102085)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1429ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 35ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.0938474719589012 threshold=4.81174812638222 adjusted=-4.90559559834112
+    dither=0.00 silent → pass (leak=false, P=None, 1537ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 78815ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 346ms)
+[24/70] rustcrypto::chacha20poly1305::encrypt iter 4/10 (seed=4209452279132210978)
+  collected 50000 baseline + 50000 test samples in 217 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1532ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 36ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.349924821596138 threshold=4.03990681584117 adjusted=-4.38983163743731
+    dither=0.00 silent → pass (leak=false, P=None, 1603ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 78150ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 342ms)
+[25/70] rustcrypto::chacha20poly1305::encrypt iter 5/10 (seed=10244123941916501375)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1519ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 39ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.933793261273452 threshold=6.38595893204287 adjusted=-7.31975219331633
+    dither=0.00 silent → pass (leak=false, P=None, 1556ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 77777ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9996338519652646), 339ms)
+[26/70] rustcrypto::chacha20poly1305::encrypt iter 6/10 (seed=17491518929099190204)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1478ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 38ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.028334447442124 threshold=5.22455264457848 adjusted=-5.2528870920206
+    dither=0.00 silent → pass (leak=false, P=None, 1534ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 78567ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 337ms)
+[27/70] rustcrypto::chacha20poly1305::encrypt iter 7/10 (seed=2870593724497938596)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1454ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 39ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=Inf threshold=1.42570670750359 adjusted=Inf
+    dither=0.00 silent → fail (leak=true, P=None, 1694ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79039ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 334ms)
+[28/70] rustcrypto::chacha20poly1305::encrypt iter 8/10 (seed=1875397544879785010)
+  collected 50000 baseline + 50000 test samples in 216 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1463ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 38ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-24.8375525927826 threshold=2.86906312556587 adjusted=-27.7066157183485
+    dither=0.00 silent → pass (leak=false, P=None, 1690ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 80694ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9998195686880889), 334ms)
+[29/70] rustcrypto::chacha20poly1305::encrypt iter 9/10 (seed=10936341685045074701)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1502ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 37ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-0.932073048873534 threshold=4.59033151507953 adjusted=-5.52240456395307
+    dither=0.00 silent → pass (leak=false, P=None, 1543ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 77274ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.6271796942253713), 339ms)
+[30/70] rustcrypto::chacha20poly1305::encrypt iter 10/10 (seed=6273507221916027710)
+  collected 50000 baseline + 50000 test samples in 215 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1480ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 38ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-1.31954966746137 threshold=2.62683064649569 adjusted=-3.94638031395706
+    dither=0.00 silent → pass (leak=false, P=None, 1688ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79170ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 346ms)
+[31/70] rustcrypto::sha3::sha3_256 iter 1/10 (seed=8503959229306082541)
+  collected 50000 baseline + 50000 test samples in 134 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1466ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 42ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.316612365424886 threshold=10.6336100947248 adjusted=-10.3169977292999
+    dither=0.00 silent → pass (leak=false, P=None, 2231ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 81676ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 346ms)
+[32/70] rustcrypto::sha3::sha3_256 iter 2/10 (seed=15197022792547380515)
+  collected 50000 baseline + 50000 test samples in 133 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1407ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 29ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.24365838343543 threshold=3.17607853149942 adjusted=-0.932420148063999
+    dither=0.00 silent → pass (leak=false, P=None, 1599ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 75320ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 333ms)
+[33/70] rustcrypto::sha3::sha3_256 iter 3/10 (seed=4083549850804976962)
+  collected 50000 baseline + 50000 test samples in 133 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1474ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 41ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-1.29397560912176 threshold=12.3144518298719 adjusted=-13.6084274389936
+    dither=0.00 silent → pass (leak=false, P=None, 1917ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79537ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999998737), 328ms)
+[34/70] rustcrypto::sha3::sha3_256 iter 4/10 (seed=15505625688943421174)
+  collected 50000 baseline + 50000 test samples in 132 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1510ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 39ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-36.7031490071888 threshold=2.30888132682047 adjusted=-39.0120303340093
+    dither=0.00 silent → pass (leak=false, P=None, 1567ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 80812ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999976979463903), 338ms)
+[35/70] rustcrypto::sha3::sha3_256 iter 5/10 (seed=5739521062736212996)
+  collected 50000 baseline + 50000 test samples in 133 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1441ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 33ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-58.2337528008758 threshold=3.05920500677178 adjusted=-61.2929578076476
+    dither=0.00 silent → pass (leak=false, P=None, 1728ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 76480ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.8970447408796773), 325ms)
+[36/70] rustcrypto::sha3::sha3_256 iter 6/10 (seed=3800147945491650744)
+  collected 50000 baseline + 50000 test samples in 133 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1500ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 42ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=30.3099213454495 threshold=9.03875547460255 adjusted=21.2711658708469
+    dither=0.00 silent → fail (leak=true, P=None, 2032ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 81464ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 326ms)
+[37/70] rustcrypto::sha3::sha3_256 iter 7/10 (seed=5685374411341844523)
+  collected 50000 baseline + 50000 test samples in 133 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1470ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 41ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-6.27713927206975 threshold=7.34327736085245 adjusted=-13.6204166329222
+    dither=0.00 silent → pass (leak=false, P=None, 1692ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79230ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 335ms)
+[38/70] rustcrypto::sha3::sha3_256 iter 8/10 (seed=6380062987332878367)
+  collected 50000 baseline + 50000 test samples in 132 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1484ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 41ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-7.33184014781337 threshold=6.8743531550487 adjusted=-14.2061933028621
+    dither=0.00 silent → pass (leak=false, P=None, 2009ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 81287ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 343ms)
+[39/70] rustcrypto::sha3::sha3_256 iter 9/10 (seed=12792246672741076588)
+  collected 50000 baseline + 50000 test samples in 132 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1443ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 36ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=-24.313731837049 threshold=3.84743015819143 adjusted=-28.1611619952404
+    dither=0.00 silent → pass (leak=false, P=None, 1546ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 77588ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9959266250644458), 341ms)
+[40/70] rustcrypto::sha3::sha3_256 iter 10/10 (seed=9147022077598547721)
+  collected 50000 baseline + 50000 test samples in 134 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1482ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 41ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=41.149366131096 threshold=8.0209515452368 adjusted=33.1284145858592
+    dither=0.00 silent → fail (leak=true, P=None, 2125ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 79538ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 336ms)
+[41/70] dalek::x25519::scalar_mult iter 1/10 (seed=10836228825329631233)
+  collected 50000 baseline + 50000 test samples in 3612 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2039ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=150.623393723738 threshold=5.4634829931392 adjusted=145.159910730599
+    dither=0.00 silent → fail (leak=true, P=None, 2199ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 108599ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999996), 336ms)
+[42/70] dalek::x25519::scalar_mult iter 2/10 (seed=3001517157359332171)
+  collected 50000 baseline + 50000 test samples in 3576 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2044ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=169.21770469906 threshold=11.5026155979234 adjusted=157.715089101136
+    dither=0.00 silent → fail (leak=true, P=None, 2365ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 109036ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 344ms)
+[43/70] dalek::x25519::scalar_mult iter 3/10 (seed=10442373143697980568)
+  collected 50000 baseline + 50000 test samples in 3561 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1983ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=20.3664410948412 threshold=10.2320901414147 adjusted=10.1343509534266
+    dither=0.00 silent → fail (leak=true, P=None, 2212ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 106419ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 352ms)
+[44/70] dalek::x25519::scalar_mult iter 4/10 (seed=254640812419664096)
+  collected 50000 baseline + 50000 test samples in 3584 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2047ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=26.25403376927 threshold=6.50297038352855 adjusted=19.7510633857415
+    dither=0.00 silent → fail (leak=true, P=None, 1757ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 108881ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999502), 350ms)
+[45/70] dalek::x25519::scalar_mult iter 5/10 (seed=2784417049637337928)
+  collected 50000 baseline + 50000 test samples in 3712 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2070ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=21.1060306984067 threshold=6.37511581712051 adjusted=14.7309148812862
+    dither=0.00 silent → fail (leak=true, P=None, 2530ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 110694ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 344ms)
+[46/70] dalek::x25519::scalar_mult iter 6/10 (seed=2899094717620558662)
+  collected 50000 baseline + 50000 test samples in 3726 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2134ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=93.5272892127729 threshold=7.8040583819158 adjusted=85.723230830857
+    dither=0.00 silent → fail (leak=true, P=None, 2274ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 109093ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999915021), 345ms)
+[47/70] dalek::x25519::scalar_mult iter 7/10 (seed=592374285312858385)
+  collected 50000 baseline + 50000 test samples in 3619 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2009ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=69.9616363060956 threshold=6.56882183550228 adjusted=63.3928144705933
+    dither=0.00 silent → fail (leak=true, P=None, 1872ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 109357ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 360ms)
+[48/70] dalek::x25519::scalar_mult iter 8/10 (seed=3454088062200130132)
+  collected 50000 baseline + 50000 test samples in 3703 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2126ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=22.3519831941689 threshold=5.08236051807209 adjusted=17.2696226760968
+    dither=0.00 silent → fail (leak=true, P=None, 2220ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 112242ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999993382), 355ms)
+[49/70] dalek::x25519::scalar_mult iter 9/10 (seed=13910157344041706971)
+  collected 50000 baseline + 50000 test samples in 3739 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2170ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=18.789552951775 threshold=7.66054661235083 adjusted=11.1290063394242
+    dither=0.00 silent → fail (leak=true, P=None, 2486ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 112397ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999998), 362ms)
+[50/70] dalek::x25519::scalar_mult iter 10/10 (seed=9531589991746876306)
+  collected 50000 baseline + 50000 test samples in 3689 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2083ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=427.523788323557 threshold=9.31505355356881 adjusted=418.208734769988
+    dither=0.00 silent → fail (leak=true, P=None, 2006ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 111855ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999995764), 367ms)
+[51/70] c_libraries::libsodium::ed25519_sign iter 1/10 (seed=7970434012246635665)
+  collected 50000 baseline + 50000 test samples in 1360 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1889ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=700.315376708951 threshold=4.27386223028309 adjusted=696.041514478668
+    dither=0.00 silent → fail (leak=true, P=None, 2265ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 100379ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999996), 348ms)
+[52/70] c_libraries::libsodium::ed25519_sign iter 2/10 (seed=32891279060181905)
+  collected 50000 baseline + 50000 test samples in 1275 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1748ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.525795850606411 threshold=5.57984542861363 adjusted=-5.05404957800722
+    dither=0.00 silent → pass (leak=false, P=None, 1863ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 95332ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999972467806719), 352ms)
+[53/70] c_libraries::libsodium::ed25519_sign iter 3/10 (seed=6463052652355296689)
+  collected 50000 baseline + 50000 test samples in 1311 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1820ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.31990234389154 threshold=5.78308230733254 adjusted=-3.463179963441
+    dither=0.00 silent → pass (leak=false, P=None, 1901ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 99083ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 340ms)
+[54/70] c_libraries::libsodium::ed25519_sign iter 4/10 (seed=13791190684930009006)
+  collected 50000 baseline + 50000 test samples in 1278 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1747ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.527500834674944 threshold=5.49793154935765 adjusted=-4.9704307146827
+    dither=0.00 silent → pass (leak=false, P=None, 1718ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 97021ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 349ms)
+[55/70] c_libraries::libsodium::ed25519_sign iter 5/10 (seed=9329310494821122244)
+  collected 50000 baseline + 50000 test samples in 1310 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1773ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.32609295762662 threshold=4.75234785774102 adjusted=-1.4262549001144
+    dither=0.00 silent → pass (leak=false, P=None, 1779ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 98632ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999999898), 355ms)
+[56/70] c_libraries::libsodium::ed25519_sign iter 6/10 (seed=6348657202958305343)
+  collected 50000 baseline + 50000 test samples in 1321 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1850ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.59781698545208 threshold=7.03026102130338 adjusted=-3.4324440358513
+    dither=0.00 silent → pass (leak=false, P=None, 2148ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 99752ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 356ms)
+[57/70] c_libraries::libsodium::ed25519_sign iter 7/10 (seed=5140504885099625482)
+  collected 50000 baseline + 50000 test samples in 1284 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1730ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 45ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.40540831041702 threshold=5.49052141490835 adjusted=-1.08511310449133
+    dither=0.00 silent → pass (leak=false, P=None, 2193ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 98835ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 350ms)
+[58/70] c_libraries::libsodium::ed25519_sign iter 8/10 (seed=12709504465293182615)
+  collected 50000 baseline + 50000 test samples in 1307 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1728ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.22395134750463 threshold=6.59677369899358 adjusted=-5.37282235148895
+    dither=0.00 silent → pass (leak=false, P=None, 1934ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 93984ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 350ms)
+[59/70] c_libraries::libsodium::ed25519_sign iter 9/10 (seed=14002040616935439461)
+  collected 50000 baseline + 50000 test samples in 1276 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1792ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.47869528391286 threshold=4.81196015964856 adjusted=-3.33326487573571
+    dither=0.00 silent → pass (leak=false, P=None, 1689ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 96248ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 343ms)
+[60/70] c_libraries::libsodium::ed25519_sign iter 10/10 (seed=3335784747518990472)
+  collected 50000 baseline + 50000 test samples in 1276 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 1781ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.477830258942426 threshold=5.3229915636299 adjusted=-4.84516130468747
+    dither=0.00 silent → pass (leak=false, P=None, 1711ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 95870ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999989838), 350ms)
+[61/70] pqcrypto::kyber::kyber768_decapsulate iter 1/10 (seed=5407073028699858624)
+  collected 50000 baseline + 50000 test samples in 1245 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.03125), 1860ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.60560495575976 threshold=4.77060683355974 adjusted=-3.16500187779998
+    dither=0.00 silent → pass (leak=false, P=None, 1807ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 100687ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9965406965355882), 334ms)
+[62/70] pqcrypto::kyber::kyber768_decapsulate iter 2/10 (seed=16486602942224098378)
+  collected 50000 baseline + 50000 test samples in 1245 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.0865), 1880ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.27576367896903 threshold=4.75690736625265 adjusted=-2.48114368728362
+    dither=0.00 silent → pass (leak=false, P=None, 2027ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 102996ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9701258304978893), 348ms)
+[63/70] pqcrypto::kyber::kyber768_decapsulate iter 3/10 (seed=47689242042048377)
+  collected 50000 baseline + 50000 test samples in 1302 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.131), 1885ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.68286024909404 threshold=4.39539763784786 adjusted=-2.71253738875382
+    dither=0.00 silent → pass (leak=false, P=None, 1678ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 101111ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9861757606407869), 336ms)
+[64/70] pqcrypto::kyber::kyber768_decapsulate iter 4/10 (seed=1609967460387453248)
+  collected 50000 baseline + 50000 test samples in 1248 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.124), 1882ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.272349361701821 threshold=4.42758143810464 adjusted=-4.15523207640282
+    dither=0.00 silent → pass (leak=false, P=None, 1670ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 100797ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.6843437562446523), 342ms)
+[65/70] pqcrypto::kyber::kyber768_decapsulate iter 5/10 (seed=7374443985686313794)
+  collected 50000 baseline + 50000 test samples in 1249 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.6485), 1868ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=5.89268697319573 threshold=4.51391197894937 adjusted=1.37877499424636
+    dither=0.00 silent → fail (leak=true, P=None, 1634ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 101601ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9869326190698068), 338ms)
+[66/70] pqcrypto::kyber::kyber768_decapsulate iter 6/10 (seed=6305068527935083372)
+  collected 50000 baseline + 50000 test samples in 1285 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.15575), 1930ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=5.89146637684263 threshold=4.56153864722205 adjusted=1.32992772962058
+    dither=0.00 silent → fail (leak=true, P=None, 1745ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 105308ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9997810195709345), 342ms)
+[67/70] pqcrypto::kyber::kyber768_decapsulate iter 7/10 (seed=9890119370013277476)
+  collected 50000 baseline + 50000 test samples in 1280 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.14125), 1922ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.80616430723111 threshold=4.49534759160862 adjusted=-1.68918328437751
+    dither=0.00 silent → pass (leak=false, P=None, 2257ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 102943ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.6944578048588227), 344ms)
+[68/70] pqcrypto::kyber::kyber768_decapsulate iter 8/10 (seed=176755103601538197)
+  collected 50000 baseline + 50000 test samples in 1244 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.1215), 1855ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.67892734744311 threshold=4.44011358157824 adjusted=-2.76118623413513
+    dither=0.00 silent → pass (leak=false, P=None, 1672ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 101478ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.4938517052162119), 345ms)
+[69/70] pqcrypto::kyber::kyber768_decapsulate iter 9/10 (seed=12310112850682059155)
+  collected 50000 baseline + 50000 test samples in 1282 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.0345), 1922ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=0.505946035869798 threshold=5.00079016427177 adjusted=-4.49484412840197
+    dither=0.00 silent → pass (leak=false, P=None, 2049ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 105342ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.7335775727565192), 351ms)
+[70/70] pqcrypto::kyber::kyber768_decapsulate iter 10/10 (seed=8189053803202916190)
+  collected 50000 baseline + 50000 test samples in 1261 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.279), 1863ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 46ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.3169183509423 threshold=5.38919238376454 adjusted=-3.07227403282224
+    dither=0.00 silent → pass (leak=false, P=None, 1810ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 101679ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9882675912511075), 339ms)
+Done. Wrote 420 units to /root/bench-results/runtime-tier1-N50000/results.csv.
+Python persistent worker shutting down
+R persistent worker shutting down
+=== Tier 1 N=50000 done 2026-04-22T22:37:10+00:00 ===
+--- Tier 2 MARVIN: N=50k, 20 iters ---
+=== Tier 2 start 2026-04-22T22:37:10+00:00 ===
+Configuring shell
+Configuring shell in 1.60ms
+Loading tasks
+Loading tasks in 621µs
+Running tasks     devenv:enterShell
+
+Running tasks
+Running           devenv:python:virtualenv
+Running           devenv:files:cleanup
+Succeeded         devenv:files:cleanup (6.69ms)
+Succeeded         devenv:python:virtualenv (20.77ms)
+Running           devenv:enterShell
+Succeeded         devenv:enterShell (7.68ms)
+Running           devenv:enterTest
+No command        devenv:enterTest
+Running tasks in 28.7ms
+1 Skipped, 3 Succeeded
+Configuring shell
+Configuring shell in 1.37ms
+==========================================
+Crypto cross-tool benchmark
+==========================================
+Iterations:     20
+Tier:           2
+Tools:          all
+Samples/class:  50000
+R workers:      24
+Python workers: 6
+Seed:           20260418
+Output dir:     /root/bench-results/runtime-tier2
+
+crypto_benchmark: tier=Two, tests=1, iterations=20, tools=all
+  dither configs (ns): [0.0]
+[1/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 1/20 (seed=9876562591584109655)
+  collected 50000 baseline + 50000 test samples in 18833 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2420ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+Loaded SILENT functions from: /nix/store/afvpgxn8vx0a00rn0r79i5wj63lprbmz-silent-unstable-2024-01-19/share/silent/scripts/functions.R
+RTLF implementation enabled (using built-in algorithm)
+R persistent worker ready
+  SILENT loaded: TRUE
+  RTLF loaded: TRUE
+SILENT result: test_stat=8.02538449122225 threshold=3.96744904343159 adjusted=4.05793544779066
+    dither=0.00 silent → fail (leak=true, P=None, 3518ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 123556ms)
+tlsfuzzer loaded successfully
+Python persistent worker ready
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999992585163971), 1092ms)
+[2/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 2/20 (seed=16181177017490280269)
+  collected 50000 baseline + 50000 test samples in 19065 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2482ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 49ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.51476853488478 threshold=4.31553417715874 adjusted=-1.80076564227396
+    dither=0.00 silent → pass (leak=false, P=None, 2337ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 122316ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9603499713948421), 346ms)
+[3/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 3/20 (seed=10345527531909316375)
+  collected 50000 baseline + 50000 test samples in 18592 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.1965), 2526ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=5.29026237404611 threshold=4.10762267230672 adjusted=1.18263970173939
+    dither=0.00 silent → fail (leak=true, P=None, 2223ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 124097ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999953206807), 352ms)
+[4/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 4/20 (seed=5235722407536906526)
+  collected 50000 baseline + 50000 test samples in 18285 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2445ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.49354392700837 threshold=4.40909568834602 adjusted=-0.915551761337651
+    dither=0.00 silent → pass (leak=false, P=None, 2169ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 121809ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.32236828066992795), 345ms)
+[5/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 5/20 (seed=11103911911378150211)
+  collected 50000 baseline + 50000 test samples in 18404 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 2559ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.99614874270624 threshold=4.38916322675369 adjusted=-2.39301448404745
+    dither=0.00 silent → pass (leak=false, P=None, 2142ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 124659ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.3361260241701809), 353ms)
+[6/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 6/20 (seed=10080952379486741611)
+  collected 50000 baseline + 50000 test samples in 19076 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0005), 2634ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.6095350553406 threshold=3.56226201655168 adjusted=10.0472730387889
+    dither=0.00 silent → fail (leak=true, P=None, 2178ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 127171ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999995744745), 346ms)
+[7/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 7/20 (seed=7147528179339094999)
+  collected 50000 baseline + 50000 test samples in 19023 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.029), 2672ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 49ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.38914253754682 threshold=4.13135853590666 adjusted=4.25778400164016
+    dither=0.00 silent → fail (leak=true, P=None, 2448ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 127815ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.997140497171653), 354ms)
+[8/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 8/20 (seed=16222819606835889983)
+  collected 50000 baseline + 50000 test samples in 18975 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.023), 2565ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=2.86380107845466 threshold=4.39830641037512 adjusted=-1.53450533192046
+    dither=0.00 silent → pass (leak=false, P=None, 2209ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 124238ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.8139848069476737), 359ms)
+[9/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 9/20 (seed=4874026367394903154)
+  collected 50000 baseline + 50000 test samples in 18398 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00125), 2583ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.77084134680526 threshold=4.45985755211912 adjusted=-2.68901620531386
+    dither=0.00 silent → pass (leak=false, P=None, 2222ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 125090ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.741145832976777), 348ms)
+[10/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 10/20 (seed=14412695428229330657)
+  collected 50000 baseline + 50000 test samples in 18930 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.004), 2574ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=6.03646598837793 threshold=4.31679367521169 adjusted=1.71967231316624
+    dither=0.00 silent → fail (leak=true, P=None, 2098ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 127398ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9809104627383669), 367ms)
+[11/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 11/20 (seed=7309414515811073847)
+  collected 50000 baseline + 50000 test samples in 19143 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.31175), 2613ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=4.63326562386217 threshold=3.69060036781596 adjusted=0.942665256046213
+    dither=0.00 silent → fail (leak=true, P=None, 2460ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 127527ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9997146679615472), 345ms)
+[12/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 12/20 (seed=1416603868060367477)
+  collected 50000 baseline + 50000 test samples in 18946 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.0), 2575ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.8716037219211 threshold=4.84839011115288 adjusted=4.02321361076821
+    dither=0.00 silent → fail (leak=true, P=None, 2431ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 127506ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.943530584908304), 349ms)
+[13/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 13/20 (seed=7156272371374718987)
+  collected 50000 baseline + 50000 test samples in 18373 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.72375), 2530ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → fail (leak=true, P=None, 0ms)
+SILENT result: test_stat=23.1342469395216 threshold=3.7833860185313 adjusted=19.3508609209903
+    dither=0.00 silent → fail (leak=true, P=None, 2251ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 124027ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 351ms)
+[14/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 14/20 (seed=5733042429392844838)
+  collected 50000 baseline + 50000 test samples in 18337 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.02325), 2529ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=19.0845481085155 threshold=3.39171964096802 adjusted=15.6928284675475
+    dither=0.00 silent → fail (leak=true, P=None, 2002ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 125016ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9999999999959429), 359ms)
+[15/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 15/20 (seed=8740215586439081363)
+  collected 50000 baseline + 50000 test samples in 18524 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.11675), 2522ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=13.0825254757313 threshold=4.50199809090697 adjusted=8.58052738482428
+    dither=0.00 silent → fail (leak=true, P=None, 2159ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 124142ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.999999999991096), 401ms)
+[16/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 16/20 (seed=268587819215575437)
+  collected 50000 baseline + 50000 test samples in 18343 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 2439ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=1.94410534445581 threshold=4.64034518474764 adjusted=-2.69623984029183
+    dither=0.00 silent → pass (leak=false, P=None, 2016ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 121407ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.47249731728898015), 354ms)
+[17/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 17/20 (seed=9369743751105822393)
+  collected 50000 baseline + 50000 test samples in 18315 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 2463ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.84329073554128 threshold=4.62380896726884 adjusted=-0.780518231727556
+    dither=0.00 silent → pass (leak=false, P=None, 2215ms)
+    dither=0.00 rtlf → pass (leak=false, P=Some(0.0), 122912ms)
+    dither=0.00 tlsfuzzer → pass (leak=false, P=Some(0.8874804179646945), 364ms)
+[18/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 18/20 (seed=1392717593351835413)
+  collected 50000 baseline + 50000 test samples in 18323 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → inconclusive (leak=false, P=Some(0.17775), 2453ms)
+    dither=0.00 dudect → pass (leak=false, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=3.97204947642882 threshold=4.12006255908608 adjusted=-0.148013082657263
+    dither=0.00 silent → pass (leak=false, P=None, 2314ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 122009ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.9997122553974792), 347ms)
+[19/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 19/20 (seed=18003829273360213823)
+  collected 50000 baseline + 50000 test samples in 18958 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.01825), 2582ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 48ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=12.8544561895718 threshold=3.85880067710603 adjusted=8.99565551246574
+    dither=0.00 silent → fail (leak=true, P=None, 2298ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 124053ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(1.0), 349ms)
+[20/20] rustcrypto::rsa::marvin_rsa1024_pkcs1v15_decrypt iter 20/20 (seed=16764460929957836017)
+  collected 50000 baseline + 50000 test samples in 18319 ms (timer=rdtsc, resolution=0.223 ns)
+    dither=0.00 tacet → pass (leak=false, P=Some(0.00075), 2471ms)
+    dither=0.00 dudect → fail (leak=true, P=None, 47ms)
+    dither=0.00 tvla → pass (leak=false, P=None, 0ms)
+SILENT result: test_stat=8.23937900452559 threshold=3.93726662567237 adjusted=4.30211237885322
+    dither=0.00 silent → fail (leak=true, P=None, 2023ms)
+    dither=0.00 rtlf → fail (leak=true, P=Some(1.0), 125084ms)
+    dither=0.00 tlsfuzzer → fail (leak=true, P=Some(0.999999999722103), 351ms)
+Done. Wrote 120 units to /root/bench-results/runtime-tier2/results.csv.
+Python persistent worker shutting down
+R persistent worker shutting down
+=== Tier 2 done 2026-04-22T23:26:40+00:00 ===
+=== ALL DONE 2026-04-22T23:26:40+00:00 ===

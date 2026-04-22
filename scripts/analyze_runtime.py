@@ -295,15 +295,15 @@ def sanity_markdown(rows: list[dict[str, str]]) -> str:
 # =============================================================================
 
 
-def response_paragraph(rows: list[dict[str, str]]) -> str:
-    # Medians across Tier-1 at N=200_000, per tool.
-    tier1_200k = [
+def response_paragraph(rows: list[dict[str, str]], primary_n: int) -> str:
+    # Medians across Tier-1 at the primary N, per tool.
+    tier1_at_n = [
         r
         for r in rows
-        if r["expected"] == "constant_time" and to_int(r["samples_per_class"]) == 200_000
+        if r["expected"] == "constant_time" and to_int(r["samples_per_class"]) == primary_n
     ]
     per_tool: dict[str, list[float]] = defaultdict(list)
-    for r in tier1_200k:
+    for r in tier1_at_n:
         per_tool[r["tool"]].append(to_float(r["decision_time_ms"]))
 
     parts = []
@@ -311,11 +311,11 @@ def response_paragraph(rows: list[dict[str, str]]) -> str:
         med, _, _ = median_iqr(per_tool[tool])
         parts.append(f"{tool} {fmt_ms(med).strip()}")
 
-    # Median collection time across Tier-1 at N=200_000.
+    # Median collection time across Tier-1 at the primary N.
     # (collection_time_ms is per-iteration and shared across tools; take one row
     # per (test, iteration) to avoid overcounting.)
     collection_seen: dict[tuple[str, str], float] = {}
-    for r in tier1_200k:
+    for r in tier1_at_n:
         key = (r["test_id"], r.get("iteration", ""))
         if key not in collection_seen:
             collection_seen[key] = to_float(r["collection_time_ms"])
@@ -334,16 +334,17 @@ def response_paragraph(rows: list[dict[str, str]]) -> str:
 
     text = [
         "On seven Tier-1 constant-time cryptographic primitives (AMD EPYC",
-        "32 vCPU, N = 200 000 samples/class, 10 iterations on identical",
+        f"32 vCPU, N = {primary_n:,} samples/class, 10 iterations on identical",
         "raw timing data), median per-tool analysis latency was: "
         + ", ".join(parts) + ".",
         f"Sample collection (shared across tools) took {fmt_s(coll_med).strip()} s",
-        "(median) per primitive, so the wall-clock to evaluate a library",
-        "is dominated by collection rather than by any tool's decision",
-        "pipeline — Tacet adds no meaningful overhead.",
-        "On the MARVIN RSA-1024 leaky test (CVE-2023-49092) at N = 50 000, end-to-end",
-        "time-to-verdict was: " + "; ".join(marvin_summary_parts) + ".",
+        "(median) per primitive.",
     ]
+    if marvin_summary_parts:
+        text += [
+            "On the MARVIN RSA-1024 leaky test (CVE-2023-49092) at N = 50 000, end-to-end",
+            "time-to-verdict was: " + "; ".join(marvin_summary_parts) + ".",
+        ]
     return " ".join(text)
 
 
@@ -409,7 +410,7 @@ def main() -> int:
     report.append("")
     report.append("## Drop-in paragraph for USENIX response")
     report.append("")
-    report.append("> " + response_paragraph(rows).replace("\n", "\n> "))
+    report.append("> " + response_paragraph(rows, args.primary_n).replace("\n", "\n> "))
     report.append("")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)

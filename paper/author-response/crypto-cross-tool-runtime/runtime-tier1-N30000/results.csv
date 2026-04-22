@@ -1,0 +1,473 @@
+ecosystem,library,primitive,test_id,expected,attacker_model,iteration,seed,samples_per_class,timer_resolution_ns,timer_name,dither_ns,tool,outcome,detected_leak,leak_probability,samples_used,decision_time_ms,status,collection_time_ms,timestamp
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,720,Pass (P=0.0%),108,1776887545
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,dudect,fail,true,,59597,13,"max|t|=21.33, tau=-0.0874, threshold=4.5",108,1776887545
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=4.74, threshold=4.5",108,1776887545
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,silent,error,false,,0,1489,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",108,1776887549
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35095,"p=0.0000, alpha=0.09 (pool)",108,1776887584
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,1,6154005188474195364,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,1024,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887585
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,720,Pass (P=0.0%),107,1776887586
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,dudect,fail,true,,59937,15,"max|t|=25.31, tau=-0.1034, threshold=4.5",107,1776887586
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=7.64, threshold=4.5",107,1776887586
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,silent,error,false,,0,1465,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",107,1776887589
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35202,"p=0.0000, alpha=0.09 (pool)",107,1776887624
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,2,4911217489519324707,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",107,1776887624
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,723,Pass (P=0.0%),107,1776887625
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,dudect,fail,true,,60000,14,"max|t|=24.92, tau=-0.1017, threshold=4.5",107,1776887625
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=24.92, threshold=4.5",107,1776887625
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,silent,error,false,,0,1468,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",107,1776887628
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,34089,"p=0.0000, alpha=0.09 (pool)",107,1776887662
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,3,13926325517549521148,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,298,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",107,1776887662
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,690,Pass (P=0.0%),108,1776887663
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,dudect,fail,true,,60000,14,"max|t|=21.12, tau=-0.0862, threshold=4.5",108,1776887663
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=21.12, threshold=4.5",108,1776887663
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,silent,error,false,,0,1497,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",108,1776887666
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35281,"p=0.0000, alpha=0.09 (pool)",108,1776887701
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,4,3050750541046227730,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,318,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887701
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,711,Pass (P=0.0%),108,1776887702
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,dudect,fail,true,,59925,16,"max|t|=26.06, tau=-0.1064, threshold=4.5",108,1776887702
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=3.52, threshold=4.5",108,1776887702
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,silent,error,false,,0,1814,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",108,1776887706
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,34137,"p=0.0000, alpha=0.09 (pool)",108,1776887740
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,5,15221301424657966275,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,304,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887740
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,715,Pass (P=0.0%),108,1776887741
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,dudect,fail,true,,59812,18,"max|t|=26.70, tau=-0.1092, threshold=4.5",108,1776887741
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=3.91, threshold=4.5",108,1776887741
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1377,"stat=2.460, alpha=0.10, delta=1.0 (pool)",108,1776887742
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35613,"p=0.0000, alpha=0.09 (pool)",108,1776887778
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,6,10417274980379140357,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,305,"sign_test(p=0.0000), alpha=0.05 (pool)",108,1776887778
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,712,Pass (P=0.0%),111,1776887779
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,dudect,fail,true,,57839,23,"max|t|=18.83, tau=-0.0783, threshold=4.5",111,1776887779
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=11.61, threshold=4.5",111,1776887779
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1200,"stat=0.000, alpha=0.10, delta=1.0 (pool)",111,1776887780
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36586,"p=1.0000, alpha=0.09 (pool)",111,1776887817
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,7,10731120142020192295,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776887817
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,701,Pass (P=0.0%),108,1776887818
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,dudect,fail,true,,59852,17,"max|t|=27.07, tau=-0.1106, threshold=4.5",108,1776887818
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=10.98, threshold=4.5",108,1776887818
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1451,"stat=5.635, alpha=0.10, delta=1.0 (pool)",108,1776887819
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,34309,"p=0.0000, alpha=0.09 (pool)",108,1776887854
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,8,13574334748152275081,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,300,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887854
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,716,Pass (P=0.0%),108,1776887855
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,dudect,fail,true,,60000,23,"max|t|=20.92, tau=-0.0854, threshold=4.5",108,1776887855
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=20.92, threshold=4.5",108,1776887855
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,silent,error,false,,0,1445,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",108,1776887858
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36535,"p=1.0000, alpha=0.09 (pool)",108,1776887894
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,9,5117884842499753759,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,309,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887894
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,712,Pass (P=0.0%),108,1776887895
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,dudect,fail,true,,59735,22,"max|t|=18.37, tau=-0.0751, threshold=4.5",108,1776887895
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=8.61, threshold=4.5",108,1776887895
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,silent,error,false,,0,1494,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",108,1776887898
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,36831,"p=0.0000, alpha=0.09 (pool)",108,1776887935
+Rust,RustCrypto,AES-128,rustcrypto::aes::aes128_encrypt,constant_time,AdjacentNetwork,10,79716518764929837,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,305,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",108,1776887935
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,696,Pass (P=0.0%),112,1776887936
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,dudect,fail,true,,54965,25,"max|t|=14.34, tau=-0.0612, threshold=4.5",112,1776887936
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.82, threshold=4.5",112,1776887936
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1562,"stat=4.837, alpha=0.10, delta=1.0 (pool)",112,1776887938
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37777,"p=1.0000, alpha=0.09 (pool)",112,1776887975
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,1,17060210546773182904,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,302,"sign_test(p=0.0000), alpha=0.05 (pool)",112,1776887976
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,687,Pass (P=0.0%),111,1776887976
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,dudect,fail,true,,57725,22,"max|t|=23.55, tau=-0.0980, threshold=4.5",111,1776887976
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,tvla,fail,true,,60000,0,"|t|=5.05, threshold=4.5",111,1776887976
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,silent,error,false,,0,1535,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776887979
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,37472,"p=0.0000, alpha=0.09 (pool)",111,1776888017
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,2,1523560160233803684,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,319,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888017
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,688,Pass (P=0.0%),111,1776888018
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,dudect,fail,true,,58902,20,"max|t|=6.51, tau=0.0268, threshold=4.5",111,1776888018
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=3.83, threshold=4.5",111,1776888018
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,silent,error,false,,0,1608,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776888021
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,35834,"p=1.0000, alpha=0.09 (pool)",111,1776888057
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,3,1930566291513391757,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888057
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,687,Pass (P=0.0%),111,1776888058
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,dudect,fail,true,,58990,21,"max|t|=5.43, tau=-0.0224, threshold=4.5",111,1776888058
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.67, threshold=4.5",111,1776888058
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,silent,error,false,,0,1725,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776888061
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37211,"p=1.0000, alpha=0.09 (pool)",111,1776888098
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,4,4145745450567302931,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999926,60000,301,"wilcoxon_test(p=0.0001), alpha=0.05 (pool)",111,1776888098
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,684,Pass (P=0.0%),111,1776888099
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,dudect,fail,true,,59819,22,"max|t|=12.91, tau=0.0528, threshold=4.5",111,1776888099
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=3.89, threshold=4.5",111,1776888099
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,silent,error,false,,0,1461,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776888102
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37498,"p=1.0000, alpha=0.09 (pool)",111,1776888139
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,5,8651195473369840465,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,358,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888140
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,689,Pass (P=0.0%),111,1776888140
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,dudect,fail,true,,57816,23,"max|t|=7.91, tau=-0.0329, threshold=4.5",111,1776888140
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.12, threshold=4.5",111,1776888140
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1526,"stat=-1.181, alpha=0.10, delta=1.0 (pool)",111,1776888142
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37887,"p=1.0000, alpha=0.09 (pool)",111,1776888180
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,6,4116686169460871686,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.981758,60000,311,"sign_test(p=0.0182), alpha=0.05 (pool)",111,1776888180
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,693,Pass (P=0.0%),111,1776888181
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,dudect,fail,true,,59840,22,"max|t|=7.72, tau=0.0316, threshold=4.5",111,1776888181
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.42, threshold=4.5",111,1776888181
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,silent,error,false,,0,1463,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776888184
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36349,"p=1.0000, alpha=0.09 (pool)",111,1776888220
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,7,16850055734939791794,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,309,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888220
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,675,Pass (P=0.0%),111,1776888221
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,dudect,fail,true,,59098,22,"max|t|=10.35, tau=0.0426, threshold=4.5",111,1776888221
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.99, threshold=4.5",111,1776888221
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1505,"stat=-1.142, alpha=0.10, delta=1.0 (pool)",111,1776888223
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36808,"p=1.0000, alpha=0.09 (pool)",111,1776888259
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,8,10790199796676464696,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,302,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888260
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,682,Pass (P=0.0%),111,1776888261
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,dudect,fail,true,,58862,21,"max|t|=15.52, tau=-0.0640, threshold=4.5",111,1776888261
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=3.89, threshold=4.5",111,1776888261
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,silent,error,false,,0,1459,"Error: SILENT failed: Error in quantile.default(max_boot, 1 - alpha) : 
+  missing values and NaN's not allowed if 'na.rm' is FALSE
+Calls: algorithm -> max_test -> quantile -> quantile.default
+Execution halted
+",111,1776888263
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35960,"p=0.0000, alpha=0.09 (pool)",111,1776888299
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,9,13498536771536337217,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888300
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,684,Pass (P=0.0%),111,1776888300
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,dudect,fail,true,,57428,23,"max|t|=6.12, tau=0.0255, threshold=4.5",111,1776888300
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.80, threshold=4.5",111,1776888300
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1211,"stat=-16.939, alpha=0.10, delta=1.0 (pool)",111,1776888302
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37343,"p=1.0000, alpha=0.09 (pool)",111,1776888339
+Rust,ring,AES-256-GCM,ring::aes_gcm::aes256gcm_seal,constant_time,AdjacentNetwork,10,16911135875195564548,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,300,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",111,1776888339
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,710,Pass (P=0.0%),171,1776888340
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,dudect,fail,true,,46146,22,"max|t|=12.38, tau=-0.0576, threshold=4.5",171,1776888340
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.13, threshold=4.5",171,1776888340
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1195,"stat=-0.012, alpha=0.10, delta=1.0 (pool)",171,1776888341
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36078,"p=1.0000, alpha=0.09 (pool)",171,1776888378
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,1,12225731234541680140,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,329,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",171,1776888378
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,718,Pass (P=0.0%),172,1776888379
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,dudect,fail,true,,58727,22,"max|t|=12.75, tau=-0.0526, threshold=4.5",172,1776888379
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.88, threshold=4.5",172,1776888379
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1191,"stat=-0.643, alpha=0.10, delta=1.0 (pool)",172,1776888380
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36978,"p=1.0000, alpha=0.09 (pool)",172,1776888417
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,2,13155455818830233774,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,319,"sign_test(p=0.0000), alpha=0.05 (pool)",172,1776888417
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,732,Pass (P=0.0%),172,1776888418
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,dudect,fail,true,,59398,23,"max|t|=7.35, tau=-0.0301, threshold=4.5",172,1776888418
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.19, threshold=4.5",172,1776888418
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1237,"stat=-3.801, alpha=0.10, delta=1.0 (pool)",172,1776888419
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,36780,"p=1.0000, alpha=0.09 (pool)",172,1776888456
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,3,18200040664651102085,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,318,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",172,1776888457
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,703,Pass (P=0.0%),172,1776888457
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,dudect,fail,true,,59776,21,"max|t|=11.12, tau=-0.0455, threshold=4.5",172,1776888457
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.79, threshold=4.5",172,1776888457
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1559,"stat=0.012, alpha=0.10, delta=1.0 (pool)",172,1776888459
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,35486,"p=1.0000, alpha=0.09 (pool)",172,1776888494
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,4,4209452279132210978,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,304,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",172,1776888495
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,723,Pass (P=0.0%),172,1776888496
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,dudect,fail,true,,59601,21,"max|t|=16.12, tau=-0.0660, threshold=4.5",172,1776888496
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.33, threshold=4.5",172,1776888496
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1330,"stat=12.795, alpha=0.10, delta=1.0 (pool)",172,1776888497
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,36304,"p=0.0000, alpha=0.09 (pool)",172,1776888533
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,5,10244123941916501375,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",172,1776888534
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,687,Pass (P=0.0%),171,1776888535
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,dudect,fail,true,,59832,22,"max|t|=16.92, tau=-0.0692, threshold=4.5",171,1776888535
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.60, threshold=4.5",171,1776888535
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1187,"stat=-0.039, alpha=0.10, delta=1.0 (pool)",171,1776888536
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,35657,"p=0.0000, alpha=0.09 (pool)",171,1776888571
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,6,17491518929099190204,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,316,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",171,1776888572
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,718,Pass (P=0.0%),173,1776888573
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,dudect,fail,true,,59865,20,"max|t|=18.65, tau=-0.0762, threshold=4.5",173,1776888573
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.93, threshold=4.5",173,1776888573
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1226,"stat=8.576, alpha=0.10, delta=1.0 (pool)",173,1776888574
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37343,"p=1.0000, alpha=0.09 (pool)",173,1776888611
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,7,2870593724497938596,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,311,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",173,1776888612
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,744,Pass (P=0.0%),172,1776888612
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,dudect,fail,true,,59796,20,"max|t|=8.51, tau=-0.0348, threshold=4.5",172,1776888612
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.75, threshold=4.5",172,1776888612
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1233,"stat=-0.046, alpha=0.10, delta=1.0 (pool)",172,1776888614
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37995,"p=1.0000, alpha=0.09 (pool)",172,1776888652
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,8,1875397544879785010,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,310,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",172,1776888652
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,739,Pass (P=0.0%),172,1776888653
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,dudect,fail,true,,59805,22,"max|t|=12.99, tau=-0.0531, threshold=4.5",172,1776888653
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.22, threshold=4.5",172,1776888653
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1220,"stat=0.474, alpha=0.10, delta=1.0 (pool)",172,1776888654
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37087,"p=1.0000, alpha=0.09 (pool)",172,1776888691
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,9,10936341685045074701,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,305,"sign_test(p=0.0000), alpha=0.05 (pool)",172,1776888692
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,687,Pass (P=0.0%),171,1776888692
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,dudect,fail,true,,51366,22,"max|t|=10.13, tau=-0.0447, threshold=4.5",171,1776888692
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.93, threshold=4.5",171,1776888692
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1205,"stat=-0.288, alpha=0.10, delta=1.0 (pool)",171,1776888694
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,35286,"p=1.0000, alpha=0.09 (pool)",171,1776888729
+Rust,RustCrypto,ChaCha20-Poly1305,rustcrypto::chacha20poly1305::encrypt,constant_time,AdjacentNetwork,10,6273507221916027710,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,301,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",171,1776888729
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,760,Pass (P=0.0%),122,1776888730
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,dudect,pass,false,,38750,26,"max|t|=2.63, tau=-0.0134, threshold=4.5",122,1776888730
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.73, threshold=4.5",122,1776888730
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1226,"stat=-30.513, alpha=0.10, delta=1.0 (pool)",122,1776888731
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,41442,"p=1.0000, alpha=0.09 (pool)",122,1776888773
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,1,8503959229306082541,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999864,60000,314,"wilcoxon_test(p=0.0001), alpha=0.05 (pool)",122,1776888773
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,696,Pass (P=0.0%),121,1776888774
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,dudect,fail,true,,46693,22,"max|t|=13.83, tau=-0.0640, threshold=4.5",121,1776888774
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.06, threshold=4.5",121,1776888774
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1192,"stat=-13.864, alpha=0.10, delta=1.0 (pool)",121,1776888775
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,35685,"p=1.0000, alpha=0.09 (pool)",121,1776888811
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,2,15197022792547380515,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,303,"sign_test(p=0.0000), alpha=0.05 (pool)",121,1776888811
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,715,Pass (P=0.0%),122,1776888812
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,dudect,pass,false,,58055,24,"max|t|=3.34, tau=0.0139, threshold=4.5",122,1776888812
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.55, threshold=4.5",122,1776888812
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1217,"stat=-0.276, alpha=0.10, delta=1.0 (pool)",122,1776888813
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37537,"p=1.0000, alpha=0.09 (pool)",122,1776888851
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,3,4083549850804976962,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999993,60000,309,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",122,1776888851
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,715,Pass (P=0.0%),122,1776888852
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,dudect,pass,false,,56222,24,"max|t|=4.28, tau=-0.0181, threshold=4.5",122,1776888852
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.61, threshold=4.5",122,1776888852
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1203,"stat=-28.418, alpha=0.10, delta=1.0 (pool)",122,1776888853
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37035,"p=1.0000, alpha=0.09 (pool)",122,1776888890
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,4,15505625688943421174,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.996614,60000,303,"sign_test(p=0.0034), alpha=0.05 (pool)",122,1776888890
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,724,Pass (P=0.0%),122,1776888891
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,dudect,pass,false,,35449,24,"max|t|=2.10, tau=0.0111, threshold=4.5",122,1776888891
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.06, threshold=4.5",122,1776888891
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1466,"stat=-0.397, alpha=0.10, delta=1.0 (pool)",122,1776888893
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,39170,"p=1.0000, alpha=0.09 (pool)",122,1776888932
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,5,5739521062736212996,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.994750,60000,312,"wilcoxon_test(p=0.0053), alpha=0.05 (pool)",122,1776888932
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,755,Pass (P=0.0%),122,1776888933
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,dudect,pass,false,,59845,26,"max|t|=4.09, tau=0.0167, threshold=4.5",122,1776888933
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.35, threshold=4.5",122,1776888933
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1576,"stat=-11.304, alpha=0.10, delta=1.0 (pool)",122,1776888935
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,40732,"p=1.0000, alpha=0.09 (pool)",122,1776888976
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,6,3800147945491650744,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,305,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",122,1776888976
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,688,Pass (P=0.0%),122,1776888977
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,dudect,fail,true,,48693,24,"max|t|=8.58, tau=-0.0389, threshold=4.5",122,1776888977
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.56, threshold=4.5",122,1776888977
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1211,"stat=14.136, alpha=0.10, delta=1.0 (pool)",122,1776888978
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,38085,"p=1.0000, alpha=0.09 (pool)",122,1776889016
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,7,5685374411341844523,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.990191,60000,313,"sign_test(p=0.0098), alpha=0.05 (pool)",122,1776889016
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,749,Pass (P=0.0%),122,1776889017
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,dudect,fail,true,,58545,25,"max|t|=5.16, tau=0.0213, threshold=4.5",122,1776889017
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.28, threshold=4.5",122,1776889017
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1181,"stat=74.298, alpha=0.10, delta=1.0 (pool)",122,1776889018
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,39061,"p=1.0000, alpha=0.09 (pool)",122,1776889057
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,8,6380062987332878367,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,312,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",122,1776889058
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,682,Pass (P=0.0%),122,1776889059
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,dudect,pass,false,,59809,24,"max|t|=2.85, tau=0.0116, threshold=4.5",122,1776889059
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.34, threshold=4.5",122,1776889059
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1220,"stat=0.262, alpha=0.10, delta=1.0 (pool)",122,1776889060
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,38122,"p=1.0000, alpha=0.09 (pool)",122,1776889098
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,9,12792246672741076588,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999969,60000,304,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",122,1776889098
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,669,Pass (P=0.0%),122,1776889099
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,dudect,fail,true,,13700,23,"max|t|=8.38, tau=-0.0716, threshold=4.5",122,1776889099
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.11, threshold=4.5",122,1776889099
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1210,"stat=20.897, alpha=0.10, delta=1.0 (pool)",122,1776889100
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,37092,"p=1.0000, alpha=0.09 (pool)",122,1776889137
+Rust,RustCrypto,SHA3-256,rustcrypto::sha3::sha3_256,constant_time,AdjacentNetwork,10,9147022077598547721,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,302,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",122,1776889138
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000750,30000,1140,Pass (P=0.1%),2216,1776889141
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,dudect,pass,false,,10520,27,"max|t|=3.53, tau=0.0345, threshold=4.5",2216,1776889141
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.09, threshold=4.5",2216,1776889141
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1518,"stat=507.200, alpha=0.10, delta=1.0 (pool)",2216,1776889143
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,57064,"p=1.0000, alpha=0.09 (pool)",2216,1776889200
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,1,10836228825329631233,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999005,60000,318,"sign_test(p=0.0010), alpha=0.05 (pool)",2216,1776889200
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1156,Pass (P=0.0%),2272,1776889203
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,dudect,fail,true,,41614,28,"max|t|=4.74, tau=0.0233, threshold=4.5",2272,1776889203
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.11, threshold=4.5",2272,1776889203
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1609,"stat=70.074, alpha=0.10, delta=1.0 (pool)",2272,1776889205
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,56694,"p=1.0000, alpha=0.09 (pool)",2272,1776889262
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,2,3001517157359332171,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999964,60000,324,"sign_test(p=0.0000), alpha=0.05 (pool)",2272,1776889262
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1168,Pass (P=0.0%),2289,1776889265
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,dudect,pass,false,,16968,28,"max|t|=3.31, tau=-0.0254, threshold=4.5",2289,1776889266
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.22, threshold=4.5",2289,1776889266
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1458,"stat=47.869, alpha=0.10, delta=1.0 (pool)",2289,1776889267
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,59144,"p=1.0000, alpha=0.09 (pool)",2289,1776889326
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,3,10442373143697980568,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,314,"sign_test(p=0.0000), alpha=0.05 (pool)",2289,1776889326
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1056,Pass (P=0.0%),2277,1776889330
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,dudect,fail,true,,45858,28,"max|t|=8.14, tau=-0.0380, threshold=4.5",2277,1776889330
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.25, threshold=4.5",2277,1776889330
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1455,"stat=313.131, alpha=0.10, delta=1.0 (pool)",2277,1776889331
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,53610,"p=0.0000, alpha=0.09 (pool)",2277,1776889385
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,4,254640812419664096,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,311,"sign_test(p=0.0000), alpha=0.05 (pool)",2277,1776889385
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,997,Pass (P=0.0%),2220,1776889388
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,dudect,pass,false,,49944,27,"max|t|=4.35, tau=-0.0195, threshold=4.5",2220,1776889388
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.16, threshold=4.5",2220,1776889388
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1653,"stat=6.082, alpha=0.10, delta=1.0 (pool)",2220,1776889390
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,51477,"p=0.0000, alpha=0.09 (pool)",2220,1776889442
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,5,2784417049637337928,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,317,"sign_test(p=0.0000), alpha=0.05 (pool)",2220,1776889442
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1082,Pass (P=0.0%),2216,1776889445
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,dudect,fail,true,,26084,27,"max|t|=5.66, tau=0.0351, threshold=4.5",2216,1776889445
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.44, threshold=4.5",2216,1776889445
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1392,"stat=424.861, alpha=0.10, delta=1.0 (pool)",2216,1776889447
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,56281,"p=1.0000, alpha=0.09 (pool)",2216,1776889503
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,6,2899094717620558662,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,314,"sign_test(p=0.0000), alpha=0.05 (pool)",2216,1776889503
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1040,Pass (P=0.0%),2267,1776889507
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,dudect,fail,true,,43883,28,"max|t|=7.77, tau=-0.0371, threshold=4.5",2267,1776889507
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.91, threshold=4.5",2267,1776889507
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1628,"stat=510.124, alpha=0.10, delta=1.0 (pool)",2267,1776889508
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,54308,"p=1.0000, alpha=0.09 (pool)",2267,1776889562
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,7,592374285312858385,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,322,"sign_test(p=0.0000), alpha=0.05 (pool)",2267,1776889563
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1138,Pass (P=0.0%),2289,1776889566
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,dudect,pass,false,,23731,28,"max|t|=3.52, tau=0.0228, threshold=4.5",2289,1776889566
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.36, threshold=4.5",2289,1776889566
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1379,"stat=4.126, alpha=0.10, delta=1.0 (pool)",2289,1776889568
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,58076,"p=0.0000, alpha=0.09 (pool)",2289,1776889626
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,8,3454088062200130132,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,324,"sign_test(p=0.0000), alpha=0.05 (pool)",2289,1776889626
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1086,Pass (P=0.0%),2226,1776889629
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,dudect,fail,true,,22164,27,"max|t|=5.32, tau=0.0357, threshold=4.5",2226,1776889629
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.57, threshold=4.5",2226,1776889629
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1655,"stat=75.590, alpha=0.10, delta=1.0 (pool)",2226,1776889631
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,55593,"p=1.0000, alpha=0.09 (pool)",2226,1776889687
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,9,13910157344041706971,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,318,"sign_test(p=0.0000), alpha=0.05 (pool)",2226,1776889687
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1129,Pass (P=0.0%),2274,1776889690
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,dudect,pass,false,,55565,28,"max|t|=2.95, tau=-0.0125, threshold=4.5",2274,1776889690
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.69, threshold=4.5",2274,1776889690
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1488,"stat=1186.525, alpha=0.10, delta=1.0 (pool)",2274,1776889692
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,58173,"p=1.0000, alpha=0.09 (pool)",2274,1776889750
+Rust,dalek,X25519,dalek::x25519::scalar_mult,constant_time,AdjacentNetwork,10,9531589991746876306,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,322,"sign_test(p=0.0000), alpha=0.05 (pool)",2274,1776889750
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,844,Pass (P=0.0%),817,1776889752
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,dudect,pass,false,,57984,27,"max|t|=3.88, tau=-0.0161, threshold=4.5",817,1776889752
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.09, threshold=4.5",817,1776889752
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1350,"stat=0.258, alpha=0.10, delta=1.0 (pool)",817,1776889753
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,46060,"p=1.0000, alpha=0.09 (pool)",817,1776889799
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,1,7970434012246635665,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,315,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",817,1776889800
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,913,Pass (P=0.0%),831,1776889802
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,dudect,pass,false,,55608,28,"max|t|=3.02, tau=-0.0128, threshold=4.5",831,1776889802
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.62, threshold=4.5",831,1776889802
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1542,"stat=0.076, alpha=0.10, delta=1.0 (pool)",831,1776889803
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,48992,"p=1.0000, alpha=0.09 (pool)",831,1776889852
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,2,32891279060181905,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,317,"sign_test(p=0.0000), alpha=0.05 (pool)",831,1776889852
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,905,Pass (P=0.0%),829,1776889854
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,dudect,fail,true,,57681,28,"max|t|=6.32, tau=-0.0263, threshold=4.5",829,1776889854
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.90, threshold=4.5",829,1776889854
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1450,"stat=0.470, alpha=0.10, delta=1.0 (pool)",829,1776889856
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,49380,"p=1.0000, alpha=0.09 (pool)",829,1776889905
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,3,6463052652355296689,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,319,"sign_test(p=0.0000), alpha=0.05 (pool)",829,1776889905
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,895,Pass (P=0.0%),830,1776889907
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,dudect,fail,true,,57985,28,"max|t|=11.59, tau=-0.0481, threshold=4.5",830,1776889907
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.88, threshold=4.5",830,1776889907
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1363,"stat=1.453, alpha=0.10, delta=1.0 (pool)",830,1776889908
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,48777,"p=0.0000, alpha=0.09 (pool)",830,1776889957
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,4,13791190684930009006,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,323,"sign_test(p=0.0000), alpha=0.05 (pool)",830,1776889958
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,910,Pass (P=0.0%),830,1776889959
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,dudect,pass,false,,58242,28,"max|t|=3.58, tau=-0.0148, threshold=4.5",830,1776889959
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.08, threshold=4.5",830,1776889959
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1479,"stat=0.173, alpha=0.10, delta=1.0 (pool)",830,1776889961
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,49353,"p=1.0000, alpha=0.09 (pool)",830,1776890010
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,5,9329310494821122244,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,319,"sign_test(p=0.0000), alpha=0.05 (pool)",830,1776890011
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,911,Pass (P=0.0%),830,1776890012
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,dudect,fail,true,,57792,28,"max|t|=8.65, tau=-0.0360, threshold=4.5",830,1776890012
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.93, threshold=4.5",830,1776890012
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1590,"stat=0.796, alpha=0.10, delta=1.0 (pool)",830,1776890014
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,49384,"p=0.0000, alpha=0.09 (pool)",830,1776890063
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,6,6348657202958305343,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,317,"sign_test(p=0.0000), alpha=0.05 (pool)",830,1776890064
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,927,Pass (P=0.0%),834,1776890065
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,dudect,fail,true,,57674,27,"max|t|=8.65, tau=-0.0360, threshold=4.5",834,1776890065
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.19, threshold=4.5",834,1776890065
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1396,"stat=2.962, alpha=0.10, delta=1.0 (pool)",834,1776890067
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,49567,"p=0.0000, alpha=0.09 (pool)",834,1776890116
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,7,5140504885099625482,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,322,"sign_test(p=0.0000), alpha=0.05 (pool)",834,1776890117
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,1105,Pass (P=0.0%),951,1776890119
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,dudect,pass,false,,37844,28,"max|t|=3.55, tau=-0.0182, threshold=4.5",951,1776890119
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.60, threshold=4.5",951,1776890119
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1465,"stat=372.984, alpha=0.10, delta=1.0 (pool)",951,1776890120
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,55231,"p=1.0000, alpha=0.09 (pool)",951,1776890175
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,8,12709504465293182615,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999999,60000,317,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",951,1776890176
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,938,Pass (P=0.0%),831,1776890178
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,dudect,fail,true,,56932,28,"max|t|=4.73, tau=-0.0198, threshold=4.5",831,1776890178
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.42, threshold=4.5",831,1776890178
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1620,"stat=0.947, alpha=0.10, delta=1.0 (pool)",831,1776890179
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,50234,"p=1.0000, alpha=0.09 (pool)",831,1776890229
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,9,14002040616935439461,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999997,60000,317,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",831,1776890230
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,tacet,pass,false,0.000000,30000,922,Pass (P=0.0%),831,1776890231
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,dudect,pass,false,,57497,28,"max|t|=4.42, tau=-0.0184, threshold=4.5",831,1776890232
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.83, threshold=4.5",831,1776890232
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1367,"stat=0.154, alpha=0.10, delta=1.0 (pool)",831,1776890233
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,48359,"p=1.0000, alpha=0.09 (pool)",831,1776890281
+C/C++,libsodium,Ed25519,c_libraries::libsodium::ed25519_sign,constant_time,AdjacentNetwork,10,3335784747518990472,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999982,60000,324,"sign_test(p=0.0000), alpha=0.05 (pool)",831,1776890282
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.013250,30000,994,"Inconclusive: ThresholdElevated { theta_user: 2.0, theta_eff: 7.148142451014809, leak_probability_at_eff: 0.01325, meets_pass_criterion_at_eff: true, achievable_at_max: false, message: ""Threshold elevated from 2ns to 7.1ns; P=1.3% at elevated threshold"", guidance: ""Use more samples or a higher-resolution timer to achieve the requested threshold."" }",801,1776890283
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,dudect,pass,false,,21722,27,"max|t|=1.57, tau=0.0106, threshold=4.5",801,1776890283
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.59, threshold=4.5",801,1776890283
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1572,"stat=0.114, alpha=0.10, delta=1.0 (pool)",801,1776890285
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,52290,"p=1.0000, alpha=0.09 (pool)",801,1776890337
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,1,5407073028699858624,30000,0.223,rdtsc,0.000,tlsfuzzer,pass,false,0.342961,60000,307,"sign_test(p=0.6570), alpha=0.05 (pool)",801,1776890338
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.228500,30000,945,"Inconclusive: SampleBudgetExceeded { current_probability: 0.2285, samples_collected: 30000 }",789,1776890339
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,dudect,fail,true,,57586,28,"max|t|=4.84, tau=0.0202, threshold=4.5",789,1776890339
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.30, threshold=4.5",789,1776890339
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1303,"stat=2.155, alpha=0.10, delta=1.0 (pool)",789,1776890341
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,50166,"p=0.0000, alpha=0.09 (pool)",789,1776890391
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,2,16486602942224098378,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999998,60000,325,"sign_test(p=0.0000), alpha=0.05 (pool)",789,1776890391
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.272250,30000,951,"Inconclusive: SampleBudgetExceeded { current_probability: 0.27225, samples_collected: 30000 }",790,1776890393
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,dudect,fail,true,,57333,27,"max|t|=5.36, tau=0.0224, threshold=4.5",790,1776890393
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=0.52, threshold=4.5",790,1776890393
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1299,"stat=5.035, alpha=0.10, delta=1.0 (pool)",790,1776890394
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,50693,"p=0.0000, alpha=0.09 (pool)",790,1776890445
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,3,47689242042048377,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,315,"sign_test(p=0.0000), alpha=0.05 (pool)",790,1776890445
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.332500,30000,937,"Inconclusive: DataTooNoisy { message: ""KL divergence 0.69 nats < 0.7 nats threshold; data not informative"", guidance: ""Try: more samples, higher-resolution timer, reduce system load"" }",790,1776890447
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,dudect,fail,true,,48616,27,"max|t|=7.70, tau=0.0349, threshold=4.5",790,1776890447
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.84, threshold=4.5",790,1776890447
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1299,"stat=8.035, alpha=0.10, delta=1.0 (pool)",790,1776890448
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,51318,"p=1.0000, alpha=0.09 (pool)",790,1776890500
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,4,1609967460387453248,30000,0.223,rdtsc,0.000,tlsfuzzer,pass,false,0.923080,60000,314,"sign_test(p=0.0769), alpha=0.05 (pool)",790,1776890500
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.345750,30000,1018,"Inconclusive: SampleBudgetExceeded { current_probability: 0.34575, samples_collected: 30000 }",814,1776890502
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,dudect,fail,true,,58674,28,"max|t|=4.73, tau=0.0195, threshold=4.5",814,1776890502
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.18, threshold=4.5",814,1776890502
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1618,"stat=16.299, alpha=0.10, delta=1.0 (pool)",814,1776890503
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,53254,"p=0.0000, alpha=0.09 (pool)",814,1776890557
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,5,7374443985686313794,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999991,60000,311,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",814,1776890557
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.504500,30000,993,"Inconclusive: SampleBudgetExceeded { current_probability: 0.5045, samples_collected: 30000 }",846,1776890559
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,dudect,pass,false,,59330,28,"max|t|=4.35, tau=0.0179, threshold=4.5",846,1776890559
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.55, threshold=4.5",846,1776890559
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1368,"stat=3.424, alpha=0.10, delta=1.0 (pool)",846,1776890560
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,51227,"p=1.0000, alpha=0.09 (pool)",846,1776890611
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,6,6305068527935083372,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999997,60000,305,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",846,1776890612
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.572500,30000,949,"Inconclusive: SampleBudgetExceeded { current_probability: 0.5725, samples_collected: 30000 }",791,1776890613
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,dudect,fail,true,,58072,27,"max|t|=4.71, tau=0.0195, threshold=4.5",791,1776890614
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.59, threshold=4.5",791,1776890614
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1418,"stat=4.925, alpha=0.10, delta=1.0 (pool)",791,1776890615
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,51384,"p=0.0000, alpha=0.09 (pool)",791,1776890666
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,7,9890119370013277476,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,314,"sign_test(p=0.0000), alpha=0.05 (pool)",791,1776890667
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.334500,30000,994,"Inconclusive: DataTooNoisy { message: ""KL divergence 0.66 nats < 0.7 nats threshold; data not informative"", guidance: ""Try: more samples, higher-resolution timer, reduce system load"" }",846,1776890668
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,dudect,fail,true,,58750,28,"max|t|=5.95, tau=0.0246, threshold=4.5",846,1776890669
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=2.64, threshold=4.5",846,1776890669
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1523,"stat=3.041, alpha=0.10, delta=1.0 (pool)",846,1776890670
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,51934,"p=0.0000, alpha=0.09 (pool)",846,1776890722
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,8,176755103601538197,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,312,"wilcoxon_test(p=0.0000), alpha=0.05 (pool)",846,1776890722
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.561750,30000,974,"Inconclusive: SampleBudgetExceeded { current_probability: 0.56175, samples_collected: 30000 }",812,1776890724
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,dudect,fail,true,,59378,28,"max|t|=6.65, tau=0.0273, threshold=4.5",812,1776890724
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.36, threshold=4.5",812,1776890724
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,silent,fail,true,,60000,1372,"stat=8.365, alpha=0.10, delta=1.0 (pool)",812,1776890725
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,rtlf,fail,true,1.000000,60000,51947,"p=0.0000, alpha=0.09 (pool)",812,1776890777
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,9,12310112850682059155,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,1.000000,60000,313,"sign_test(p=0.0000), alpha=0.05 (pool)",812,1776890778
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,tacet,inconclusive,false,0.361500,30000,994,"Inconclusive: DataTooNoisy { message: ""KL divergence 0.58 nats < 0.7 nats threshold; data not informative"", guidance: ""Try: more samples, higher-resolution timer, reduce system load"" }",812,1776890780
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,dudect,fail,true,,57412,28,"max|t|=4.98, tau=0.0208, threshold=4.5",812,1776890780
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,tvla,pass,false,,60000,0,"|t|=1.74, threshold=4.5",812,1776890780
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,silent,pass,false,,60000,1499,"stat=4.256, alpha=0.10, delta=1.0 (pool)",812,1776890781
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,rtlf,pass,false,0.000000,60000,52369,"p=1.0000, alpha=0.09 (pool)",812,1776890833
+Rust,pqcrypto,ML-KEM-768,pqcrypto::kyber::kyber768_decapsulate,constant_time,PostQuantumSentinel,10,8189053803202916190,30000,0.223,rdtsc,0.000,tlsfuzzer,fail,true,0.999952,60000,314,"sign_test(p=0.0000), alpha=0.05 (pool)",812,1776890834
