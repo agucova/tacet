@@ -255,3 +255,260 @@ fn injected_shift_1000ns_k5() {
 fn injected_shift_1000ns_k20() {
     run_amplified_shift_test("injected_shift_1000ns_k20", 1000, 20);
 }
+
+// ============================================================================
+// Tier-1 primitive positive-control sweep (Reviewer D, real-hardware FN leg)
+// ============================================================================
+//
+// Wraps each §5 Tier-1 constant-time primitive (matching
+// `crates/tacet-bench/src/crypto_registry.rs::tier1`) with the same
+// conditional `busy_wait_ns(500)` pattern used in `run_injected_shift_test`
+// above. Delay fixed at 5× θ_AdjacentNetwork, above the `busy_wait_ns`
+// injection floor documented in §4 of the author-response findings.
+//
+// Purpose: §5's 229 Tier-1 Pass verdicts are on source-selected
+// constant-time implementations (true negatives by construction). These
+// tests validate the converse — that when a real, ground-truth-known leak
+// is injected into a wrapper around each primitive, tacet does flip off
+// the Pass verdict. Miss = 0 at this delay is the claim; it rules out the
+// "tacet defaults to Pass on real crypto" reading of §5's low FPR.
+
+fn rand_bytes_32() -> [u8; 32] {
+    let mut arr = [0u8; 32];
+    for byte in &mut arr {
+        *byte = rand::random();
+    }
+    arr
+}
+
+fn rand_bytes_64() -> [u8; 64] {
+    let mut arr = [0u8; 64];
+    for byte in &mut arr {
+        *byte = rand::random();
+    }
+    arr
+}
+
+/// ring AES-256-GCM seal.
+fn run_injected_ring_aes_gcm_test(test_name: &str, delay_ns: u64) {
+    use ring::aead::{self, LessSafeKey, UnboundKey, AES_256_GCM};
+
+    init_effect_injection();
+
+    let key_bytes: [u8; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    let unbound_key = UnboundKey::new(&AES_256_GCM, &key_bytes).unwrap();
+    let key = LessSafeKey::new(unbound_key);
+
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |pt| {
+            let nonce = aead::Nonce::assume_unique_for_key([0u8; 12]);
+            let mut in_out = pt.to_vec();
+            let tag = key
+                .seal_in_place_separate_tag(nonce, aead::Aad::empty(), &mut in_out)
+                .unwrap();
+            if pt[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(tag.as_ref()[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_ring_aes_gcm_500ns() {
+    run_injected_ring_aes_gcm_test("injected_ring_aes_gcm_500ns", 500);
+}
+
+/// RustCrypto ChaCha20-Poly1305 encrypt.
+fn run_injected_chacha20poly1305_test(test_name: &str, delay_ns: u64) {
+    use chacha20poly1305::{
+        aead::{Aead, KeyInit},
+        ChaCha20Poly1305, Nonce,
+    };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    init_effect_injection();
+
+    let key_bytes: [u8; 32] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d,
+        0x1e, 0x1f,
+    ];
+    let cipher = ChaCha20Poly1305::new(&key_bytes.into());
+    let nonce_counter = AtomicU64::new(0);
+
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |pt| {
+            let nonce_value = nonce_counter.fetch_add(1, Ordering::Relaxed);
+            let mut nonce_bytes = [0u8; 12];
+            nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
+            let nonce = Nonce::from_slice(&nonce_bytes);
+            let ct = cipher.encrypt(nonce, pt.as_ref()).unwrap();
+            if pt[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(ct[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_chacha20poly1305_500ns() {
+    run_injected_chacha20poly1305_test("injected_chacha20poly1305_500ns", 500);
+}
+
+/// RustCrypto SHA3-256 digest.
+fn run_injected_sha3_256_test(test_name: &str, delay_ns: u64) {
+    use sha3::{Digest, Sha3_256};
+
+    init_effect_injection();
+
+    let inputs = InputPair::new(|| [0u8; 32], rand_bytes_32);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |input| {
+            let hash = Sha3_256::digest(*input);
+            if input[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(hash[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_sha3_256_500ns() {
+    run_injected_sha3_256_test("injected_sha3_256_500ns", 500);
+}
+
+/// dalek X25519 scalar multiplication.
+fn run_injected_x25519_test(test_name: &str, delay_ns: u64) {
+    use x25519_dalek::x25519;
+
+    init_effect_injection();
+
+    let basepoint = x25519_dalek::X25519_BASEPOINT_BYTES;
+    let inputs = InputPair::new(|| [0u8; 32], rand_bytes_32);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |scalar| {
+            let result = x25519(*scalar, basepoint);
+            if scalar[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(result[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_x25519_500ns() {
+    run_injected_x25519_test("injected_x25519_500ns", 500);
+}
+
+/// libsodium Ed25519 signing.
+fn run_injected_ed25519_test(test_name: &str, delay_ns: u64) {
+    use sodiumoxide::crypto::sign::ed25519;
+
+    init_effect_injection();
+
+    sodiumoxide::init().expect("failed to initialize sodiumoxide");
+    let (_pk, sk) = ed25519::gen_keypair();
+
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |msg| {
+            let signature = ed25519::sign_detached(msg.as_ref(), &sk);
+            if msg[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(signature.as_ref()[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_ed25519_500ns() {
+    run_injected_ed25519_test("injected_ed25519_500ns", 500);
+}
+
+/// pqcrypto ML-KEM-768 (Kyber) decapsulate.
+///
+/// Unlike the other primitives, Kyber's input is a ciphertext (opaque
+/// pqcrypto type), so InputPair returns a 32-byte *discriminator* while the
+/// primitive is fed a pre-generated valid ciphertext pool. Baseline reuses
+/// one fixed CT; sample cycles through distinct CTs — mirroring the
+/// registry pattern at `crypto_registry.rs:355`.
+fn run_injected_kyber768_test(test_name: &str, delay_ns: u64) {
+    use pqcrypto_kyber::kyber768;
+    use pqcrypto_traits::kem::SharedSecret as _;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    init_effect_injection();
+
+    let (pk, sk) = kyber768::keypair();
+    let (_, fixed_ct) = kyber768::encapsulate(&pk);
+    let sample_cts: Vec<_> = (0..1024)
+        .map(|_| {
+            let (_, ct) = kyber768::encapsulate(&pk);
+            ct
+        })
+        .collect();
+    let idx = AtomicUsize::new(0);
+
+    let inputs = InputPair::new(|| [0u8; 32], rand_bytes_32);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |disc| {
+            let ct = if disc[0] == 0 {
+                &fixed_ct
+            } else {
+                let i = idx.fetch_add(1, Ordering::Relaxed) % sample_cts.len();
+                &sample_cts[i]
+            };
+            let ss = kyber768::decapsulate(ct, &sk);
+            if disc[0] != 0 {
+                busy_wait_ns(delay_ns);
+            }
+            std::hint::black_box(ss.as_bytes()[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_kyber768_500ns() {
+    run_injected_kyber768_test("injected_kyber768_500ns", 500);
+}
