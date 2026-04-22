@@ -422,7 +422,10 @@ fn tier2_rustcrypto_rsa_marvin() -> CryptoTestCase {
         // the paper's CVE detection evaluation (Table 4) and the MARVIN
         // threat model.
         attacker_model: AttackerModel::AdjacentNetwork,
-        samples_per_class: 10_000,
+        // Detection-power target — MARVIN's signal is subtle at 10k; the
+        // original investigation test uses 50k max adaptive, so we match that
+        // budget for fairness. All tools see the same 50k samples.
+        samples_per_class: 50_000,
         warmup: 200,
         collect: Arc::new(|seed, n| {
             // Key generation is expensive and non-deterministic; do it once

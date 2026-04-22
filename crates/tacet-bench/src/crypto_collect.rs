@@ -54,6 +54,35 @@ impl CollectedBlocked {
             test: self.test_ns.iter().map(|&v| v.round() as u64).collect(),
         }
     }
+
+    /// Return a copy with sub-quantum dither added to every sample, then
+    /// rounded to integer nanoseconds. Dither is uniform in
+    /// `[-dither_ns/2, +dither_ns/2]`; pass `0.0` for no-op.
+    ///
+    /// Breaks numerical ties in rank-based tools (SILENT) without changing
+    /// the physical measurement interpretation. The dither magnitude should
+    /// be set well below the timer resolution (e.g., 0.2 ns on an rdtsc
+    /// path with 0.22 ns resolution).
+    pub fn to_blocked_with_dither(&self, dither_ns: f64, seed: u64) -> BlockedData {
+        if dither_ns <= 0.0 {
+            return self.to_blocked_u64();
+        }
+        use rand::Rng;
+        let mut rng = StdRng::seed_from_u64(seed);
+        let half = dither_ns / 2.0;
+        let dither = |v: f64, rng: &mut StdRng| -> u64 {
+            let d: f64 = rng.gen_range(-half..half);
+            (v + d).round() as u64
+        };
+        BlockedData {
+            baseline: self
+                .baseline_ns
+                .iter()
+                .map(|&v| dither(v, &mut rng))
+                .collect(),
+            test: self.test_ns.iter().map(|&v| dither(v, &mut rng)).collect(),
+        }
+    }
 }
 
 /// Run a crypto operation under tacet's measurement harness and return the

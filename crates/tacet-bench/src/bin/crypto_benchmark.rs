@@ -90,6 +90,16 @@ struct Args {
     #[arg(long, default_value_t = 20_260_418)]
     seed: u64,
 
+    /// Comma-separated list of dither magnitudes (ns) to fan-out through.
+    /// 0.0 = raw u64-rounded samples (fastest; SILENT may error on ties).
+    /// Non-zero values add uniform dither in [-d/2, +d/2] ns before fanout,
+    /// breaking numerical ties from discrete timer quantization without
+    /// changing verdicts (dither magnitude is 20× below θ=100 ns).
+    /// Each config yields a separate row per (test, iter, tool) in the CSV,
+    /// tagged with `dither_ns`.
+    #[arg(long, default_value = "0.0")]
+    dither_configs: String,
+
     /// R worker pool size (SILENT + RTLF share this pool).
     #[arg(long)]
     r_pool_workers: Option<usize>,
@@ -117,6 +127,7 @@ struct RowOut {
     samples_per_class: usize,
     timer_resolution_ns: f64,
     timer_name: String,
+    dither_ns: f64,
     tool: String,
     outcome: String,
     detected_leak: bool,
@@ -128,7 +139,7 @@ struct RowOut {
     timestamp: String,
 }
 
-const CSV_HEADER: &str = "ecosystem,library,primitive,test_id,expected,attacker_model,iteration,seed,samples_per_class,timer_resolution_ns,timer_name,tool,outcome,detected_leak,leak_probability,samples_used,decision_time_ms,status,collection_time_ms,timestamp";
+const CSV_HEADER: &str = "ecosystem,library,primitive,test_id,expected,attacker_model,iteration,seed,samples_per_class,timer_resolution_ns,timer_name,dither_ns,tool,outcome,detected_leak,leak_probability,samples_used,decision_time_ms,status,collection_time_ms,timestamp";
 
 impl RowOut {
     fn to_csv_line(&self) -> String {
@@ -137,7 +148,7 @@ impl RowOut {
             .map(|p| format!("{:.6}", p))
             .unwrap_or_default();
         format!(
-            "{},{},{},{},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{},{},{:.3},{},{:.3},{},{},{},{},{},{},{},{},{}",
             csv_quote(&self.ecosystem),
             csv_quote(&self.library),
             csv_quote(&self.primitive),
@@ -149,6 +160,7 @@ impl RowOut {
             self.samples_per_class,
             self.timer_resolution_ns,
             csv_quote(&self.timer_name),
+            self.dither_ns,
             csv_quote(&self.tool),
             self.outcome,
             self.detected_leak,
@@ -180,10 +192,17 @@ fn derive_seed(base_seed: u64, test_id: &str, iteration: usize) -> u64 {
     h.finish()
 }
 
-/// Load the set of `(test_id, iteration, tool)` triples already present in
-/// the CSV, for resume support. Returns an empty set if the file does not
-/// exist.
-fn load_completed(csv_path: &Path) -> std::io::Result<HashSet<(String, usize, String)>> {
+/// Resume key: `(test_id, iteration, dither_ns_fixed3, tool)`. We encode
+/// dither as a 3-decimal string so floating-point equality isn't a concern.
+type ResumeKey = (String, usize, String, String);
+
+fn dither_key(d: f64) -> String {
+    format!("{:.3}", d)
+}
+
+/// Load the set of resume keys already present in the CSV. Returns empty
+/// on first run.
+fn load_completed(csv_path: &Path) -> std::io::Result<HashSet<ResumeKey>> {
     let mut out = HashSet::new();
     if !csv_path.exists() {
         return Ok(out);
@@ -201,8 +220,8 @@ fn load_completed(csv_path: &Path) -> std::io::Result<HashSet<(String, usize, St
             continue;
         }
         let parts: Vec<&str> = line.split(',').collect();
-        // Schema: test_id is field index 3; iteration is 6; tool is 11.
-        if parts.len() < 12 {
+        // Schema: test_id=3, iteration=6, dither_ns=11, tool=12.
+        if parts.len() < 13 {
             continue;
         }
         let test_id = parts[3].trim_matches('"').to_string();
@@ -210,8 +229,9 @@ fn load_completed(csv_path: &Path) -> std::io::Result<HashSet<(String, usize, St
             Ok(v) => v,
             Err(_) => continue,
         };
-        let tool = parts[11].trim_matches('"').to_string();
-        out.insert((test_id, iteration, tool));
+        let dither: f64 = parts[11].parse().unwrap_or(0.0);
+        let tool = parts[12].trim_matches('"').to_string();
+        out.insert((test_id, iteration, dither_key(dither), tool));
     }
     Ok(out)
 }
@@ -475,8 +495,10 @@ fn parse_tool_list(
 // Main
 // =============================================================================
 
-fn run_tacet_on_collected(
-    collected: &CollectedBlocked,
+fn run_tacet_on_samples(
+    baseline_ns: &[f64],
+    test_ns: &[f64],
+    timer_resolution_ns: f64,
     model: AttackerModel,
     _time_budget: Option<Duration>,
 ) -> (ToolResult, u64) {
@@ -484,9 +506,9 @@ fn run_tacet_on_collected(
     // Fixed-n single-pass — matches Fig 1/2 methodology (plan §Strategy).
     // analyze_raw_samples_with_resolution picks up tacet's internal trim.
     let outcome = TimingOracle::for_attacker(model).analyze_raw_samples_with_resolution(
-        &collected.baseline_ns,
-        &collected.test_ns,
-        collected.timer_resolution_ns,
+        baseline_ns,
+        test_ns,
+        timer_resolution_ns,
     );
     let elapsed_ms = t0.elapsed().as_millis() as u64;
     let (status_kind, detected, leak_prob, samples_used, status_msg) =
@@ -592,7 +614,20 @@ fn main() {
 
     let tacet_time_budget = args.tacet_time_budget_secs.map(Duration::from_secs);
 
-    // Totals for progress.
+    // Parse dither configs once.
+    let dither_configs: Vec<f64> = args
+        .dither_configs
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.parse::<f64>().expect("invalid dither value"))
+        .collect();
+    if dither_configs.is_empty() {
+        eprintln!("ERROR: --dither-configs produced no values");
+        std::process::exit(2);
+    }
+    eprintln!("  dither configs (ns): {:?}", dither_configs);
+
     let tool_count = tools.len();
     let mut done_units: usize = 0;
 
@@ -602,25 +637,32 @@ fn main() {
         let model_label = format_attacker_model(&case.attacker_model);
 
         for iteration in 1..=args.iterations {
-            // Derive per-iteration seed.
             let seed = derive_seed(args.seed, case.id, iteration);
 
-            // If every tool for this (test, iter) is already done, skip collection.
-            let all_done = tools.iter().all(|te| {
-                let tool_name = match te {
-                    ToolEntry::Tacet => "tacet",
-                    ToolEntry::Adapter { name, .. } => name,
-                };
-                completed.contains(&(case.id.to_string(), iteration, tool_name.to_string()))
+            // Skip collection if every (dither, tool) cell for this iteration is done.
+            let all_done = dither_configs.iter().all(|&d| {
+                let dk = dither_key(d);
+                tools.iter().all(|te| {
+                    let tool_name = match te {
+                        ToolEntry::Tacet => "tacet",
+                        ToolEntry::Adapter { name, .. } => name.as_str(),
+                    };
+                    completed.contains(&(
+                        case.id.to_string(),
+                        iteration,
+                        dk.clone(),
+                        tool_name.to_string(),
+                    ))
+                })
             });
             if all_done {
-                done_units += tool_count;
+                done_units += tool_count * dither_configs.len();
                 continue;
             }
 
             eprintln!(
                 "[{}/{}] {} iter {}/{} (seed={})",
-                done_units / tool_count + 1,
+                done_units / (tool_count * dither_configs.len()) + 1,
                 cases.len() * args.iterations,
                 case.id,
                 iteration,
@@ -628,7 +670,7 @@ fn main() {
                 seed
             );
 
-            // Collection step (one-shot).
+            // Collection step (one-shot, shared across dither configs).
             let t_coll = Instant::now();
             let collected = (case.collect)(seed, spc);
             let coll_ms = t_coll.elapsed().as_millis() as u64;
@@ -650,77 +692,102 @@ fn main() {
                 }
             }
 
-            // Build BlockedData once and reuse across tools.
-            let blocked: BlockedData = collected.to_blocked_u64();
+            for &dither in &dither_configs {
+                let dk = dither_key(dither);
+                // Build dithered BlockedData once per (iteration, dither) pair.
+                // Dither is seeded per (iteration, dither_ns_bits) so the same
+                // run reproduces the same dithered sample stream deterministically.
+                let dither_seed = seed ^ (dither.to_bits());
+                let blocked: BlockedData =
+                    collected.to_blocked_with_dither(dither, dither_seed);
 
-            for tool in &tools {
-                let (tool_name, res) = match tool {
-                    ToolEntry::Tacet => {
-                        let tool_name = "tacet".to_string();
-                        if completed.contains(&(
-                            case.id.to_string(),
-                            iteration,
-                            tool_name.clone(),
-                        )) {
-                            done_units += 1;
-                            continue;
+                for tool in &tools {
+                    let (tool_name, res) = match tool {
+                        ToolEntry::Tacet => {
+                            let tool_name = "tacet".to_string();
+                            if completed.contains(&(
+                                case.id.to_string(),
+                                iteration,
+                                dk.clone(),
+                                tool_name.clone(),
+                            )) {
+                                done_units += 1;
+                                continue;
+                            }
+                            // Run tacet on the dithered f64 samples to keep
+                            // all tools on matched data per config.
+                            let baseline: Vec<f64> = blocked
+                                .baseline
+                                .iter()
+                                .map(|&v| v as f64)
+                                .collect();
+                            let test: Vec<f64> =
+                                blocked.test.iter().map(|&v| v as f64).collect();
+                            let (res, _ms) = run_tacet_on_samples(
+                                &baseline,
+                                &test,
+                                collected.timer_resolution_ns.max(dither),
+                                case.attacker_model,
+                                tacet_time_budget,
+                            );
+                            (tool_name, res)
                         }
-                        let (res, _ms) =
-                            run_tacet_on_collected(&collected, case.attacker_model, tacet_time_budget);
-                        (tool_name, res)
-                    }
-                    ToolEntry::Adapter { name, adapter } => {
-                        if completed.contains(&(
-                            case.id.to_string(),
-                            iteration,
-                            name.clone(),
-                        )) {
-                            done_units += 1;
-                            continue;
+                        ToolEntry::Adapter { name, adapter } => {
+                            if completed.contains(&(
+                                case.id.to_string(),
+                                iteration,
+                                dk.clone(),
+                                name.clone(),
+                            )) {
+                                done_units += 1;
+                                continue;
+                            }
+                            let res = adapter.analyze_blocked(&blocked);
+                            (name.clone(), res)
                         }
-                        let res = adapter.analyze_blocked(&blocked);
-                        (name.clone(), res)
+                    };
+
+                    let row = RowOut {
+                        ecosystem: case.ecosystem.to_string(),
+                        library: case.library.to_string(),
+                        primitive: case.primitive.to_string(),
+                        test_id: case.id.to_string(),
+                        expected: expected_label.to_string(),
+                        attacker_model: model_label.to_string(),
+                        iteration,
+                        seed,
+                        samples_per_class: spc,
+                        timer_resolution_ns: collected.timer_resolution_ns,
+                        timer_name: collected.timer_name.to_string(),
+                        dither_ns: dither,
+                        tool: tool_name.clone(),
+                        outcome: res.outcome.as_str().to_string(),
+                        detected_leak: res.detected_leak,
+                        leak_probability: res.leak_probability,
+                        samples_used: res.samples_used,
+                        decision_time_ms: res.decision_time_ms,
+                        status: res.status,
+                        collection_time_ms: coll_ms,
+                        timestamp: iso_timestamp(),
+                    };
+                    if let Err(e) = writeln!(out, "{}", row.to_csv_line()) {
+                        eprintln!("  ERROR: write failed: {}", e);
                     }
-                };
+                    if let Err(e) = out.flush() {
+                        eprintln!("  ERROR: flush failed: {}", e);
+                    }
 
-                let row = RowOut {
-                    ecosystem: case.ecosystem.to_string(),
-                    library: case.library.to_string(),
-                    primitive: case.primitive.to_string(),
-                    test_id: case.id.to_string(),
-                    expected: expected_label.to_string(),
-                    attacker_model: model_label.to_string(),
-                    iteration,
-                    seed,
-                    samples_per_class: spc,
-                    timer_resolution_ns: collected.timer_resolution_ns,
-                    timer_name: collected.timer_name.to_string(),
-                    tool: tool_name.clone(),
-                    outcome: res.outcome.as_str().to_string(),
-                    detected_leak: res.detected_leak,
-                    leak_probability: res.leak_probability,
-                    samples_used: res.samples_used,
-                    decision_time_ms: res.decision_time_ms,
-                    status: res.status,
-                    collection_time_ms: coll_ms,
-                    timestamp: iso_timestamp(),
-                };
-                if let Err(e) = writeln!(out, "{}", row.to_csv_line()) {
-                    eprintln!("  ERROR: write failed: {}", e);
+                    eprintln!(
+                        "    dither={:.2} {} → {} (leak={}, P={:?}, {}ms)",
+                        dither,
+                        tool_name,
+                        res.outcome.as_str(),
+                        res.detected_leak,
+                        res.leak_probability,
+                        res.decision_time_ms
+                    );
+                    done_units += 1;
                 }
-                if let Err(e) = out.flush() {
-                    eprintln!("  ERROR: flush failed: {}", e);
-                }
-
-                eprintln!(
-                    "    {} → {} (leak={}, P={:?}, {}ms)",
-                    tool_name,
-                    res.outcome.as_str(),
-                    res.detected_leak,
-                    res.leak_probability,
-                    res.decision_time_ms
-                );
-                done_units += 1;
             }
         }
     }
