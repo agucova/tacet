@@ -8,7 +8,9 @@
 # Environment overrides:
 #   TOOLS         Comma-separated tool list (default: all).
 #   TIER          Tier selector (default: all).
-#   SAMPLES       samples_per_class (default: 10000).
+#   SAMPLES       samples_per_class. Unset (default): honor per-test registry
+#                 defaults (10k Tier 1, 50k MARVIN). Setting this overrides
+#                 every test uniformly — only do that for smoke runs.
 #   R_WORKERS     SILENT/RTLF pool size (default: 24 for 32 vCPUs).
 #   PY_WORKERS    tlsfuzzer pool size (default: 6).
 #   SEED          Base RNG seed (default: 20260418).
@@ -22,7 +24,7 @@ ITERATIONS="${1:-20}"
 OUTPUT_DIR="${2:-$HOME/bench-results/crypto-cross-tool/x86_64}"
 TOOLS="${TOOLS:-all}"
 TIER="${TIER:-all}"
-SAMPLES="${SAMPLES:-10000}"
+SAMPLES="${SAMPLES:-}"
 R_WORKERS="${R_WORKERS:-24}"
 PY_WORKERS="${PY_WORKERS:-6}"
 SEED="${SEED:-20260418}"
@@ -36,7 +38,7 @@ echo "=========================================="
 echo "Iterations:     $ITERATIONS"
 echo "Tier:           $TIER"
 echo "Tools:          $TOOLS"
-echo "Samples/class:  $SAMPLES"
+echo "Samples/class:  ${SAMPLES:-registry defaults (10k Tier 1 / 50k MARVIN)}"
 echo "R workers:      $R_WORKERS"
 echo "Python workers: $PY_WORKERS"
 echo "Seed:           $SEED"
@@ -50,11 +52,16 @@ if [[ ! -x target/release/crypto_benchmark ]]; then
     cargo build --release -p tacet-bench --bin crypto_benchmark
 fi
 
+SAMPLES_ARG=()
+if [[ -n "$SAMPLES" ]]; then
+    SAMPLES_ARG=(--samples-per-class "$SAMPLES")
+fi
+
 exec ./target/release/crypto_benchmark \
     --tier "$TIER" \
     --iterations "$ITERATIONS" \
     --tools "$TOOLS" \
-    --samples-per-class "$SAMPLES" \
+    "${SAMPLES_ARG[@]}" \
     --r-pool-workers "$R_WORKERS" \
     --python-pool-workers "$PY_WORKERS" \
     --seed "$SEED" \

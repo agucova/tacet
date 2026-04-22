@@ -1,0 +1,94 @@
+======================================================================
+TRUE POSITIVE RATE ANALYSIS (leaky-test interpretation)
+======================================================================
+
+Total test runs: 180
+  True positive (detected):     27 ( 15.0%)
+  False negative (missed):      67 ( 37.2%)
+  Inconclusive:                 86 ( 47.8%)
+
+----------------------------------------------------------------------
+TPR CONDITIONAL ON DEFINITIVE VERDICT (Pass or Fail)
+----------------------------------------------------------------------
+  27/94 = 28.72%
+  Wilson 95% CI: [20.55%, 38.56%]
+
+Inconclusive rate among non-skipped: 47.78%  (86/180)
+
+----------------------------------------------------------------------
+PER-FAMILY BREAKDOWN
+----------------------------------------------------------------------
+
+injected:
+  Trials: 180  |  TP: 27  |  FN: 67  |  Inc: 86  |  Skip: 0
+  TPR (conditional): 28.72%  (95% CI: [20.55%, 38.56%])
+
+----------------------------------------------------------------------
+PER-TEST BREAKDOWN
+----------------------------------------------------------------------
+  injected::injected_shift_2ns              n= 30  TP=  0  FN= 17  Inc= 13  Skip=  0  TPR=  0.0%  [ 0.0%,  18.4%]
+  injected::injected_shift_5ns              n= 30  TP=  0  FN= 15  Inc= 15  Skip=  0  TPR=  0.0%  [ 0.0%,  20.4%]
+  injected::injected_shift_20ns             n= 30  TP=  0  FN= 16  Inc= 14  Skip=  0  TPR=  0.0%  [ 0.0%,  19.4%]
+  injected::injected_shift_50ns             n= 30  TP=  0  FN= 11  Inc= 19  Skip=  0  TPR=  0.0%  [ 0.0%,  25.9%]
+  injected::injected_shift_100ns            n= 30  TP=  9  FN=  8  Inc= 13  Skip=  0  TPR= 52.9%  [31.0%,  73.8%]
+  injected::injected_shift_500ns            n= 30  TP= 18  FN=  0  Inc= 12  Skip=  0  TPR=100.0%  [82.4%, 100.0%]
+
+----------------------------------------------------------------------
+INJECTED-SHIFT DETECTION CURVE
+----------------------------------------------------------------------
+  delay_ns     n    TP    FN   Inc       TPR                95% CI
+         2    30     0    17    13      0.0%      [  0.0%,  18.4%]
+         5    30     0    15    15      0.0%      [  0.0%,  20.4%]
+        20    30     0    16    14      0.0%      [  0.0%,  19.4%]
+        50    30     0    11    19      0.0%      [  0.0%,  25.9%]
+       100    30     9     8    13     52.9%      [ 31.0%,  73.8%]
+       500    30    18     0    12    100.0%      [ 82.4%, 100.0%]
+
+----------------------------------------------------------------------
+FALSE-NEGATIVE DETAILS (oracle said Pass on known-leaky code)
+----------------------------------------------------------------------
+
+  injected / injected::injected_shift_100ns
+    Missed 8/30 iterations
+      iter=1  P(leak)=0.6%  samples=6000  t=0s
+      iter=13  P(leak)=1.4%  samples=6000  t=1s
+      iter=18  P(leak)=4.0%  samples=9000  t=0s
+      ... and 5 more
+
+  injected / injected::injected_shift_20ns
+    Missed 16/30 iterations
+      iter=2  P(leak)=0.0%  samples=6000  t=0s
+      iter=5  P(leak)=0.0%  samples=6000  t=0s
+      iter=8  P(leak)=0.0%  samples=6000  t=0s
+      ... and 13 more
+
+  injected / injected::injected_shift_2ns
+    Missed 17/30 iterations
+      iter=4  P(leak)=0.0%  samples=6000  t=0s
+      iter=5  P(leak)=0.0%  samples=6000  t=1s
+      iter=6  P(leak)=0.0%  samples=6000  t=0s
+      ... and 14 more
+
+  injected / injected::injected_shift_50ns
+    Missed 11/30 iterations
+      iter=3  P(leak)=0.0%  samples=6000  t=0s
+      iter=5  P(leak)=0.0%  samples=6000  t=0s
+      iter=7  P(leak)=0.0%  samples=6000  t=0s
+      ... and 8 more
+
+  injected / injected::injected_shift_5ns
+    Missed 15/30 iterations
+      iter=1  P(leak)=0.0%  samples=6000  t=1s
+      iter=2  P(leak)=0.0%  samples=6000  t=0s
+      iter=3  P(leak)=0.0%  samples=6000  t=0s
+      ... and 12 more
+
+----------------------------------------------------------------------
+PAPER-READY SUMMARY
+----------------------------------------------------------------------
+
+6 known-leaky tests × average 30.0 iterations = 180 trials.
+tacet detected leaks in 27/94 = 28.72% of definitive verdicts
+(Wilson 95% CI: [20.55%, 38.56%]).
+Inconclusive rate: 47.78% (86/180 non-skipped trials).
+
