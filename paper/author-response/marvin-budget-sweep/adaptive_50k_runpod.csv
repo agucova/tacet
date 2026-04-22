@@ -1,0 +1,11 @@
+timestamp,budget_label,iteration,seed,samples_requested,samples_used,timer_name,timer_resolution_ns,collection_ms,analysis_ms,verdict,leak_probability,effect_ns,ci_lo_ns,ci_hi_ns,dependence_length,effective_sample_size,stationarity_ratio,calibration_samples,attacker_model,threshold_ns
+1776895494,50k-adaptive,1,1,50000,24000,adaptive,0.0,0,9120,inconclusive,0.086500,62.691,11.189,121.214,97,103,1.0026,10000,AdjacentNetwork,100.000
+1776895498,50k-adaptive,2,2,50000,11000,adaptive,0.0,0,4651,inconclusive,0.961500,168.975,89.718,243.619,424,23,1.0513,10000,AdjacentNetwork,100.000
+1776895515,50k-adaptive,3,3,50000,45000,adaptive,0.0,0,16916,inconclusive,0.014750,145.931,71.390,217.889,384,26,1.0099,10000,AdjacentNetwork,100.000
+1776895526,50k-adaptive,4,4,50000,27000,adaptive,0.0,0,10259,inconclusive,0.245750,96.187,13.332,193.659,67,149,1.0115,10000,AdjacentNetwork,100.000
+1776895544,50k-adaptive,5,5,50000,50000,adaptive,0.0,0,18612,inconclusive,0.013500,86.845,21.832,155.669,62,161,1.0043,10000,AdjacentNetwork,100.000
+1776895559,50k-adaptive,6,6,50000,40000,adaptive,0.0,0,15092,inconclusive,0.881500,195.819,100.162,284.820,38,263,1.0040,10000,AdjacentNetwork,100.000
+1776895566,50k-adaptive,7,7,50000,16000,adaptive,0.0,0,6283,inconclusive,0.698250,159.291,27.910,304.254,73,136,1.0037,10000,AdjacentNetwork,100.000
+1776895575,50k-adaptive,8,8,50000,25000,adaptive,0.0,0,9561,inconclusive,0.304750,149.265,21.109,299.239,51,196,1.0046,10000,AdjacentNetwork,100.000
+1776895584,50k-adaptive,9,9,50000,24000,adaptive,0.0,0,9120,pass,0.008000,62.459,34.200,91.253,38,263,1.0056,10000,AdjacentNetwork,100.000
+1776895591,50k-adaptive,10,10,50000,16000,adaptive,0.0,0,6291,inconclusive,0.412000,92.615,26.744,160.396,113,88,1.0071,10000,AdjacentNetwork,100.000

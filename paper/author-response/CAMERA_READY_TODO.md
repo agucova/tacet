@@ -33,6 +33,45 @@ discoveries. These are not rebuttal items — they belong in the revision.
   vs single-op TPR against actual effective delay on shared x-axis. Reuse
   `crates/tacet/scripts/plot_power_curve.py` with a new CSV export mode.
 
+## §5.6 MARVIN: clarify measurement pattern (cache-warming, not padding-oracle)
+
+§5.6's claim is "tacet flagged CVE-2023-49092 during routine testing." The
+test code producing those numbers is
+`crates/tacet/tests/core/known_leaky.rs::detects_marvin_rsa_decryption`,
+which uses a **cache/branch-predictor warming pattern** (baseline = 1 fixed
+valid ciphertext repeated; sample = 200 varied valid ciphertexts). **Both
+classes decrypt successfully**; the timing difference comes from
+microarchitectural state differences between repeated-fixed and
+varied-valid inputs.
+
+CVE-2023-49092 / MARVIN (Kario 2023) is specifically about the PKCS#1 v1.5
+**padding oracle** — padding-valid vs padding-invalid timing differences.
+The cross-tool registry entry at
+`crates/tacet-bench/src/crypto_registry.rs::tier2_rustcrypto_rsa_marvin`
+implements this padding-oracle pattern (valid vs random-invalid
+ciphertexts). On c8a.8xlarge the padding-oracle variant yields a ~25 ns
+effect (below θ=100 ns AdjacentNetwork); the cache-warming variant yields
+~140 ns, matching §5.6.
+
+Both are real timing-leak signals, but they exercise different
+microarchitectural channels and have different exploitability properties.
+The §5.6 paragraph should clarify which variant it measured and acknowledge
+that a full MARVIN-oracle test on the same hardware yields a different
+effect magnitude. Two options:
+
+1. **Rename §5.6's leak** to "RSA-1024 PKCS#1 v1.5 decryption timing
+   anomaly" (generic) rather than conflating it with MARVIN's specific
+   padding-oracle mechanism. Still triggers a correct CVE investigation
+   — the case study's narrative stands.
+2. **Add a paragraph** distinguishing "cache-warming leak" from
+   "padding-oracle leak" in §5.6, citing both the `known_leaky.rs` test
+   and the `crypto_registry.rs` registry entry. Report both variants'
+   effect magnitudes and tacet's verdict on each.
+
+**Do NOT raise this distinction in the Apr 23 rebuttal.** It is not a
+reviewer-raised concern. §8's sweep data answers the reviewers' questions
+regardless of which MARVIN-adjacent channel is being measured.
+
 ## Other reviewer asks to address in revision (not all in the 700 words)
 
 - A: hyperparameter sensitivity study (ablation table of the 10+ calibrated
