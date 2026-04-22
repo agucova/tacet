@@ -24,6 +24,36 @@ All findings are partitioned into two halves:
 
 # For the Rebuttal
 
+## Word budget accounting
+
+Rebuttal word limit: **700 words total** across all four reviewers.
+
+**Budget-trimmed paste-ready claims** (use the trimmed versions from each
+§ below when assembling the response):
+
+| § | Concern | Reviewers | Trimmed | Full |
+|---|---|---|---|---|
+| 1 | Hyperparameter ablation | A-Q1, A-Q2, B, C, D | **~75 w** | ~110 w |
+| 2 | Fig 2 detection fill-in | C | **~20 w** | ~30 w |
+| 3 | Synth-vs-AWS representativeness | D-Q2, A, C | **~95 w** | ~170 w |
+| 4 | Amplification / ShowTime overlay | B-Q1 | **~100 w** | ~140 w |
+| — | Subtotal for done findings | | **~290 w** | ~450 w |
+
+That leaves ~**410 words** for the items *not yet in this document* —
+MARVIN budget sweep, runtime comparison vs dudect/SILENT, factual
+corrections (SILENT quantile parameter, stream-based bootstrap claim,
+rdtsc / rdtscp), Reviewer A's novelty pushback, A's "testbed of known
+CVEs beyond MARVIN," C's microarchitectural-attack-class clarification,
+D's test-case definition, salutation, and closing. That's tight but
+workable if the four done items stick to their trimmed versions.
+
+**Blocking item for the opening paragraph**: MARVIN convergent-Fail
+result. Do **not** start the full rebuttal draft until MARVIN lands —
+its outcome shapes the opening framing materially. The four paragraphs
+above can be polished independently in the meantime.
+
+---
+
 ## 1. Hyperparameter sensitivity ablation
 
 **Reviewer targets**:
@@ -33,7 +63,18 @@ All findings are partitioned into two halves:
 - #1370B / #1370C — calibration-robustness evidence gap
 - #1370D — "calibration quality" / FPR not a threshold artifact
 
-### Paste-ready claim (v3, ~110 words)
+### Paste-ready claim — budget-trimmed (~75 words, A-Q1/Q2 paragraph)
+
+> **A-Q1/Q2 (hyperparameter sensitivity).** 16-configuration × 120-dataset
+> ablation (~187k trials) spanning π₀ ∈ [0.50, 0.85], α/(1−β) ∈ [0.01/0.99,
+> 0.10/0.90], kl_min ∈ [0.3, 1.5], ν_ℓ ∈ [2.01, 16], prior ν ∈ [2.5, 16],
+> and joint-extreme compound stress. **FPR ≤ 0.57% across every cell**
+> (n = 880 null/cell, Wilson CI [0, 0.4%] on AdjacentNetwork). Detection
+> at 1σ-shift is 100% for 14/16 configs; at the near-Cauchy likelihood
+> boundary (ν_ℓ = 2.01) the oracle degrades sensitivity to 37.7% while
+> preserving FPR = 0% — the three-way verdict is calibration-preserving.
+
+### Paste-ready claim — full version (~110 words, for artifact/appendix use)
 
 > Across 16 hyperparameter configurations spanning π₀ ∈ [0.50, 0.85],
 > α/(1−β) ∈ [0.01/0.99, 0.10/0.90], kl_min ∈ [0.3, 1.5], likelihood
@@ -156,7 +197,12 @@ Values with Wilson 95% CIs and counts: [ablation-v3/ablation_summary.md](ablatio
 - #1370C — "insert branch and cache-dependent operations into the existing libraries"
 - general reviewer concern about the 2σ → 20σ gap in Fig 2 implying a detection cliff
 
-### Paste-ready claim (~30 words)
+### Paste-ready claim — budget-trimmed (~20 words)
+
+> Extended Fig 2 at 3σ and 4σ (both patterns, both threat models; data in
+> supplement): detection is monotone with no cliff between 2σ and 20σ.
+
+### Paste-ready claim — full version (~30 words)
 
 > We extended Fig 2 with 3σ and 4σ rows (data in supplementary). Detection is
 > **100% at SharedHardware** and **0% at AdjacentNetwork** at both 3σ and 4σ
@@ -219,7 +265,27 @@ pending work.
 - #1370A — "synthetic data doesn't reflect real cache/branch behaviour"
 - #1370C — same concern framed around synthetic data for parameter calibration
 
-### Paste-ready claim (~170 words, D-Q2 paragraph)
+### Paste-ready claim — budget-trimmed (~95 words, D-Q2 paragraph, **use this one**)
+
+> **D-Q2 (synthetic vs. AWS).** The synthetic AR(1) grid in §5 is **more
+> adversarial** than the dependence structure of real constant-time crypto
+> on c8a.4xlarge (§5.1 hardware): measured asymmetric-crypto ρ₁ = 0.02
+> (idle) / 0.00 (loaded), PW block 2.4 / 0.7, versus our synthetic
+> φ ∈ {0.3, 0.6, 0.8} producing effective ρ₁ ∈ {0.15, 0.29, 0.39}.
+> MARVIN RSA (§5.5) — the variable-time case the grid was designed to
+> stress — sits squarely inside the φ=0.6 column (block length 19,
+> IACT ≈ 19). Real upper tails are heavier than LogNormal synthetic
+> (p99.9 at 111–22 500 σ_MAD vs 3.7 σ_MAD); since θ_floor is calibrated
+> from the raw un-debiased W₁, this inflates θ_floor conservatively on
+> real hardware, shifting borderline verdicts toward Inconclusive rather
+> than Fail.
+
+**Reframe rationale.** The earlier "weak-autocorrelation end of the grid"
+framing reads as defensive; the sharper claim is that our grid *brackets*
+the real dependence regimes and the worst real case (MARVIN) sits at the
+center of its designed-for zone. Same data, stronger framing for Reviewer D.
+
+### Paste-ready claim — full version (~170 words, for artifact/appendix use)
 
 > **D-Q2 (synthetic vs. AWS).** We characterised both streams on the four
 > properties driving inference: lag-k autocorrelation, MAD-robust upper-tail
@@ -228,27 +294,17 @@ pending work.
 > `tacet-core/src/statistics/{autocorrelation,iact,block_length}.rs`). On
 > `c8a.4xlarge` — the §5.1 hardware — asymmetric-crypto streams show median
 > ρ₁ = 0.02 (idle) / 0.00 (loaded); PW block length 2.4 / 0.7; IACT τ̂ = 1.4
-> / 1.0. These sit at the *weak-autocorrelation end* of our AR(1) sweep
-> (φ ∈ {0, 0.3, 0.6, 0.8} produce effective ρ₁ of 0.00, 0.15, 0.29, 0.39).
-> MARVIN RSA on EPYC 9575F (§5.5) is the autocorrelated exception: block
-> length 19, IACT ≈ 19, inside the synthetic φ=0.6 column — the regime our
-> grid was designed to cover. The real upper tail is dramatically heavier
-> than LogNormal synthetic (p99.9 at 111 σ_MAD idle, 22 500 σ_MAD loaded,
-> vs. 3.7–5.2 σ_MAD synthetic). This strengthens calibration: θ_floor is
-> derived from the raw un-debiased W₁, whose tail sensitivity inflates
-> θ_floor conservatively on real hardware, pushing borderline verdicts
-> toward Inconclusive rather than Fail.
-
-Compressed version (~90 words) if word budget is tight:
-
-> **D-Q2.** Measured on c8a.4xlarge, asymmetric-crypto ρ₁ is 0.02 (idle) /
-> 0.00 (loaded), PW block 2.4 / 0.7 — the weak-autocorrelation end of our
-> synthetic grid (φ=0.3–0.8 → effective ρ₁ 0.15–0.39). MARVIN RSA (§5.5)
-> block length 19 sits inside the synthetic φ=0.6 column. The real upper
-> tail is heavier than LogNormal synthetic (p99.9 at 111–22 500 σ_MAD vs.
-> 3.7 σ_MAD). Because θ_floor is calibrated against the raw un-debiased
-> W₁, heavier real tails only inflate θ_floor conservatively — borderline
-> verdicts shift to Inconclusive, not Fail.
+> / 1.0. These sit at the weak end of our AR(1) sweep
+> (φ ∈ {0, 0.3, 0.6, 0.8} produce effective ρ₁ of 0.00, 0.15, 0.29, 0.39);
+> i.e. the synthetic grid is *more adversarial* than typical real
+> measurements. MARVIN RSA on EPYC 9575F (§5.5) is the autocorrelated
+> exception: block length 19, IACT ≈ 19, inside the synthetic φ=0.6 column
+> — the regime our grid was designed to cover. The real upper tail is
+> dramatically heavier than LogNormal synthetic (p99.9 at 111 σ_MAD idle,
+> 22 500 σ_MAD loaded, vs. 3.7–5.2 σ_MAD synthetic). This strengthens
+> calibration: θ_floor is derived from the raw un-debiased W₁, whose tail
+> sensitivity inflates θ_floor conservatively on real hardware, pushing
+> borderline verdicts toward Inconclusive rather than Fail.
 
 ### Scope / data produced
 
@@ -304,7 +360,30 @@ Camera-ready implications for this finding are consolidated in the
 - #1370B Q1 (explicit) — "discuss timing amplification techniques, such as those proposed in ShowTime, and how these might affect the detection assumptions"
 - #1370B limitation — "amplification techniques influence the security of the chosen threshold parameter"
 
-### Paste-ready claim (~140 words, B-Q1 paragraph)
+### Paste-ready claim — budget-trimmed (~100 words, B-Q1 paragraph, **use this one**)
+
+> **B-Q1 (amplification / ShowTime).** Amplification is a measurement-side
+> capability: an attacker with budget k_adv scales the per-query W₁ by
+> k_adv, so a θ_user bound on W₁ also bounds the amplified attacker's
+> signal at θ_user / k_adv. For amplification-capable threat models,
+> users set θ_user = θ_physical / k_adv; the paper's security argument
+> extends directly. We verified the scaling by overlaying amplified
+> (d = 200 ns, k ∈ {5, 10, 25, 100}) against single-op baselines at
+> matched actual effective delays within 5% (`busy_wait_ns` calibration).
+> Against AdjacentNetwork (θ = 100 ns) on EPYC @ 5 GHz, amplified and
+> single-op TPRs coincide within 95% Wilson CIs at every matched pair
+> (all four 100% TPR, n = 20/cell). We will add ShowTime and this
+> discussion to the camera-ready.
+
+**Reframe rationale.** The earlier draft led with *"amplification does not
+defeat tacet — it refines the threshold-choice rule,"* which reads as
+goalpost-moving to Reviewer B. The revised version leads with the
+*implication* (a θ_user bound on per-query W₁ is an amplification-aware
+bound because W₁ scales linearly with k) before stating the rule, so
+the rule is framed as operating the existing θ_user formalism correctly
+rather than retreating from the security claim.
+
+### Paste-ready claim — full version (~140 words, for artifact/appendix use)
 
 > **Reviewer B, Q1 (amplification / ShowTime).** Amplification is a
 > measurement-side capability available to both attacker and defender; the
@@ -525,6 +604,58 @@ Fig 2 with the 3σ/4σ rows visible.
 **For the rebuttal**, we cite the new points in prose only (see
 [Figure 2 claim](#paste-ready-claim-30-words) above) — no figure regeneration
 required on the Apr 23 timeline.
+
+## G. Decide disclosure timing for the ν_ℓ = 4 FFI result (see §A)
+
+**Open question.** §A documents that `step.rs:717` in the FFI path uses
+ν_ℓ = 4, while the paper and the Rust headline path use ν_ℓ = 8.
+Which path did the paper's §5.5 cryptographic-library evaluation
+actually run through?
+
+- **If §5.5 ran through the Rust headline path** (i.e., `tacet-bench`
+  native tests in `crates/tacet/tests/*_timing.rs`), numbers reflect
+  ν_ℓ = 8 and match the paper's stated method. Camera-ready only.
+- **If any row of §5.5 ran through the FFI path** (e.g., C/Go/Node
+  binding tests), those rows' numbers reflect ν_ℓ = 4. The paper's
+  numbers are still internally valid but the stated *method* does not
+  match *what was run* for those rows. This is a rebuttal-time
+  disclosure, not a camera-ready fix.
+
+**Action before Thursday**: read `paper/paper.tex` §5.5 / Table 3 and
+cross-reference with the test harness actually used. If FFI bindings
+were involved anywhere, surface proactively in the rebuttal ("one row
+of Table 3 was run through the FFI path which defaults to ν_ℓ = 4
+rather than ν_ℓ = 8; the ablation v3 result shows both values produce
+0% FPR and 100% 1σ detection, so the calibration claim is unaffected;
+the implementation literal will be aligned in the camera-ready").
+
+The ablation (§A.Impact) demonstrates both ν_ℓ values produce the same
+qualitative outcome, so proactive disclosure here *strengthens* rather
+than weakens the rebuttal — it shows we audited our own codebase.
+
+**Priority**: this is the highest-impact open audit item for the
+rebuttal. Resolve before drafting.
+
+## H. Decide disclosure timing for the `busy_wait_ns` 19 ns floor (see §4 and F)
+
+**Open question.** §4 documents that `busy_wait_ns(d)` has an ~19 ns
+floor on x86 @ 5 GHz (nominal d ≤ 10 ns all produce ~19 ns actual).
+Any paper-cited detection-curve row at nominal d < 200 ns is wrong on
+its x-axis.
+
+**Action before Thursday**: audit §5.4 (ablation) and any detection-curve
+figure or table in the paper for reported d values in this range.
+
+- If none of the headline figures cite nominal d < 200 ns, the floor
+  is a camera-ready-only disclosure (§F).
+- If any headline cite is below the floor, disclose in the rebuttal
+  alongside §4 ("small-d detection rows will be relabeled with measured
+  effective delay in the camera-ready; the load-bearing result —
+  operation-loop amplification scaling — is established in the
+  d ≥ 1 000 ns region where the primitive is faithful").
+
+**Priority**: medium. The amplification result itself is not affected
+because the overlay used d ≥ 1 000 ns.
 
 ## D. Other items surfaced but out of scope for rebuttal
 
