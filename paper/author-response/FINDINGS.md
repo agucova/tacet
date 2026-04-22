@@ -605,36 +605,42 @@ Fig 2 with the 3σ/4σ rows visible.
 [Figure 2 claim](#paste-ready-claim-30-words) above) — no figure regeneration
 required on the Apr 23 timeline.
 
-## G. Decide disclosure timing for the ν_ℓ = 4 FFI result (see §A)
+## G. ν_ℓ = 4 FFI discrepancy: camera-ready only (resolved — no rebuttal disclosure needed)
 
-**Open question.** §A documents that `step.rs:717` in the FFI path uses
-ν_ℓ = 4, while the paper and the Rust headline path use ν_ℓ = 8.
-Which path did the paper's §5.5 cryptographic-library evaluation
-actually run through?
+**Resolution.** §5.5 "Crypto Library Validation" ran through the Rust
+headline path for **all 670 trials** (ν_ℓ = 8). The 67-test FPR
+measurement explicitly enumerates "10 libraries across Rust and C/C++"
+covering 7 libraries in the source CSV (RustCrypto, ring, dalek,
+pqcrypto, orion, libressl, libsodium). Go and JavaScript/WASM rows in
+Table 2 are coverage indicators, not part of the FPR number.
 
-- **If §5.5 ran through the Rust headline path** (i.e., `tacet-bench`
-  native tests in `crates/tacet/tests/*_timing.rs`), numbers reflect
-  ν_ℓ = 8 and match the paper's stated method. Camera-ready only.
-- **If any row of §5.5 ran through the FFI path** (e.g., C/Go/Node
-  binding tests), those rows' numbers reflect ν_ℓ = 4. The paper's
-  numbers are still internally valid but the stated *method* does not
-  match *what was run* for those rows. This is a rebuttal-time
-  disclosure, not a camera-ready fix.
+**Code trace.** The C/C++ library tests
+(`crates/tacet/tests/crypto/c_libraries/*.rs`) import
+`use tacet::{..., TimingOracle};` and call
+`TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)` directly
+from Rust. The C/C++ FFI is used only for the *cryptographic library
+under test* (LibreSSL, Libsodium, etc.) — never for the Tacet oracle
+itself. The oracle always runs in Rust through
+`tacet::Config` → `SinglePassConfig` → `single_pass.rs`, which sets
+`nu_likelihood: 8.0` (§A).
 
-**Action before Thursday**: read `paper/paper.tex` §5.5 / Table 3 and
-cross-reference with the test harness actually used. If FFI bindings
-were involved anywhere, surface proactively in the rebuttal ("one row
-of Table 3 was run through the FFI path which defaults to ν_ℓ = 4
-rather than ν_ℓ = 8; the ablation v3 result shows both values produce
-0% FPR and 100% 1σ detection, so the calibration claim is unaffected;
-the implementation literal will be aligned in the camera-ready").
+Verified sites:
+- `crates/tacet/tests/crypto/c_libraries/libressl.rs:30,110,227,300,407,475,559`
+  — all `TimingOracle::for_attacker(...)`
+- `crates/tacet/tests/crypto/c_libraries/libsodium.rs` — same pattern
+- `crates/tacet/tests/crypto/{rustcrypto,dalek,ring,pqcrypto}.rs` — Rust
+  libs, trivially Rust path
+- `results/_old/fpr_crypto_noisy_final.csv` — 670 rows total:
+  RustCrypto=270, pqcrypto=110, dalek=70, libsodium=70, orion=60,
+  libressl=50, ring=40. No Go / JS / WASM rows.
 
-The ablation (§A.Impact) demonstrates both ν_ℓ values produce the same
-qualitative outcome, so proactive disclosure here *strengthens* rather
-than weakens the rebuttal — it shows we audited our own codebase.
+**Impact on the rebuttal.** **Zero.** No paper-reported number ever went
+through the ν_ℓ = 4 path. The FFI ν_ℓ = 4 literal affects C / Go / Node
+/ WASM library consumers only, and is strictly a code-consistency issue.
+Remains a camera-ready patch (§A).
 
-**Priority**: this is the highest-impact open audit item for the
-rebuttal. Resolve before drafting.
+**Decision**: do **not** disclose the FFI discrepancy in the rebuttal.
+The claim "paper method matches what was run" holds for every row cited.
 
 ## H. Decide disclosure timing for the `busy_wait_ns` 19 ns floor (see §4 and F)
 
