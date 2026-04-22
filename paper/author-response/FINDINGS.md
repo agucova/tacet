@@ -43,16 +43,16 @@ Rebuttal word limit: **700 words total** across all four reviewers.
 | 8 | MARVIN budget-scaling sweep | A, B, C-Q3, D | **~75 w** | ~150 w |
 | 9 | Cross-tool runtime comparison | C-Q3 | **~45 w** | ~140 w |
 | 10 | Tier-1 positive-control FN leg | D (primary), B | **~75 w** (or 45 w) | — |
-| — | Subtotal for done findings | | **~680 w** | ~1 060 w |
+| 11 | Input-pool sensitivity (MARVIN) | B-Q2 | **~55 w** | ~130 w |
+| — | Subtotal for done findings | | **~735 w** | ~1 190 w |
 
-That leaves ~**20 words** for items not yet in this document — factual
-corrections (SILENT quantile parameter, stream-based bootstrap claim,
-rdtsc / rdtscp), Reviewer A's novelty pushback, C's
-microarchitectural-attack-class clarification, D's test-case definition,
-salutation, and closing. **Very tight**: use §10's 45 w variant and
-consider folding §6 into §10 (both are injection results) to recover
-~30 w. Factual corrections will need to collapse into a single
-3-sentence paragraph or drop below the line.
+Subtotal is **~735 w**, which is 35 w over budget before remaining items
+(factual corrections, A's novelty pushback, C's microarchitectural
+clarification, D's test-case definition, salutation, closing). To fit
+within 700 w: use §10's 45-word variant (saves 30 w), fold §6 into §10
+as an injection-results paragraph (saves ~40 w), or drop §2 Fig-2
+prose (saves ~20 w). Factual corrections collapse into a single
+3-sentence tail. §11 is non-negotiable — B-Q2 was asked explicitly.
 
 **Opening framing**: Variant B of the MARVIN sweep (see §8) — §5.6 is
 representative, not anomalous. Do **not** open with "converges to
@@ -1312,6 +1312,134 @@ paste-ready paragraphs don't depend on it.
 
 ---
 
+## 11. Input-pool sensitivity on MARVIN (Reviewer B Q2)
+
+**Reviewer targets**:
+- #1370B Q2 (explicit): *"Can the authors comment on how input generation
+  strategies influence the effectiveness of the framework in discovering
+  timing leaks?"*
+
+### Paste-ready claim — budget-trimmed (~55 words, B-Q2 paragraph)
+
+> **B-Q2 (input generation).** Tacet inherits DudeCT's fixed-vs-random
+> two-class input model. Sweeping sample-class pool size N ∈ {1, 10, 100,
+> 1000} on §5.6's MARVIN at the 62k budget (20 seeds/pool, 80 runs)
+> yields Fail rates **{50%, 30%, 30%, 25%}**; median effect is stable at
+> 189–228 ns while CI widths widen from 78 → 300 ns with N. The posterior
+> faithfully reflects input-generation variance; structure-aware
+> generators are future work.
+
+### Paste-ready claim — full version (~130 words, appendix use)
+
+> To answer Reviewer B's input-generation question concretely, we swept
+> the sample-class ciphertext pool size on §5.6's cache-warming MARVIN
+> variant at the 62k-sample budget (20 seeds per pool, 80 runs total,
+> AdjacentNetwork θ = 100 ns). Across N ∈ {1, 10, 100, 1000}, **median
+> effect is stable at 189–228 ns** — the underlying leak is
+> input-generation-invariant. Fail rates are *highest* at N = 1
+> (50%, Wilson [30, 70]%) and saturate at 25–30% for N ≥ 10. Larger pools
+> inflate posterior CI widths ~4× (78 → 300 ns) without shifting the
+> point estimate — the oracle correctly reports more uncertainty under
+> more-diverse input generation. The DudeCT two-class interface is
+> load-bearing; structure-aware input generators (e.g., Bleichenbacher-
+> oracle templating) are deferred to future work.
+
+### Scope
+
+- **Hardware**: RunPod container, AMD EPYC 4564P (16 C / 32 T, SMT on,
+  powersave governor), invariant TSC at ~0.223 ns resolution. Same
+  host as §5 cross-tool and §10 injection. Declared fully in
+  [marvin-pool-sweep/conditions.md](marvin-pool-sweep/conditions.md).
+- **Test**: `marvin_budget_sweep --marvin-mode cache` with a new
+  `--pool-size N` flag, baseline = one fixed valid PKCS#1 v1.5
+  ciphertext, sample = N distinct valid ciphertexts cycled.
+- **Budget**: fixed at 62 000 samples/class (§5.6's baseline),
+  single-pass analysis via `analyze_raw_samples_with_resolution`.
+- **Pool ladder**: {1, 10, 100, 1000}. **Seeds**: 20 per pool,
+  derived as `md5("20260422|marvin-pool|{pool}|{iter}")`. Total 80 runs.
+- **Parallelism**: 4 workers, each pinned to an 8-core group via
+  `taskset`. Wall time ≈ 11 min.
+
+### Headline table
+
+| pool_size | N | verdicts (F/I/P) | %Fail (Wilson 95%) | median P | IQR P | median effect (ns) | median CI width (ns) | median ESS | block |
+|---|---|---|---|---|---|---|---|---|---|
+| **1**    | 20 | **10/8/2** | **50.0%** (30–70%) | 0.919 | [0.30, 1.00] | **228** | **78** | 58 | 1,056 |
+| 10   | 20 | 6/14/0 | 30.0% (15–52%) | 0.593 | [0.42, 0.98] | 189 | 300 | 58 | 1,056 |
+| 100  | 20 | 6/14/0 | 30.0% (15–52%) | 0.509 | [0.12, 0.98] | 189 | 355 | 58 | 1,056 |
+| 1000 | 20 | 5/13/2 | 25.0% (11–47%) | 0.509 | [0.19, 0.94] | 197 | 300 | 58 | 1,056 |
+
+### Key rhetorical findings
+
+1. **Effect estimate is input-generation-invariant.** Median effect
+   stays within 189–228 ns across a 1 000× sweep in pool size. Tacet
+   recovers the same underlying leak magnitude regardless of the
+   sample-class pool size.
+2. **Detection rate is highest at N = 1 and saturates by N ≥ 10.**
+   The naive hypothesis "more pool diversity → more detection power"
+   is wrong on MARVIN. Wilson CIs overlap for N ∈ {10, 100, 1000},
+   so the "bigger pool is always better" claim a reviewer might make
+   doesn't hold; §5.6's N = 200 sits in the saturated region.
+3. **Larger pools inflate posterior uncertainty, not signal.** CI
+   width goes 78 → 300 → 355 → 300 ns as N grows. At N = 1 both
+   classes are cache-warm on a single ciphertext each; within-class
+   variance is noise-limited. At N ≫ 1, sample-class variance
+   includes variation across the variable-time distribution of many
+   ciphertexts — the posterior *correctly* reports more uncertainty
+   under more-diverse input generation.
+4. **N = 1 trades robustness for sharpness.** 2 / 20 seeds at N = 1
+   landed Pass with per-key effects 47 / 61 ns (below θ = 100 ns);
+   those specific random ciphertexts happened to fall in the lower
+   tail of the MARVIN variable-time distribution. N ≥ 10 averages
+   over the pool → representative effect (~190 ns, > θ) at the cost
+   of wider CIs.
+5. **DudeCT interface is load-bearing.** Tacet's input-generation
+   strategy is the fixed-vs-random two-class model it inherits from
+   DudeCT. All four pool-size regimes are valid within that model;
+   structure-aware generators (ASN.1 malformations, oracle-targeting
+   templates) lie outside the interface and are deferred to future
+   work.
+
+### Suggested rebuttal framing
+
+Do **not** claim "tacet is robust to input-generation choice" as a
+standalone positive — it's technically true for effect estimation but
+the 50 → 25% Fail-rate spread is substantive. The honest framing is:
+*detection is pool-size-sensitive for the verdict leg (higher at
+small N, lower at large N), while the effect estimate is
+pool-size-invariant; the oracle's CI widths track the change so the
+posterior is well-calibrated*. This is a three-way-verdict story: at
+larger pools, more Inconclusive + same effect, not a calibration
+failure.
+
+### Data pointers
+
+- **Raw CSV (80 rows)**:
+  [marvin-pool-sweep/results.csv](marvin-pool-sweep/results.csv)
+- **Per-pool summary**: [marvin-pool-sweep/summary.md](marvin-pool-sweep/summary.md) /
+  [marvin-pool-sweep/summary.csv](marvin-pool-sweep/summary.csv)
+- **Headline JSON**:
+  [marvin-pool-sweep/headline.json](marvin-pool-sweep/headline.json)
+- **Pool-curve figure**:
+  [marvin-pool-sweep/pool_curve.png](marvin-pool-sweep/pool_curve.png) /
+  [marvin-pool-sweep/pool_curve.pdf](marvin-pool-sweep/pool_curve.pdf)
+- **Conditions**: [marvin-pool-sweep/conditions.md](marvin-pool-sweep/conditions.md)
+- **Sweep log**: [marvin-pool-sweep/sweep.log](marvin-pool-sweep/sweep.log)
+- **Binary addition**: `crates/tacet-bench/src/bin/marvin_budget_sweep.rs`
+  (new `--pool-size N` arg; default 200 matches §5.6 / §8)
+- **Driver**: `scripts/marvin_pool_sweep.sh`
+- **Analyzer**: `scripts/analyze_marvin_pool.py`
+- **Reproduce**:
+  ```bash
+  cargo build --release -p tacet-bench --bin marvin_budget_sweep
+  bash scripts/marvin_pool_sweep.sh $HOME/marvin-pool-sweep 20 4
+  uv run scripts/analyze_marvin_pool.py \
+      $HOME/marvin-pool-sweep/results.csv \
+      paper/author-response/marvin-pool-sweep/
+  ```
+
+---
+
 # For Camera-Ready (if accepted)
 
 Do **not** include any of this material in the Apr 23 rebuttal. These are
@@ -1576,3 +1704,15 @@ Carry-overs from [§4 Operation-loop amplification](#4-operation-loop-amplificat
 - `crates/tacet-bench/src/bin/marvin_budget_sweep.rs` — sweep binary (`--marvin-mode cache|padding`, `--attacker-model ...`, resumable)
 - `scripts/marvin_budget_sweep.sh` — 7-budget × 20-seed driver with 4-way core-group parallelism
 - `scripts/analyze_marvin_budget.py` — per-budget summary + Wilson CIs + learning curve + variant selector
+
+### Input-pool sensitivity sweep (§11)
+
+- `paper/author-response/marvin-pool-sweep/` — 20-seed × 4-pool sweep at fixed 62k budget (80 runs)
+- `paper/author-response/marvin-pool-sweep/results.csv` — full 80-row raw data (adds `pool_size` column)
+- `paper/author-response/marvin-pool-sweep/summary.{md,csv}` — per-pool table with Wilson 95% CIs
+- `paper/author-response/marvin-pool-sweep/headline.json` — machine-readable per-pool headline numbers
+- `paper/author-response/marvin-pool-sweep/pool_curve.{png,pdf}` — effect-vs-N scatter + %Fail overlay
+- `paper/author-response/marvin-pool-sweep/conditions.md` — host declaration (RunPod EPYC 4564P) + methodology
+- `crates/tacet-bench/src/bin/marvin_budget_sweep.rs` — extended with `--pool-size N` (default 200)
+- `scripts/marvin_pool_sweep.sh` — fixed-budget × pool-size driver with 4-way taskset parallelism
+- `scripts/analyze_marvin_pool.py` — per-pool summary + Wilson CIs + pool-curve figure

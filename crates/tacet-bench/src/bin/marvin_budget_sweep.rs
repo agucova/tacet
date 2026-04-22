@@ -79,36 +79,53 @@ struct Args {
     /// `samples_used` column reflects adaptive termination (≤ the budget).
     #[arg(long, default_value_t = false)]
     adaptive: bool,
+
+    /// Size of the sample-class ciphertext pool (cache-warming variant).
+    /// Default 200 matches `known_leaky.rs::detects_marvin_rsa_decryption`
+    /// and §5.6. Sweeping this axis answers Reviewer B Q2 (input-generation
+    /// sensitivity): N=1 isolates the pure MARVIN variable-time signal;
+    /// N ≫ 1 composes variable-time with cache/branch-predictor state
+    /// variance across the pool. Only used in `--marvin-mode cache`.
+    #[arg(long, default_value_t = 200)]
+    pool_size: usize,
 }
 
 const CSV_HEADER: &str = "timestamp,budget_label,iteration,seed,samples_requested,samples_used,\
 timer_name,timer_resolution_ns,collection_ms,analysis_ms,\
 verdict,leak_probability,effect_ns,ci_lo_ns,ci_hi_ns,\
 dependence_length,effective_sample_size,stationarity_ratio,calibration_samples,\
-attacker_model,threshold_ns";
+attacker_model,threshold_ns,pool_size";
 
-/// Resume key format: "budget_label|iteration|seed".
-fn resume_key(budget_label: &str, iteration: usize, seed: u64) -> String {
-    format!("{}|{}|{}", budget_label, iteration, seed)
+/// Resume key format: "budget_label|iteration|seed|pool_size".
+fn resume_key(budget_label: &str, iteration: usize, seed: u64, pool_size: usize) -> String {
+    format!("{}|{}|{}|{}", budget_label, iteration, seed, pool_size)
 }
 
-fn row_already_present(path: &PathBuf, budget_label: &str, iteration: usize, seed: u64) -> bool {
+fn row_already_present(
+    path: &PathBuf,
+    budget_label: &str,
+    iteration: usize,
+    seed: u64,
+    pool_size: usize,
+) -> bool {
     let Ok(f) = File::open(path) else {
         return false;
     };
-    let target = resume_key(budget_label, iteration, seed);
+    let target = resume_key(budget_label, iteration, seed, pool_size);
     let reader = BufReader::new(f);
     for (i, line) in reader.lines().flatten().enumerate() {
         if i == 0 {
             continue; // header
         }
-        // budget_label is column index 1, iteration is 2, seed is 3.
-        let mut cols = line.split(',');
-        let _ts = cols.next();
-        let bl = cols.next().unwrap_or("");
-        let it = cols.next().unwrap_or("");
-        let sd = cols.next().unwrap_or("");
-        if format!("{}|{}|{}", bl, it, sd) == target {
+        // budget_label is column index 1, iteration is 2, seed is 3, pool_size is 21.
+        let cols: Vec<&str> = line.split(',').collect();
+        let bl = cols.get(1).copied().unwrap_or("");
+        let it = cols.get(2).copied().unwrap_or("");
+        let sd = cols.get(3).copied().unwrap_or("");
+        // pool_size column is last if present; legacy rows (no pool_size)
+        // match any pool_size by falling back to "200" (the historical const).
+        let ps = cols.get(21).copied().unwrap_or("200");
+        if format!("{}|{}|{}|{}", bl, it, sd, ps) == target {
             return true;
         }
     }
@@ -128,7 +145,7 @@ fn iso_timestamp() -> String {
 /// but with caller-supplied `max_samples` (= `samples_per_class`) so the
 /// production-mode adaptive loop terminates by sample budget.
 ///
-/// Cache-warming pattern (baseline = 1 fixed valid ct; sample = 200 varied).
+/// Cache-warming pattern (baseline = 1 fixed valid ct; sample = `pool_size` varied).
 fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
     use rand::rngs::StdRng;
     use rand::{RngCore, SeedableRng};
@@ -146,9 +163,9 @@ fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
         .encrypt(&mut RsaOsRng, Pkcs1v15Encrypt, &fixed_message)
         .expect("encrypt fixed failed");
 
-    const POOL_SIZE: usize = 200;
+    let pool_size = args.pool_size.max(1);
     let mut rng = StdRng::seed_from_u64(args.seed);
-    let varied_pool: Vec<Vec<u8>> = (0..POOL_SIZE)
+    let varied_pool: Vec<Vec<u8>> = (0..pool_size)
         .map(|_| {
             let mut msg = [0u8; 32];
             rng.fill_bytes(&mut msg);
@@ -165,7 +182,7 @@ fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
         move || fixed_ct.clone(),
         move || {
             let i = sample_idx.get();
-            sample_idx.set((i + 1) % POOL_SIZE);
+            sample_idx.set((i + 1) % pool_size);
             varied[i].clone()
         },
     );
@@ -269,7 +286,7 @@ fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
     }
     writeln!(
         out,
-        "{ts},{bl},{it},{sd},{n_req},{n_used},adaptive,0.0,0,{wms},{v},{p},{e},{lo},{hi},{dep},{ess},{sr},{cs},{am},{th}",
+        "{ts},{bl},{it},{sd},{n_req},{n_used},adaptive,0.0,0,{wms},{v},{p},{e},{lo},{hi},{dep},{ess},{sr},{cs},{am},{th},{ps}",
         ts = iso_timestamp(),
         bl = args.budget_label,
         it = args.iteration,
@@ -288,6 +305,7 @@ fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
         cs = fmt_opt_usize(calib_samples),
         am = format_attacker_model(model),
         th = fmt_opt_f64(threshold_ns, 3),
+        ps = args.pool_size,
     )
     .expect("write CSV row");
     out.flush().ok();
@@ -297,12 +315,18 @@ fn run_adaptive_and_write(args: &Args, model: AttackerModel) {
 ///
 /// Mirrors `crates/tacet/tests/core/known_leaky.rs::detects_marvin_rsa_decryption`:
 ///   baseline = one fixed valid ciphertext, reused for every measurement;
-///   sample   = pool of 200 distinct valid ciphertexts, cycled.
+///   sample   = pool of `pool_size` distinct valid ciphertexts, cycled.
 ///
 /// The leak signature is driven by cache / branch-predictor state differences
 /// between the repeated-fixed input and the varied-valid inputs, both of
-/// which decrypt successfully (no padding-check divergence).
-fn collect_marvin_cache(seed: u64, samples_per_class: usize) -> CollectedBlocked {
+/// which decrypt successfully (no padding-check divergence). At `pool_size=1`
+/// both classes are cache-warm on a single ciphertext each and the residual
+/// signal is the pure MARVIN variable-time RSA CRT leak.
+fn collect_marvin_cache(
+    seed: u64,
+    samples_per_class: usize,
+    pool_size: usize,
+) -> CollectedBlocked {
     use rand::rngs::StdRng;
     use rand::{RngCore, SeedableRng};
     use rsa::rand_core::OsRng as RsaOsRng;
@@ -325,10 +349,10 @@ fn collect_marvin_cache(seed: u64, samples_per_class: usize) -> CollectedBlocked
         .encrypt(&mut RsaOsRng, Pkcs1v15Encrypt, &fixed_message)
         .expect("encrypt fixed failed");
 
-    // Sample: pool of 200 distinct valid ciphertexts. Deterministic under `seed`.
-    const POOL_SIZE: usize = 200;
+    // Sample: pool of `pool_size` distinct valid ciphertexts. Deterministic under `seed`.
+    let pool_size = pool_size.max(1);
     let mut rng = StdRng::seed_from_u64(seed);
-    let varied_pool: Vec<Vec<u8>> = (0..POOL_SIZE)
+    let varied_pool: Vec<Vec<u8>> = (0..pool_size)
         .map(|_| {
             let mut msg = [0u8; 32];
             rng.fill_bytes(&mut msg);
@@ -346,7 +370,7 @@ fn collect_marvin_cache(seed: u64, samples_per_class: usize) -> CollectedBlocked
         }
         Class::Sample => {
             let i = s_idx.get();
-            s_idx.set((i + 1) % POOL_SIZE);
+            s_idx.set((i + 1) % pool_size);
             let result = private_key.decrypt(Pkcs1v15Encrypt, &varied_pool[i]);
             black_box(result.is_ok());
         }
@@ -356,11 +380,18 @@ fn collect_marvin_cache(seed: u64, samples_per_class: usize) -> CollectedBlocked
 fn main() {
     let args = Args::parse();
 
-    if args.resume && row_already_present(&args.output, &args.budget_label, args.iteration, args.seed)
+    if args.resume
+        && row_already_present(
+            &args.output,
+            &args.budget_label,
+            args.iteration,
+            args.seed,
+            args.pool_size,
+        )
     {
         eprintln!(
-            "[skip] resume: ({}, iter={}, seed={}) already present",
-            args.budget_label, args.iteration, args.seed
+            "[skip] resume: ({}, iter={}, seed={}, pool_size={}) already present",
+            args.budget_label, args.iteration, args.seed, args.pool_size
         );
         return;
     }
@@ -368,8 +399,14 @@ fn main() {
     let mode = args.marvin_mode.to_ascii_lowercase();
     let mode = mode.as_str();
     eprintln!(
-        "[marvin_budget_sweep] mode={} adaptive={} budget_label={} iter={} seed={} n={}",
-        mode, args.adaptive, args.budget_label, args.iteration, args.seed, args.samples_per_class,
+        "[marvin_budget_sweep] mode={} adaptive={} budget_label={} iter={} seed={} n={} pool_size={}",
+        mode,
+        args.adaptive,
+        args.budget_label,
+        args.iteration,
+        args.seed,
+        args.samples_per_class,
+        args.pool_size,
     );
 
     // Default attacker model for both modes: AdjacentNetwork (matches §5.6).
@@ -404,7 +441,7 @@ fn main() {
     // ---- Collection (fixed-n single-pass path) ----
     let t_coll = Instant::now();
     let collected = match mode {
-        "cache" => collect_marvin_cache(args.seed, args.samples_per_class),
+        "cache" => collect_marvin_cache(args.seed, args.samples_per_class, args.pool_size),
         "padding" => {
             let cases = Tier::Two.cases();
             let case = cases
@@ -545,7 +582,7 @@ fn main() {
     }
     writeln!(
         out,
-        "{ts},{bl},{it},{sd},{n_req},{n_used},{tn},{tr:.4},{cms},{ams},{v},{p},{e},{lo},{hi},{dep},{ess},{sr},{cs},{am},{th}",
+        "{ts},{bl},{it},{sd},{n_req},{n_used},{tn},{tr:.4},{cms},{ams},{v},{p},{e},{lo},{hi},{dep},{ess},{sr},{cs},{am},{th},{ps}",
         ts = iso_timestamp(),
         bl = args.budget_label,
         it = args.iteration,
@@ -567,6 +604,7 @@ fn main() {
         cs = fmt_opt_usize(calib_samples),
         am = format_attacker_model(model),
         th = fmt_opt_f64(threshold_ns, 3),
+        ps = args.pool_size,
     )
     .expect("write CSV row");
     out.flush().ok();

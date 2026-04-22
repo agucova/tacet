@@ -1,0 +1,247 @@
+[conditions] captured to /root/marvin-pool-sweep/pool_conditions.md
+[sweep] total runs: 80 (pool_sizes=4, seeds=20)
+[sweep] parallelism: 4
+[sweep] output: /root/marvin-pool-sweep/results.csv
+xargs: warning: options --max-args and --replace/-I/-i are mutually exclusive, ignoring previous --max-args value
+[w1 pool=1 iter2] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=2 seed=78014102245978821 n=62000 pool_size=1
+[w2 pool=1 iter1] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=1 seed=1078796318545967650 n=62000 pool_size=1
+[w1 pool=1 iter3] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=3 seed=995088891325652053 n=62000 pool_size=1
+[w1 pool=1 iter4] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=4 seed=711936575469861325 n=62000 pool_size=1
+[w2 pool=1 iter1]   collected baseline=62000 test=62000 in 23481ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter4]   collected baseline=62000 test=62000 in 24178ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter2]   collected baseline=62000 test=62000 in 24205ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter3]   collected baseline=62000 test=62000 in 24220ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1 iter1]   verdict=inconclusive P=0.391000 effect=97.288 CI=[77.710,117.171] samples_used=62000 block=1056 ESS=58 in 2811ms
+[w0 pool=1 iter5] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=5 seed=104406682862267988 n=62000 pool_size=1
+[w1 pool=1 iter4]   verdict=pass P=0.021000 effect=47.138 CI=[6.372,96.392] samples_used=62000 block=182 ESS=340 in 3762ms
+[w0 pool=1 iter6] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=6 seed=217424124624939276 n=62000 pool_size=1
+[w1 pool=1 iter3]   verdict=fail P=1.000000 effect=334.166 CI=[306.965,360.528] samples_used=62000 block=1056 ESS=58 in 3796ms
+[w3 pool=1 iter7] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=7 seed=499430324540461199 n=62000 pool_size=1
+[w1 pool=1 iter2]   verdict=inconclusive P=0.078250 effect=77.719 CI=[44.699,110.643] samples_used=62000 block=1056 ESS=58 in 3843ms
+[w3 pool=1 iter8] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=8 seed=449361607908318591 n=62000 pool_size=1
+[w0 pool=1 iter5]   collected baseline=62000 test=62000 in 23624ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter6]   collected baseline=62000 test=62000 in 23825ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1 iter7]   collected baseline=62000 test=62000 in 24596ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter5]   verdict=fail P=0.998250 effect=181.699 CI=[140.453,221.637] samples_used=62000 block=1056 ESS=58 in 2831ms
+[w3 pool=1 iter9] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=9 seed=1046383544042722979 n=62000 pool_size=1
+[w3 pool=1 iter8]   collected baseline=62000 test=62000 in 24805ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter6]   verdict=inconclusive P=0.290750 effect=345.343 CI=[69.376,616.016] samples_used=62000 block=18 ESS=3444 in 2762ms
+[w0 pool=1 iter10] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=10 seed=1143514255585681004 n=62000 pool_size=1
+[w3 pool=1 iter7]   verdict=fail P=1.000000 effect=772.211 CI=[715.720,825.433] samples_used=62000 block=1056 ESS=58 in 3135ms
+[w3 pool=1 iter11] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=11 seed=1105831837669049927 n=62000 pool_size=1
+[w3 pool=1 iter8]   verdict=fail P=1.000000 effect=302.914 CI=[268.911,335.832] samples_used=62000 block=1056 ESS=58 in 3209ms
+[w0 pool=1 iter12] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=12 seed=652169800310159104 n=62000 pool_size=1
+[w3 pool=1 iter9]   collected baseline=62000 test=62000 in 24433ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter10]   collected baseline=62000 test=62000 in 23676ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter12]   collected baseline=62000 test=62000 in 23754ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1 iter9]   verdict=fail P=1.000000 effect=197.580 CI=[165.783,228.534] samples_used=62000 block=1056 ESS=58 in 2863ms
+[w2 pool=1 iter13] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=13 seed=1123070737775148130 n=62000 pool_size=1
+[w3 pool=1 iter11]   collected baseline=62000 test=62000 in 24349ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1 iter10]   verdict=inconclusive P=0.299750 effect=88.848 CI=[42.665,134.644] samples_used=62000 block=1056 ESS=58 in 3198ms
+[w1 pool=1 iter14] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=14 seed=604754052538623909 n=62000 pool_size=1
+[w0 pool=1 iter12]   verdict=fail P=1.000000 effect=264.814 CI=[229.004,299.478] samples_used=62000 block=1056 ESS=58 in 3023ms
+[w3 pool=1 iter15] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=15 seed=308181273724949211 n=62000 pool_size=1
+[w3 pool=1 iter11]   verdict=inconclusive P=0.768500 effect=447.037 CI=[65.439,846.243] samples_used=62000 block=15 ESS=4133 in 2808ms
+[w1 pool=1 iter16] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=16 seed=725942297882578521 n=62000 pool_size=1
+[w2 pool=1 iter13]   collected baseline=62000 test=62000 in 23650ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter14]   collected baseline=62000 test=62000 in 24363ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1 iter13]   verdict=fail P=1.000000 effect=568.390 CI=[522.335,611.822] samples_used=62000 block=1056 ESS=58 in 2898ms
+[w2 pool=1 iter17] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=17 seed=406391209684130042 n=62000 pool_size=1
+[w1 pool=1 iter16]   collected baseline=62000 test=62000 in 24287ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1 iter15]   collected baseline=62000 test=62000 in 24420ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter14]   verdict=pass P=0.020750 effect=60.864 CI=[24.829,97.229] samples_used=62000 block=1056 ESS=58 in 3596ms
+[w1 pool=1 iter18] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=18 seed=136063200680072725 n=62000 pool_size=1
+[w3 pool=1 iter15]   verdict=inconclusive P=0.845000 effect=280.919 CI=[41.728,549.457] samples_used=62000 block=1056 ESS=58 in 3390ms
+[w1 pool=1 iter19] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=19 seed=962267307743617229 n=62000 pool_size=1
+[w1 pool=1 iter16]   verdict=inconclusive P=0.272500 effect=89.317 CI=[51.350,126.919] samples_used=62000 block=1056 ESS=58 in 3470ms
+[w2 pool=1 iter20] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=20 seed=1074257095293584106 n=62000 pool_size=1
+[w2 pool=1 iter17]   collected baseline=62000 test=62000 in 23821ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1 iter17]   verdict=fail P=1.000000 effect=418.559 CI=[372.747,461.724] samples_used=62000 block=1056 ESS=58 in 3068ms
+[w3 pool=10 iter1] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=1 seed=176896037440867219 n=62000 pool_size=10
+[w1 pool=1 iter18]   collected baseline=62000 test=62000 in 24276ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1 iter20]   collected baseline=62000 test=62000 in 23838ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter19]   collected baseline=62000 test=62000 in 24252ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1 iter18]   verdict=fail P=1.000000 effect=257.483 CI=[224.685,289.254] samples_used=62000 block=1056 ESS=58 in 3013ms
+[w0 pool=10 iter2] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=2 seed=961926210246167028 n=62000 pool_size=10
+[w2 pool=1 iter20]   verdict=inconclusive P=0.724750 effect=105.288 CI=[85.418,125.394] samples_used=62000 block=1056 ESS=58 in 2651ms
+[w3 pool=10 iter3] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=3 seed=454972776906859739 n=62000 pool_size=10
+[w1 pool=1 iter19]   verdict=fail P=0.993750 effect=166.162 CI=[120.648,210.105] samples_used=62000 block=1056 ESS=58 in 3032ms
+[w0 pool=10 iter4] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=4 seed=999392400752091492 n=62000 pool_size=10
+[w3 pool=10 iter1]   collected baseline=62000 test=62000 in 24758ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter2]   collected baseline=62000 test=62000 in 23523ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter1]   verdict=inconclusive P=0.439000 effect=188.465 CI=[12.250,463.053] samples_used=62000 block=1056 ESS=58 in 2959ms
+[w0 pool=10 iter5] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=5 seed=434049359236725308 n=62000 pool_size=10
+[w0 pool=10 iter4]   collected baseline=62000 test=62000 in 23542ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter3]   collected baseline=62000 test=62000 in 24518ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter2]   verdict=fail P=0.998250 effect=189.502 CI=[144.709,232.334] samples_used=62000 block=963 ESS=64 in 2894ms
+[w2 pool=10 iter6] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=6 seed=229595927149828298 n=62000 pool_size=10
+[w0 pool=10 iter4]   verdict=inconclusive P=0.576250 effect=121.834 CI=[9.134,284.030] samples_used=62000 block=1056 ESS=58 in 2839ms
+[w0 pool=10 iter7] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=7 seed=772876258816372760 n=62000 pool_size=10
+[w3 pool=10 iter3]   verdict=fail P=1.000000 effect=281.952 CI=[250.952,311.987] samples_used=62000 block=1056 ESS=58 in 2796ms
+[w1 pool=10 iter8] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=8 seed=519927428347566113 n=62000 pool_size=10
+[w0 pool=10 iter5]   collected baseline=62000 test=62000 in 23675ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=10 iter6]   collected baseline=62000 test=62000 in 23946ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter5]   verdict=fail P=1.000000 effect=472.987 CI=[445.040,500.029] samples_used=62000 block=1056 ESS=58 in 2983ms
+[w2 pool=10 iter9] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=9 seed=36288486214591646 n=62000 pool_size=10
+[w0 pool=10 iter7]   collected baseline=62000 test=62000 in 23858ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=10 iter8]   collected baseline=62000 test=62000 in 24331ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=10 iter6]   verdict=inconclusive P=0.609500 effect=189.634 CI=[10.649,492.938] samples_used=62000 block=1056 ESS=58 in 3119ms
+[w2 pool=10 iter10] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=10 seed=370651428744761926 n=62000 pool_size=10
+[w0 pool=10 iter7]   verdict=fail P=1.000000 effect=578.734 CI=[442.151,694.384] samples_used=62000 block=1056 ESS=58 in 2807ms
+[w1 pool=10 iter11] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=11 seed=1115181727906357009 n=62000 pool_size=10
+[w1 pool=10 iter8]   verdict=inconclusive P=0.380750 effect=91.723 CI=[37.355,145.849] samples_used=62000 block=1056 ESS=58 in 3004ms
+[w0 pool=10 iter12] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=12 seed=477545167163624712 n=62000 pool_size=10
+[w2 pool=10 iter9]   collected baseline=62000 test=62000 in 23979ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=10 iter10]   collected baseline=62000 test=62000 in 23859ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=10 iter9]   verdict=fail P=0.978500 effect=486.064 CI=[143.766,769.056] samples_used=62000 block=1056 ESS=58 in 3052ms
+[w0 pool=10 iter13] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=13 seed=500354015894497112 n=62000 pool_size=10
+[w1 pool=10 iter11]   collected baseline=62000 test=62000 in 24420ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter12]   collected baseline=62000 test=62000 in 24271ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=10 iter10]   verdict=inconclusive P=0.920750 effect=291.982 CI=[62.123,518.777] samples_used=62000 block=879 ESS=70 in 3070ms
+[w1 pool=10 iter14] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=14 seed=780087849091055205 n=62000 pool_size=10
+[w1 pool=10 iter11]   verdict=inconclusive P=0.182000 effect=83.097 CI=[42.070,124.239] samples_used=62000 block=1056 ESS=58 in 2933ms
+[w3 pool=10 iter15] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=15 seed=8765121486464919 n=62000 pool_size=10
+[w0 pool=10 iter12]   verdict=inconclusive P=0.380250 effect=175.122 CI=[7.972,502.223] samples_used=62000 block=1056 ESS=58 in 2886ms
+[w3 pool=10 iter16] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=16 seed=220694530848822395 n=62000 pool_size=10
+[w0 pool=10 iter13]   collected baseline=62000 test=62000 in 23497ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter13]   verdict=inconclusive P=0.502250 effect=293.051 CI=[26.616,656.074] samples_used=62000 block=65 ESS=953 in 2823ms
+[w3 pool=10 iter17] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=17 seed=117027092509192947 n=62000 pool_size=10
+[w1 pool=10 iter14]   collected baseline=62000 test=62000 in 24699ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter15]   collected baseline=62000 test=62000 in 24559ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter16]   collected baseline=62000 test=62000 in 24588ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=10 iter14]   verdict=fail P=0.997500 effect=182.770 CI=[137.567,226.068] samples_used=62000 block=311 ESS=199 in 3765ms
+[w0 pool=10 iter18] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=18 seed=544409675584396124 n=62000 pool_size=10
+[w3 pool=10 iter15]   verdict=inconclusive P=0.455250 effect=135.885 CI=[20.139,270.650] samples_used=62000 block=1056 ESS=58 in 2980ms
+[w3 pool=10 iter19] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=19 seed=829639986296504335 n=62000 pool_size=10
+[w3 pool=10 iter16]   verdict=inconclusive P=0.019500 effect=202.023 CI=[9.892,579.861] samples_used=62000 block=1056 ESS=58 in 2976ms
+[w1 pool=10 iter20] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=20 seed=846752189815114509 n=62000 pool_size=10
+[w3 pool=10 iter17]   collected baseline=62000 test=62000 in 24677ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter17]   verdict=inconclusive P=0.524000 effect=158.498 CI=[10.747,382.878] samples_used=62000 block=1056 ESS=58 in 3054ms
+[w2 pool=100 iter1] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=1 seed=469478278150961870 n=62000 pool_size=100
+[w0 pool=10 iter18]   collected baseline=62000 test=62000 in 23700ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=10 iter19]   collected baseline=62000 test=62000 in 24476ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=10 iter20]   collected baseline=62000 test=62000 in 24721ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=10 iter18]   verdict=inconclusive P=0.905000 effect=132.144 CI=[81.098,181.882] samples_used=62000 block=257 ESS=241 in 2886ms
+[w1 pool=100 iter2] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=2 seed=444604846706474173 n=62000 pool_size=100
+[w3 pool=10 iter19]   verdict=inconclusive P=0.658750 effect=507.820 CI=[66.060,978.600] samples_used=62000 block=15 ESS=4133 in 3053ms
+[w2 pool=100 iter3] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=3 seed=983534720395399266 n=62000 pool_size=100
+[w1 pool=10 iter20]   verdict=inconclusive P=0.328000 effect=154.740 CI=[14.547,339.230] samples_used=62000 block=1056 ESS=58 in 2992ms
+[w3 pool=100 iter4] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=4 seed=1048601086323250919 n=62000 pool_size=100
+[w2 pool=100 iter1]   collected baseline=62000 test=62000 in 23727ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter1]   verdict=inconclusive P=0.639000 effect=168.412 CI=[17.465,361.808] samples_used=62000 block=1056 ESS=58 in 2849ms
+[w2 pool=100 iter5] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=5 seed=895549079363533954 n=62000 pool_size=100
+[w1 pool=100 iter2]   collected baseline=62000 test=62000 in 24343ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter3]   collected baseline=62000 test=62000 in 23557ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=100 iter4]   collected baseline=62000 test=62000 in 24421ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=100 iter2]   verdict=fail P=1.000000 effect=292.082 CI=[248.655,333.385] samples_used=62000 block=1056 ESS=58 in 2970ms
+[w2 pool=100 iter6] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=6 seed=74007519459396026 n=62000 pool_size=100
+[w2 pool=100 iter3]   verdict=fail P=1.000000 effect=182.293 CI=[156.096,207.892] samples_used=62000 block=1056 ESS=58 in 2752ms
+[w3 pool=100 iter7] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=7 seed=1029415811909035259 n=62000 pool_size=100
+[w3 pool=100 iter4]   verdict=inconclusive P=0.532000 effect=149.358 CI=[8.136,388.392] samples_used=62000 block=1056 ESS=58 in 2782ms
+[w3 pool=100 iter8] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=8 seed=1000904084550277567 n=62000 pool_size=100
+[w2 pool=100 iter5]   collected baseline=62000 test=62000 in 23685ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter5]   verdict=inconclusive P=0.607000 effect=437.434 CI=[44.406,942.269] samples_used=62000 block=21 ESS=2952 in 2900ms
+[w3 pool=100 iter9] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=9 seed=1143288332124752427 n=62000 pool_size=100
+[w2 pool=100 iter6]   collected baseline=62000 test=62000 in 23607ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=100 iter7]   collected baseline=62000 test=62000 in 24456ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter6]   verdict=inconclusive P=0.087750 effect=149.078 CI=[11.247,347.179] samples_used=62000 block=24 ESS=2583 in 2784ms
+[w2 pool=100 iter10] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=10 seed=583290236340740402 n=62000 pool_size=100
+[w3 pool=100 iter8]   collected baseline=62000 test=62000 in 24511ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=100 iter7]   verdict=fail P=1.000000 effect=403.876 CI=[367.512,438.767] samples_used=62000 block=1056 ESS=58 in 2994ms
+[w2 pool=100 iter11] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=11 seed=10148541705013566 n=62000 pool_size=100
+[w3 pool=100 iter8]   verdict=inconclusive P=0.036250 effect=140.376 CI=[14.736,299.978] samples_used=62000 block=20 ESS=3100 in 3041ms
+[w1 pool=100 iter12] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=12 seed=366430527617356917 n=62000 pool_size=100
+[w3 pool=100 iter9]   collected baseline=62000 test=62000 in 24468ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=100 iter9]   verdict=inconclusive P=0.183000 effect=305.997 CI=[43.074,605.574] samples_used=62000 block=20 ESS=3100 in 3035ms
+[w3 pool=100 iter13] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=13 seed=172625955726712367 n=62000 pool_size=100
+[w2 pool=100 iter10]   collected baseline=62000 test=62000 in 23874ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter11]   collected baseline=62000 test=62000 in 23747ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter10]   verdict=fail P=1.000000 effect=307.694 CI=[257.461,355.115] samples_used=62000 block=725 ESS=85 in 3045ms
+[w2 pool=100 iter14] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=14 seed=515233588831911666 n=62000 pool_size=100
+[w1 pool=100 iter12]   collected baseline=62000 test=62000 in 24628ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter11]   verdict=inconclusive P=0.089750 effect=229.907 CI=[16.545,547.961] samples_used=62000 block=15 ESS=4133 in 2864ms
+[w0 pool=100 iter15] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=15 seed=958753013910868904 n=62000 pool_size=100
+[w1 pool=100 iter12]   verdict=inconclusive P=0.570000 effect=190.089 CI=[8.787,552.548] samples_used=62000 block=1056 ESS=58 in 3091ms
+[w0 pool=100 iter16] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=16 seed=419916514487527644 n=62000 pool_size=100
+[w3 pool=100 iter13]   collected baseline=62000 test=62000 in 24502ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter14]   collected baseline=62000 test=62000 in 23941ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=100 iter13]   verdict=inconclusive P=0.485000 effect=142.002 CI=[7.807,373.050] samples_used=62000 block=1056 ESS=58 in 2915ms
+[w0 pool=100 iter17] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=17 seed=728848956816812200 n=62000 pool_size=100
+[w0 pool=100 iter15]   collected baseline=62000 test=62000 in 23918ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter14]   verdict=inconclusive P=0.210750 effect=89.714 CI=[60.887,118.502] samples_used=62000 block=1056 ESS=58 in 2951ms
+[w2 pool=100 iter18] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=18 seed=719978488162208346 n=62000 pool_size=100
+[w0 pool=100 iter15]   verdict=fail P=0.979750 effect=191.201 CI=[124.853,253.939] samples_used=62000 block=1056 ESS=58 in 2812ms
+[w3 pool=100 iter19] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=19 seed=142971197451126367 n=62000 pool_size=100
+[w0 pool=100 iter16]   collected baseline=62000 test=62000 in 24121ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=100 iter16]   verdict=inconclusive P=0.106250 effect=179.848 CI=[7.427,555.068] samples_used=62000 block=1056 ESS=58 in 2895ms
+[w2 pool=100 iter20] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=20 seed=501704817766671446 n=62000 pool_size=100
+[w0 pool=100 iter17]   collected baseline=62000 test=62000 in 24119ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter18]   collected baseline=62000 test=62000 in 24271ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=100 iter17]   verdict=inconclusive P=0.008000 effect=187.463 CI=[9.127,521.576] samples_used=62000 block=15 ESS=4133 in 2853ms
+[w0 pool=1000 iter1] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=1 seed=395420977352570312 n=62000 pool_size=1000
+[w3 pool=100 iter19]   collected baseline=62000 test=62000 in 24360ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter18]   verdict=inconclusive P=0.357750 effect=155.365 CI=[8.342,412.454] samples_used=62000 block=1056 ESS=58 in 3006ms
+[w1 pool=1000 iter2] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=2 seed=560227162220564437 n=62000 pool_size=1000
+[w3 pool=100 iter19]   verdict=fail P=1.000000 effect=319.719 CI=[274.087,362.765] samples_used=62000 block=1056 ESS=58 in 2854ms
+[w2 pool=1000 iter3] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=3 seed=694651472983452534 n=62000 pool_size=1000
+[w2 pool=100 iter20]   collected baseline=62000 test=62000 in 24013ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=100 iter20]   verdict=inconclusive P=0.119500 effect=210.992 CI=[10.490,590.916] samples_used=62000 block=1056 ESS=58 in 3017ms
+[w1 pool=1000 iter4] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=4 seed=320161625793385197 n=62000 pool_size=1000
+[w0 pool=1000 iter1]   collected baseline=62000 test=62000 in 24062ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1000 iter1]   verdict=inconclusive P=0.574000 effect=203.837 CI=[11.093,536.595] samples_used=62000 block=1056 ESS=58 in 2843ms
+[w1 pool=1000 iter5] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=5 seed=748157908169293301 n=62000 pool_size=1000
+[w1 pool=1000 iter2]   collected baseline=62000 test=62000 in 24228ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1000 iter3]   collected baseline=62000 test=62000 in 24151ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1000 iter2]   verdict=fail P=1.000000 effect=689.664 CI=[659.877,718.547] samples_used=62000 block=1056 ESS=58 in 3035ms
+[w3 pool=1000 iter6] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=6 seed=130557521811117259 n=62000 pool_size=1000
+[w2 pool=1000 iter3]   verdict=inconclusive P=0.040250 effect=307.469 CI=[25.099,718.650] samples_used=62000 block=1056 ESS=58 in 2705ms
+[w1 pool=1000 iter7] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=7 seed=90200112967612453 n=62000 pool_size=1000
+[w1 pool=1000 iter4]   collected baseline=62000 test=62000 in 24382ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1000 iter4]   verdict=fail P=1.000000 effect=608.373 CI=[551.771,661.307] samples_used=62000 block=1056 ESS=58 in 3119ms
+[w0 pool=1000 iter8] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=8 seed=678030164355937760 n=62000 pool_size=1000
+[w1 pool=1000 iter5]   collected baseline=62000 test=62000 in 24655ms (timer=rdtsc resolution=0.223ns)
+[w1 pool=1000 iter5]   verdict=inconclusive P=0.643750 effect=350.752 CI=[60.961,652.455] samples_used=62000 block=36 ESS=1722 in 3104ms
+[w3 pool=1000 iter9] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=9 seed=544779225362211171 n=62000 pool_size=1000
+[w1 pool=1000 iter7]   collected baseline=62000 test=62000 in 24421ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter6]   collected baseline=62000 test=62000 in 24842ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1000 iter8]   collected baseline=62000 test=62000 in 23343ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter6]   verdict=inconclusive P=0.310750 effect=171.638 CI=[12.528,402.842] samples_used=62000 block=1056 ESS=58 in 3367ms
+[w3 pool=1000 iter10] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=10 seed=712837231911347827 n=62000 pool_size=1000
+[w1 pool=1000 iter7]   verdict=fail P=0.999500 effect=311.843 CI=[221.626,393.690] samples_used=62000 block=1056 ESS=58 in 3418ms
+[w0 pool=1000 iter11] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=11 seed=714550810203089884 n=62000 pool_size=1000
+[w0 pool=1000 iter8]   verdict=inconclusive P=0.882500 effect=179.823 CI=[48.003,312.433] samples_used=62000 block=1056 ESS=58 in 2821ms
+[w2 pool=1000 iter12] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=12 seed=247643173762752382 n=62000 pool_size=1000
+[w3 pool=1000 iter9]   collected baseline=62000 test=62000 in 24759ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1000 iter11]   collected baseline=62000 test=62000 in 23690ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter9]   verdict=inconclusive P=0.032000 effect=244.679 CI=[20.257,556.276] samples_used=62000 block=1056 ESS=58 in 3007ms
+[w3 pool=1000 iter13] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=13 seed=657822429871721167 n=62000 pool_size=1000
+[w3 pool=1000 iter10]   collected baseline=62000 test=62000 in 24309ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1000 iter12]   collected baseline=62000 test=62000 in 23711ms (timer=rdtsc resolution=0.223ns)
+[w0 pool=1000 iter11]   verdict=pass P=0.012500 effect=62.588 CI=[31.779,93.940] samples_used=62000 block=561 ESS=110 in 2919ms
+[w3 pool=1000 iter14] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=14 seed=507023116931590839 n=62000 pool_size=1000
+[w3 pool=1000 iter10]   verdict=inconclusive P=0.786000 effect=534.198 CI=[92.313,938.131] samples_used=62000 block=18 ESS=3444 in 2913ms
+[w3 pool=1000 iter15] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=15 seed=658352989007498167 n=62000 pool_size=1000
+[w2 pool=1000 iter12]   verdict=inconclusive P=0.432750 effect=122.838 CI=[5.719,344.155] samples_used=62000 block=1056 ESS=58 in 2831ms
+[w3 pool=1000 iter16] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=16 seed=59779672248171895 n=62000 pool_size=1000
+[w3 pool=1000 iter13]   collected baseline=62000 test=62000 in 24488ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter14]   collected baseline=62000 test=62000 in 24443ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter13]   verdict=inconclusive P=0.239250 effect=299.701 CI=[27.005,671.846] samples_used=62000 block=15 ESS=4133 in 3308ms
+[w2 pool=1000 iter17] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=17 seed=190795684313128806 n=62000 pool_size=1000
+[w3 pool=1000 iter15]   collected baseline=62000 test=62000 in 24694ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter16]   collected baseline=62000 test=62000 in 24436ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter14]   verdict=pass P=0.035250 effect=64.130 CI=[24.890,103.769] samples_used=62000 block=1056 ESS=58 in 3297ms
+[w3 pool=1000 iter18] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=18 seed=915807207505975115 n=62000 pool_size=1000
+[w3 pool=1000 iter15]   verdict=inconclusive P=0.013250 effect=189.810 CI=[9.104,539.293] samples_used=62000 block=27 ESS=2296 in 3454ms
+[w3 pool=1000 iter19] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=19 seed=203573680303019147 n=62000 pool_size=1000
+[w3 pool=1000 iter16]   verdict=inconclusive P=0.443500 effect=186.428 CI=[28.546,364.068] samples_used=62000 block=96 ESS=645 in 3134ms
+[w3 pool=1000 iter20] [marvin_budget_sweep] mode=cache adaptive=false budget_label=1.0x iter=20 seed=758827336332846551 n=62000 pool_size=1000
+[w2 pool=1000 iter17]   collected baseline=62000 test=62000 in 24346ms (timer=rdtsc resolution=0.223ns)
+[w2 pool=1000 iter17]   verdict=fail P=1.000000 effect=247.358 CI=[205.911,286.955] samples_used=62000 block=36 ESS=1722 in 3252ms
+[w3 pool=1000 iter19]   collected baseline=62000 test=62000 in 24502ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter18]   collected baseline=62000 test=62000 in 26106ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter20]   collected baseline=62000 test=62000 in 24619ms (timer=rdtsc resolution=0.223ns)
+[w3 pool=1000 iter19]   verdict=inconclusive P=0.263250 effect=91.253 CI=[61.438,120.947] samples_used=62000 block=1056 ESS=58 in 3371ms
+[w3 pool=1000 iter20]   verdict=fail P=0.996000 effect=139.552 CI=[114.933,163.797] samples_used=62000 block=1056 ESS=58 in 3177ms
+[w3 pool=1000 iter18]   verdict=inconclusive P=0.923250 effect=190.710 CI=[92.830,281.823] samples_used=62000 block=165 ESS=375 in 3882ms
+[sweep] complete. Rows in CSV:
+81 /root/marvin-pool-sweep/results.csv
