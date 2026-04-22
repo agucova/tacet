@@ -751,49 +751,28 @@ AES-family errors on dither=0.0 raw; the dithered pipeline runs clean).
 - #1370B — "reintroduce previously reported CVEs; analyze how many
   reliably identified or marked as inconclusive"
 
-**Status (as of 22:15 UTC Wed Apr 22):** 🟡 **IN PROGRESS** — second
-run active on RunPod, target N=20 per CVE across Rust / Go / JS.
-Expected completion ≈ 23:35 UTC (~1 h 20 m remaining, JS `~4 min/iter`
-is bottleneck). Update this section with final verdict tally once
-run lands.
+**Status (as of 23:33 UTC Wed Apr 22):** 🟢 **COMPLETE** — 53 trials
+across 3 CVEs × 3 ecosystems. 19 / 20 Rust (iter 3 harness-skipped),
+14 / 20 Go (6 iters lost to a `is_completed` regex bug — see Scope),
+20 / 20 JS.
 
-### Preliminary data (partial — use as provisional only)
+### Paste-ready claim — budget-trimmed (~85 words, B paragraph)
 
-| CVE                                            | Ecosystem | Det | Inc | Miss | N so far |
-|------------------------------------------------|-----------|:---:|:---:|:----:|:---:|
-| CVE-2023-49092 (RustCrypto `rsa-0.9.9` MARVIN) | Rust      |  0  |  9  |  0   |  9  |
-| Go stdlib RSA PKCS1v15 KnownLimit              | Go        |  3  |  6  |  0   |  9  |
-| CVE-2025-12816 (node-forge MARVIN-class)       | JS        |  0  |  5  |  0   |  5  |
-| **Preliminary totals**                         |           | **3** | **20** | **0** | **23** |
-
-**Provisional read:** Miss column is **0 across all three ecosystems**
-— tacet never issues a false "no leak" on known-leaky code. Go's
-stdlib limitation lands as Detect ~33% of iterations with 66%
-Inconclusive; MARVIN-class (Rust + JS) lands fully Inconclusive at
-the container noise floor. This is a **gradient tracking leak
-magnitude**, not a flat refuse-to-decide — consistent with the
-three-way verdict's calibration claim.
-
-### Paste-ready claim — budget-trimmed (~75 words, B paragraph) — draft v2
-
-> **CVE three-way verdict across three ecosystems (B).** 20 iterations
-> per CVE on the same RunPod EPYC container:
+> **CVE three-way verdict across three ecosystems (B).** 53 trials on
+> the §5.4 RunPod EPYC container (rdtsc, no PMU):
 >
-> | CVE / target                                | Det | Inc | Miss |
-> |---------------------------------------------|:---:|:---:|:----:|
-> | CVE-2023-49092 (Rust `rsa-0.9.9` MARVIN)    |  X  |  Y  |  0   |
-> | Go stdlib RSA PKCS1v15 (known limitation)   |  X  |  Y  |  0   |
-> | CVE-2025-12816 (node-forge MARVIN-class, JS)|  X  |  Y  |  0   |
+> | CVE / target                                | N  | Det | Inc | Miss | Detect rate (Wilson 95%) |
+> |---------------------------------------------|:--:|:---:|:---:|:----:|:------------------------:|
+> | CVE-2023-49092 (Rust `rsa-0.9.9` MARVIN)    | 19 |  0  | 19  |  **0** | 0%  [0.0, 16.8]  |
+> | Go stdlib RSA PKCS1v15 KnownLimitation      | 14 |  5  |  9  |  **0** | **35.7% [16.3, 61.2]** |
+> | CVE-2025-12816 (node-forge RSA, JS)         | 20 |  0  | 20  |  **0** | 0%  [0.0, 16.1]  |
 >
-> **Miss = 0 across all three ecosystems** — tacet never falsely
-> reassures on known-leaky code. Detect rate tracks leak magnitude
-> (Go stdlib's larger effect lands Detect ~30%; MARVIN-class at the
-> container noise floor lands Inconclusive). Reviewer-B's "how many
-> reliably identified vs. Inconclusive?" is answered as a gradient,
-> not a flat rate — the calibrated three-way verdict in action.
-
-*(X / Y placeholders to be filled from final run. JS numbers will
-update `node-forge` row from provisional 0/5/0.)*
+> **Miss = 0 across all 53 trials** — tacet never falsely reassures on
+> known-leaky code. **Detect rate tracks leak magnitude**: Go stdlib's
+> larger documented leak lands Detect 36%; MARVIN-class signals (Rust
+> + JS, both smaller) land fully Inconclusive at the container noise
+> floor. Reviewer-B's "how many reliably identified vs. Inconclusive?"
+> is answered as a calibrated gradient, not a flat rate.
 
 ### Scope
 
@@ -831,26 +810,36 @@ update `node-forge` row from provisional 0/5/0.)*
   `P=0.0%` column is a nominal posterior from calibration, not a
   claim of zero leak probability — consistent with a
   `ThresholdElevated` or `NotLearning` bailout.
+- **Go N=14 not 20**: `scripts/measure_cve_tpr.sh::is_completed` uses
+  `grep '^$cve_id,.*,$iter,'` which spuriously matches non-iteration
+  columns (e.g. `elapsed_sec=14`, `samples=14000`) and falsely
+  resume-skipped iters 14-19 for the Go CVE after a restart. The 14
+  trials we have are unaffected — the bug only suppresses runs, not
+  their recorded outcomes. Camera-ready item. At N=14 the Wilson CI
+  is still tight enough to distinguish the Detect rate from zero.
 
 ### Suggested reconciliation with §5.5
 
 > §5.5 reports MARVIN posterior = 0.89 on noisy AWS — an Inconclusive
 > outcome. This rebuttal run reproduces that behavior across three
-> ecosystems: Miss = 0 / 60, with Detect rate tracking leak magnitude.
-> The paper's claim is that Inconclusive is the *calibrated* verdict
-> when signal is near the noise floor; both runs validate it.
+> ecosystems: **Miss = 0 / 53**, with Detect rate spanning 0-36%
+> depending on leak magnitude (Go's documented leak at 36%; MARVIN-
+> class effects in Rust + JS stay Inconclusive under container
+> noise). The paper's claim is that Inconclusive is the *calibrated*
+> verdict when signal is near the noise floor; both runs validate it.
 
 ### Data pointers
 
-- **Raw CSV (live, 23+ rows, target 60)**:
-  [cve-breadth/results.csv](cve-breadth/results.csv) *(current file is
-  the pre-run snapshot from the Rust-only sweep; will be replaced
-  with the full 3-ecosystem CSV once the run completes)*
-- **Run log**: [cve-breadth/run.log](cve-breadth/run.log)
+- **Raw CSV (53 rows, 3 CVEs × 3 ecosystems)**:
+  [cve-breadth/results.csv](cve-breadth/results.csv)
+- **Run log** (Rust + Go + JS iterations, 108 min wall-clock):
+  [cve-breadth/run.log](cve-breadth/run.log)
 - **Analyzer**: `scripts/analyze_cve_tpr.py` (three-way split,
-  Wilson CIs)
-- **RunPod full-run CSV location (post-completion)**:
-  `~/bench-results/tier2b-full/results.csv`
+  Wilson CIs); re-run locally with
+  ```bash
+  uv run --no-project scripts/analyze_cve_tpr.py \
+      paper/author-response/cve-breadth/results.csv
+  ```
 - **Reproduce**:
   ```bash
   bash scripts/measure_cve_tpr.sh 20 paper/author-response/cve-breadth/results.csv
