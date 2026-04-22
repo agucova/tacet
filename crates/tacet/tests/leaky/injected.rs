@@ -235,3 +235,23 @@ fn injected_shift_200ns_k25() {
 fn injected_shift_200ns_k100() {
     run_amplified_shift_test("injected_shift_200ns_k100", 200, 100);
 }
+
+// Second amplification base at d = 1000 ns (per-call overhead ≈ 1%), k ∈
+// {2, 5, 20} → actual effective ≈ {2023, 5058, 20230} ns, matching baselines
+// {2000, 5000, 20000} ns within ≤ 2%. Orthogonal overlay: confirms the
+// scaling law isn't an artifact of the d = 200 base choice.
+
+#[test]
+fn injected_shift_1000ns_k2() {
+    run_amplified_shift_test("injected_shift_1000ns_k2", 1000, 2);
+}
+
+#[test]
+fn injected_shift_1000ns_k5() {
+    run_amplified_shift_test("injected_shift_1000ns_k5", 1000, 5);
+}
+
+#[test]
+fn injected_shift_1000ns_k20() {
+    run_amplified_shift_test("injected_shift_1000ns_k20", 1000, 20);
+}

@@ -1,0 +1,110 @@
+======================================================================
+TRUE POSITIVE RATE ANALYSIS (leaky-test interpretation)
+======================================================================
+
+Total test runs: 420
+  True positive (detected):    277 ( 66.0%)
+  False negative (missed):      20 (  4.8%)
+  Inconclusive:                123 ( 29.3%)
+
+----------------------------------------------------------------------
+TPR CONDITIONAL ON DEFINITIVE VERDICT (Pass or Fail)
+----------------------------------------------------------------------
+  277/297 = 93.27%
+  Wilson 95% CI: [89.83%, 95.60%]
+
+Inconclusive rate among non-skipped: 29.29%  (123/420)
+
+----------------------------------------------------------------------
+PER-FAMILY BREAKDOWN
+----------------------------------------------------------------------
+
+injected:
+  Trials: 420  |  TP: 277  |  FN: 20  |  Inc: 123  |  Skip: 0
+  TPR (conditional): 93.27%  (95% CI: [89.83%, 95.60%])
+
+----------------------------------------------------------------------
+PER-TEST BREAKDOWN
+----------------------------------------------------------------------
+  injected::injected_shift_2ns              n= 20  TP=  0  FN=  4  Inc= 16  Skip=  0  TPR=  0.0%  [ 0.0%,  49.0%]
+  injected::injected_shift_5ns              n= 20  TP= 20  FN=  0  Inc=  0  Skip=  0  TPR=100.0%  [83.9%, 100.0%]
+  injected::injected_shift_20ns             n= 20  TP=  0  FN=  5  Inc= 15  Skip=  0  TPR=  0.0%  [ 0.0%,  43.4%]
+  injected::injected_shift_50ns             n= 20  TP=  0  FN= 11  Inc=  9  Skip=  0  TPR=  0.0%  [ 0.0%,  25.9%]
+  injected::injected_shift_100ns            n= 20  TP=  6  FN=  0  Inc= 14  Skip=  0  TPR=100.0%  [61.0%, 100.0%]
+  injected::injected_shift_200ns            n= 20  TP= 20  FN=  0  Inc=  0  Skip=  0  TPR=100.0%  [83.9%, 100.0%]
+  injected::injected_shift_500ns            n= 20  TP= 11  FN=  0  Inc=  9  Skip=  0  TPR=100.0%  [74.1%, 100.0%]
+  injected::injected_shift_1000ns           n= 20  TP= 12  FN=  0  Inc=  8  Skip=  0  TPR=100.0%  [75.7%, 100.0%]
+  injected::injected_shift_2000ns           n= 20  TP= 16  FN=  0  Inc=  4  Skip=  0  TPR=100.0%  [80.6%, 100.0%]
+  injected::injected_shift_5000ns           n= 20  TP= 13  FN=  0  Inc=  7  Skip=  0  TPR=100.0%  [77.2%, 100.0%]
+  injected::injected_shift_20000ns          n= 20  TP= 16  FN=  0  Inc=  4  Skip=  0  TPR=100.0%  [80.6%, 100.0%]
+  injected::injected_shift_5ns_k10          n= 20  TP= 20  FN=  0  Inc=  0  Skip=  0  TPR=100.0%  [83.9%, 100.0%]
+  injected::injected_shift_200ns_k5         n= 20  TP= 12  FN=  0  Inc=  8  Skip=  0  TPR=100.0%  [75.7%, 100.0%]
+  injected::injected_shift_5ns_k100         n= 20  TP= 20  FN=  0  Inc=  0  Skip=  0  TPR=100.0%  [83.9%, 100.0%]
+  injected::injected_shift_1000ns_k2        n= 20  TP= 20  FN=  0  Inc=  0  Skip=  0  TPR=100.0%  [83.9%, 100.0%]
+  injected::injected_shift_1000ns_k5        n= 20  TP= 14  FN=  0  Inc=  6  Skip=  0  TPR=100.0%  [78.5%, 100.0%]
+  injected::injected_shift_200ns_k10        n= 20  TP= 19  FN=  0  Inc=  1  Skip=  0  TPR=100.0%  [83.2%, 100.0%]
+  injected::injected_shift_200ns_k25        n= 20  TP= 14  FN=  0  Inc=  6  Skip=  0  TPR=100.0%  [78.5%, 100.0%]
+  injected::injected_shift_5ns_k1000        n= 20  TP= 15  FN=  0  Inc=  5  Skip=  0  TPR=100.0%  [79.6%, 100.0%]
+  injected::injected_shift_1000ns_k20       n= 20  TP= 14  FN=  0  Inc=  6  Skip=  0  TPR=100.0%  [78.5%, 100.0%]
+  injected::injected_shift_200ns_k100       n= 20  TP= 15  FN=  0  Inc=  5  Skip=  0  TPR=100.0%  [79.6%, 100.0%]
+
+----------------------------------------------------------------------
+INJECTED-SHIFT DETECTION CURVE (with amplification overlay)
+----------------------------------------------------------------------
+ delay_ns     k   eff_ns     n    TP    FN   Inc       TPR                95% CI
+        2     1        2    20     0     4    16      0.0%      [  0.0%,  49.0%]
+        5     1        5    20    20     0     0    100.0%      [ 83.9%, 100.0%]
+       20     1       20    20     0     5    15      0.0%      [  0.0%,  43.4%]
+       50     1       50    20     0    11     9      0.0%      [  0.0%,  25.9%]
+        5    10       50    20    20     0     0    100.0%      [ 83.9%, 100.0%]
+      100     1      100    20     6     0    14    100.0%      [ 61.0%, 100.0%]
+      200     1      200    20    20     0     0    100.0%      [ 83.9%, 100.0%]
+      500     1      500    20    11     0     9    100.0%      [ 74.1%, 100.0%]
+        5   100      500    20    20     0     0    100.0%      [ 83.9%, 100.0%]
+     1000     1     1000    20    12     0     8    100.0%      [ 75.7%, 100.0%]
+      200     5     1000    20    12     0     8    100.0%      [ 75.7%, 100.0%]
+     2000     1     2000    20    16     0     4    100.0%      [ 80.6%, 100.0%]
+     1000     2     2000    20    20     0     0    100.0%      [ 83.9%, 100.0%]
+      200    10     2000    20    19     0     1    100.0%      [ 83.2%, 100.0%]
+     5000     1     5000    20    13     0     7    100.0%      [ 77.2%, 100.0%]
+     1000     5     5000    20    14     0     6    100.0%      [ 78.5%, 100.0%]
+      200    25     5000    20    14     0     6    100.0%      [ 78.5%, 100.0%]
+        5  1000     5000    20    15     0     5    100.0%      [ 79.6%, 100.0%]
+    20000     1    20000    20    16     0     4    100.0%      [ 80.6%, 100.0%]
+     1000    20    20000    20    14     0     6    100.0%      [ 78.5%, 100.0%]
+      200   100    20000    20    15     0     5    100.0%      [ 79.6%, 100.0%]
+
+----------------------------------------------------------------------
+FALSE-NEGATIVE DETAILS (oracle said Pass on known-leaky code)
+----------------------------------------------------------------------
+
+  injected / injected::injected_shift_20ns
+    Missed 5/20 iterations
+      iter=1  P(leak)=0.0%  samples=6000  t=1s
+      iter=6  P(leak)=0.0%  samples=6000  t=0s
+      iter=12  P(leak)=0.0%  samples=6000  t=0s
+      ... and 2 more
+
+  injected / injected::injected_shift_2ns
+    Missed 4/20 iterations
+      iter=1  P(leak)=0.0%  samples=6000  t=1s
+      iter=3  P(leak)=0.0%  samples=6000  t=0s
+      iter=16  P(leak)=0.0%  samples=6000  t=0s
+      ... and 1 more
+
+  injected / injected::injected_shift_50ns
+    Missed 11/20 iterations
+      iter=1  P(leak)=0.0%  samples=6000  t=0s
+      iter=2  P(leak)=0.0%  samples=6000  t=1s
+      iter=4  P(leak)=0.0%  samples=6000  t=0s
+      ... and 8 more
+
+----------------------------------------------------------------------
+PAPER-READY SUMMARY
+----------------------------------------------------------------------
+
+21 known-leaky tests × average 20.0 iterations = 420 trials.
+tacet detected leaks in 277/297 = 93.27% of definitive verdicts
+(Wilson 95% CI: [89.83%, 95.60%]).
+Inconclusive rate: 29.29% (123/420 non-skipped trials).
+

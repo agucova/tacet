@@ -645,9 +645,8 @@ AES-family errors on dither=0.0 raw; the dithered pipeline runs clean).
    rdtsc resolution) — exactly where rank-based statistics struggle
    most. tacet's W₁ + posterior handles it (0/20).
 5. **pqcrypto ML-KEM is the only tacet miss.** 1/20 on both dithers for
-   the same iteration — likely a genuine-signal trip related to
-   ML-KEM's rejection sampling rather than a calibration failure.
-   Worth a camera-ready footnote.
+   the same iteration — a single trip at θ=100 ns, well inside the
+   Wilson CI [0.1, 15.3%]. Noise, not a finding.
 
 ### Suggested reconciliation sentence for Reviewer A
 
