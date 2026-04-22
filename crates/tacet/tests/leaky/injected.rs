@@ -117,6 +117,121 @@ fn injected_shift_100ns() {
 }
 
 #[test]
+fn injected_shift_200ns() {
+    run_injected_shift_test("injected_shift_200ns", 200);
+}
+
+#[test]
 fn injected_shift_500ns() {
     run_injected_shift_test("injected_shift_500ns", 500);
+}
+
+#[test]
+fn injected_shift_5000ns() {
+    run_injected_shift_test("injected_shift_5000ns", 5000);
+}
+
+// Baselines filled in at d ≥ 200 ns for the amplification overlay, where
+// `busy_wait_ns` per-call overhead is ≤5% of nominal (measured on EPYC @ 5 GHz
+// via `examples/busy_wait_calibration.rs`: +13 ns constant per call, which
+// saturates actual-vs-nominal at d ≤ ~10 ns).
+#[test]
+fn injected_shift_1000ns() {
+    run_injected_shift_test("injected_shift_1000ns", 1000);
+}
+
+#[test]
+fn injected_shift_2000ns() {
+    run_injected_shift_test("injected_shift_2000ns", 2000);
+}
+
+#[test]
+fn injected_shift_20000ns() {
+    run_injected_shift_test("injected_shift_20000ns", 20000);
+}
+
+// ============================================================================
+// Operation-loop amplification sweep (ShowTime-style, Rokicki et al.)
+// ============================================================================
+//
+// Wraps the same conditional `busy_wait_ns(delay_ns)` in a k-iteration loop,
+// modelling per-op amplification: an attacker who invokes the leaky op k times
+// per query multiplies the per-query W_1 by k.
+//
+// Design rationale: `busy_wait_ns` has a ~13 ns per-call overhead on x86_64
+// (measured at 5 GHz EPYC), so small nominal d values don't actually inject
+// what their names claim (d ∈ {1, 2, 3, 5} all land at ~19 ns actual). We
+// therefore fix d = 200 ns — where actual = 211 ns (5% overhead, negligible
+// relative to the k-loop integer multiplier) — and sweep k ∈ {5, 10, 25, 100}.
+// Effective per-query delays are {~1055, ~2110, ~5275, ~21100} ns, each within
+// 5% of matched single-op baselines {1000, 2000, 5000, 20000}. Overlaying the
+// two sets tests the scaling-law prediction that detection depends only on
+// actual effective delay d·k, not on (d, k) separately.
+//
+// Threshold remains AdjacentNetwork (θ = 100 ns). Baseline k = 1 at d = 200
+// already exists as `injected_shift_200ns` equivalent — we reuse
+// `injected_shift_1000ns`, 2000, 5000, 20000 above as the comparison points.
+
+fn run_amplified_shift_test(test_name: &str, delay_ns: u64, k: u32) {
+    init_effect_injection();
+
+    let cipher = Aes128::new(&KEY.into());
+    let inputs = InputPair::new(|| [0u8; 16], rand_bytes_16);
+
+    let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
+        .pass_threshold(0.05)
+        .fail_threshold(0.95)
+        .time_budget(Duration::from_secs(60))
+        .test(inputs, |pt| {
+            let mut block = (*pt).into();
+            cipher.encrypt_block(&mut block);
+            // k-fold amplification of the per-op leak. Effective W1 ≈ k · delay_ns.
+            if pt[0] != 0 {
+                for _ in 0..k {
+                    busy_wait_ns(delay_ns);
+                }
+            }
+            std::hint::black_box(block[0]);
+        });
+
+    record_detection_outcome(&outcome, test_name);
+}
+
+#[test]
+fn injected_shift_5ns_k10() {
+    run_amplified_shift_test("injected_shift_5ns_k10", 5, 10);
+}
+
+#[test]
+fn injected_shift_5ns_k100() {
+    run_amplified_shift_test("injected_shift_5ns_k100", 5, 100);
+}
+
+#[test]
+fn injected_shift_5ns_k1000() {
+    run_amplified_shift_test("injected_shift_5ns_k1000", 5, 1000);
+}
+
+// d = 200 ns base: actual effective delay ≈ 211, 1055, 2110, 5275, 21100 ns
+// for k ∈ {1, 5, 10, 25, 100}, matching baselines {200, 1000, 2000, 5000, 20000}
+// within 5%.
+
+#[test]
+fn injected_shift_200ns_k5() {
+    run_amplified_shift_test("injected_shift_200ns_k5", 200, 5);
+}
+
+#[test]
+fn injected_shift_200ns_k10() {
+    run_amplified_shift_test("injected_shift_200ns_k10", 200, 10);
+}
+
+#[test]
+fn injected_shift_200ns_k25() {
+    run_amplified_shift_test("injected_shift_200ns_k25", 200, 25);
+}
+
+#[test]
+fn injected_shift_200ns_k100() {
+    run_amplified_shift_test("injected_shift_200ns_k100", 200, 100);
 }

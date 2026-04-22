@@ -28,8 +28,11 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 # Pattern-match on test names like "injected::injected_shift_100ns" to extract
-# the injected delay magnitude for the power curve.
-_DELAY_RE = re.compile(r"injected_shift_(\d+)ns")
+# the injected delay magnitude for the power curve. An optional "_k<N>" suffix
+# marks operation-loop amplification (cf. ShowTime, Rokicki et al.): the sample
+# class repeats the per-op busy_wait N times per query, so effective per-query
+# delay = delay_ns × k. k defaults to 1 when the suffix is absent.
+_DELAY_RE = re.compile(r"injected_shift_(\d+)ns(?:_k(\d+))?")
 
 
 def wilson_ci(successes: int, trials: int, confidence: float = 0.95) -> tuple[float, float]:
@@ -161,29 +164,66 @@ def analyze(results: list[dict]) -> None:
             tpr_str = f"{100 * s['tp'] / defn:5.1f}%  [{100 * lo:4.1f}%, {100 * hi:5.1f}%]"
         print(f"  {name:<40s}  n={s['total']:3d}  TP={s['tp']:3d}  FN={s['fn']:3d}  Inc={s['inc']:3d}  Skip={s['skip']:3d}  TPR={tpr_str}")
 
-    # ----- Detection curve for injected_shift_<N>ns -------------------------
-    shift_tests = {}
+    # ----- Detection curve for injected_shift_<N>ns(_k<K>)? -----------------
+    # Keyed by (delay_ns, k). k defaults to 1 for un-amplified tests.
+    shift_tests: dict[tuple[int, int], dict] = {}
     for name, s in by_test.items():
         m = _DELAY_RE.search(name)
         if m:
-            shift_tests[int(m.group(1))] = s
+            delay = int(m.group(1))
+            k = int(m.group(2)) if m.group(2) else 1
+            shift_tests[(delay, k)] = s
 
     if shift_tests:
+        any_amplified = any(k > 1 for (_, k) in shift_tests)
         print()
         print("-" * 70)
-        print("INJECTED-SHIFT DETECTION CURVE")
-        print("-" * 70)
-        print(f"{'delay_ns':>10s}  {'n':>4s}  {'TP':>4s}  {'FN':>4s}  {'Inc':>4s}  {'TPR':>8s}  {'95% CI':>20s}")
-        for delay in sorted(shift_tests):
-            s = shift_tests[delay]
-            defn = s["tp"] + s["fn"]
-            if defn == 0:
-                tpr_str, ci_str = "--", "--"
-            else:
-                lo, hi = wilson_ci(s["tp"], defn)
-                tpr_str = f"{100 * s['tp'] / defn:7.1f}%"
-                ci_str = f"[{100 * lo:5.1f}%, {100 * hi:5.1f}%]"
-            print(f"{delay:>10d}  {s['total']:>4d}  {s['tp']:>4d}  {s['fn']:>4d}  {s['inc']:>4d}  {tpr_str:>8s}  {ci_str:>20s}")
+        if any_amplified:
+            # Extended overlay table: sort by effective_ns so amplified points
+            # sit next to the baseline single-op points at the same effective
+            # delay. This is the overlay test for the scaling-law claim.
+            print("INJECTED-SHIFT DETECTION CURVE (with amplification overlay)")
+            print("-" * 70)
+            print(
+                f"{'delay_ns':>9s} {'k':>5s} {'eff_ns':>8s}  "
+                f"{'n':>4s}  {'TP':>4s}  {'FN':>4s}  {'Inc':>4s}  "
+                f"{'TPR':>8s}  {'95% CI':>20s}"
+            )
+            # Sort by (effective_ns, k) — baseline (k=1) sorts first within each tier.
+            ordered = sorted(shift_tests.items(), key=lambda kv: (kv[0][0] * kv[0][1], kv[0][1]))
+            for (delay, k), s in ordered:
+                effective = delay * k
+                defn = s["tp"] + s["fn"]
+                if defn == 0:
+                    tpr_str, ci_str = "--", "--"
+                else:
+                    lo, hi = wilson_ci(s["tp"], defn)
+                    tpr_str = f"{100 * s['tp'] / defn:7.1f}%"
+                    ci_str = f"[{100 * lo:5.1f}%, {100 * hi:5.1f}%]"
+                print(
+                    f"{delay:>9d} {k:>5d} {effective:>8d}  "
+                    f"{s['total']:>4d}  {s['tp']:>4d}  {s['fn']:>4d}  {s['inc']:>4d}  "
+                    f"{tpr_str:>8s}  {ci_str:>20s}"
+                )
+        else:
+            print("INJECTED-SHIFT DETECTION CURVE")
+            print("-" * 70)
+            print(
+                f"{'delay_ns':>10s}  {'n':>4s}  {'TP':>4s}  {'FN':>4s}  {'Inc':>4s}  "
+                f"{'TPR':>8s}  {'95% CI':>20s}"
+            )
+            for (delay, _), s in sorted(shift_tests.items()):
+                defn = s["tp"] + s["fn"]
+                if defn == 0:
+                    tpr_str, ci_str = "--", "--"
+                else:
+                    lo, hi = wilson_ci(s["tp"], defn)
+                    tpr_str = f"{100 * s['tp'] / defn:7.1f}%"
+                    ci_str = f"[{100 * lo:5.1f}%, {100 * hi:5.1f}%]"
+                print(
+                    f"{delay:>10d}  {s['total']:>4d}  {s['tp']:>4d}  "
+                    f"{s['fn']:>4d}  {s['inc']:>4d}  {tpr_str:>8s}  {ci_str:>20s}"
+                )
 
     # ----- List specific false negatives ------------------------------------
     if fn > 0:
