@@ -11,9 +11,9 @@ use std::time::Duration;
 use tacet::{helpers, AttackerModel, Outcome, TimingOracle};
 
 fn main() {
-    let key = Key::<Aes256Gcm>::from_slice(&[0u8; 32]);
-    let cipher = Aes256Gcm::new(key);
-    let nonce = Nonce::from_slice(&[0u8; 12]);
+    let key = Key::<Aes256Gcm>::from([0u8; 32]);
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = &Nonce::from([0u8; 12]);
 
     // Pre-generate inputs: fixed (all zeros) and random (generated per sample)
     let plaintexts = helpers::byte_vecs(1024);

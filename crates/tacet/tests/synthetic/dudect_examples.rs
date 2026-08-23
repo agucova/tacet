@@ -23,7 +23,7 @@
 
 use std::time::Duration;
 
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
 use subtle::ConstantTimeEq;
 use tacet::{helpers::InputPair, AttackerModel, Outcome, TimingOracle};

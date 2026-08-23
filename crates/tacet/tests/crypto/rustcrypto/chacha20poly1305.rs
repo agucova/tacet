@@ -50,7 +50,7 @@ fn rustcrypto_chacha20poly1305_encrypt_ct() {
             let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut nonce_bytes = [0u8; 12];
             nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
-            let nonce = Nonce::from_slice(&nonce_bytes);
+            let nonce = <&Nonce>::from(&nonce_bytes);
 
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ciphertext[0]);
@@ -105,7 +105,7 @@ fn rustcrypto_chacha20poly1305_decrypt_ct() {
 
     let key_bytes: [u8; 32] = [0x5a; 32];
     let cipher = ChaCha20Poly1305::new(&key_bytes.into());
-    let nonce = Nonce::from_slice(&[0u8; 12]);
+    let nonce = &Nonce::from([0u8; 12]);
 
     let fixed_plaintext = [0x42u8; 64];
     let fixed_ciphertext = cipher.encrypt(nonce, fixed_plaintext.as_ref()).unwrap();
@@ -193,7 +193,7 @@ fn rustcrypto_chacha20poly1305_nonce_ct() {
         .fail_threshold(0.99)
         .time_budget(Duration::from_secs(30))
         .test(nonces, |nonce_bytes| {
-            let nonce = Nonce::from_slice(nonce_bytes);
+            let nonce = <&Nonce>::from(nonce_bytes);
             let ciphertext = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ciphertext[0]);
         });
@@ -258,7 +258,7 @@ fn rustcrypto_chacha20poly1305_hamming() {
             let nonce_value = nonce_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut nonce_bytes = [0u8; 12];
             nonce_bytes[..8].copy_from_slice(&nonce_value.to_le_bytes());
-            let nonce = Nonce::from_slice(&nonce_bytes);
+            let nonce = <&Nonce>::from(&nonce_bytes);
 
             let ct = cipher.encrypt(nonce, plaintext.as_ref()).unwrap();
             std::hint::black_box(ct[0]);

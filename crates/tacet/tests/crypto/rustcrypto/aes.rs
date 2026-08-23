@@ -9,7 +9,7 @@
 //! IMPORTANT: Both closures must execute IDENTICAL code paths - only the DATA differs.
 //! Pre-generate inputs outside closures to avoid measuring RNG time.
 
-use aes::cipher::{BlockEncrypt, KeyInit};
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use aes::Aes128;
 use std::time::Duration;
 use tacet::helpers::InputPair;
