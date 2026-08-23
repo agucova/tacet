@@ -181,7 +181,7 @@ pub fn compute_bayes_1d(
     let w1_post = delta_draws.iter().sum::<f64>() / n_kept as f64;
     let var_post = delta_draws
         .iter()
-        .map(|d| (d - w1_post).powi(2))
+        .map(|d| math::sq(d - w1_post))
         .sum::<f64>()
         / (n_kept - 1) as f64;
 
@@ -218,7 +218,7 @@ pub fn sample_gamma<R: Rng>(rng: &mut R, shape: f64, rate: f64) -> f64 {
         // Use transformation for shape < 1
         let g = sample_gamma_marsaglia_tsang(rng, shape + 1.0);
         let u: f64 = rng.random();
-        return g * u.powf(1.0 / shape) / rate;
+        return g * math::pow(u, 1.0 / shape) / rate;
     }
 
     sample_gamma_marsaglia_tsang(rng, shape) / rate
@@ -231,7 +231,7 @@ fn sample_gamma_marsaglia_tsang<R: Rng>(rng: &mut R, shape: f64) -> f64 {
 
     loop {
         let z = sample_standard_normal(rng);
-        let v = (1.0 + c * z).powi(3);
+        let v = math::cube(1.0 + c * z);
 
         if v <= 0.0 {
             continue;

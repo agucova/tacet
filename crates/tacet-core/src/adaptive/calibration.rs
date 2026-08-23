@@ -24,6 +24,7 @@ use rand_xoshiro::Xoshiro256PlusPlus;
 
 use crate::analysis::bayes::{sample_gamma, sample_standard_normal};
 use crate::constants::DEFAULT_SEED;
+use crate::math;
 use crate::preflight::{run_core_checks, PreflightResult};
 use crate::statistics::{
     bootstrap_w1_variance, compute_w1_distance, timing_iact_combined, timing_iact_direct,
@@ -232,7 +233,7 @@ impl Calibration {
     /// This decreases as sample size grows, reflecting improved measurement precision.
     pub fn theta_floor_at(&self, n: usize) -> f64 {
         let n_blocks = n.checked_div(self.block_length).unwrap_or(n).max(1);
-        libm::fmax(self.c_floor / (n_blocks as f64).sqrt(), self.theta_tick)
+        libm::fmax(self.c_floor / math::sqrt(n_blocks as f64), self.theta_tick)
     }
 
     /// Compute the dynamic effective threshold at sample size n (spec §3.3.3).
@@ -269,7 +270,7 @@ impl Calibration {
                 if self.iact <= 1.0 {
                     return n.max(1);
                 }
-                ((n as f64) / self.iact).floor().max(1.0) as usize
+                math::floor((n as f64) / self.iact).max(1.0) as usize
             }
         }
     }
@@ -569,7 +570,7 @@ pub fn calibrate(
     // Compute MDE from variance estimate (1D W₁ distance)
     // MDE ≈ z_α/2 * sqrt(var) for standard normal quantile z_α/2
     let z_alpha = 1.96; // 95% confidence for alpha=0.05
-    let mde_ns = z_alpha * var_estimate.variance.sqrt();
+    let mde_ns = z_alpha * math::sqrt(var_estimate.variance);
 
     // Run preflight checks (unless skipped)
     let preflight_result = if config.skip_preflight {
@@ -601,7 +602,7 @@ pub fn calibrate(
 
     // Initial measurement floor at calibration sample count
     let n_blocks_cal = n.checked_div(block_length).unwrap_or(n).max(1);
-    let theta_floor_initial = (c_floor / (n_blocks_cal as f64).sqrt()).max(theta_tick);
+    let theta_floor_initial = (c_floor / math::sqrt(n_blocks_cal as f64)).max(theta_tick);
 
     // Effective threshold: max(user threshold, measurement floor)
     let theta_eff = if config.theta_ns > 0.0 {
@@ -744,7 +745,7 @@ pub fn calibrate_halft_prior_scale_1d(
         for _ in 0..N_SAMPLES {
             let lambda = sample_gamma(&mut rng, NU / 2.0, NU / 2.0);
             let z = sample_standard_normal(&mut rng);
-            let delta = (sigma_mid / lambda.sqrt() * z).abs();
+            let delta = (sigma_mid / math::sqrt(lambda) * z).abs();
 
             if delta > theta_user {
                 exceed_count += 1;
@@ -819,7 +820,7 @@ pub fn calibrate_floor_from_null(
         .checked_div(block_length)
         .unwrap_or(n_per_class)
         .max(1);
-    let sqrt_n_blocks_cal = (n_blocks_cal as f64).sqrt();
+    let sqrt_n_blocks_cal = math::sqrt(n_blocks_cal as f64);
 
     // Split interleaved samples by class
     let mut baseline_samples: Vec<f64> = Vec::with_capacity(n_per_class);
@@ -877,7 +878,7 @@ pub fn calibrate_floor_from_null(
         // but the floor guards a decision made with the full n_per_class samples.
         // Since W₁ variance ∝ 1/√m, the half-sample W₁ overestimates by √2.
         let avg_w1 = (w1_baseline + w1_sample) / 2.0;
-        let scaled_w1 = avg_w1 * sqrt_n_blocks_cal / std::f64::consts::SQRT_2;
+        let scaled_w1 = avg_w1 * sqrt_n_blocks_cal / core::f64::consts::SQRT_2;
 
         null_replicates.push(scaled_w1);
     }
@@ -887,7 +888,7 @@ pub fn calibrate_floor_from_null(
     let null_var_rate = if n_bootstrap > 1 {
         null_replicates
             .iter()
-            .map(|x| (x - null_mean_rate).powi(2))
+            .map(|x| math::sq(x - null_mean_rate))
             .sum::<f64>()
             / (n_bootstrap - 1) as f64
     } else {

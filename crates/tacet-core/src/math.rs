@@ -75,6 +75,15 @@ pub fn sq(x: f64) -> f64 {
     x * x
 }
 
+/// Cube (x^3).
+///
+/// Evaluated as `(x * x) * x`, matching the expansion `f64::powi(3)` lowers to,
+/// so results are bit-identical to the std method.
+#[inline]
+pub fn cube(x: f64) -> f64 {
+    x * x * x
+}
+
 /// Standard normal CDF: Φ(x) = (1 + erf(x/√2)) / 2
 #[inline]
 pub fn normal_cdf(x: f64) -> f64 {

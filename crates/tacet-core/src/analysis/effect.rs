@@ -14,6 +14,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
+use crate::math;
 use crate::result::{EffectEstimate, EffectPattern, QuantileShifts, TailDiagnostics};
 
 /// Compute effect estimate from W₁ posterior samples (spec §5.2).
@@ -43,8 +44,8 @@ pub fn compute_effect_estimate(w1_draws: &[f64]) -> EffectEstimate {
     // 95% credible interval (2.5th and 97.5th percentiles)
     let mut sorted = w1_draws.to_vec();
     sorted.sort_by(|a, b| a.total_cmp(b));
-    let lo_idx = ((n as f64 * 0.025).round() as usize).min(n - 1);
-    let hi_idx = ((n as f64 * 0.975).round() as usize).min(n - 1);
+    let lo_idx = (math::round(n as f64 * 0.025) as usize).min(n - 1);
+    let hi_idx = (math::round(n as f64 * 0.975) as usize).min(n - 1);
     let credible_interval_ns = (sorted[lo_idx], sorted[hi_idx]);
 
     EffectEstimate {
