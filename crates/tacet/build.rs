@@ -51,7 +51,9 @@ fn configure_mbedtls() {
         }
     }
 
-    println!("cargo:warning=mbedTLS not found. Set MBEDTLS_DIR or install via your package manager.");
+    println!(
+        "cargo:warning=mbedTLS not found. Set MBEDTLS_DIR or install via your package manager."
+    );
 }
 
 fn configure_wolfssl() {
@@ -91,7 +93,9 @@ fn configure_wolfssl() {
         }
     }
 
-    println!("cargo:warning=wolfSSL not found. Set WOLFSSL_DIR or install via your package manager.");
+    println!(
+        "cargo:warning=wolfSSL not found. Set WOLFSSL_DIR or install via your package manager."
+    );
 }
 
 fn configure_botan() {

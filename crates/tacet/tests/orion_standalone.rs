@@ -31,7 +31,10 @@ fn orion_auth_compiles() {
             std::hint::black_box(tag.unprotected_as_bytes()[0]);
         });
 
-    eprintln!("Orion auth test outcome: {}", tacet::output::format_outcome(&outcome));
+    eprintln!(
+        "Orion auth test outcome: {}",
+        tacet::output::format_outcome(&outcome)
+    );
 }
 
 #[test]
@@ -48,7 +51,10 @@ fn orion_hash_compiles() {
             std::hint::black_box(digest.as_ref()[0]);
         });
 
-    eprintln!("Orion hash test outcome: {}", tacet::output::format_outcome(&outcome));
+    eprintln!(
+        "Orion hash test outcome: {}",
+        tacet::output::format_outcome(&outcome)
+    );
 }
 
 #[test]
@@ -67,5 +73,8 @@ fn orion_aead_compiles() {
             std::hint::black_box(ciphertext[0]);
         });
 
-    eprintln!("Orion aead test outcome: {}", tacet::output::format_outcome(&outcome));
+    eprintln!(
+        "Orion aead test outcome: {}",
+        tacet::output::format_outcome(&outcome)
+    );
 }

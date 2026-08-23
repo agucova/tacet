@@ -18,6 +18,8 @@ fn test_pmu_initialization() {
         eprintln!("PMU timer not available on this platform");
     }
 
-    eprintln!("\nTimerSpec::cycle_accurate_available() = {}",
-             TimerSpec::cycle_accurate_available());
+    eprintln!(
+        "\nTimerSpec::cycle_accurate_available() = {}",
+        TimerSpec::cycle_accurate_available()
+    );
 }

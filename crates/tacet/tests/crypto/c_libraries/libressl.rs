@@ -19,12 +19,12 @@
 //! - AES-256-GCM encryption (software fallback paths)
 
 use openssl::ec::{EcGroup, EcKey};
+use openssl::hash::MessageDigest;
 use openssl::nid::Nid;
 use openssl::pkey::PKey;
 use openssl::rsa::{Padding, Rsa};
 use openssl::sign::{Signer, Verifier};
-use openssl::hash::MessageDigest;
-use openssl::symm::{Cipher, encrypt_aead};
+use openssl::symm::{encrypt_aead, Cipher};
 use std::time::Duration;
 use tacet::helpers::InputPair;
 use tacet::{skip_if_unreliable, AttackerModel, Outcome, TimingOracle};
@@ -144,9 +144,7 @@ fn libressl_rsa_2048_pkcs1v15_decrypt_constant_time() {
             effect,
             ..
         } => {
-            eprintln!(
-                "⚠️  TIMING LEAK DETECTED in LibreSSL RSA PKCS#1 v1.5 decryption"
-            );
+            eprintln!("⚠️  TIMING LEAK DETECTED in LibreSSL RSA PKCS#1 v1.5 decryption");
             eprintln!(
                 "   P(leak)={:.1}%, exploitability={:?}, effect={:.1}ns",
                 leak_probability * 100.0,
@@ -467,10 +465,7 @@ fn libressl_aes_256_gcm_encrypt_constant_time() {
     let cipher = Cipher::aes_256_gcm();
 
     let nonce_counter = std::sync::atomic::AtomicU64::new(0);
-    let inputs = InputPair::new(
-        || [0u8; 64],
-        rand_bytes_64,
-    );
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)

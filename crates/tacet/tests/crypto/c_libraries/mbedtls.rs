@@ -18,6 +18,9 @@
 //! - ECDSA P-256 signing
 //! - AES-256-GCM encryption (software fallback paths)
 
+// The FFI surface is declared in full; not every binding is exercised by the tests.
+#![allow(dead_code)]
+
 use std::ffi::c_void;
 use std::ptr;
 use std::time::Duration;
@@ -218,11 +221,7 @@ fn rand_bytes_64() -> [u8; 64] {
 
 // Simple entropy callback using Rust's RNG
 // This bypasses the entropy pool and directly provides entropy to CTR_DRBG
-unsafe extern "C" fn rust_entropy_callback(
-    _ctx: *mut c_void,
-    output: *mut u8,
-    len: usize,
-) -> i32 {
+unsafe extern "C" fn rust_entropy_callback(_ctx: *mut c_void, output: *mut u8, len: usize) -> i32 {
     for i in 0..len {
         *output.add(i) = rand::random();
     }
@@ -370,7 +369,8 @@ fn mbedtls_rsa_2048_pkcs1v15_decrypt_constant_time() {
         mbedtls_rsa_free(ctx);
         free_rng(&mut ctr_drbg_mem);
 
-        let outcome = skip_if_unreliable!(outcome, "mbedtls_rsa_2048_pkcs1v15_decrypt_constant_time");
+        let outcome =
+            skip_if_unreliable!(outcome, "mbedtls_rsa_2048_pkcs1v15_decrypt_constant_time");
 
         match &outcome {
             Outcome::Pass {
@@ -390,16 +390,16 @@ fn mbedtls_rsa_2048_pkcs1v15_decrypt_constant_time() {
                 effect,
                 ..
             } => {
-                eprintln!(
-                    "⚠️  TIMING LEAK DETECTED in mbedTLS RSA PKCS#1 v1.5 decryption"
-                );
+                eprintln!("⚠️  TIMING LEAK DETECTED in mbedTLS RSA PKCS#1 v1.5 decryption");
                 eprintln!(
                     "   P(leak)={:.1}%, exploitability={:?}, effect={:.1}ns",
                     leak_probability * 100.0,
                     exploitability,
                     effect.max_effect_ns
                 );
-                eprintln!("   This may be a variant of MARVIN (CVE-2023-50782) or similar timing leak");
+                eprintln!(
+                    "   This may be a variant of MARVIN (CVE-2023-50782) or similar timing leak"
+                );
                 panic!("RSA PKCS#1 v1.5 decryption timing leak - potential security vulnerability");
             }
             Outcome::Inconclusive { reason, .. } => {

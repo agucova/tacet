@@ -230,10 +230,7 @@ fn libsodium_x25519_scalar_mult_constant_time() {
         0x6d, 0x5e,
     ];
 
-    let inputs = InputPair::new(
-        move || fixed_scalar_bytes,
-        rand_bytes_32,
-    );
+    let inputs = InputPair::new(move || fixed_scalar_bytes, rand_bytes_32);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .time_budget(Duration::from_secs(30))
@@ -304,10 +301,7 @@ fn libsodium_crypto_box_encrypt_constant_time() {
     let (receiver_pk, _receiver_sk) = gen_keypair();
 
     let nonce_counter = std::sync::atomic::AtomicU64::new(0);
-    let inputs = InputPair::new(
-        || [0u8; 64],
-        rand_bytes_64,
-    );
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)
@@ -482,10 +476,7 @@ fn libsodium_crypto_secretbox_encrypt_constant_time() {
     let key = secretbox::gen_key();
 
     let nonce_counter = std::sync::atomic::AtomicU64::new(0);
-    let inputs = InputPair::new(
-        || [0u8; 64],
-        rand_bytes_64,
-    );
+    let inputs = InputPair::new(|| [0u8; 64], rand_bytes_64);
 
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .pass_threshold(0.15)

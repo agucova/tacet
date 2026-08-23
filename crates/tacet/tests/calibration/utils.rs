@@ -937,60 +937,123 @@ impl TrialRecord {
         outcome: &Outcome,
     ) -> Self {
         // Extract common fields and diagnostic info from each variant
-        let (decision, leak_probability, max_effect_ns, ci_low_ns, ci_high_ns, samples_used,
-             inconclusive_reason, quality, diagnostics_opt, theta_user, theta_eff, theta_floor) =
-            match outcome {
-                Outcome::Pass {
-                    leak_probability, effect, samples_used, quality, diagnostics,
-                    theta_user, theta_eff, theta_floor, ..
-                } => (
-                    "pass", Some(*leak_probability),
-                    Some(effect.max_effect_ns), Some(effect.credible_interval_ns.0),
-                    Some(effect.credible_interval_ns.1), Some(*samples_used),
-                    None, Some(format!("{:?}", quality)), Some(diagnostics),
-                    Some(*theta_user), Some(*theta_eff), Some(*theta_floor),
-                ),
-                Outcome::Fail {
-                    leak_probability, effect, samples_used, quality, diagnostics,
-                    theta_user, theta_eff, theta_floor, ..
-                } => (
-                    "fail", Some(*leak_probability),
-                    Some(effect.max_effect_ns), Some(effect.credible_interval_ns.0),
-                    Some(effect.credible_interval_ns.1), Some(*samples_used),
-                    None, Some(format!("{:?}", quality)), Some(diagnostics),
-                    Some(*theta_user), Some(*theta_eff), Some(*theta_floor),
-                ),
-                Outcome::Inconclusive {
-                    reason, leak_probability, effect, samples_used, quality, diagnostics,
-                    theta_user, theta_eff, theta_floor, ..
-                } => {
-                    // Extract short reason variant name
-                    let reason_name = match reason {
-                        InconclusiveReason::DataTooNoisy { .. } => "DataTooNoisy",
-                        InconclusiveReason::NotLearning { .. } => "NotLearning",
-                        InconclusiveReason::WouldTakeTooLong { .. } => "WouldTakeTooLong",
-                        InconclusiveReason::TimeBudgetExceeded { .. } => "TimeBudgetExceeded",
-                        InconclusiveReason::SampleBudgetExceeded { .. } => "SampleBudgetExceeded",
-                        InconclusiveReason::ConditionsChanged { .. } => "ConditionsChanged",
-                        InconclusiveReason::ThresholdElevated { .. } => "ThresholdElevated",
-                    };
-                    (
-                        "inconclusive", Some(*leak_probability),
-                        Some(effect.max_effect_ns), Some(effect.credible_interval_ns.0),
-                        Some(effect.credible_interval_ns.1), Some(*samples_used),
-                        Some(reason_name.to_string()), Some(format!("{:?}", quality)),
-                        Some(diagnostics), Some(*theta_user), Some(*theta_eff), Some(*theta_floor),
-                    )
-                },
-                Outcome::Unmeasurable { .. } => (
-                    "unmeasurable", None, None, None, None, None,
-                    None, None, None, None, None, None,
-                ),
-                Outcome::Research(_) => (
-                    "research", None, None, None, None, None,
-                    None, None, None, None, None, None,
-                ),
-            };
+        let (
+            decision,
+            leak_probability,
+            max_effect_ns,
+            ci_low_ns,
+            ci_high_ns,
+            samples_used,
+            inconclusive_reason,
+            quality,
+            diagnostics_opt,
+            theta_user,
+            theta_eff,
+            theta_floor,
+        ) = match outcome {
+            Outcome::Pass {
+                leak_probability,
+                effect,
+                samples_used,
+                quality,
+                diagnostics,
+                theta_user,
+                theta_eff,
+                theta_floor,
+                ..
+            } => (
+                "pass",
+                Some(*leak_probability),
+                Some(effect.max_effect_ns),
+                Some(effect.credible_interval_ns.0),
+                Some(effect.credible_interval_ns.1),
+                Some(*samples_used),
+                None,
+                Some(format!("{:?}", quality)),
+                Some(diagnostics),
+                Some(*theta_user),
+                Some(*theta_eff),
+                Some(*theta_floor),
+            ),
+            Outcome::Fail {
+                leak_probability,
+                effect,
+                samples_used,
+                quality,
+                diagnostics,
+                theta_user,
+                theta_eff,
+                theta_floor,
+                ..
+            } => (
+                "fail",
+                Some(*leak_probability),
+                Some(effect.max_effect_ns),
+                Some(effect.credible_interval_ns.0),
+                Some(effect.credible_interval_ns.1),
+                Some(*samples_used),
+                None,
+                Some(format!("{:?}", quality)),
+                Some(diagnostics),
+                Some(*theta_user),
+                Some(*theta_eff),
+                Some(*theta_floor),
+            ),
+            Outcome::Inconclusive {
+                reason,
+                leak_probability,
+                effect,
+                samples_used,
+                quality,
+                diagnostics,
+                theta_user,
+                theta_eff,
+                theta_floor,
+                ..
+            } => {
+                // Extract short reason variant name
+                let reason_name = match reason {
+                    InconclusiveReason::DataTooNoisy { .. } => "DataTooNoisy",
+                    InconclusiveReason::NotLearning { .. } => "NotLearning",
+                    InconclusiveReason::WouldTakeTooLong { .. } => "WouldTakeTooLong",
+                    InconclusiveReason::TimeBudgetExceeded { .. } => "TimeBudgetExceeded",
+                    InconclusiveReason::SampleBudgetExceeded { .. } => "SampleBudgetExceeded",
+                    InconclusiveReason::ConditionsChanged { .. } => "ConditionsChanged",
+                    InconclusiveReason::ThresholdElevated { .. } => "ThresholdElevated",
+                };
+                (
+                    "inconclusive",
+                    Some(*leak_probability),
+                    Some(effect.max_effect_ns),
+                    Some(effect.credible_interval_ns.0),
+                    Some(effect.credible_interval_ns.1),
+                    Some(*samples_used),
+                    Some(reason_name.to_string()),
+                    Some(format!("{:?}", quality)),
+                    Some(diagnostics),
+                    Some(*theta_user),
+                    Some(*theta_eff),
+                    Some(*theta_floor),
+                )
+            }
+            Outcome::Unmeasurable { .. } => (
+                "unmeasurable",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ),
+            Outcome::Research(_) => (
+                "research", None, None, None, None, None, None, None, None, None, None, None,
+            ),
+        };
 
         Self {
             trial,

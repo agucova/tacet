@@ -138,10 +138,7 @@ fn main() {
     }
 
     // Parse bootstrap method from env var (for ablation studies)
-    let bootstrap_method = match std::env::var("TACET_BOOTSTRAP_METHOD")
-        .ok()
-        .as_deref()
-    {
+    let bootstrap_method = match std::env::var("TACET_BOOTSTRAP_METHOD").ok().as_deref() {
         Some("stratified") | Some("per-class") => tacet::BootstrapMethod::Stratified,
         _ => tacet::BootstrapMethod::Joint,
     };
@@ -582,9 +579,8 @@ fn create_r_pool() -> Option<Arc<ProcessPool>> {
     let config =
         ProcessConfig::r_worker(&script_path, silent_path.as_deref(), rtlf_path.as_deref());
 
-    match ProcessPool::new(config, pool_size) {
-        pool => Some(Arc::new(pool)),
-    }
+    let pool = ProcessPool::new(config, pool_size);
+    Some(Arc::new(pool))
 }
 
 /// Find an R tool's script path by inspecting the wrapper command.
@@ -665,9 +661,8 @@ fn create_python_pool() -> Option<Arc<ProcessPool>> {
     let pool_size = (num_cpus::get() / 3).max(2);
     let config = ProcessConfig::python_worker(&script_path);
 
-    match ProcessPool::new(config, pool_size) {
-        pool => Some(Arc::new(pool)),
-    }
+    let pool = ProcessPool::new(config, pool_size);
+    Some(Arc::new(pool))
 }
 
 /// Find a worker script in known locations.

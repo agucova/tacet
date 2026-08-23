@@ -115,12 +115,14 @@ impl ChildProcess {
 
         let mut child = cmd.spawn()?;
 
-        let stdin = child.stdin.take().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "Failed to open stdin")
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "Failed to open stdout")
-        })?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| std::io::Error::other("Failed to open stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| std::io::Error::other("Failed to open stdout"))?;
 
         Ok(Self {
             child,
@@ -383,10 +385,7 @@ impl ProcessPool {
             }
         }
 
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "No process slots available",
-        ))
+        Err(std::io::Error::other("No process slots available"))
     }
 
     /// Shutdown all processes in the pool.
@@ -426,9 +425,9 @@ impl<'a> PoolGuard<'a> {
         let (slot_idx, mut guard) = self.pool.get_or_spawn_process()?;
         self.slot_index = Some(slot_idx);
 
-        let process = guard.as_mut().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::Other, "Process slot unexpectedly empty")
-        })?;
+        let process = guard
+            .as_mut()
+            .ok_or_else(|| std::io::Error::other("Process slot unexpectedly empty"))?;
 
         // Send request with timeout consideration
         let timeout = Duration::from_secs(self.pool.config.request_timeout_secs);

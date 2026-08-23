@@ -164,20 +164,15 @@ impl AttackerModel {
 ///   Legacy method, remains available for backward compatibility.
 ///
 /// All methods maintain type-1 error control under autocorrelation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum IactMethod {
     /// Direct IACT on timing differences (recommended)
     DirectDifferences,
     /// Per-quantile IACT with robust aggregation (most principled)
+    #[default]
     PerQuantile,
     /// Geyer's Initial Monotone Sequence with max aggregation (conservative)
     GeyersIMS,
     /// Politis-White block length (legacy)
     PolitisWhite,
-}
-
-impl Default for IactMethod {
-    fn default() -> Self {
-        Self::PerQuantile
-    }
 }

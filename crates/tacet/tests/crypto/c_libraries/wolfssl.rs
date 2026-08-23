@@ -18,6 +18,9 @@
 //! - AES-256-GCM encryption/decryption
 //! - Dilithium (ML-DSA) post-quantum signatures (if enabled in build)
 
+// The FFI surface is declared in full; not every binding is exercised by the tests.
+#![allow(dead_code)]
+
 use std::mem::MaybeUninit;
 use std::ptr;
 use std::time::Duration;
@@ -126,8 +129,7 @@ extern "C" {
     fn wc_ecc_init(key: *mut ecc_key) -> i32;
     fn wc_ecc_free(key: *mut ecc_key) -> i32;
     fn wc_ecc_make_key(rng: *mut WC_RNG, keysize: i32, key: *mut ecc_key) -> i32;
-    fn wc_ecc_make_key_ex(rng: *mut WC_RNG, keysize: i32, key: *mut ecc_key, curve_id: i32)
-        -> i32;
+    fn wc_ecc_make_key_ex(rng: *mut WC_RNG, keysize: i32, key: *mut ecc_key, curve_id: i32) -> i32;
     fn wc_ecc_sign_hash(
         in_data: *const u8,
         in_len: u32,

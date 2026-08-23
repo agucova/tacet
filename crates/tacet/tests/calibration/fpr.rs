@@ -14,8 +14,8 @@ use crate::calibration_utils;
 // TimerBackend only used on non-ARM64 platforms for pmu_available check
 #[allow(unused_imports)]
 use calibration_utils::{rand_bytes, CalibrationConfig, Decision, TimerBackend, TrialRunner};
-use tacet::helpers::InputPair;
 use sha3::Digest;
+use tacet::helpers::InputPair;
 use tacet::{AttackerModel, TimingOracle};
 
 // =============================================================================

@@ -20,7 +20,7 @@ use tacet::{assert_leak_detected, AttackerModel, IactMethod, Outcome, TimingOrac
 #[test]
 fn test_iid_consistency() {
     // Test with Politis-White (current default)
-    let inputs_pw = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
+    let inputs_pw = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
     let outcome_politis_white = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .iact_method(IactMethod::PolitisWhite)
         .time_budget(Duration::from_secs(10))
@@ -30,7 +30,7 @@ fn test_iid_consistency() {
         });
 
     // Test with Geyer's IMS
-    let inputs_geyers = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
+    let inputs_geyers = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
     let outcome_geyers = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
         .iact_method(IactMethod::GeyersIMS)
         .time_budget(Duration::from_secs(10))
@@ -79,11 +79,9 @@ fn test_iid_consistency() {
                 "[SKIPPED] test_iid_consistency (Geyer's IMS): {}",
                 recommendation
             );
-            return;
         }
         Outcome::Research(_) => {
             eprintln!("[SKIPPED] test_iid_consistency: Research mode not expected");
-            return;
         }
     }
 }
@@ -98,7 +96,7 @@ fn test_iid_consistency() {
 /// measurement artifacts). Geyer's IMS should handle this without false positives.
 #[test]
 fn test_autocorr_robustness_geyers() {
-    let inputs = InputPair::new(|| [0u8; 32], || rand::random::<[u8; 32]>());
+    let inputs = InputPair::new(|| [0u8; 32], rand::random::<[u8; 32]>);
 
     // Use Geyer's IMS which is designed to handle autocorrelation
     let outcome = TimingOracle::for_attacker(AttackerModel::AdjacentNetwork)
@@ -108,9 +106,9 @@ fn test_autocorr_robustness_geyers() {
             // Constant-time operation with intentional memory access patterns
             // that may introduce autocorrelation in timing measurements
             let mut acc: u64 = 0;
-            for i in 0..data.len() {
+            for &byte in data.iter() {
                 // Access pattern that may cause cache effects (but constant-time)
-                acc = acc.wrapping_add(data[i] as u64);
+                acc = acc.wrapping_add(byte as u64);
                 // Add some busywork to make the operation measurable
                 for _ in 0..10 {
                     acc = acc.wrapping_add(1);
@@ -150,11 +148,9 @@ fn test_autocorr_robustness_geyers() {
                 "[SKIPPED] test_autocorr_robustness_geyers: {}",
                 recommendation
             );
-            return;
         }
         Outcome::Research(_) => {
             eprintln!("[SKIPPED] test_autocorr_robustness_geyers: Research mode not expected");
-            return;
         }
     }
 }

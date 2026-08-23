@@ -258,7 +258,15 @@ pub fn bootstrap_w1_variance(
                     vec![0.0f64; sample_raw.len()],           // stratified sample resample buffer
                     WelfordVariance::new(),
                 ),
-                |(_, mut buffer, mut baseline_samples, mut sample_samples, mut baseline_buf, mut sample_buf, mut acc),
+                |(
+                    _,
+                    mut buffer,
+                    mut baseline_samples,
+                    mut sample_samples,
+                    mut baseline_buf,
+                    mut sample_buf,
+                    mut acc,
+                ),
                  i| {
                     // Counter-based RNG for deterministic, well-distributed seeding
                     let mut rng =

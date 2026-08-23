@@ -149,10 +149,7 @@ fn detects_marvin_rsa_decryption() {
             return;
         }
         Outcome::Inconclusive { reason, .. } => {
-            eprintln!(
-                "[SKIPPED] detects_marvin_rsa_decryption: {}",
-                reason
-            );
+            eprintln!("[SKIPPED] detects_marvin_rsa_decryption: {}", reason);
             return;
         }
         _ => {}

@@ -20,6 +20,10 @@
 //! Botan is the only modern C++ crypto library in the test suite. It emphasizes
 //! constant-time implementations and side-channel resistance.
 
+// Botan's FFI takes NUL-terminated byte strings as *const u8, so explicit b"...\0"
+// literals are used instead of c"..." (which yields *const c_char).
+#![allow(clippy::manual_c_str_literals)]
+
 use std::ptr;
 use std::time::Duration;
 use tacet::helpers::InputPair;
@@ -277,12 +281,8 @@ fn botan_rsa_2048_pkcs1v15_decrypt_constant_time() {
 
         // Create encrypt operator for test setup
         let mut encrypt_op: BotanPkOpEncrypt = ptr::null_mut();
-        let rc = botan_pk_op_encrypt_create(
-            &mut encrypt_op,
-            pubkey.as_ptr(),
-            b"PKCS1v15\0".as_ptr(),
-            0,
-        );
+        let rc =
+            botan_pk_op_encrypt_create(&mut encrypt_op, pubkey.as_ptr(), b"PKCS1v15\0".as_ptr(), 0);
         assert_eq!(rc, BOTAN_FFI_SUCCESS, "Failed to create encrypt op");
 
         // Pre-generate two pools of ciphertexts
@@ -405,7 +405,9 @@ fn botan_rsa_2048_pkcs1v15_decrypt_constant_time() {
                     exploitability,
                     effect.max_effect_ns
                 );
-                eprintln!("   This may be a variant of MARVIN (CVE-2023-50782) or similar timing leak");
+                eprintln!(
+                    "   This may be a variant of MARVIN (CVE-2023-50782) or similar timing leak"
+                );
                 panic!("RSA PKCS#1 v1.5 decryption timing leak - potential security vulnerability");
             }
             Outcome::Inconclusive { reason, .. } => {
@@ -590,17 +592,12 @@ fn botan_rsa_2048_oaep_decrypt_constant_time() {
 fn botan_ecdsa_p256_sign_constant_time() {
     unsafe {
         let rng = BotanRngHandle::new().expect("Failed to init RNG");
-        let privkey =
-            BotanPrivkeyHandle::create_ecdsa(&rng, "secp256r1").expect("Failed to create ECDSA key");
+        let privkey = BotanPrivkeyHandle::create_ecdsa(&rng, "secp256r1")
+            .expect("Failed to create ECDSA key");
 
         // Create sign operator
         let mut sign_op: BotanPkOpSign = ptr::null_mut();
-        let rc = botan_pk_op_sign_create(
-            &mut sign_op,
-            privkey.as_ptr(),
-            b"SHA-256\0".as_ptr(),
-            0,
-        );
+        let rc = botan_pk_op_sign_create(&mut sign_op, privkey.as_ptr(), b"SHA-256\0".as_ptr(), 0);
         assert_eq!(rc, BOTAN_FFI_SUCCESS, "Failed to create sign op");
 
         // Get signature length
@@ -789,12 +786,8 @@ fn botan_harness_sanity_check() {
 
         // Create encrypt operator
         let mut encrypt_op: BotanPkOpEncrypt = ptr::null_mut();
-        let rc = botan_pk_op_encrypt_create(
-            &mut encrypt_op,
-            pubkey.as_ptr(),
-            b"PKCS1v15\0".as_ptr(),
-            0,
-        );
+        let rc =
+            botan_pk_op_encrypt_create(&mut encrypt_op, pubkey.as_ptr(), b"PKCS1v15\0".as_ptr(), 0);
         assert_eq!(rc, BOTAN_FFI_SUCCESS, "Failed to create encrypt op");
 
         // Generate a single ciphertext

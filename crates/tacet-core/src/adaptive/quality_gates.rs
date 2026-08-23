@@ -305,11 +305,10 @@ pub fn compute_achievable_at_max(
     }
 
     // Spec §3.3.3: theta_floor(n) = max(theta_tick, c_floor / sqrt(n_blocks(n)))
-    let n_blocks = if block_length > 0 {
-        (max_samples / block_length).max(1)
-    } else {
-        max_samples.max(1)
-    };
+    let n_blocks = max_samples
+        .checked_div(block_length)
+        .unwrap_or(max_samples)
+        .max(1);
     let theta_floor_at_max = libm::fmax(c_floor / libm::sqrt(n_blocks as f64), theta_tick);
 
     // Compute epsilon: max(theta_tick, 1e-6 * theta_user)
@@ -611,9 +610,12 @@ pub fn check_gate1_1d(
         Some(InconclusiveReason::DataTooNoisy {
             message: alloc::format!(
                 "KL divergence {:.2} nats < {:.1} nats threshold; data not informative",
-                kl, config.kl_min
+                kl,
+                config.kl_min
             ),
-            guidance: String::from("Try: more samples, higher-resolution timer, reduce system load"),
+            guidance: String::from(
+                "Try: more samples, higher-resolution timer, reduce system load",
+            ),
             kl_divergence: kl,
         })
     } else {

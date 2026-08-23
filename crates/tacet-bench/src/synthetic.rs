@@ -792,7 +792,7 @@ pub fn generate_benchmark_suite(
 
         println!(
             "Generating {} datasets for {} (n={})",
-            datasets_per_config, &name, base_config.samples_per_class
+            datasets_per_config, name, base_config.samples_per_class
         );
 
         for i in 0..datasets_per_config {

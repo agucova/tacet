@@ -374,7 +374,12 @@ pub unsafe extern "C" fn to_calibrate(
     let block_length = var_estimate.block_size;
 
     // Compute c_floor from null distribution
-    let null_cal = calibrate_floor_from_null(&interleaved, block_length, DEFAULT_BOOTSTRAP_ITERATIONS, seed);
+    let null_cal = calibrate_floor_from_null(
+        &interleaved,
+        block_length,
+        DEFAULT_BOOTSTRAP_ITERATIONS,
+        seed,
+    );
     let c_floor = null_cal.c_floor;
 
     // Compute initial theta_floor
@@ -960,7 +965,12 @@ pub unsafe extern "C" fn to_analyze(
     let block_length = var_estimate.block_size;
 
     // Compute theta_eff
-    let null_cal = calibrate_floor_from_null(&interleaved, block_length, DEFAULT_BOOTSTRAP_ITERATIONS, seed);
+    let null_cal = calibrate_floor_from_null(
+        &interleaved,
+        block_length,
+        DEFAULT_BOOTSTRAP_ITERATIONS,
+        seed,
+    );
     let c_floor = null_cal.c_floor;
     let n_blocks = (count / block_length).max(1);
     let theta_floor = (c_floor / (n_blocks as f64).sqrt()).max(ns_per_tick);

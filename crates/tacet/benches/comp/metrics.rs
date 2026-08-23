@@ -390,11 +390,9 @@ pub fn generate_roc_curve(
         } else {
             0.0
         };
-        let avg_samples_leaky = if total_positives > 0 {
-            total_samples_leaky / total_positives
-        } else {
-            0
-        };
+        let avg_samples_leaky = total_samples_leaky
+            .checked_div(total_positives)
+            .unwrap_or(0);
 
         // Measure FPR on safe cases
         let mut false_positives = 0;
@@ -429,11 +427,7 @@ pub fn generate_roc_curve(
         } else {
             0.0
         };
-        let avg_samples_safe = if total_negatives > 0 {
-            total_samples_safe / total_negatives
-        } else {
-            0
-        };
+        let avg_samples_safe = total_samples_safe.checked_div(total_negatives).unwrap_or(0);
 
         roc_points.push(RocPoint {
             threshold,

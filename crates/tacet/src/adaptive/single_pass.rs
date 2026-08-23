@@ -248,11 +248,16 @@ pub fn analyze_single_pass(
     let block_length = var_estimate.block_size;
 
     // Compute null calibration (floor + null variance for inference)
-    let null_cal = calibrate_floor_from_null(&interleaved, block_length, config.bootstrap_iterations, config.seed);
+    let null_cal = calibrate_floor_from_null(
+        &interleaved,
+        block_length,
+        config.bootstrap_iterations,
+        config.seed,
+    );
     let c_floor = null_cal.c_floor;
 
     // Statistical floor: c_floor / √n_blocks
-    let n_blocks = if block_length > 0 { (n / block_length).max(1) } else { n.max(1) };
+    let n_blocks = n.checked_div(block_length).unwrap_or(n).max(1);
     let theta_floor_stat = c_floor / (n_blocks as f64).sqrt();
 
     // Timer tick floor (spec §3.3.4)
@@ -309,8 +314,13 @@ pub fn analyze_single_pass(
     let var_eff = var_n.max(null_var_n);
 
     if std::env::var("TIMING_ORACLE_DEBUG").is_ok() {
-        eprintln!("[DEBUG] var_n = {:.2e}, null_var_n = {:.2e}, var_eff = {:.2e} (null floor active: {})",
-            var_n, null_var_n, var_eff, null_var_n > var_n);
+        eprintln!(
+            "[DEBUG] var_n = {:.2e}, null_var_n = {:.2e}, var_eff = {:.2e} (null floor active: {})",
+            var_n,
+            null_var_n,
+            var_eff,
+            null_var_n > var_n
+        );
     }
 
     let bayes_result = tacet_core::analysis::compute_bayes_1d(

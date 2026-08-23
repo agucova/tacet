@@ -1171,8 +1171,6 @@ impl TimingOracle {
                     theta_user,
                     theta_eff,
                     achievable_at_max,
-                    samples_per_class: _,
-                    elapsed: _,
                     ..
                 } => {
                     // v5.5: Threshold elevated and P < pass_threshold at θ_eff

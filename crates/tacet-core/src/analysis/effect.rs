@@ -137,7 +137,7 @@ pub fn compute_tail_diagnostics(baseline: &[f64], sample: &[f64], w1_deb: f64) -
     let mut diffs_copy = diffs.clone();
     let mid = n / 2;
     diffs_copy.select_nth_unstable_by(mid, |a, b| a.total_cmp(b));
-    let shift_ns = if n % 2 == 0 {
+    let shift_ns = if n.is_multiple_of(2) {
         (diffs_copy[mid - 1] + diffs_copy[mid]) / 2.0
     } else {
         diffs_copy[mid]
@@ -294,8 +294,8 @@ mod tests {
         let sample: Vec<f64> = (0..n).map(|i| 100.0 + i as f64 * 0.01).collect();
 
         // Add tail effect to top 10% of baseline
-        for i in (n * 9 / 10)..n {
-            baseline[i] += 50.0; // Add 50ns to tail
+        for b in baseline.iter_mut().skip(n * 9 / 10) {
+            *b += 50.0; // Add 50ns to tail
         }
 
         // W₁ should capture this tail effect
@@ -347,8 +347,8 @@ mod tests {
         let sample: Vec<f64> = (0..n).map(|i| 100.0 + i as f64 * 0.1).collect();
 
         // Add larger tail effect to top 30% of baseline to create mixed pattern
-        for i in (n * 7 / 10)..n {
-            baseline[i] += 15.0;
+        for b in baseline.iter_mut().skip(n * 7 / 10) {
+            *b += 15.0;
         }
 
         // W₁ should capture both components

@@ -130,11 +130,11 @@ pub fn geyer_ims_iact(u: &[f64]) -> IactResult {
     // Step 2: Form consecutive pairs Γ[m] = ρ[2m] + ρ[2m+1]
     let m_max = (max_lag - 1) / 2;
     let mut gamma = vec![0.0; m_max + 1];
-    for m in 0..=m_max {
+    for (m, g) in gamma.iter_mut().enumerate() {
         let idx1 = 2 * m;
         let idx2 = 2 * m + 1;
         if idx2 <= max_lag {
-            gamma[m] = rho[idx1] + rho[idx2];
+            *g = rho[idx1] + rho[idx2];
         }
     }
 
@@ -145,8 +145,8 @@ pub fn geyer_ims_iact(u: &[f64]) -> IactResult {
 
     // Step 4: Truncation at first Γ[m] ≤ 0
     let mut m_trunc = 0;
-    for m in 1..=m_max {
-        if gamma[m] <= 0.0 {
+    for (m, &g) in gamma.iter().enumerate().skip(1) {
+        if g <= 0.0 {
             break;
         }
         m_trunc = m;
@@ -452,7 +452,7 @@ fn compute_median(values: &mut [f64]) -> f64 {
     values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
     let n = values.len();
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         (values[n / 2 - 1] + values[n / 2]) / 2.0
     } else {
         values[n / 2]

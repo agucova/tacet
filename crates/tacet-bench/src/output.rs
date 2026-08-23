@@ -174,11 +174,7 @@ fn format_tool_label(
     threshold: Option<f64>,
     all_pairs: &[(String, Option<f64>)],
 ) -> String {
-    let has_multiple = all_pairs
-        .iter()
-        .filter(|(t, _)| t == tool)
-        .count()
-        > 1;
+    let has_multiple = all_pairs.iter().filter(|(t, _)| t == tool).count() > 1;
     if has_multiple {
         match threshold {
             Some(t) if t < 1.0 => format!("{} (θ={:.1}ns)", tool, t),

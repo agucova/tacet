@@ -94,11 +94,10 @@ pub fn compute_diagnostics(
 
     // 3. Per-class dependence estimation (spec §3.3.2)
     let dependence_length = estimate_joint_dependence_length(interleaved_samples);
-    let effective_sample_size = if dependence_length > 0 {
-        extra.samples_per_class / dependence_length
-    } else {
-        extra.samples_per_class
-    };
+    let effective_sample_size = extra
+        .samples_per_class
+        .checked_div(dependence_length)
+        .unwrap_or(extra.samples_per_class);
 
     Diagnostics {
         dependence_length,

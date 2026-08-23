@@ -231,11 +231,7 @@ impl Calibration {
     ///
     /// This decreases as sample size grows, reflecting improved measurement precision.
     pub fn theta_floor_at(&self, n: usize) -> f64 {
-        let n_blocks = if self.block_length > 0 {
-            (n / self.block_length).max(1)
-        } else {
-            n.max(1)
-        };
+        let n_blocks = n.checked_div(self.block_length).unwrap_or(n).max(1);
         libm::fmax(self.c_floor / (n_blocks as f64).sqrt(), self.theta_tick)
     }
 
@@ -604,11 +600,7 @@ pub fn calibrate(
     let theta_tick = config.timer_resolution_ns;
 
     // Initial measurement floor at calibration sample count
-    let n_blocks_cal = if block_length > 0 {
-        (n / block_length).max(1)
-    } else {
-        n.max(1)
-    };
+    let n_blocks_cal = n.checked_div(block_length).unwrap_or(n).max(1);
     let theta_floor_initial = (c_floor / (n_blocks_cal as f64).sqrt()).max(theta_tick);
 
     // Effective threshold: max(user threshold, measurement floor)
@@ -686,7 +678,6 @@ fn compute_calibration_snapshot(baseline_ns: &[f64], sample_ns: &[f64]) -> Calib
 // DELETED: calibrate_t_prior_scale() - 9D version (replaced by calibrate_halft_prior_scale_1d)
 
 // DELETED: precompute_t_prior_effects() - 9D helper (replaced by 1D calibration)
-
 
 /// Calibrate half-t prior scale to achieve target exceedance probability (W₁ distance).
 ///
@@ -824,11 +815,10 @@ pub fn calibrate_floor_from_null(
     let n_per_class = n / 2;
 
     // Compute n_blocks at calibration size for scaling
-    let n_blocks_cal = if block_length > 0 {
-        (n_per_class / block_length).max(1)
-    } else {
-        n_per_class.max(1)
-    };
+    let n_blocks_cal = n_per_class
+        .checked_div(block_length)
+        .unwrap_or(n_per_class)
+        .max(1);
     let sqrt_n_blocks_cal = (n_blocks_cal as f64).sqrt();
 
     // Split interleaved samples by class
@@ -855,11 +845,11 @@ pub fn calibrate_floor_from_null(
         baseline_indices.shuffle(&mut rng);
         let split_baseline = n_baseline / 2;
 
-        let mut b1: Vec<f64> = baseline_indices[..split_baseline]
+        let b1: Vec<f64> = baseline_indices[..split_baseline]
             .iter()
             .map(|&i| baseline_samples[i])
             .collect();
-        let mut b2: Vec<f64> = baseline_indices[split_baseline..]
+        let b2: Vec<f64> = baseline_indices[split_baseline..]
             .iter()
             .map(|&i| baseline_samples[i])
             .collect();
@@ -869,18 +859,18 @@ pub fn calibrate_floor_from_null(
         sample_indices.shuffle(&mut rng);
         let split_sample = n_sample / 2;
 
-        let mut s1: Vec<f64> = sample_indices[..split_sample]
+        let s1: Vec<f64> = sample_indices[..split_sample]
             .iter()
             .map(|&i| sample_samples[i])
             .collect();
-        let mut s2: Vec<f64> = sample_indices[split_sample..]
+        let s2: Vec<f64> = sample_indices[split_sample..]
             .iter()
             .map(|&i| sample_samples[i])
             .collect();
 
         // Compute W₁ for both within-class splits
-        let w1_baseline = compute_w1_distance(&mut b1, &mut b2);
-        let w1_sample = compute_w1_distance(&mut s1, &mut s2);
+        let w1_baseline = compute_w1_distance(&b1, &b2);
+        let w1_sample = compute_w1_distance(&s1, &s2);
 
         // Average the two null replicates and scale by sqrt(n_blocks_cal).
         // Correction: null W₁ replicates use half-samples (m = n_per_class/2),
@@ -1368,11 +1358,11 @@ mod tests {
             let mut baseline_indices: Vec<usize> = (0..n_baseline).collect();
             baseline_indices.shuffle(&mut rng);
             let split = n_baseline / 2;
-            let mut b1: Vec<f64> = baseline_indices[..split]
+            let b1: Vec<f64> = baseline_indices[..split]
                 .iter()
                 .map(|&i| baseline_samples[i])
                 .collect();
-            let mut b2: Vec<f64> = baseline_indices[split..]
+            let b2: Vec<f64> = baseline_indices[split..]
                 .iter()
                 .map(|&i| baseline_samples[i])
                 .collect();
@@ -1380,17 +1370,17 @@ mod tests {
             let mut sample_indices: Vec<usize> = (0..n_sample).collect();
             sample_indices.shuffle(&mut rng);
             let split = n_sample / 2;
-            let mut s1: Vec<f64> = sample_indices[..split]
+            let s1: Vec<f64> = sample_indices[..split]
                 .iter()
                 .map(|&i| sample_samples[i])
                 .collect();
-            let mut s2: Vec<f64> = sample_indices[split..]
+            let s2: Vec<f64> = sample_indices[split..]
                 .iter()
                 .map(|&i| sample_samples[i])
                 .collect();
 
-            let w1_b = compute_w1_distance(&mut b1, &mut b2);
-            let w1_s = compute_w1_distance(&mut s1, &mut s2);
+            let w1_b = compute_w1_distance(&b1, &b2);
+            let w1_s = compute_w1_distance(&s1, &s2);
             let avg_w1 = (w1_b + w1_s) / 2.0;
             null_replicates.push(avg_w1 * sqrt_n_blocks_cal);
         }

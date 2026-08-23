@@ -354,7 +354,7 @@ fn orion_aead_decrypt_constant_time() {
     let secret_key = aead::SecretKey::default();
 
     // Pre-encrypt two different plaintexts
-    let ciphertext1 = aead::seal(&secret_key, &vec![0u8; 32]).unwrap();
+    let ciphertext1 = aead::seal(&secret_key, &[0u8; 32]).unwrap();
     let ciphertext2 = aead::seal(&secret_key, &rand_bytes_32()).unwrap();
 
     let inputs = InputPair::new(move || ciphertext1.clone(), move || ciphertext2.clone());

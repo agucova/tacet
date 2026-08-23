@@ -211,8 +211,8 @@ impl ToolAdapter for TimingOracleAdapter {
         let baseline_ns: Vec<f64> = data.baseline.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
         let test_ns: Vec<f64> = data.test.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
 
-        let mut oracle = TimingOracle::for_attacker(self.attacker_model)
-            .bootstrap_method(self.bootstrap_method);
+        let mut oracle =
+            TimingOracle::for_attacker(self.attacker_model).bootstrap_method(self.bootstrap_method);
 
         if let Some(budget) = self.time_budget {
             oracle = oracle.time_budget(budget);
@@ -325,8 +325,18 @@ impl ToolAdapter for TimingOracleAdapter {
         // Convert cycles to nanoseconds using the same 3 GHz reference frequency
         // as the synthetic data generator (sweep.rs line 1260)
         const FREQ_GHZ: f64 = 3.0;
-        let baseline_ns: Vec<f64> = dataset.blocked.baseline.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
-        let test_ns: Vec<f64> = dataset.blocked.test.iter().map(|&c| c as f64 / FREQ_GHZ).collect();
+        let baseline_ns: Vec<f64> = dataset
+            .blocked
+            .baseline
+            .iter()
+            .map(|&c| c as f64 / FREQ_GHZ)
+            .collect();
+        let test_ns: Vec<f64> = dataset
+            .blocked
+            .test
+            .iter()
+            .map(|&c| c as f64 / FREQ_GHZ)
+            .collect();
 
         let mut oracle = TimingOracle::for_attacker(actual_model);
 
