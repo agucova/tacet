@@ -31,17 +31,19 @@ jobs:
             target: x86_64-apple-darwin
             strip: strip -x *.node
 
-          # Linux x64 (glibc)
+          # Linux x64 (glibc) - linked against the old glibc in @napi-rs/cross-toolchain
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            build_flags: '--use-napi-cross'
             strip: strip *.node
 
-          # Linux ARM64 (glibc)
+          # Linux ARM64 (glibc) - linked against the old glibc in @napi-rs/cross-toolchain
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            build_flags: '--use-napi-cross'
             setup: |
               sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu
+              sudo apt-get install -y binutils-aarch64-linux-gnu
             strip: aarch64-linux-gnu-strip *.node
 
           # Linux x64 (musl) - cross-compiled with cargo-zigbuild
@@ -97,10 +99,6 @@ jobs:
 
       - name: Install dependencies
         run: bun install
-
-      - name: Set cross-compile env (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
 
       - name: Build native module
         run: bun run build:native --target ${{ matrix.target }} ${{ matrix.build_flags }}
