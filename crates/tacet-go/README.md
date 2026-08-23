@@ -13,17 +13,52 @@
 
 ---
 
-## ⚠️ Known Issues
+## Status and Known Limitations
 
-**CRITICAL BUG (As of 2026-02-05):** All tacet-go tests are currently failing with false positives. The FFI layer has been partially fixed (enums changed from `int` to `int32`, integer fields to `uint64`), but integration tests still report `P(leak)=100%` for identical inputs (should be 0%).
+The "inverted results" bug previously described here (`P(leak)=100%` on identical
+inputs) does not exist. It was a misdiagnosis: the FFI conversion, enum mapping,
+class labelling, and tick-to-nanosecond conversion are all correct, and are now
+covered by deterministic regression tests in `analysis_groundtruth_test.go`
+(identical distributions must Pass; an injected shift of *N* timer ticks must
+Fail with an effect within 10% of *N* × the timer resolution; the result must not
+depend on which class is slower).
 
-**Status:**
-- ✅ Direct FFI calls work correctly
-- ❌ Integration through `tacet.Test()` produces inverted results (negative effects, 100% leak probability on sanity checks)
+What was actually wrong was the measurement loop, not the analysis:
 
-**Workaround:** Use the Rust API directly (`tacet` crate) until this is resolved.
+- **Batch size was chosen from one input class only.** The pilot timed the
+  baseline class and ignored the sample class. For an operation like
+  `big.Int.Exp` with a zero exponent the baseline returns immediately, so the
+  pilot concluded "too fast to measure" and folded 20 calls into every
+  measurement — including 20 full modular exponentiations per sample-class
+  measurement. Batching calls back-to-back also makes consecutive calls share
+  microarchitectural state, which adds serial dependence to the samples and
+  inflates the variance estimate until the posterior collapses onto the prior
+  (the signature was `Inconclusive (NotLearning)` with `P(leak)` pinned near 63%,
+  which is the prior exceedance probability, not a measurement).
+  The pilot now times both classes and sizes the batch from the slower one.
+- **Operations below the timer's resolution produced a verdict anyway.** The
+  Rust harness reports `Unmeasurable` when even the maximum batch fails to span
+  50 timer ticks; the Go binding analyzed quantization noise instead. It now
+  returns `Unmeasurable` with a recommendation, matching the Rust behaviour.
+- **Inputs were generated inside the measurement loop.** Generating the next
+  input immediately before timing the operation leaves the caches and branch
+  predictors in a different state for each class. Inputs are now generated up
+  front.
+- **No measurement environment setup.** The goroutine is now pinned to its OS
+  thread and the CPU is spun up to a stable clock before sampling, as the Rust
+  harness does.
+- **Effect sizes were reported per batch.** They are now divided by the batch
+  size and reported per call.
 
-**Tracking:** The root cause is likely in how results flow from FFI through `resultFromFFI()` conversion - struct field alignment or sign errors.
+### Remaining limitations
+
+- **Coarse timer on Apple Silicon.** `cntvct_el0` ticks at 24 MHz (41.67 ns).
+  Any operation below roughly 100 ns per call comes back `Unmeasurable` on this
+  platform, which covers most single-block symmetric primitives. Run under
+  `sudo` to get PMU cycle counters, or measure a larger unit of work.
+- **Sensitive to machine load.** Results on a busy machine drift toward
+  `Inconclusive`, and a heavily loaded machine can produce false positives. Run
+  timing tests on an otherwise idle system.
 
 ---
 

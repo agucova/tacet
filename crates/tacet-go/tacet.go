@@ -52,6 +52,7 @@ package tacet
 
 import (
 	"errors"
+	"fmt"
 	"math/rand/v2"
 	"time"
 
@@ -94,13 +95,24 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 		rng = rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))
 	}
 
-	// Phase 0: Warmup and detect batch K
+	// Pin to one OS thread and let the CPU reach a stable clock before any
+	// measurement is taken.
+	unlock := lockAndStabilize()
+	defer unlock()
+
+	startTime := time.Now()
+
+	// Phase 0: Warmup, then pilot both classes to select the batch size
 	WarmupOperation(op, inputSize, 100)
 
-	batchK := 1
+	pilot := pilotResult{batchK: 1, measurable: true}
 	if !cfg.disableAdaptiveBatch {
-		batchK = detectBatchK(op, inputSize)
+		pilot = runPilot(gen, op, inputSize)
+		if !pilot.measurable {
+			return unmeasurableResult(pilot, time.Since(startTime)), nil
+		}
 	}
+	batchK := pilot.batchK
 
 	// Phase 1: Calibration - collect initial samples (pure Go)
 	calBaseline, calSample := collectSamples(
@@ -123,7 +135,12 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 	}
 	defer state.Free()
 
-	startTime := time.Now()
+	// The calibration samples count toward the posterior, so they are handed to
+	// the first adaptive step along with the first batch. Without this the first
+	// posterior is computed from a single batch and its variance (var_rate / n)
+	// is wide enough to leave the posterior sitting on the prior.
+	pendingBaseline := calBaseline
+	pendingSample := calSample
 
 	for {
 		// Check time budget
@@ -144,6 +161,10 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 			gen, op, inputSize,
 			cfg.batchSize, batchK, rng,
 		)
+		batchBaseline = append(pendingBaseline, batchBaseline...)
+		batchSample = append(pendingSample, batchSample...)
+		pendingBaseline = nil
+		pendingSample = nil
 
 		// Run adaptive step (single CGo call)
 		stepResult, err := ffi.Step(
@@ -160,7 +181,7 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 
 		// Check if we have a decision
 		if stepResult.HasDecision {
-			return resultFromFFI(&stepResult.Result), nil
+			return resultFromFFI(&stepResult.Result, batchK), nil
 		}
 
 		// Check sample budget
@@ -173,6 +194,24 @@ func Test(gen Generator, op Operation, inputSize int, opts ...Option) (*Result, 
 				LeakProbability:    state.LeakProbability(),
 			}, nil
 		}
+	}
+}
+
+// unmeasurableResult builds the outcome for an operation that is too fast for
+// the platform timer even with maximum batching.
+func unmeasurableResult(pilot pilotResult, elapsed time.Duration) *Result {
+	resolution := timerResolutionNs()
+	return &Result{
+		Outcome:           Unmeasurable,
+		ElapsedTime:       elapsed,
+		TimerResolutionNs: resolution,
+		Recommendation: fmt.Sprintf(
+			"Operation takes about %.1f ns per call, but %s has %.1f ns resolution: "+
+				"even %d calls per measurement span only %.1f ticks, below the %.0f ticks "+
+				"needed for reliable inference. Measure a larger unit of work, or run on a "+
+				"platform with a finer timer (for example PMU cycle counters via sudo).",
+			pilot.ticksPerCall*resolution, timerName(), resolution,
+			maxBatchK, pilot.ticksPerCall*maxBatchK, targetTicksPerBatch),
 	}
 }
 
@@ -198,7 +237,7 @@ func Analyze(baseline, sample []uint64, opts ...Option) (*Result, error) {
 		return nil, err
 	}
 
-	return resultFromFFI(ffiResult), nil
+	return resultFromFFI(ffiResult, 1), nil
 }
 
 // Version returns the library version string.
@@ -256,29 +295,40 @@ func (c *Config) toFFI() *ffi.Config {
 	}
 }
 
-// resultFromFFI converts FFI result to public Result
-func resultFromFFI(r *ffi.Result) *Result {
+// resultFromFFI converts FFI result to public Result.
+//
+// batchK is the number of operation calls folded into each measurement. The
+// analysis works on batch totals, so effect sizes are divided by batchK to be
+// reported per call, matching the Rust harness.
+func resultFromFFI(r *ffi.Result, batchK int) *Result {
 	if r == nil {
 		return nil
+	}
+
+	k := float64(batchK)
+	if k < 1 {
+		k = 1
 	}
 
 	result := &Result{
 		Outcome:         outcomeFromFFI(r.Outcome),
 		LeakProbability: r.LeakProbability,
 		Effect: Effect{
-			MaxEffectNs:        r.Effect.MaxEffectNs,
-			CredibleIntervalNs: [2]float64{r.Effect.CILow, r.Effect.CIHigh},
+			MaxEffectNs:        r.Effect.MaxEffectNs / k,
+			CredibleIntervalNs: [2]float64{r.Effect.CILow / k, r.Effect.CIHigh / k},
 			TopQuantiles:       nil, // TODO: populate from C API when available
 		},
-		Quality:            qualityFromFFI(r.Quality),
-		SamplesUsed:        r.SamplesUsed,
-		ElapsedTime:        time.Duration(r.ElapsedTime * float64(time.Second)),
-		Exploitability:     exploitabilityFromFFI(r.Exploitability),
-		InconclusiveReason: inconclusiveReasonFromFFI(r.InconclusiveReason),
-		MDENs:              r.MDENs,
-		ThetaUserNs:        r.ThetaUserNs,
-		ThetaEffNs:         r.ThetaEffNs,
-		ThetaFloorNs:       r.ThetaFloorNs,
+		Quality:             qualityFromFFI(r.Quality),
+		SamplesUsed:         r.SamplesUsed,
+		ElapsedTime:         time.Duration(r.ElapsedTime * float64(time.Second)),
+		Exploitability:      exploitabilityFromFFI(r.Exploitability),
+		InconclusiveReason:  inconclusiveReasonFromFFI(r.InconclusiveReason),
+		MDENs:               r.MDENs,
+		ThetaUserNs:         r.ThetaUserNs,
+		ThetaEffNs:          r.ThetaEffNs,
+		ThetaFloorNs:        r.ThetaFloorNs,
+		TimerResolutionNs:   r.TimerResolutionNs,
+		DecisionThresholdNs: r.DecisionThresholdNs,
 	}
 
 	// Convert diagnostics (always present in FFI result, not a pointer)

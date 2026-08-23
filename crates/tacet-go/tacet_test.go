@@ -97,18 +97,24 @@ func TestCollectSamples(t *testing.T) {
 	}
 }
 
-// TestDetectBatchK verifies adaptive batching detection.
-func TestDetectBatchK(t *testing.T) {
-	// Fast operation - may need batching
+// TestRunPilot verifies batch size selection and the unmeasurable verdict.
+func TestRunPilot(t *testing.T) {
+	gen := NewZeroGenerator(42)
+
+	// Fast operation - far below timer resolution, so it must be reported as
+	// unmeasurable rather than silently analyzed at maximum batching.
 	fastOp := FuncOperation(func(input []byte) {
 		// Very fast - just a memory access
 		_ = input[0]
 	})
 
-	k := detectBatchK(fastOp, 32)
-	t.Logf("Batch K for fast operation: %d", k)
-	if k < 1 || k > 20 {
-		t.Fatalf("Batch K out of range: %d", k)
+	fast := runPilot(gen, fastOp, 32)
+	t.Logf("Fast operation: K=%d ticksPerCall=%.4f measurable=%v", fast.batchK, fast.ticksPerCall, fast.measurable)
+	if fast.batchK < 1 || fast.batchK > maxBatchK {
+		t.Fatalf("Batch K out of range: %d", fast.batchK)
+	}
+	if fast.measurable && fast.ticksPerCall*float64(fast.batchK) < targetTicksPerBatch {
+		t.Fatalf("Operation reported measurable with only %.1f ticks per batch", fast.ticksPerCall*float64(fast.batchK))
 	}
 
 	// Slow operation - should not need batching
@@ -123,9 +129,44 @@ func TestDetectBatchK(t *testing.T) {
 		_ = sum
 	})
 
-	k2 := detectBatchK(slowOp, 32)
-	t.Logf("Batch K for slow operation: %d", k2)
-	// Slow operation should typically have lower K
+	slow := runPilot(gen, slowOp, 32)
+	t.Logf("Slow operation: K=%d ticksPerCall=%.2f measurable=%v", slow.batchK, slow.ticksPerCall, slow.measurable)
+	if !slow.measurable {
+		t.Errorf("Expected a ~microsecond operation to be measurable, got ticksPerCall=%.4f", slow.ticksPerCall)
+	}
+	if slow.batchK != 1 {
+		t.Errorf("Expected no batching for a slow operation, got K=%d", slow.batchK)
+	}
+}
+
+// TestRunPilotUsesBothClasses verifies that batch size selection accounts for
+// both input classes. An operation that is instant for the baseline class but
+// expensive for the sample class must not be batched based on the cheap class.
+func TestRunPilotUsesBothClasses(t *testing.T) {
+	gen := NewZeroGenerator(42)
+
+	// Instant when the input is all zeros, ~microseconds otherwise.
+	asymmetricOp := FuncOperation(func(input []byte) {
+		if input[0] == 0 {
+			return
+		}
+		var sum byte
+		for i := 0; i < 2000; i++ {
+			for _, b := range input {
+				sum ^= b
+			}
+		}
+		_ = sum
+	})
+
+	p := runPilot(gen, asymmetricOp, 32)
+	t.Logf("Asymmetric operation: K=%d ticksPerCall=%.2f measurable=%v", p.batchK, p.ticksPerCall, p.measurable)
+	if p.batchK != 1 {
+		t.Errorf("Expected K=1 (the sample class alone is well above timer resolution), got K=%d", p.batchK)
+	}
+	if !p.measurable {
+		t.Error("Expected an asymmetric operation with an expensive class to be measurable")
+	}
 }
 
 // TestConfigOptions verifies configuration options work.
@@ -228,6 +269,10 @@ func TestKnownLeaky(t *testing.T) {
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
 	t.Logf("  Effect: %.2f ns (CI: [%.2f, %.2f])", result.Effect.MaxEffectNs, result.Effect.CredibleIntervalNs[0], result.Effect.CredibleIntervalNs[1])
 	t.Logf("  Samples: %d", result.SamplesUsed)
+
+	if result.Outcome == Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
 
 	if result.Outcome != Fail {
 		t.Errorf("Expected Fail outcome for leaky operation, got %s", result.Outcome)
@@ -659,6 +704,10 @@ func TestKnownLeakyEarlyExitComparison(t *testing.T) {
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
 	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
+	if result.Outcome == Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
+
 	if result.Outcome != Fail {
 		t.Errorf("Expected Fail for early-exit comparison, got %s", result.Outcome)
 	}
@@ -779,18 +828,9 @@ func TestQualityExcellentOrGood(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	// Simple constant-time operation
-	safeOp := FuncOperation(func(input []byte) {
-		var sum byte
-		for _, b := range input {
-			sum ^= b
-		}
-		_ = sum
-	})
-
 	result, err := Test(
 		NewZeroGenerator(42),
-		safeOp,
+		measurableSafeOp(),
 		32,
 		WithAttacker(AdjacentNetwork),
 		WithTimeBudget(10*time.Second),
@@ -803,10 +843,29 @@ func TestQualityExcellentOrGood(t *testing.T) {
 	t.Logf("  Quality: %s", result.Quality)
 	t.Logf("  MDE: %.2f ns", result.MDENs)
 
+	if result.Outcome == Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
+
 	// In a good environment, we should get Excellent or Good quality
 	if result.Quality != Excellent && result.Quality != Good && result.Quality != Poor {
 		t.Logf("Warning: got quality %s, expected Excellent, Good, or Poor", result.Quality)
 	}
+}
+
+// measurableSafeOp returns a constant-time operation slow enough to be resolved
+// by a coarse platform timer (roughly a microsecond per call), so tests that
+// need a real analysis result do not come back Unmeasurable.
+func measurableSafeOp() Operation {
+	return FuncOperation(func(input []byte) {
+		var sum byte
+		for i := 0; i < 200; i++ {
+			for _, b := range input {
+				sum ^= b
+			}
+		}
+		_ = sum
+	})
 }
 
 // TestDiagnosticsPopulated verifies that diagnostics fields are populated.
@@ -815,17 +874,9 @@ func TestDiagnosticsPopulated(t *testing.T) {
 		t.Skip("Skipping integration test in short mode")
 	}
 
-	safeOp := FuncOperation(func(input []byte) {
-		var sum byte
-		for _, b := range input {
-			sum ^= b
-		}
-		_ = sum
-	})
-
 	result, err := Test(
 		NewZeroGenerator(42),
-		safeOp,
+		measurableSafeOp(),
 		32,
 		WithAttacker(AdjacentNetwork),
 		WithTimeBudget(10*time.Second),
@@ -835,6 +886,10 @@ func TestDiagnosticsPopulated(t *testing.T) {
 	}
 
 	t.Logf("Result: %s", result)
+
+	if result.Outcome == Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
 
 	// Check that diagnostics is present
 	if result.Diagnostics == nil {

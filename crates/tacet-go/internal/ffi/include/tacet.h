@@ -506,7 +506,7 @@ struct ToState *to_state_new(void);
 void to_state_free(struct ToState *state);
 
 /**
- * Get the total number of samples collected (both classes combined).
+ * Get the total number of samples collected per class (baseline class count).
  *
  * # Safety
  * `state` must be a valid pointer.

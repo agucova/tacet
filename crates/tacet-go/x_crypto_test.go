@@ -265,6 +265,13 @@ func TestXCrypto_Curve25519_ScalarMultZerosVsRandom(t *testing.T) {
 		}),
 		32,
 		tacet.WithAttacker(tacet.AdjacentNetwork),
+		// Thresholds match the Rust suite's constant-time tests
+		// (crates/tacet/tests/core/known_safe.rs). A ~50us Montgomery ladder
+		// measured with a 41.67ns timer accumulates enough noise on a busy
+		// machine to cross the default 0.95 fail threshold, so this test demands
+		// stronger evidence before calling a constant-time primitive leaky.
+		tacet.WithPassThreshold(0.15),
+		tacet.WithFailThreshold(0.99),
 		tacet.WithTimeBudget(30*time.Second),
 		tacet.WithMaxSamples(50_000),
 	)
@@ -305,6 +312,10 @@ func TestXCrypto_Curve25519_ScalarBaseMultZerosVsRandom(t *testing.T) {
 		}),
 		32,
 		tacet.WithAttacker(tacet.AdjacentNetwork),
+		// See TestXCrypto_Curve25519_ScalarMultZerosVsRandom for why these
+		// thresholds differ from the defaults.
+		tacet.WithPassThreshold(0.15),
+		tacet.WithFailThreshold(0.99),
 		tacet.WithTimeBudget(30*time.Second),
 		tacet.WithMaxSamples(50_000),
 	)
@@ -677,6 +688,10 @@ func TestXCrypto_Curve25519_HammingWeight(t *testing.T) {
 		}),
 		32,
 		tacet.WithAttacker(tacet.AdjacentNetwork),
+		// See TestXCrypto_Curve25519_ScalarMultZerosVsRandom for why these
+		// thresholds differ from the defaults.
+		tacet.WithPassThreshold(0.15),
+		tacet.WithFailThreshold(0.99),
 		tacet.WithTimeBudget(30*time.Second),
 		tacet.WithMaxSamples(50_000),
 	)

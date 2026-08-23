@@ -46,44 +46,22 @@ Testing circl provides:
 9. `TestCircl_X25519_ScalarMult` - Compare with golang.org/x/crypto/curve25519
 10. `TestCircl_Ed25519_Signing` - Compare with stdlib crypto/ed25519
 
-## The Problem: tacet-go FFI Bug
+## Previously Reported FFI Bug (resolved)
 
-### Symptoms
+An earlier revision of this file reported that all Go tests produced garbage
+(`P(leak) = 100%` on identical inputs, negative effect sizes, nonsensical sample
+counts) and blamed the FFI result conversion. That diagnosis was wrong. The
+struct layout, enum mapping, class labelling, and tick-to-nanosecond conversion
+are correct and are now pinned by deterministic regression tests in
+`analysis_groundtruth_test.go`.
 
-**All Go tests fail immediately with garbage results:**
-- Invalid sample counts: `3`, `4294967298` (≈ uint32 max), or other garbage values
-- Instant execution: <2 seconds instead of expected 30-60 seconds
-- `P(leak) = 100%` for identical inputs (should be 0%)
-- Implausible effect sizes: `-8.36ns` (negative effects indicate sign error)
+The real defect was in the measurement loop: the batch size was selected by
+timing only the baseline class, which for asymmetric operations folded twenty
+calls into every measurement and added enough serial dependence to collapse the
+posterior onto its prior. See the "Status and Known Limitations" section of
+`README.md` for the full list of what changed.
 
-### Impact
-
-This bug blocks:
-1. **All circl tests** (new, never worked)
-2. **All stdlib crypto tests** (golang.org/x/crypto)
-3. **All x/crypto tests** (previously working)
-4. **Simple examples** and sanity checks
-
-### Root Cause
-
-**Partially Identified:**
-
-The FFI layer had type mismatches between Go and C structs:
-- ✅ **FIXED:** Enums: `int` → `int32` (C enums are 32-bit)
-- ✅ **FIXED:** Integer fields: `int` → `uint64` to match C's `uint64_t`
-- ✅ **FIXED:** Diagnostics: Changed from pointer to embedded struct
-- ✅ **FIXED:** Added missing fields: `TimerResolutionNs`, `DecisionThresholdNs`
-
-**Still Broken:**
-- Direct FFI calls work correctly (see `debug_test.go`)
-- Integration through `tacet.Test()` produces inverted results
-- Negative effects suggest baseline/sample might be swapped or sign error in conversion
-
-### Current Work
-
-The issue is being investigated. The problem appears to be in the flow from FFI → `resultFromFFI()` → public API, not in the FFI layer itself.
-
-## Expected Results (When Fixed)
+## Expected Results
 
 Based on the test design:
 
@@ -103,7 +81,7 @@ Based on the test design:
 - Should PASS - both are designed for constant-time operation
 - Serves as validation baseline against stdlib implementations
 
-## How to Run (When Fixed)
+## How to Run
 
 ```bash
 cd crates/tacet-go
@@ -144,4 +122,9 @@ See `CIRCL_INVESTIGATION_REPORT.md` for:
 
 ## Status Updates
 
-**2026-02-05:** Tests implemented, blocked by tacet-go FFI bug. Partial fixes applied (enum types, integer fields), but integration tests still fail. Direct FFI works correctly, suggesting issue is in result conversion layer.
+**2026-02-05:** Tests implemented, reported as blocked by a tacet-go FFI bug.
+
+**2026-08-22:** The FFI bug report was a misdiagnosis. The batch-size selection
+in the Go measurement loop was fixed, along with the missing `Unmeasurable`
+verdict, input pre-generation, and measurement environment setup. The whole Go
+test suite, including these circl tests, passes.

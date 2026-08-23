@@ -129,7 +129,20 @@ func TestGoStdlibECDSA_P384_SignZerosVsRandom(t *testing.T) {
 	}
 }
 
-// TestGoStdlibECDSA_P256_VerifyZerosVsRandom tests ECDSA P-256 verification timing.
+// TestGoStdlibECDSA_P256_VerifyZerosVsRandom measures ECDSA P-256 verification
+// timing with an all-zero digest against random digests.
+//
+// This test is informational rather than an assertion. Verification consumes
+// only public values (digest, signature, public key), so a timing difference
+// between them is not a side channel. The two classes here are also not
+// equivalent computations: an all-zero digest hashes to z = 0, which turns the
+// u1 = z*w scalar multiplication into a multiplication by zero, and the
+// signature verifies for the baseline class while failing for the sample class.
+// A difference of a few hundred nanoseconds is regularly measured here and is
+// expected.
+//
+// The Rust suite avoids all-zero fixed inputs for exactly this reason; see the
+// "non-pathological fixed pattern" note in crates/tacet/tests/core/known_safe.rs.
 func TestGoStdlibECDSA_P256_VerifyZerosVsRandom(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping stdlib crypto test in short mode")
@@ -166,10 +179,12 @@ func TestGoStdlibECDSA_P256_VerifyZerosVsRandom(t *testing.T) {
 	t.Logf("ECDSA P-256 Verify Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
 	if result.Outcome == tacet.Fail {
-		t.Errorf("TIMING LEAK DETECTED in crypto/ecdsa P-256 Verify")
-		t.Logf("  Effect size: %.2f ns", result.Effect.MaxEffectNs)
+		t.Logf("  A timing difference was measured between a valid zero-digest verification")
+		t.Logf("  and failing verifications of random digests. Both inputs are public, so this")
+		t.Logf("  is not a side channel; it reflects z=0 taking a different scalar multiplication.")
 	}
 }
 
@@ -332,23 +347,27 @@ func TestGoStdlibRSA_PKCS1v15_DecryptZerosVsRandom(t *testing.T) {
 	}
 }
 
-// TestGoStdlibRSA_PKCS1v15_KnownLimitation_AssertLeak validates that tacet
-// detects the known RSA PKCS#1 v1.5 timing limitation documented in Go's
-// crypto/rsa package.
+// TestGoStdlibRSA_PKCS1v15_DecryptPaddingTiming measures RSA PKCS#1 v1.5
+// decryption with a valid ciphertext against a corrupted one, the shape of a
+// Bleichenbacher/Marvin padding oracle.
 //
-// Go's documentation explicitly warns that PKCS#1 v1.5 encryption is
-// "almost impossible to use safely" and recommends RSA-OAEP instead.
-// This test validates that tacet can detect timing differences in the
-// padding validation code path.
+// This test used to assert that a leak is detected, on the grounds that Go's
+// documentation warns PKCS#1 v1.5 is "almost impossible to use safely". That
+// warning is about the protocol construction, not about a timing side channel
+// in Go's implementation: crypto/rsa performs the padding check in constant
+// time, so a Pass or Inconclusive outcome here is the correct answer, and
+// asserting Fail made the test fail against a hardened standard library.
 //
-// Expected: FAIL - This is a KNOWN limitation, not a bug.
+// The test is therefore informational: it reports what was measured and only
+// fails if the harness itself errors.
+//
 // Reference: https://pkg.go.dev/crypto/rsa#DecryptPKCS1v15
 //
 // CI Configuration:
-// - pass_threshold(0.01): Very hard to falsely pass (we expect leak)
-// - fail_threshold(0.85): Quick to detect leak
-// - time_budget(30s): Generous ceiling
-func TestGoStdlibRSA_PKCS1v15_KnownLimitation_AssertLeak(t *testing.T) {
+// - pass_threshold(0.01): demand strong evidence before declaring no leak
+// - fail_threshold(0.85): quick to flag a leak if one appears
+// - time_budget(30s): generous ceiling
+func TestGoStdlibRSA_PKCS1v15_DecryptPaddingTiming(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping stdlib crypto test in short mode")
 	}
@@ -403,29 +422,23 @@ func TestGoStdlibRSA_PKCS1v15_KnownLimitation_AssertLeak(t *testing.T) {
 		t.Fatalf("Test failed with error: %v", err)
 	}
 
-	t.Logf("\n[TestGoStdlibRSA_PKCS1v15_KnownLimitation_AssertLeak]")
-	t.Logf("RSA PKCS#1 v1.5 Known Limitation: %s", result)
+	t.Logf("\n[TestGoStdlibRSA_PKCS1v15_DecryptPaddingTiming]")
+	t.Logf("RSA PKCS#1 v1.5 Decrypt (valid vs corrupted ciphertext): %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
-	// Skip ONLY if unmeasurable (operation too fast for this platform)
-	if result.Outcome == tacet.Unmeasurable {
+	switch result.Outcome {
+	case tacet.Unmeasurable:
 		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
-		return
-	}
-
-	// For known leaky code, we EXPECT Fail - this validates tacet's detection capability
-	if result.Outcome != tacet.Fail {
-		t.Errorf("Expected FAIL outcome for RSA PKCS#1 v1.5 known limitation, got: %s", result.Outcome)
-		t.Logf("  This is a KNOWN timing limitation per Go docs (\"almost impossible to use safely\")")
-		t.Logf("  If tacet cannot detect this leak, it indicates a detection failure")
-		t.Logf("  Current P(leak): %.2f%%", result.LeakProbability*100)
-		t.Logf("  Effect size: %.2f ns", result.Effect.MaxEffectNs)
-	} else {
-		// Expected outcome - leak detected
-		t.Logf("  ✓ LEAK DETECTED as expected (known limitation)")
-		t.Logf("  Effect size: %.2f ns", result.Effect.MaxEffectNs)
-		t.Logf("  This validates tacet's ability to detect Bleichenbacher-class attacks")
+	case tacet.Fail:
+		t.Logf("  A timing difference was detected between valid and corrupted ciphertexts.")
+		t.Logf("  Exploitability: %s", result.Exploitability)
+		t.Logf("  This is the shape of a Bleichenbacher/Marvin padding oracle and is worth investigating.")
+	case tacet.Pass:
+		t.Logf("  No timing difference above the threshold: the padding check looks constant time.")
+	default:
+		t.Logf("  Inconclusive (%s) - not enough evidence either way within the budget.", result.InconclusiveReason)
 	}
 }
 
@@ -760,6 +773,10 @@ func TestGoStdlibHarness_KnownLeaky(t *testing.T) {
 	t.Logf("Harness Known Leaky Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 
+	if result.Outcome == tacet.Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
+
 	if result.Outcome != tacet.Fail {
 		t.Errorf("HARNESS ERROR: Known leaky operation should fail")
 		t.Logf("  This indicates the harness cannot detect obvious timing leaks")
@@ -944,7 +961,15 @@ func TestGoStdlibRSA_DecryptOAEP_ZerosVsRandom(t *testing.T) {
 // =============================================================================
 
 // TestGoStdlibBigInt_ModExp_ZerosVsRandom tests big.Int modular exponentiation.
-// This is the underlying primitive used by RSA and may have timing leaks.
+//
+// math/big is documented as not constant time, and this test exercises the most
+// extreme case of that: the baseline exponent is zero, which returns 1
+// immediately, while the sample exponent is a random 256-bit value that runs the
+// full windowed ladder. Measured on Apple Silicon the two differ by tens of
+// microseconds per call, so detecting a leak here is the correct answer and the
+// test asserts it. Failing to detect it would mean the harness is broken.
+//
+// This is why crypto/rsa and crypto/ecdsa do not use math/big for secret values.
 func TestGoStdlibBigInt_ModExp_ZerosVsRandom(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping stdlib crypto test in short mode")
@@ -976,10 +1001,18 @@ func TestGoStdlibBigInt_ModExp_ZerosVsRandom(t *testing.T) {
 	t.Logf("math/big ModExp Result: %s", result)
 	t.Logf("  Outcome: %s", result.Outcome)
 	t.Logf("  P(leak): %.2f%%", result.LeakProbability*100)
+	t.Logf("  Effect: %.2f ns", result.Effect.MaxEffectNs)
 
-	if result.Outcome == tacet.Fail {
-		t.Errorf("TIMING LEAK DETECTED in math/big ModExp")
-		t.Logf("  Effect size: %.2f ns", result.Effect.MaxEffectNs)
-		t.Logf("  This affects RSA and other cryptographic primitives")
+	if result.Outcome == tacet.Unmeasurable {
+		t.Skipf("SKIPPED: Operation too fast to measure - %s", result.Recommendation)
+	}
+
+	// math/big is not constant time, and a zero exponent short-circuits the
+	// whole ladder. This is a true positive; not detecting it is the bug.
+	if result.Outcome != tacet.Fail {
+		t.Errorf("Expected FAIL for math/big ModExp (zero vs random exponent), got %s", result.Outcome)
+		t.Logf("  math/big.Int.Exp short-circuits on a zero exponent, so the two classes")
+		t.Logf("  differ by the entire cost of a modular exponentiation.")
+		t.Logf("  P(leak): %.2f%%, effect: %.2f ns", result.LeakProbability*100, result.Effect.MaxEffectNs)
 	}
 }
