@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://crates.io/crates/tacet"><img src="https://img.shields.io/crates/v/tacet" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/@tacet/js"><img src="https://img.shields.io/npm/v/@tacet/js" alt="npm"></a>
-  <a href="https://jsr.io/@tacet/js"><img src="https://jsr.io/badges/@tacet/js" alt="JSR"></a>
+  <a href="https://jsr.io/@tacet/wasm"><img src="https://jsr.io/badges/@tacet/wasm" alt="JSR"></a>
   <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
 </p>
 
@@ -19,9 +19,12 @@
 | Language | Package | Install |
 |----------|---------|---------|
 | Rust | `tacet` | `cargo add tacet --dev` |
-| JavaScript | `@tacet/js` | `bun add @tacet/js` |
+| JavaScript / TypeScript (native) | `@tacet/js` | `bun add @tacet/js` |
+| JavaScript / TypeScript (WASM) | `@tacet/wasm` | `bun add @tacet/wasm` |
 | C/C++ | source | [Build instructions](https://tacet.sh/getting-started/installation) |
 | Go | `tacet-go` | `go get github.com/agucova/tacet/bindings/go` |
+
+> **Two JavaScript packages:** `@tacet/js` ships prebuilt native (N-API) binaries — the fastest option, for **Node.js** and **Bun**. `@tacet/wasm` is a portable WebAssembly build that also runs on **Deno** and platforms without a prebuilt binary (also on [JSR](https://jsr.io/@tacet/wasm)). Both expose the same detection API. Neither runs in browsers, which lack the high-precision timers these measurements require.
 
 **[Documentation →](https://tacet.sh)**
 

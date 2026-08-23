@@ -47,15 +47,31 @@ tacet = { version = "0.1", default-features = false }
 </TabItem>
 <TabItem label="JavaScript" icon="seti:javascript">
 
+tacet ships two JavaScript packages with the same builder-based detection API. Pick based on your runtime:
+
+- **`@tacet/js`** — prebuilt native (N-API) bindings. The fastest option, for **Node.js** and **Bun**. Prebuilt for Linux (x86_64, aarch64), macOS (x86_64, aarch64), and Windows (x86_64).
+- **`@tacet/wasm`** — a portable WebAssembly build. Runs on **Node.js**, **Bun**, and **Deno**, plus any platform without a prebuilt native binary. Also published on [JSR](https://jsr.io/@tacet/wasm).
+
+<Aside type="note">
+Neither package runs in browsers, which lack the high-precision timers these measurements require.
+</Aside>
+
+**Native — `@tacet/js`:**
+
 <PackageManagers pkg="@tacet/js" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
 
-Native bindings via NAPI-RS, supporting Node.js and Bun on:
-- Linux (x86_64, aarch64)
-- macOS (x86_64, aarch64)
-- Windows (x86_64)
+**WASM — `@tacet/wasm`:**
+
+<PackageManagers pkg="@tacet/wasm" pkgManagers={['bun', 'npm', 'pnpm', 'yarn']} />
+
+For Deno, install from JSR:
+
+```bash
+deno add jsr:@tacet/wasm
+```
 
 ```javascript
-import { TimingOracle, AttackerModel } from 'tacet';
+import { TimingOracle, AttackerModel } from '@tacet/js';
 
 const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
   .test(
@@ -64,6 +80,8 @@ const outcome = TimingOracle.forAttacker(AttackerModel.AdjacentNetwork)
     (data) => myFunction(data)
   );
 ```
+
+The WASM package (`@tacet/wasm`) exposes the same API; its enum values are accessed via `AttackerModelValues` and `OutcomeValues`.
 
 </TabItem>
 <TabItem label="C" icon="seti:c">

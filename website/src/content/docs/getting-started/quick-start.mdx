@@ -21,9 +21,10 @@ cargo add subtle --dev  # For the constant-time comparison example
 </TabItem>
 <TabItem label="JavaScript" icon="seti:javascript">
 ```bash
+# Native bindings (Node.js, Bun)
 bun add @tacet/js --dev
-# Or with npm
-npm install --save-dev @tacet/js
+# Or the portable WASM build (Node.js, Bun, Deno)
+bun add @tacet/wasm --dev
 ```
 </TabItem>
 <TabItem label="C" icon="seti:c">

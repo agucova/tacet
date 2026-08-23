@@ -35,13 +35,19 @@ cargo add tacet --dev
 Most useful features are enabled by default. See [installation](/getting-started/installation) for more details.
 </TabItem>
 <TabItem label="JavaScript" icon="seti:javascript">
-Install via your preferred package manager:
+Install the native package for Node.js and Bun:
 
 ```bash
 bun add @tacet/js
 ```
 
-We support Node.js, Deno and Bun. See [installation](/getting-started/installation) for more platform details.
+Or the portable WASM build, which also runs on Deno:
+
+```bash
+bun add @tacet/wasm
+```
+
+Both expose the same API. See [installation](/getting-started/installation) for more platform details.
 </TabItem>
 <TabItem label="C" icon="seti:c">
 Install the shared library and headers:
