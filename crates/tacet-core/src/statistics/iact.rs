@@ -482,7 +482,7 @@ fn compute_quantile(sorted_or_unsorted: &[f64], p: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{Rng, SeedableRng};
+    use rand::{RngExt, SeedableRng};
     use rand_xoshiro::Xoshiro256PlusPlus;
 
     #[test]

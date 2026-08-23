@@ -1025,7 +1025,7 @@ impl BenchmarkEffect {
 ///     .test(inputs, apply_effect(effect));
 /// ```
 pub fn apply_effect(effect: BenchmarkEffect) -> impl Fn(&bool) {
-    use rand::Rng;
+    use rand::RngExt;
     use rand_distr::{Distribution, Normal};
     use std::cell::RefCell;
 

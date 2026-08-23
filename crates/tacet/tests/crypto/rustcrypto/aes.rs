@@ -184,7 +184,7 @@ fn aes128_different_keys_constant_time() {
 #[test]
 fn aes128_multiple_blocks_constant_time() {
     use rand::rngs::StdRng;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
 
     // Use deterministic seed for reproducibility

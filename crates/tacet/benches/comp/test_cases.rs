@@ -10,7 +10,7 @@
 //! - **Noisy safe**: High variance but no actual leak
 //! - **Edge cases**: Platform-dependent or borderline cases
 
-use rand::Rng;
+use rand::RngExt;
 
 /// A test case that can be run by different timing analysis tools.
 pub trait TestCase: Send + Sync {

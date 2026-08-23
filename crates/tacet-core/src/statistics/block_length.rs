@@ -573,7 +573,7 @@ fn politis_white_from_acf(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
     use rand::SeedableRng;
     use rand_xoshiro::Xoshiro256PlusPlus;
 

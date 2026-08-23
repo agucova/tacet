@@ -863,7 +863,7 @@ fn effect_pattern_mixed() {
 /// since it executes the same operations regardless of input data.
 #[test]
 fn exploitability_negligible() {
-    use rand::Rng;
+    use rand::RngExt;
 
     let inputs = InputPair::new(
         || [0u8; 32], // Baseline: zeros

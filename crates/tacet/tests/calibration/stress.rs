@@ -15,7 +15,7 @@
 use crate::calibration_utils;
 
 use calibration_utils::{select_attacker_model, CalibrationConfig, Decision, TrialRunner};
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;

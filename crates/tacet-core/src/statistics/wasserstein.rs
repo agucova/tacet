@@ -35,7 +35,7 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 /// Compute the 1-Wasserstein distance (W₁) between two empirical distributions.
 ///

@@ -3,7 +3,7 @@
 //! Uses reservoir sampling to maintain approximate quantiles per time window,
 //! enabling detection of timing distribution drift during measurement.
 
-use rand::{Rng, SeedableRng};
+use rand::{RngExt, SeedableRng};
 use rand_xoshiro::Xoshiro256PlusPlus;
 
 /// Number of time windows for stationarity analysis.

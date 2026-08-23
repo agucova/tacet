@@ -9,7 +9,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 use crate::math;
 use crate::types::TimingSample;

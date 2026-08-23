@@ -1686,7 +1686,7 @@ pub fn compute_estimation_stats_by_effect(points: &[EstimationPoint]) -> Vec<Est
 
 /// Generate random 32-byte array.
 pub fn rand_bytes(rng: &mut StdRng) -> [u8; 32] {
-    use rand::Rng;
+    use rand::RngExt;
     let mut arr = [0u8; 32];
     rng.fill(&mut arr);
     arr

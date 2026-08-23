@@ -192,12 +192,11 @@ pub fn collect_realistic_dataset(config: &RealisticConfig) -> RealisticDataset {
 /// statistical tests.
 #[inline(never)]
 fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
-    use rand::Rng;
     use rand_distr::{Distribution, Normal};
 
     // Thread-local RNG for stochastic effects
     thread_local! {
-        static RNG: std::cell::RefCell<rand::rngs::ThreadRng> = std::cell::RefCell::new(rand::thread_rng());
+        static RNG: std::cell::RefCell<rand::rngs::ThreadRng> = std::cell::RefCell::new(rand::rng());
     }
 
     // ALWAYS compute the delay (same code path for baseline and test)
@@ -219,7 +218,7 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
                 0
             } else {
                 RNG.with(|rng| {
-                    if rng.borrow_mut().gen::<f64>() < *slow_prob {
+                    if rng.borrow_mut().random::<f64>() < *slow_prob {
                         *slow_delay_ns
                     } else {
                         0
@@ -248,7 +247,7 @@ fn compute_effect_delay(apply_effect: bool, effect: &BenchmarkEffect) -> u64 {
                 0
             } else {
                 RNG.with(|rng| {
-                    let is_tail = rng.borrow_mut().gen::<f64>() < *tail_prob;
+                    let is_tail = rng.borrow_mut().random::<f64>() < *tail_prob;
                     if is_tail {
                         (*base_delay_ns as f64 * *tail_mult) as u64
                     } else {

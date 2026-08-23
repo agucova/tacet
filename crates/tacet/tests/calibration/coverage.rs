@@ -18,7 +18,7 @@ use crate::calibration_utils;
 use calibration_utils::{
     busy_wait_ns, init_effect_injection, select_attacker_model, CalibrationConfig, Decision,
 };
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};
 use tacet::helpers::InputPair;
 use tacet::{Outcome, TimingOracle};
 

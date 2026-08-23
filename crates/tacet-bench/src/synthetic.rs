@@ -530,7 +530,7 @@ pub fn generate_benchmark_dataset(config: &BenchmarkConfig) -> GeneratedDataset 
                 .into_iter()
                 .zip(outlier_samples)
                 .map(|(base, outlier)| {
-                    if rng.gen::<f64>() < tail_prob {
+                    if rng.random::<f64>() < tail_prob {
                         outlier
                     } else {
                         base
@@ -576,7 +576,7 @@ pub fn generate_benchmark_dataset(config: &BenchmarkConfig) -> GeneratedDataset 
                 .into_iter()
                 .zip(slow_samples)
                 .map(|(base, slow)| {
-                    if rng.gen::<f64>() < slow_prob * config.effect_sigma_mult {
+                    if rng.random::<f64>() < slow_prob * config.effect_sigma_mult {
                         slow
                     } else {
                         base

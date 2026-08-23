@@ -35,7 +35,9 @@ fn fpr_quick_random_vs_random() {
 
     let test_name = "fpr_quick_random_vs_random";
     let config = CalibrationConfig::from_env(test_name);
-    let mut rng = config.rng();
+    // Both input closures need an RNG at the same state, and `StdRng` is not
+    // `Clone`, so each trial reseeds a pair of generators from `trial_seed`.
+    let mut trial_seed = config.seed;
 
     let trials = config.tier.fpr_trials();
     let mut runner = TrialRunner::new(test_name, config.clone(), trials);
@@ -52,10 +54,10 @@ fn fpr_quick_random_vs_random() {
         }
 
         // Both classes use random data - true null hypothesis
-        let mut rng_clone = rng.clone();
-        let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
-            let mut rng2 = rng.clone();
-            move || rand_bytes(&mut rng2)
+        let mut rng_a = StdRng::seed_from_u64(trial_seed);
+        let inputs = InputPair::new(move || rand_bytes(&mut rng_a), {
+            let mut rng_b = StdRng::seed_from_u64(trial_seed);
+            move || rand_bytes(&mut rng_b)
         });
 
         // Use 10ns threshold for rigorous FPR testing
@@ -89,8 +91,8 @@ fn fpr_quick_random_vs_random() {
             );
         }
 
-        // Advance RNG state for next trial
-        rng = StdRng::seed_from_u64(rng.random());
+        // Derive the next trial's seed from the current one
+        trial_seed = StdRng::seed_from_u64(trial_seed).random();
     }
 
     let (decision, report) = runner.finalize_fpr();
@@ -209,7 +211,9 @@ fn fpr_validation_rigorous() {
 
     let test_name = "fpr_validation_rigorous";
     let config = CalibrationConfig::from_env(test_name);
-    let mut rng = config.rng();
+    // Both input closures need an RNG at the same state, and `StdRng` is not
+    // `Clone`, so each trial reseeds a pair of generators from `trial_seed`.
+    let mut trial_seed = config.seed;
 
     let trials = config.tier.fpr_trials();
     let mut runner = TrialRunner::new(test_name, config.clone(), trials);
@@ -225,10 +229,10 @@ fn fpr_validation_rigorous() {
             break;
         }
 
-        let mut rng_clone = rng.clone();
-        let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
-            let mut rng2 = rng.clone();
-            move || rand_bytes(&mut rng2)
+        let mut rng_a = StdRng::seed_from_u64(trial_seed);
+        let inputs = InputPair::new(move || rand_bytes(&mut rng_a), {
+            let mut rng_b = StdRng::seed_from_u64(trial_seed);
+            move || rand_bytes(&mut rng_b)
         });
 
         let outcome = TimingOracle::for_attacker(AttackerModel::Research)
@@ -261,7 +265,7 @@ fn fpr_validation_rigorous() {
             );
         }
 
-        rng = StdRng::seed_from_u64(rng.random());
+        trial_seed = StdRng::seed_from_u64(trial_seed).random();
     }
 
     let (decision, report) = runner.finalize_fpr();
@@ -322,7 +326,9 @@ fn fpr_validation_per_attacker_model() {
             );
             continue;
         }
-        let mut rng = config.rng();
+        // Both input closures need an RNG at the same state, and `StdRng` is not
+        // `Clone`, so each trial reseeds a pair of generators from `trial_seed`.
+        let mut trial_seed = config.seed;
         let sub_test_name = format!("{}_{}", test_name, model_name);
         let mut runner = TrialRunner::new(&sub_test_name, config.clone(), trials_per_model);
 
@@ -336,10 +342,10 @@ fn fpr_validation_per_attacker_model() {
                 break;
             }
 
-            let mut rng_clone = rng.clone();
-            let inputs = InputPair::new(move || rand_bytes(&mut rng_clone), {
-                let mut rng2 = rng.clone();
-                move || rand_bytes(&mut rng2)
+            let mut rng_a = StdRng::seed_from_u64(trial_seed);
+            let inputs = InputPair::new(move || rand_bytes(&mut rng_a), {
+                let mut rng_b = StdRng::seed_from_u64(trial_seed);
+                move || rand_bytes(&mut rng_b)
             });
 
             let outcome = TimingOracle::for_attacker(attacker_model)
@@ -354,7 +360,7 @@ fn fpr_validation_per_attacker_model() {
                 });
 
             runner.record(&outcome);
-            rng = StdRng::seed_from_u64(rng.random());
+            trial_seed = StdRng::seed_from_u64(trial_seed).random();
         }
 
         let (decision, _report) = runner.finalize_fpr();
@@ -381,4 +387,4 @@ fn fpr_validation_per_attacker_model() {
 }
 
 // Need to import these for the rng operations
-use rand::{rngs::StdRng, Rng, SeedableRng};
+use rand::{rngs::StdRng, RngExt, SeedableRng};

@@ -2189,7 +2189,6 @@ fn rtlf_bootstrap_test(
 ) -> (bool, Vec<usize>, f64) {
     use rand::prelude::*;
     use rand::rngs::SmallRng;
-    use rand::SeedableRng;
     use rayon::prelude::*;
 
     let n = baseline.len().min(test.len());
@@ -2227,7 +2226,7 @@ fn rtlf_bootstrap_test(
                 // This is standard practice for parallel bootstrap and maintains
                 // statistical validity (same asymptotic properties as sequential)
                 ThreadLocalState {
-                    rng: SmallRng::from_entropy(),
+                    rng: rand::make_rng(),
                     b1: vec![0u64; n],
                     b2: vec![0u64; n],
                     t1: vec![0u64; n],
@@ -2243,16 +2242,16 @@ fn rtlf_bootstrap_test(
 
                 // Bootstrap WITHIN baseline: resample baseline twice
                 for i in 0..n {
-                    state.b1[i] = baseline[state.rng.gen_range(0..baseline.len())];
-                    state.b2[i] = baseline[state.rng.gen_range(0..baseline.len())];
+                    state.b1[i] = baseline[state.rng.random_range(0..baseline.len())];
+                    state.b2[i] = baseline[state.rng.random_range(0..baseline.len())];
                 }
                 compute_quantiles_inplace(&state.b1, &decile_probs, &mut state.sort_buf, &mut q_b1);
                 compute_quantiles_inplace(&state.b2, &decile_probs, &mut state.sort_buf, &mut q_b2);
 
                 // Bootstrap WITHIN test: resample test twice
                 for i in 0..n {
-                    state.t1[i] = test[state.rng.gen_range(0..test.len())];
-                    state.t2[i] = test[state.rng.gen_range(0..test.len())];
+                    state.t1[i] = test[state.rng.random_range(0..test.len())];
+                    state.t2[i] = test[state.rng.random_range(0..test.len())];
                 }
                 compute_quantiles_inplace(&state.t1, &decile_probs, &mut state.sort_buf, &mut q_t1);
                 compute_quantiles_inplace(&state.t2, &decile_probs, &mut state.sort_buf, &mut q_t2);
@@ -2306,7 +2305,6 @@ fn rtlf_bootstrap_test(
 ) -> (bool, Vec<usize>, f64) {
     use rand::prelude::*;
     use rand::rngs::SmallRng;
-    use rand::SeedableRng;
 
     let n = baseline.len().min(test.len());
 
@@ -2346,16 +2344,16 @@ fn rtlf_bootstrap_test(
     for _ in 0..bootstrap_iters {
         // Bootstrap WITHIN baseline: resample baseline twice
         for i in 0..n {
-            b1[i] = baseline[rng.gen_range(0..baseline.len())];
-            b2[i] = baseline[rng.gen_range(0..baseline.len())];
+            b1[i] = baseline[rng.random_range(0..baseline.len())];
+            b2[i] = baseline[rng.random_range(0..baseline.len())];
         }
         compute_quantiles_inplace(&b1, &decile_probs, &mut sort_buf, &mut q_b1);
         compute_quantiles_inplace(&b2, &decile_probs, &mut sort_buf, &mut q_b2);
 
         // Bootstrap WITHIN test: resample test twice
         for i in 0..n {
-            t1[i] = test[rng.gen_range(0..test.len())];
-            t2[i] = test[rng.gen_range(0..test.len())];
+            t1[i] = test[rng.random_range(0..test.len())];
+            t2[i] = test[rng.random_range(0..test.len())];
         }
         compute_quantiles_inplace(&t1, &decile_probs, &mut sort_buf, &mut q_t1);
         compute_quantiles_inplace(&t2, &decile_probs, &mut sort_buf, &mut q_t2);
@@ -2597,7 +2595,7 @@ fn silent_bootstrap_test(
 ) -> (bool, f64, f64, f64) {
     use rand::prelude::*;
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // Convert to f64 for calculations
     let x: Vec<f64> = baseline.iter().map(|&v| v as f64).collect();
@@ -2625,8 +2623,8 @@ fn silent_bootstrap_test(
 
     for _ in 0..bootstrap_iters {
         // Resample with replacement from each group
-        let x_boot: Vec<f64> = (0..n_x).map(|_| x[rng.gen_range(0..n_x)]).collect();
-        let y_boot: Vec<f64> = (0..n_y).map(|_| y[rng.gen_range(0..n_y)]).collect();
+        let x_boot: Vec<f64> = (0..n_x).map(|_| x[rng.random_range(0..n_x)]).collect();
+        let y_boot: Vec<f64> = (0..n_y).map(|_| y[rng.random_range(0..n_y)]).collect();
 
         let mean_x_boot: f64 = x_boot.iter().sum::<f64>() / n_x as f64;
         let mean_y_boot: f64 = y_boot.iter().sum::<f64>() / n_y as f64;

@@ -240,7 +240,7 @@ pub fn sanity_check(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::Rng;
+    use rand::RngExt;
 
     const TEST_SEED: u64 = 12345;
 
