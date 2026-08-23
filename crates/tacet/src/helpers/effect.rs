@@ -286,7 +286,12 @@ pub fn timer_backend_name() -> &'static str {
             "cntvct_el0"
         }
     }
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    // Every other aarch64 target reads the cycle counter directly, including
+    // Linux builds without the `perf` feature.
+    #[cfg(all(
+        target_arch = "aarch64",
+        not(all(target_os = "linux", feature = "perf"))
+    ))]
     {
         "cntvct_el0"
     }
