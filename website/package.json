@@ -11,21 +11,21 @@
     "deploy": "bun run build && wrangler deploy"
   },
   "dependencies": {
-    "@astrojs/starlight": "^0.37.4",
-    "@fontsource-variable/recursive": "^5.2.8",
-    "@fontsource/ibm-plex-mono": "^5.2.7",
-    "@fontsource/jetbrains-mono": "^5.2.8",
-    "@tailwindcss/vite": "^4.1.18",
-    "astro": "^5.16.15",
-    "katex": "^0.16.27",
+    "@astrojs/starlight": "^0.37.7",
+    "@fontsource-variable/recursive": "^5.3.0",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "astro": "^5.18.2",
+    "katex": "^0.16.47",
     "rehype-katex": "^7.0.1",
     "remark-math": "^6.0.0",
     "sharp": "^0.34.5",
     "starlight-package-managers": "^0.12.0",
     "starlight-page-actions": "^0.4.0",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
-    "wrangler": "^4.60.0"
+    "wrangler": "^4.123.0"
   }
 }
