@@ -139,13 +139,53 @@ let
   texlive-paper = pkgs.texlive.combine {
     inherit (pkgs.texlive) scheme-full;
   };
+
+  # wolfSSL for the test-wolfssl feature. Nixpkgs dropped the package in
+  # April 2026, so it is built here. The configure flags match the upstream
+  # Homebrew build: crates/tacet/tests/crypto/c_libraries/wolfssl.rs hardcodes
+  # the sizes of opaque wolfSSL structs (RsaKey = 8448, ecc_key = 4320 bytes),
+  # and builds using SP math (--enable-sp-math-all, as nixpkgs did) make those
+  # structs larger, which would overflow the Rust-side buffers.
+  wolfssl = pkgs.stdenv.mkDerivation (finalAttrs: {
+    pname = "wolfssl";
+    version = "5.8.4";
+
+    src = pkgs.fetchFromGitHub {
+      owner = "wolfSSL";
+      repo = "wolfssl";
+      tag = "v${finalAttrs.version}-stable";
+      hash = "sha256-vfJKmDdM0r591t5GnuSS7NyiUYXCQOTKbWLVydB3N9s=";
+    };
+
+    postPatch = ''
+      patchShebangs ./scripts
+    '';
+
+    configureFlags = [
+      "--enable-all"
+      "--enable-reproducible-build"
+    ];
+
+    nativeBuildInputs = [ pkgs.autoreconfHook ];
+
+    # Upstream test suite spawns TLS servers and takes minutes
+    doCheck = false;
+
+    meta = {
+      description = "wolfSSL - embedded TLS/cryptography library";
+      homepage = "https://www.wolfssl.com/";
+      license = lib.licenses.gpl2Plus;
+    };
+  });
 in
 {
   languages.rust = {
     enable = true;
     channel = "stable";
     components = [ "rustc" "cargo" "clippy" "rustfmt" "rust-analyzer" "rust-src" ];
-    targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" ];
+    # thumbv7em-none-eabihf is a bare-metal target: it guards tacet-core's
+    # no_std build, which a host-target check can pass even when std leaks in
+    targets = [ "wasm32-unknown-unknown" "wasm32-wasip1" "thumbv7em-none-eabihf" ];
   };
 
   languages.go.enable = true;
@@ -186,6 +226,10 @@ in
     # C/C++ cryptographic libraries for cross-language testing
     libressl.dev  # Include dev outputs for headers
     libsodium.dev  # Include dev outputs for headers
+    mbedtls  # Headers and libraries share a single output
+    botan3.out  # Library output (botan3 defaults to its `bin` output)
+    botan3.dev  # Include dev outputs for headers
+    wolfssl  # Built above (no longer in nixpkgs)
 
     # Documentation website (Starlight + CF Workers)
     bun
@@ -205,6 +249,12 @@ in
 
   env = {
     RUST_BACKTRACE = "1";
+
+    # C crypto library locations for crates/tacet/build.rs, which links
+    # <DIR>/lib for the test-mbedtls, test-wolfssl and test-botan features
+    MBEDTLS_DIR = "${pkgs.mbedtls}";
+    WOLFSSL_DIR = "${wolfssl}";
+    BOTAN_DIR = "${pkgs.botan3.out}";
   };
 
   enterShell = ''
