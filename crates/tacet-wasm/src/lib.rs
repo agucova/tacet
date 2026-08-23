@@ -36,21 +36,23 @@ pub use oracle::{
 mod tests {
     use super::*;
 
+    // The `#[wasm_bindgen]` wrappers take and return `Ts<T>`, which needs a JS
+    // runtime, so these exercise the `Config` constructor they delegate to.
     #[test]
     fn test_default_config() {
-        let config = default_config(AttackerModel::AdjacentNetwork);
+        let config = Config::for_attacker_model(AttackerModel::AdjacentNetwork);
         assert!((config.theta_ns() - 100.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_config_presets() {
-        let adjacent = config_adjacent_network();
+        let adjacent = Config::for_attacker_model(AttackerModel::AdjacentNetwork);
         assert!((adjacent.theta_ns() - 100.0).abs() < 1e-10);
 
-        let shared = config_shared_hardware();
+        let shared = Config::for_attacker_model(AttackerModel::SharedHardware);
         assert!((shared.theta_ns() - 0.4).abs() < 1e-10);
 
-        let remote = config_remote_network();
+        let remote = Config::for_attacker_model(AttackerModel::RemoteNetwork);
         assert!((remote.theta_ns() - 50000.0).abs() < 1e-10);
     }
 }

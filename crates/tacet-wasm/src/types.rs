@@ -1,7 +1,9 @@
 //! WASM-compatible type definitions.
 //!
 //! These types mirror the core types but are designed for wasm-bindgen FFI.
-//! Uses tsify-next for automatic TypeScript type generation.
+//! Uses tsify for automatic TypeScript type generation. Types crossing the
+//! wasm-bindgen boundary are wrapped in `tsify::Ts` at the call sites in
+//! `oracle.rs` so that (de)serialization failures surface as `Result`.
 
 use serde::{Deserialize, Serialize};
 use tacet_core::constants::{
@@ -17,7 +19,6 @@ use tsify::Tsify;
 ///
 /// Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum AttackerModel {
     /// theta = 0.4 ns (~2 cycles @ 5 GHz) - SGX, cross-VM, containers
@@ -53,7 +54,6 @@ impl AttackerModel {
 
 /// Test outcome.
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum Outcome {
     /// No timing leak detected within threshold theta.
@@ -68,7 +68,6 @@ pub enum Outcome {
 
 /// Reason for inconclusive result.
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum InconclusiveReason {
     /// Not applicable (outcome is not Inconclusive).
@@ -91,7 +90,6 @@ pub enum InconclusiveReason {
 
 /// Exploitability assessment.
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum Exploitability {
     /// < 10 ns - Requires shared hardware to exploit.
@@ -124,7 +122,6 @@ impl Exploitability {
 
 /// Measurement quality assessment.
 #[derive(Tsify, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub enum MeasurementQuality {
     /// MDE < 5 ns - Excellent measurement precision.
@@ -150,7 +147,6 @@ impl From<CoreMeasurementQuality> for MeasurementQuality {
 
 /// Effect size estimate.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectEstimate {
     /// Maximum effect across all deciles in nanoseconds: max_k |delta_k|.
@@ -170,7 +166,6 @@ impl EffectEstimate {
 
 /// Diagnostics information for debugging and quality assessment.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct Diagnostics {
     /// Block length used for bootstrap resampling.
@@ -220,7 +215,6 @@ impl Default for Diagnostics {
 
 /// Configuration for the timing analysis.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     /// Attacker model to use (determines threshold theta).
@@ -254,6 +248,14 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Build a default configuration for the given attacker model.
+    pub fn for_attacker_model(attacker_model: AttackerModel) -> Self {
+        Self {
+            attacker_model,
+            ..Self::default()
+        }
+    }
+
     /// Get the effective theta threshold in nanoseconds.
     pub fn theta_ns(&self) -> f64 {
         self.custom_threshold_ns
@@ -268,7 +270,6 @@ impl Config {
 
 /// Analysis result.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisResult {
     /// Test outcome.
@@ -303,7 +304,6 @@ pub struct AnalysisResult {
 
 /// Timer calibration info.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct TimerInfo {
     /// Cycles per nanosecond.
@@ -316,7 +316,6 @@ pub struct TimerInfo {
 
 /// Result of an adaptive step.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct AdaptiveStepResult {
     /// Whether a decision was reached.
@@ -332,7 +331,6 @@ pub struct AdaptiveStepResult {
 /// Calibration handle for adaptive analysis.
 /// Contains opaque calibration state from the calibration phase.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct CalibrationHandle {
     /// Serialized calibration state (opaque to JS).
@@ -344,7 +342,6 @@ pub struct CalibrationHandle {
 /// Adaptive state handle for the adaptive sampling loop.
 /// Contains opaque state from the adaptive phase.
 #[derive(Tsify, Debug, Clone, Serialize, Deserialize)]
-#[tsify(into_wasm_abi, from_wasm_abi)]
 #[serde(rename_all = "camelCase")]
 pub struct AdaptiveStateHandle {
     /// Serialized adaptive state (opaque to JS).

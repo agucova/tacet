@@ -69,6 +69,11 @@ jobs:
         with:
           bun-version: latest
 
+      # @napi-rs/cli v3 requires Node ^20.17.0 || ^22.13.0 || >=23.5.0 at build time
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Setup cross-compilation
         if: matrix.setup
         run: ${{ matrix.setup }}
@@ -201,8 +206,11 @@ jobs:
       - name: List artifacts
         run: ls -R artifacts
 
+      - name: Create per-platform npm directories
+        run: bun x @napi-rs/cli create-npm-dirs
+
       - name: Move artifacts to npm directories
-        run: bun x @napi-rs/cli artifacts --dir artifacts
+        run: bun x @napi-rs/cli artifacts --output-dir artifacts
 
       - name: List npm packages
         run: ls -la npm/

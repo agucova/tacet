@@ -15,7 +15,7 @@ use tacet_core::types::AttackerModel as CoreAttackerModel;
 ///
 /// Cycle-based thresholds use a 5 GHz reference frequency (conservative).
 #[napi]
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AttackerModel {
     /// theta = 0.4 ns (~2 cycles @ 5 GHz) - SGX, cross-VM, containers
     SharedHardware,
@@ -50,7 +50,7 @@ impl AttackerModel {
 
 /// Test outcome.
 #[napi]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     /// No timing leak detected within threshold theta.
     Pass,
@@ -64,7 +64,7 @@ pub enum Outcome {
 
 /// Reason for inconclusive result.
 #[napi]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InconclusiveReason {
     /// Not applicable (outcome is not Inconclusive).
     None,
@@ -86,7 +86,7 @@ pub enum InconclusiveReason {
 
 /// Exploitability assessment.
 #[napi]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exploitability {
     /// < 10 ns - Requires shared hardware to exploit.
     SharedHardwareOnly,
@@ -118,7 +118,7 @@ impl Exploitability {
 
 /// Measurement quality assessment.
 #[napi]
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MeasurementQuality {
     /// MDE < 5 ns - Excellent measurement precision.
     Excellent,

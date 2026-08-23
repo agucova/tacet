@@ -6,6 +6,7 @@
 use std::sync::Mutex;
 
 use js_sys::BigInt64Array;
+use tsify::{Ts, Tsify};
 use wasm_bindgen::prelude::*;
 
 use tacet_core::adaptive::{
@@ -144,29 +145,26 @@ pub fn version() -> String {
 
 /// Create a default configuration for a given attacker model.
 #[wasm_bindgen(js_name = defaultConfig)]
-pub fn default_config(attacker_model: AttackerModel) -> Config {
-    Config {
-        attacker_model,
-        ..Config::default()
-    }
+pub fn default_config(attacker_model: Ts<AttackerModel>) -> Result<Ts<Config>, JsError> {
+    Ok(Config::for_attacker_model(attacker_model.to_rust()?).into_ts()?)
 }
 
 /// Create a configuration for adjacent network attacker (100ns threshold).
 #[wasm_bindgen(js_name = configAdjacentNetwork)]
-pub fn config_adjacent_network() -> Config {
-    default_config(AttackerModel::AdjacentNetwork)
+pub fn config_adjacent_network() -> Result<Ts<Config>, JsError> {
+    Ok(Config::for_attacker_model(AttackerModel::AdjacentNetwork).into_ts()?)
 }
 
 /// Create a configuration for shared hardware attacker (0.4ns threshold).
 #[wasm_bindgen(js_name = configSharedHardware)]
-pub fn config_shared_hardware() -> Config {
-    default_config(AttackerModel::SharedHardware)
+pub fn config_shared_hardware() -> Result<Ts<Config>, JsError> {
+    Ok(Config::for_attacker_model(AttackerModel::SharedHardware).into_ts()?)
 }
 
 /// Create a configuration for remote network attacker (50us threshold).
 #[wasm_bindgen(js_name = configRemoteNetwork)]
-pub fn config_remote_network() -> Config {
-    default_config(AttackerModel::RemoteNetwork)
+pub fn config_remote_network() -> Result<Ts<Config>, JsError> {
+    Ok(Config::for_attacker_model(AttackerModel::RemoteNetwork).into_ts()?)
 }
 
 /// Calibrate timing samples.
@@ -180,9 +178,10 @@ pub fn config_remote_network() -> Config {
 pub fn calibrate_samples(
     baseline: &BigInt64Array,
     sample: &BigInt64Array,
-    config: Config,
+    config: Ts<Config>,
     timer_frequency_hz: f64,
 ) -> Result<Calibration, JsError> {
+    let config = config.to_rust()?;
     let baseline: Vec<u64> = baseline.to_vec().into_iter().map(|x| x as u64).collect();
     let sample: Vec<u64> = sample.to_vec().into_iter().map(|x| x as u64).collect();
 
@@ -262,9 +261,10 @@ pub fn adaptive_step_batch(
     state: &AdaptiveState,
     baseline: &BigInt64Array,
     sample: &BigInt64Array,
-    config: Config,
+    config: Ts<Config>,
     elapsed_secs: f64,
-) -> Result<AdaptiveStepResult, JsError> {
+) -> Result<Ts<AdaptiveStepResult>, JsError> {
+    let config = config.to_rust()?;
     let baseline: Vec<u64> = baseline.to_vec().into_iter().map(|x| x as u64).collect();
     let sample: Vec<u64> = sample.to_vec().into_iter().map(|x| x as u64).collect();
 
@@ -317,7 +317,8 @@ pub fn adaptive_step_batch(
             current_probability: posterior.leak_probability,
             samples_per_class: samples_per_class as u32,
             result: None,
-        }),
+        }
+        .into_ts()?),
         StepResult::Decision(outcome) => {
             let result = build_result_from_outcome(&outcome, &config, Some(&core_cal));
             Ok(AdaptiveStepResult {
@@ -325,7 +326,8 @@ pub fn adaptive_step_batch(
                 current_probability: result.leak_probability,
                 samples_per_class: result.samples_used,
                 result: Some(result),
-            })
+            }
+            .into_ts()?)
         }
     }
 }
@@ -335,9 +337,10 @@ pub fn adaptive_step_batch(
 pub fn analyze(
     baseline: &BigInt64Array,
     sample: &BigInt64Array,
-    config: Config,
+    config: Ts<Config>,
     timer_frequency_hz: f64,
-) -> Result<AnalysisResult, JsError> {
+) -> Result<Ts<AnalysisResult>, JsError> {
+    let config = config.to_rust()?;
     let baseline: Vec<u64> = baseline.to_vec().into_iter().map(|x| x as u64).collect();
     let sample: Vec<u64> = sample.to_vec().into_iter().map(|x| x as u64).collect();
 
@@ -418,7 +421,7 @@ pub fn analyze(
             result.mde_ns = core_cal.mde_ns;
             result.theta_user_ns = theta_ns;
             result.theta_eff_ns = core_cal.theta_eff;
-            return Ok(result);
+            return Ok(result.into_ts()?);
         }
     }
 
@@ -440,7 +443,7 @@ pub fn analyze(
     result.mde_ns = core_cal.mde_ns;
     result.theta_user_ns = theta_ns;
     result.theta_eff_ns = core_cal.theta_eff;
-    Ok(result)
+    Ok(result.into_ts()?)
 }
 
 /// Helper function: Convert AdaptiveOutcome to AnalysisResult using FFI summary types.

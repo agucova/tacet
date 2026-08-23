@@ -16,12 +16,12 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # napi-rs for Node.js bindings
-napi = { version = "2.16", default-features = false, features = [
+napi = { version = "3", default-features = false, features = [
     "napi8",
     "tokio_rt",
     "serde-json",
 ] }
-napi-derive = "2.16"
+napi-derive = "3"
 
 # Core analysis (no timing, just statistics)
 tacet-core = { path = "../tacet-core", features = ["std", "parallel"] }
@@ -37,4 +37,4 @@ rand_xoshiro = "0.7"
 thiserror = "2"
 
 [build-dependencies]
-napi-build = "2.1"
+napi-build = "2.4"
