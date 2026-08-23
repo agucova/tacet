@@ -48,7 +48,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "example": "bun run examples/simple.ts",
-    "prepublishOnly": "napi prepublish -t npm --no-gh-release",
+    "prepublishOnly": "napi pre-publish -t npm --no-gh-release --skip-optional-publish",
     "artifacts": "napi artifacts",
     "universal": "napi universalize"
   },
