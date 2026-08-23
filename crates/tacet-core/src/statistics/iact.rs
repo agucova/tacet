@@ -3,6 +3,12 @@
 //! This module implements the Geyer IMS algorithm as specified in the implementation guide §3,
 //! which provides a robust estimate of the effective sample size for autocorrelated data.
 
+extern crate alloc;
+
+use alloc::vec;
+use alloc::vec::Vec;
+
+use crate::math;
 use crate::types::{Class, TimingSample};
 
 /// Result of IACT computation
@@ -35,25 +41,25 @@ pub enum IactWarning {
 impl Eq for IactWarning {}
 
 impl PartialOrd for IactWarning {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+    fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
 impl Ord for IactWarning {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
         use IactWarning::*;
         match (self, other) {
             (InsufficientSamples { n: n1 }, InsufficientSamples { n: n2 }) => n1.cmp(n2),
-            (InsufficientSamples { .. }, _) => std::cmp::Ordering::Less,
-            (_, InsufficientSamples { .. }) => std::cmp::Ordering::Greater,
-            (ZeroVariance, ZeroVariance) => std::cmp::Ordering::Equal,
-            (ZeroVariance, _) => std::cmp::Ordering::Less,
-            (_, ZeroVariance) => std::cmp::Ordering::Greater,
-            (AllPairsNonPositive, AllPairsNonPositive) => std::cmp::Ordering::Equal,
-            (AllPairsNonPositive, _) => std::cmp::Ordering::Less,
-            (_, AllPairsNonPositive) => std::cmp::Ordering::Greater,
-            (UpperBoundApplied { .. }, UpperBoundApplied { .. }) => std::cmp::Ordering::Equal,
+            (InsufficientSamples { .. }, _) => core::cmp::Ordering::Less,
+            (_, InsufficientSamples { .. }) => core::cmp::Ordering::Greater,
+            (ZeroVariance, ZeroVariance) => core::cmp::Ordering::Equal,
+            (ZeroVariance, _) => core::cmp::Ordering::Less,
+            (_, ZeroVariance) => core::cmp::Ordering::Greater,
+            (AllPairsNonPositive, AllPairsNonPositive) => core::cmp::Ordering::Equal,
+            (AllPairsNonPositive, _) => core::cmp::Ordering::Less,
+            (_, AllPairsNonPositive) => core::cmp::Ordering::Greater,
+            (UpperBoundApplied { .. }, UpperBoundApplied { .. }) => core::cmp::Ordering::Equal,
         }
     }
 }
@@ -168,7 +174,7 @@ pub fn geyer_ims_iact(u: &[f64]) -> IactResult {
     let mut tau = (-1.0 + 2.0 * gamma_sum).max(1.0);
 
     // Step 6: Upper bound (Stan's safeguard)
-    let upper_bound = (n as f64) * (n as f64).log10();
+    let upper_bound = (n as f64) * math::log10(n as f64);
     if tau > upper_bound {
         warnings.push(IactWarning::UpperBoundApplied {
             tau_uncapped: tau,
@@ -449,7 +455,7 @@ fn compute_median(values: &mut [f64]) -> f64 {
         return 1.0;
     }
 
-    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
 
     let n = values.len();
     if n.is_multiple_of(2) {
@@ -468,13 +474,13 @@ fn compute_quantile(sorted_or_unsorted: &[f64], p: f64) -> f64 {
     }
 
     let mut data = sorted_or_unsorted.to_vec();
-    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(core::cmp::Ordering::Equal));
 
     let n = data.len();
     let h = (n as f64) * p + 0.5;
 
-    let lo = (h.floor() as usize).clamp(1, n);
-    let hi = (h.ceil() as usize).clamp(1, n);
+    let lo = (math::floor(h) as usize).clamp(1, n);
+    let hi = (math::ceil(h) as usize).clamp(1, n);
 
     (data[lo - 1] + data[hi - 1]) / 2.0
 }
