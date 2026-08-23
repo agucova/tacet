@@ -536,19 +536,24 @@ pub unsafe extern "C" fn to_step(
         .inner
         .add_batch(baseline_slice.to_vec(), sample_slice.to_vec());
 
-    // Create step config
-    let step_config = AdaptiveStepConfig {
-        pass_threshold: cfg.pass_threshold,
-        fail_threshold: cfg.fail_threshold,
-        time_budget_secs: cfg.time_budget_secs,
-        max_samples: if cfg.max_samples == 0 {
+    // Create step config.
+    //
+    // The builder methods are used so the embedded `quality_gates` copy of these
+    // thresholds is kept in sync. Assigning the fields directly leaves
+    // `quality_gates` holding the library defaults, so the caller's thresholds
+    // and budgets never reach the gates.
+    let step_config = AdaptiveStepConfig::with_theta(cfg.threshold_ns())
+        .pass_threshold(cfg.pass_threshold)
+        .fail_threshold(cfg.fail_threshold)
+        .time_budget_secs(cfg.time_budget_secs)
+        .max_samples(if cfg.max_samples == 0 {
             100_000
         } else {
             cfg.max_samples as usize
-        },
-        theta_ns: cfg.threshold_ns(),
+        });
+    let step_config = AdaptiveStepConfig {
         seed: if cfg.seed == 0 { 42 } else { cfg.seed },
-        ..Default::default()
+        ..step_config
     };
 
     // Run adaptive step
@@ -776,19 +781,20 @@ pub unsafe extern "C" fn to_test(
     // Create adaptive state
     let mut state = AdaptiveState::new();
 
-    // Create step config
-    let step_config = AdaptiveStepConfig {
-        pass_threshold: cfg.pass_threshold,
-        fail_threshold: cfg.fail_threshold,
-        time_budget_secs: cfg.time_budget_secs,
-        max_samples: if cfg.max_samples == 0 {
+    // Create step config. The builder methods keep the embedded `quality_gates`
+    // copy of these thresholds in sync (see `to_step`).
+    let step_config = AdaptiveStepConfig::with_theta(cfg.threshold_ns())
+        .pass_threshold(cfg.pass_threshold)
+        .fail_threshold(cfg.fail_threshold)
+        .time_budget_secs(cfg.time_budget_secs)
+        .max_samples(if cfg.max_samples == 0 {
             100_000
         } else {
             cfg.max_samples as usize
-        },
-        theta_ns: cfg.threshold_ns(),
+        });
+    let step_config = AdaptiveStepConfig {
         seed: if cfg.seed == 0 { 42 } else { cfg.seed },
-        ..Default::default()
+        ..step_config
     };
 
     // Phase 3: Adaptive sampling loop
