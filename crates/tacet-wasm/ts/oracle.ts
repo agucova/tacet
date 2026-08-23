@@ -274,7 +274,7 @@ export function configRemoteNetwork(): Config {
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/js';
+ * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/wasm';
  * import crypto from 'crypto';
  *
  * const result = TimingOracle

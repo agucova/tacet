@@ -27,22 +27,30 @@ jobs:
             strip: strip -x *.node
 
           # macOS x64
-          - os: macos-13
+          - os: macos-15-intel
             target: x86_64-apple-darwin
             strip: strip -x *.node
 
-          # Linux x64 (glibc)
+          # Linux x64 (glibc) - linked against the old glibc in @napi-rs/cross-toolchain
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            build_flags: '--use-napi-cross'
             strip: strip *.node
 
-          # Linux ARM64 (glibc)
+          # Linux ARM64 (glibc) - linked against the old glibc in @napi-rs/cross-toolchain
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
+            build_flags: '--use-napi-cross'
             setup: |
               sudo apt-get update
-              sudo apt-get install -y gcc-aarch64-linux-gnu
+              sudo apt-get install -y binutils-aarch64-linux-gnu
             strip: aarch64-linux-gnu-strip *.node
+
+          # Linux x64 (musl) - cross-compiled with cargo-zigbuild
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            build_flags: '-x'
+            strip: strip *.node
 
           # Windows x64
           - os: windows-latest
@@ -74,6 +82,17 @@ jobs:
         with:
           node-version: '22'
 
+      # musl targets cross-compile through cargo-zigbuild (`napi build -x`)
+      - uses: mlugg/setup-zig@v2
+        if: contains(matrix.target, 'musl')
+        with:
+          version: 0.15.2
+
+      - uses: taiki-e/install-action@v2
+        if: contains(matrix.target, 'musl')
+        with:
+          tool: cargo-zigbuild
+
       - name: Setup cross-compilation
         if: matrix.setup
         run: ${{ matrix.setup }}
@@ -81,12 +100,8 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Set cross-compile env (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: echo "CC=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-
       - name: Build native module
-        run: bun run build:native --target ${{ matrix.target }}
+        run: bun run build:native --target ${{ matrix.target }} ${{ matrix.build_flags }}
 
       - name: Strip binary
         if: matrix.strip
@@ -97,38 +112,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bindings-${{ matrix.target }}
-          path: crates/tacet-napi/*.node
-          if-no-files-found: error
-          retention-days: 1
-
-  # Linux musl (Alpine)
-  build-musl:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: crates/tacet-napi
-    container:
-      image: ghcr.io/napi-rs/napi-rs/nodejs-rust:lts-alpine
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install bun
-        run: |
-          curl -fsSL https://bun.sh/install | bash
-          echo "$HOME/.bun/bin" >> $GITHUB_PATH
-
-      - name: Install dependencies
-        run: $HOME/.bun/bin/bun install
-
-      - name: Build native module
-        run: |
-          $HOME/.bun/bin/bun run build:native --target x86_64-unknown-linux-musl
-          strip *.node
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bindings-x86_64-unknown-linux-musl
           path: crates/tacet-napi/*.node
           if-no-files-found: error
           retention-days: 1
@@ -175,7 +158,7 @@ jobs:
 
   # Publish to npm
   publish:
-    needs: [build, build-musl, test]
+    needs: [build, test]
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -221,6 +204,9 @@ jobs:
       - name: Publish dry run
         if: inputs.dry_run == true
         run: |
+          echo "=== Pre-publish validation ==="
+          bun x @napi-rs/cli pre-publish -t npm --no-gh-release --skip-optional-publish --dry-run
+          echo ""
           echo "=== Main package ==="
           npm pack --dry-run
           echo ""

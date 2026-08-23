@@ -382,9 +382,11 @@ describe("Timer functions", () => {
   test("calibrateTimer resolution is reasonable", () => {
     const info = calibrateTimer();
 
-    // Resolution should be between 0.1ns and 100ns for any reasonable timer
+    // Resolution should be between 0.1ns and 100ns for any reasonable timer.
+    // The upper bound is inclusive: Windows falls back to QueryPerformanceCounter,
+    // whose 10 MHz frequency lands exactly on 100ns.
     expect(info.resolutionNs).toBeGreaterThan(0.1);
-    expect(info.resolutionNs).toBeLessThan(100);
+    expect(info.resolutionNs).toBeLessThanOrEqual(100);
   });
 });
 

@@ -1,12 +1,12 @@
 /**
- * @tacet/js - Timing side-channel detection for JavaScript/TypeScript
+ * @tacet/wasm - Timing side-channel detection for JavaScript/TypeScript
  *
  * Detect timing leaks in cryptographic code using statistical analysis.
  * Works in Node.js, Bun, and Deno (not browsers - they lack high-precision timers).
  *
  * @example
  * ```typescript
- * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/js';
+ * import { TimingOracle, AttackerModelValues, OutcomeValues } from '@tacet/wasm';
  * import crypto from 'crypto';
  *
  * const result = TimingOracle

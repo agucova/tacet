@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@tacet/js",
+      "name": "@tacet/wasm",
       "devDependencies": {
         "@noble/ciphers": "^1.0.0",
         "@noble/curves": "^2.0.1",

@@ -8,8 +8,8 @@
 </p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/@tacet/js"><img src="https://img.shields.io/npm/v/@tacet/js" alt="npm"></a>
-  <a href="https://jsr.io/@tacet/js"><img src="https://jsr.io/badges/@tacet/js" alt="JSR"></a>
+  <a href="https://www.npmjs.com/package/@tacet/wasm"><img src="https://img.shields.io/npm/v/@tacet/wasm" alt="npm"></a>
+  <a href="https://jsr.io/@tacet/wasm"><img src="https://jsr.io/badges/@tacet/wasm" alt="JSR"></a>
   <a href="https://github.com/agucova/tacet/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MPL--2.0-blue" alt="License"></a>
 </p>
 
@@ -21,19 +21,19 @@ This is a WASM-based implementation that works in **Node.js**, **Bun**, and **De
 
 ```bash
 # npm
-npm install @tacet/js
+npm install @tacet/wasm
 
 # bun
-bun add @tacet/js
+bun add @tacet/wasm
 
 # deno/jsr
-deno add jsr:@tacet/js
+deno add jsr:@tacet/wasm
 ```
 
 ## Quick Start
 
 ```typescript
-import { TimingOracle, AttackerModelValues, OutcomeValues } from "@tacet/js";
+import { TimingOracle, AttackerModelValues, OutcomeValues } from "@tacet/wasm";
 import crypto from "crypto";
 
 // Test your cryptographic function
@@ -109,7 +109,7 @@ import {
   calibrateSamples,
   analyze,
   defaultConfig,
-} from "@tacet/js";
+} from "@tacet/wasm";
 
 // Collect timing samples
 const samples = collectSamples(inputPair, measureFn, 5000);
