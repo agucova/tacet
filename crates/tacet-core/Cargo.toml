@@ -32,6 +32,8 @@ libm = "0.2"
 
 # Parallel bootstrap (optional, requires std)
 rayon = { version = "1.11", optional = true }
+
+# no_std hash sets - counts unique timing values for discrete mode detection
 hashbrown = "0.16.1"
 
 # Terminal colors (optional, requires std)

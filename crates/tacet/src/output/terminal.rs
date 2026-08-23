@@ -1,9 +1,9 @@
 //! Terminal output formatting with colors and box drawing.
 //!
 //! This module re-exports the formatting functions from `tacet-core`.
-//! When the `ansi` feature is enabled on `tacet-core` (which it is by
-//! default when using `tacet`), the output includes ANSI color codes
-//! automatically.
+//! ANSI colors come from `tacet-core`'s `std` feature (enabled by
+//! default when using `tacet`), with automatic `NO_COLOR`/`TERM`/TTY
+//! detection.
 
 use colored::Colorize;
 
@@ -12,7 +12,7 @@ use crate::result::{Diagnostics, IssueCode, Outcome};
 /// Format an Outcome for human-readable terminal output.
 ///
 /// Uses ANSI colors and a spec-aligned layout for clear presentation.
-/// Colors are included automatically via the `ansi` feature on `tacet-core`.
+/// Colors are included automatically via `tacet-core`'s `std` feature.
 pub fn format_outcome(outcome: &Outcome) -> String {
     tacet_core::formatting::format_outcome_plain(outcome)
 }

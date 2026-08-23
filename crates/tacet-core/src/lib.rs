@@ -6,9 +6,11 @@
 //!
 //! # Features
 //!
-//! - `std` (default): Enable standard library support for convenience
+//! - `std` (default): Enable standard library support for convenience. Also
+//!   pulls in `colored`, so Display/Debug output carries ANSI colors with
+//!   automatic `NO_COLOR`/`TERM`/TTY detection; without `std` the same output
+//!   is emitted as plain text.
 //! - `parallel`: Enable parallel bootstrap using rayon (requires `std`)
-//! - `ansi`: Enable ANSI colors in Display/Debug output (no_std compatible)
 //!
 //! # Usage
 //!
