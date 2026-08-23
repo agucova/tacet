@@ -32,6 +32,25 @@ jobs:
       - name: Check (MSRV)
         run: cargo check --all-targets
 
+  no-std:
+    # Guards tacet-core's no_std build. The bare-metal target is the strong
+    # check: a host-target build can succeed even when std leaks in through
+    # a dependency.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: thumbv7em-none-eabihf
+      - uses: Swatinem/rust-cache@v2
+      - name: Check (no_std)
+        run: cargo check -p tacet-core --no-default-features
+      - name: Check (no_std, bare metal)
+        run: cargo check -p tacet-core --no-default-features --target thumbv7em-none-eabihf
+      - name: Clippy (no_std)
+        run: cargo clippy -p tacet-core --no-default-features -- -D warnings
+
   test:
     # Fast, reliable test suite for CI
     # Runs: core (known_leaky/safe), unit, macros, runtime (~1-2min)
