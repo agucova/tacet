@@ -1,6 +1,6 @@
 {
   "name": "@tacet/wasm",
-  "version": "0.2.3",
+  "version": "0.4.2",
   "description": "Timing side-channel detection for JavaScript/TypeScript. Detect timing leaks in cryptographic code using statistical analysis.",
   "license": "MPL-2.0",
   "exports": "./dist/index.js",
